@@ -156,15 +156,24 @@ nvm-internal/
 - [x] S1-08 Audit: `login_success`, `login_failed` (user_id kosong bila username tidak terdaftar), `account_locked`, `logout`, `password_changed`.
 - [x] S1-09 Perlindungan CSRF lewat cek header Origin.
 - [x] S1-10 `POST /api/auth/logout` dan `GET /api/auth/me`.
-- [ ] S1-11 Ganti password sendiri dengan password lama. Login dengan `must_change_password` langsung diarahkan ke halaman ganti password. Catatan: backend selesai, halaman dan pengalihannya belum.
-- [ ] S1-12 Halaman Masuk sesuai Stitch, termasuk state akun dikunci (dengan sisa waktu) dan sesi berakhir.
-- [ ] S1-13 Route guard di Vue: halaman selain login butuh sesi, `http://<IP>/` membuka login.
-**Selesai kalau:** skenario AC-01 dan AC-02 lolos manual dan lewat test Go.
+- [x] S1-11 Ganti password sendiri dengan password lama (halaman Profil). Login dengan `must_change_password` langsung diarahkan ke halaman Buat password baru.
+- [x] S1-12 Halaman Masuk sesuai Stitch, termasuk state akun dikunci (jam buka kunci) dan sesi berakhir.
+- [x] S1-13 Route guard di Vue: halaman selain login butuh sesi, `http://<IP>/` membuka login.
 
----
 **Keputusan:**
 - Logout mengakhiri sesi di semua perangkat (token_version naik), karena skema tidak punya tabel sesi.
-- Akun terkunci menampilkan sisa waktu walaupun ini menandakan username ada; diterima karena sistem hanya di LAN.
+- Akun terkunci menampilkan jam buka kunci walaupun ini menandakan username ada; diterima karena sistem hanya di LAN.
+- Layar Buat password baru memakai password login yang disimpan sementara di memori, sehingga hanya ada dua kolom seperti di Stitch. Bila halaman dimuat ulang, muncul kolom "Password sementara".
+- Password baru minimal 8 karakter, maksimal 72 (batas bcrypt).
+- Rate limit login: 10 percobaan per IP, lalu 1 per 30 detik.
+- Sementara semua peran diarahkan ke halaman Status setelah login. "Halaman sesuai peran" (AC-01) diselesaikan saat halaman tujuannya ada: Pengguna untuk Admin (Sprint 2), Papan Task untuk Manajer dan Staf (Sprint 4).
+
+### Retro
+
+- Lancar: aturan lockout diuji sebagai fungsi murni dulu, jadi AC-02 terbukti sebelum ada HTTP; backend selesai dalam satu hari.
+- Macet: server lupa di-restart setelah perubahan; proxy Vite mengganti Host sehingga cek Origin gagal; file CRLF dari VS Code; perintah curl dengan JSON rawan salah ketik.
+- Diubah untuk Sprint 2: restart server setiap selesai mengubah kode Go; uji lewat browser sesegera mungkin, curl hanya untuk kasus yang tidak bisa dari halaman.
+---
 
 ## Sprint 2: Akun, peran, divisi
 
