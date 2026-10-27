@@ -163,6 +163,9 @@ nvm-internal/
 **Selesai kalau:** skenario AC-01 dan AC-02 lolos manual dan lewat test Go.
 
 ---
+**Keputusan:**
+- Logout mengakhiri sesi di semua perangkat (token_version naik), karena skema tidak punya tabel sesi.
+- Akun terkunci menampilkan sisa waktu walaupun ini menandakan username ada; diterima karena sistem hanya di LAN.
 
 ## Sprint 2: Akun, peran, divisi
 

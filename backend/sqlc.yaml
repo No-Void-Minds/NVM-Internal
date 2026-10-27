@@ -1,0 +1,12 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    # sqlc membaca file *.up.sql dan mengabaikan *.down.sql, jadi skemanya selalu sama dengan migrasi.
+    schema: "migrations"
+    queries: "internal/db/queries"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/db/sqlc"
+        sql_package: "pgx/v5"
+        emit_empty_slices: true
