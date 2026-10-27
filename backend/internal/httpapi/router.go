@@ -17,6 +17,7 @@ type Server struct {
 	auth         *auth.Service
 	tokens       auth.TokenIssuer
 	cookieSecure bool
+	loginLimiter *ipLimiter
 	// now bisa diganti di test supaya waktu kuncian dan kedaluwarsa token bisa diuji.
 	now func() time.Time
 }
@@ -38,6 +39,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 		tokens:       tokens,
 		cookieSecure: cfg.CookieSecure,
 		now:          time.Now,
+		loginLimiter: newIPLimiter(30*time.Second, 10),
 	}
 
 	r := gin.New()
@@ -52,9 +54,9 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 		writeError(c, 404, CodeNotFound, "Alamat tidak ditemukan.")
 	})
 
-	api := r.Group("/api")
+	api := r.Group("/api", sameOrigin())
 	api.GET("/health", s.health)
-	api.POST("/auth/login", s.login)
+	api.POST("/auth/login", s.limitLogin(), s.login)
 	authed := api.Group("", s.requireSession())
 	authed.GET("/auth/me", s.me)
 	authed.POST("/auth/logout", s.logout)
