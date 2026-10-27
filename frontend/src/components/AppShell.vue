@@ -1,10 +1,19 @@
 <script setup lang="ts">
 import { RouterLink } from 'vue-router'
+import { useSessionStore } from '../stores/session'
+import { useLogout } from '../composables/useLogout'
+import { roleLabel } from '../utils/roles'
 
 type NavItem = { to: string; label: string; iconPath: string }
 
 // Hanya halaman yang sudah ada yang boleh masuk sini; ditambah per sprint.
-const navItems: NavItem[] = [{ to: '/', label: 'Status', iconPath: 'M3 12h4l3-8 4 16 3-8h4' }]
+const navItems: NavItem[] = [
+  { to: '/status', label: 'Status', iconPath: 'M3 12h4l3-8 4 16 3-8h4' },
+  { to: '/profil', label: 'Profil', iconPath: 'M20 21a8 8 0 0 0-16 0M12 13a4 4 0 1 0 0-8 4 4 0 0 0 0 8' },
+]
+
+const session = useSessionStore()
+const { logout, loggingOut, logoutError } = useLogout()
 </script>
 
 <template>
@@ -29,13 +38,32 @@ const navItems: NavItem[] = [{ to: '/', label: 'Status', iconPath: 'M3 12h4l3-8 
             {{ item.label }}
           </RouterLink>
         </nav>
+
+        <div v-if="session.user" class="ml-auto hidden items-center gap-3 md:flex">
+          <span class="text-right text-sm leading-tight">
+            <span class="block font-medium">{{ session.user.name }}</span>
+            <span class="block text-ink-muted">{{ roleLabel(session.user.role) }}</span>
+          </span>
+          <button
+            type="button"
+            :disabled="loggingOut"
+            class="inline-flex min-h-11 items-center rounded-card border border-line px-3 text-sm font-medium hover:bg-canvas active:translate-y-px disabled:opacity-60"
+            @click="logout"
+          >
+            Keluar
+          </button>
+        </div>
       </div>
+      <p v-if="logoutError" role="alert" class="mx-auto max-w-6xl px-4 pb-3 text-sm text-danger md:px-8">
+        {{ logoutError }}
+      </p>
     </header>
 
     <!-- Padding bawah di mobile memberi ruang untuk bottom nav dan area aman layar. -->
     <main
       id="konten"
-      class="mx-auto max-w-6xl px-4 pt-6 pb-[calc(5rem+env(safe-area-inset-bottom))] md:px-8 md:pb-10"
+      tabindex="-1"
+      class="mx-auto max-w-6xl px-4 pt-6 pb-[calc(5rem+env(safe-area-inset-bottom))] outline-none md:px-8 md:pb-10"
     >
       <slot />
     </main>

@@ -146,20 +146,19 @@ nvm-internal/
 **Tujuan:** pengguna bisa masuk dan keluar dengan aman.
 **SRS:** FR-AUTH-01, 05, 06, 07, 08, 09, 11, NFR-SEC-01, 02, 04, 06. **AC:** AC-01, AC-02.
 
-- [ ] S1-01 `POST /api/auth/login` dengan username dan password. Hash password memakai bcrypt atau argon2id.
-- [ ] S1-02 JWT 30 menit di cookie HttpOnly dan SameSite=Lax, berisi `user_id`, `role`, `token_version`. Atribut Secure dimatikan lewat env selama masih HTTP.
-- [ ] S1-03 Middleware auth: tolak token yang `token_version`-nya tidak sama dengan database atau akun yang nonaktif (FR-AUTH-08).
-- [ ] S1-04 Idle timeout: token diperbarui saat ada request, kedaluwarsa setelah 30 menit tanpa aktivitas.
-- [ ] S1-05 Lockout progresif: 5 kali gagal dikunci 5 menit, lalu 15, lalu 30 dan seterusnya 30. Reset saat login berhasil.
-- [ ] S1-06 Rate limit per IP di endpoint login (NFR-SEC-04).
-- [ ] S1-07 Pesan login gagal tidak membedakan "username tidak ada" dan "password salah".
-- [ ] S1-08 Audit: `login_success`, `login_failed` (user_id kosong bila username tidak terdaftar), `account_locked`.
-- [ ] S1-09 Perlindungan CSRF untuk request yang mengubah data (token double-submit atau cek header Origin).
-- [ ] S1-10 `POST /api/auth/logout` dan `GET /api/auth/me`.
-- [ ] S1-11 Ganti password sendiri dengan password lama. Login dengan `must_change_password` langsung diarahkan ke halaman ganti password.
+- [x] S1-01 `POST /api/auth/login` dengan username dan password. Hash password memakai bcrypt.
+- [x] S1-02 JWT 30 menit di cookie HttpOnly dan SameSite=Lax, berisi `user_id`, `role`, `token_version`. Atribut Secure dari env `COOKIE_SECURE`.
+- [x] S1-03 Middleware auth: tolak token yang `token_version`-nya tidak sama dengan database atau akun yang nonaktif (FR-AUTH-08).
+- [x] S1-04 Idle timeout: token diperbarui saat ada request, kedaluwarsa setelah 30 menit tanpa aktivitas.
+- [x] S1-05 Lockout progresif: 5 kali gagal dikunci 5 menit, lalu 15, lalu 30 dan seterusnya 30. Reset saat login berhasil.
+- [x] S1-06 Rate limit per IP di endpoint login (NFR-SEC-04). 10 percobaan, lalu 1 per 30 detik.
+- [x] S1-07 Pesan login gagal tidak membedakan "username tidak ada" dan "password salah".
+- [x] S1-08 Audit: `login_success`, `login_failed` (user_id kosong bila username tidak terdaftar), `account_locked`, `logout`, `password_changed`.
+- [x] S1-09 Perlindungan CSRF lewat cek header Origin.
+- [x] S1-10 `POST /api/auth/logout` dan `GET /api/auth/me`.
+- [ ] S1-11 Ganti password sendiri dengan password lama. Login dengan `must_change_password` langsung diarahkan ke halaman ganti password. Catatan: backend selesai, halaman dan pengalihannya belum.
 - [ ] S1-12 Halaman Masuk sesuai Stitch, termasuk state akun dikunci (dengan sisa waktu) dan sesi berakhir.
 - [ ] S1-13 Route guard di Vue: halaman selain login butuh sesi, `http://<IP>/` membuka login.
-
 **Selesai kalau:** skenario AC-01 dan AC-02 lolos manual dan lewat test Go.
 
 ---

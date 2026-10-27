@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { RouterView } from 'vue-router'
+import { computed } from 'vue'
+import { RouterView, useRoute } from 'vue-router'
 import AppShell from './components/AppShell.vue'
+
+const route = useRoute()
+const authLayout = computed(() => route.meta.layout === 'auth')
 </script>
 
 <template>
-  <AppShell>
+  <RouterView v-if="authLayout" />
+  <AppShell v-else>
     <RouterView />
   </AppShell>
 </template>
