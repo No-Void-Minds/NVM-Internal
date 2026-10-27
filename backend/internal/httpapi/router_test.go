@@ -6,15 +6,19 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+
+	"nvm-internal/internal/config"
 )
 
 func newTestRouter(t *testing.T) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	r, err := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), nil, "test")
+	cfg := config.Config{AppEnv: "test", JWTSecret: strings.Repeat("x", 32)}
+	r, err := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), nil, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

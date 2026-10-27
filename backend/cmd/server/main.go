@@ -47,7 +47,7 @@ func run(cfg config.Config, log *slog.Logger) error {
 	}
 	defer pool.Close()
 
-	router, err := httpapi.NewRouter(log, pool, cfg.AppEnv)
+	router, err := httpapi.NewRouter(log, pool, cfg)
 	if err != nil {
 		return err
 	}
