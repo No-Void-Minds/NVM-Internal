@@ -18,6 +18,7 @@ const (
 	CodeSessionExpired         = "session_expired"
 	CodePasswordChangeRequired = "password_change_required"
 	CodeTooManyRequests        = "too_many_requests"
+	CodeInvalidCurrentPassword = "invalid_current_password"
 )
 
 // Satu pesan untuk username tidak ada, password salah, dan akun nonaktif (AC-01).
