@@ -4,9 +4,7 @@ import { ApiError, apiGet } from '../api/client'
 
 type Health = { status: string; database: string }
 type CheckState =
-  | { kind: 'loading' }
-  | { kind: 'ok'; checkedAt: Date }
-  | { kind: 'error'; message: string; code: string }
+  { kind: 'loading' } | { kind: 'ok'; checkedAt: Date } | { kind: 'error'; message: string; code: string }
 
 const state = ref<CheckState>({ kind: 'loading' })
 const timeFormat = new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })

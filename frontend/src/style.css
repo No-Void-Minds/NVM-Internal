@@ -1,9 +1,9 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 /* Nilai dari DESIGN.md; kontras teks dan elemen non-teks sudah dihitung lolos WCAG AA. */
 @theme {
-  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
 
   --color-canvas: #f4f1ea;
   --color-surface: #ffffff;
