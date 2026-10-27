@@ -2,14 +2,13 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"net/netip"
-	"time"
-
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"net/netip"
+	"nvm-internal/internal/audit"
+	"time"
 
 	"nvm-internal/internal/db/sqlc"
 )
@@ -50,7 +49,7 @@ func (s *Service) Login(ctx context.Context, username, password string, ip *neti
 		if errors.Is(err, pgx.ErrNoRows) {
 			burnPasswordCheck(password)
 			result.Outcome = LoginInvalid
-			return audit(ctx, q, nil, "login_failed", ip, map[string]any{"username": username, "reason": "unknown_user"})
+			return audit.UserEvent(ctx, q, nil, "login_failed", ip, map[string]any{"username": username, "reason": "unknown_user"})
 		}
 		if err != nil {
 			return err
@@ -69,7 +68,7 @@ func (s *Service) Login(ctx context.Context, username, password string, ip *neti
 		if state.IsLocked(now) {
 			result.Outcome = LoginLocked
 			result.RetryAfterSeconds = state.RetryAfterSeconds(now)
-			return audit(ctx, q, &u.ID, "login_failed", ip, map[string]any{"reason": "locked"})
+			return audit.UserEvent(ctx, q, &u.ID, "login_failed", ip, map[string]any{"reason": "locked"})
 		}
 
 		passwordOK := CheckPassword(u.PasswordHash, password)
@@ -77,7 +76,7 @@ func (s *Service) Login(ctx context.Context, username, password string, ip *neti
 		// Akun nonaktif tidak menambah hitungan gagal; tidak ada gunanya mengunci akun yang memang tidak bisa dipakai.
 		if !u.IsActive {
 			result.Outcome = LoginInvalid
-			return audit(ctx, q, &u.ID, "login_failed", ip, map[string]any{"reason": "inactive"})
+			return audit.UserEvent(ctx, q, &u.ID, "login_failed", ip, map[string]any{"reason": "inactive"})
 		}
 
 		if !passwordOK {
@@ -90,7 +89,7 @@ func (s *Service) Login(ctx context.Context, username, password string, ip *neti
 			}); err != nil {
 				return err
 			}
-			if err := audit(ctx, q, &u.ID, "login_failed", ip, map[string]any{"reason": "wrong_password"}); err != nil {
+			if err := audit.UserEvent(ctx, q, &u.ID, "login_failed", ip, map[string]any{"reason": "wrong_password"}); err != nil {
 				return err
 			}
 			if !locked {
@@ -99,7 +98,7 @@ func (s *Service) Login(ctx context.Context, username, password string, ip *neti
 			}
 			result.Outcome = LoginLocked
 			result.RetryAfterSeconds = next.RetryAfterSeconds(now)
-			return audit(ctx, q, &u.ID, "account_locked", ip, map[string]any{
+			return audit.UserEvent(ctx, q, &u.ID, "account_locked", ip, map[string]any{
 				"level":        next.Level,
 				"locked_until": next.LockedUntil,
 			})
@@ -109,28 +108,8 @@ func (s *Service) Login(ctx context.Context, username, password string, ip *neti
 			return err
 		}
 		result.Outcome = LoginOK
-		return audit(ctx, q, &u.ID, "login_success", ip, nil)
+		return audit.UserEvent(ctx, q, &u.ID, "login_success", ip, nil)
 	})
 
 	return result, err
-}
-
-func audit(ctx context.Context, q *sqlc.Queries, userID *int64, action string, ip *netip.Addr, detail map[string]any) error {
-	p := sqlc.InsertAuditLogParams{
-		Action:    action,
-		Entity:    pgtype.Text{String: "user", Valid: true},
-		IpAddress: ip,
-	}
-	if userID != nil {
-		p.UserID = pgtype.Int8{Int64: *userID, Valid: true}
-		p.EntityID = pgtype.Text{String: formatID(*userID), Valid: true}
-	}
-	if detail != nil {
-		b, err := json.Marshal(detail)
-		if err != nil {
-			return err
-		}
-		p.NewValue = b
-	}
-	return q.InsertAuditLog(ctx, p)
 }

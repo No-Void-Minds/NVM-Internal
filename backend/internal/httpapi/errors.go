@@ -6,15 +6,17 @@ import (
 
 // Frontend memilih tampilan berdasarkan kode; teks pesan boleh berubah, kode jangan.
 const (
-	CodeBadRequest         = "bad_request"
-	CodeUnauthorized       = "unauthorized"
-	CodeForbidden          = "forbidden"
-	CodeNotFound           = "not_found"
-	CodeConflict           = "conflict"
-	CodeInternal           = "internal"
-	CodeUnavailable        = "service_unavailable"
-	CodeInvalidCredentials = "invalid_credentials"
-	CodeAccountLocked      = "account_locked"
+	CodeBadRequest             = "bad_request"
+	CodeUnauthorized           = "unauthorized"
+	CodeForbidden              = "forbidden"
+	CodeNotFound               = "not_found"
+	CodeConflict               = "conflict"
+	CodeInternal               = "internal"
+	CodeUnavailable            = "service_unavailable"
+	CodeInvalidCredentials     = "invalid_credentials"
+	CodeAccountLocked          = "account_locked"
+	CodeSessionExpired         = "session_expired"
+	CodePasswordChangeRequired = "password_change_required"
 )
 
 // Satu pesan untuk username tidak ada, password salah, dan akun nonaktif (AC-01).

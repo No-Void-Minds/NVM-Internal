@@ -55,6 +55,9 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	api := r.Group("/api")
 	api.GET("/health", s.health)
 	api.POST("/auth/login", s.login)
+	authed := api.Group("", s.requireSession())
+	authed.GET("/auth/me", s.me)
+	authed.POST("/auth/logout", s.logout)
 
 	return r, nil
 }

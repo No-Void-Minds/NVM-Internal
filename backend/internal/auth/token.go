@@ -65,7 +65,3 @@ func (t TokenIssuer) Parse(token string, now time.Time) (Claims, int64, error) {
 	}
 	return c, userID, nil
 }
-
-func formatID(id int64) string {
-	return strconv.FormatInt(id, 10)
-}

@@ -31,6 +31,7 @@ type sessionUser struct {
 	Username           string `json:"username"`
 	Role               string `json:"role"`
 	DivisionID         int64  `json:"division_id"`
+	DivisionName       string `json:"division_name,omitempty"`
 	MustChangePassword bool   `json:"must_change_password"`
 }
 
