@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+
+backend/bin/
+backend/tmp/
+storage/
+
+node_modules/
+frontend/dist/
+
+.vscode/*
+!.vscode/extensions.json
+.idea/
+Thumbs.db
+.DS_Store
