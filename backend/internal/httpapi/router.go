@@ -79,6 +79,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	manage.PUT("/divisions/:id", s.renameDivision)
 	manage.POST("/divisions/:id/deactivate", s.setDivisionActive(false))
 	manage.POST("/divisions/:id/activate", s.setDivisionActive(true))
+	manage.GET("/audit-logs", s.listAuditLogs)
 
 	return r, nil
 }
