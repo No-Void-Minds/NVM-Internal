@@ -191,7 +191,14 @@ nvm-internal/
 **Demo pertama ke Manajer:** login, buat akun Staf, login sebagai Staf, cek menu.
 **Butuh dari Manajer:** daftar pengguna awal (nama, username, peran, divisi), termasuk setiap anggota Creative.
 
----
+**Keputusan:**
+- Password awal dan reset password diketik oleh pengelola (sesuai Stitch), minimal 8 karakter, dan wajib diganti saat login berikutnya.
+- Reset password juga membuka kunci akun dan mengakhiri semua sesi akun itu.
+- Username 3 sampai 50 karakter: huruf, angka, titik, garis bawah, atau tanda hubung, tanpa spasi.
+- Perlindungan pengelola terakhir: tidak bisa menonaktifkan diri sendiri, dan tidak ada aksi yang boleh membuat jumlah Admin dan Manajer aktif menjadi nol.
+- Divisi tidak bisa dihapus, hanya dinonaktifkan. Divisi nonaktif tidak muncul di pilihan akun baru, tapi akun lama tetap di divisinya.
+- Kolom user_id di audit log selalu berisi pelaku aksi; sasarannya di entity dan entity_id.
+- Halaman awal sementara: Admin dan Manajer ke Pengguna, Staf ke Status, sampai Papan Task ada di Sprint 4.
 
 ## Sprint 3: Task inti dan label
 
