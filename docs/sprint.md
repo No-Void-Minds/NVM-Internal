@@ -200,6 +200,8 @@ nvm-internal/
 - Kolom user_id di audit log selalu berisi pelaku aksi; sasarannya di entity dan entity_id.
 - Halaman awal sementara: Admin dan Manajer ke Pengguna, Staf ke Status, sampai Papan Task ada di Sprint 4.
 
+- 2026-10-28: Sprint 2 langkah 1-4 selesai (backend). Helper audit pelaku dan sasaran, middleware peran, kelola akun (buat, ubah, nonaktif/aktif, reset password, buka kunci, perlindungan pengelola terakhir), kelola divisi, daftar audit log dengan filter dan halaman. Test database diantrekan dengan advisory lock setelah deadlock antar package.
+
 ## Sprint 3: Task inti dan label
 
 **Tujuan:** siklus hidup task benar di backend sebelum ada papan.
