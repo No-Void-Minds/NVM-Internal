@@ -7,8 +7,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"nvm-internal/internal/account"
 	"nvm-internal/internal/auth"
 	"nvm-internal/internal/config"
+	"nvm-internal/internal/db/sqlc"
 )
 
 type Server struct {
@@ -18,6 +20,7 @@ type Server struct {
 	tokens       auth.TokenIssuer
 	cookieSecure bool
 	loginLimiter *ipLimiter
+	accounts     *account.Service
 	// now bisa diganti di test supaya waktu kuncian dan kedaluwarsa token bisa diuji.
 	now func() time.Time
 }
@@ -40,6 +43,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 		cookieSecure: cfg.CookieSecure,
 		now:          time.Now,
 		loginLimiter: newIPLimiter(30*time.Second, 10),
+		accounts:     account.NewService(pool),
 	}
 
 	r := gin.New()
@@ -61,6 +65,15 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	authed.GET("/auth/me", s.me)
 	authed.POST("/auth/logout", s.logout)
 	authed.POST("/auth/change-password", s.limitLogin(), s.changePassword)
+	app := authed.Group("", requirePasswordChanged())
+	manage := app.Group("", requireRole(sqlc.UserRoleAdmin, sqlc.UserRoleManager))
+	manage.GET("/users", s.listUsers)
+	manage.POST("/users", s.createUser)
+	manage.PUT("/users/:id", s.updateUser)
+	manage.POST("/users/:id/deactivate", s.setUserActive(false))
+	manage.POST("/users/:id/activate", s.setUserActive(true))
+	manage.POST("/users/:id/reset-password", s.resetUserPassword)
+	manage.POST("/users/:id/unlock", s.unlockUser)
 
 	return r, nil
 }

@@ -2,33 +2,18 @@ package auth
 
 import (
 	"context"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"net/netip"
-	"os"
+	"nvm-internal/internal/testdb"
 	"testing"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Test ini memakai database sungguhan dan hanya jalan bila TEST_DATABASE_URL diisi.
 // Jangan arahkan ke database dev: semua tabel dikosongkan di awal setiap test.
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	url := os.Getenv("TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("TEST_DATABASE_URL kosong, test database dilewati")
-	}
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
-
-	if _, err := pool.Exec(ctx, `TRUNCATE audit_logs, task_attachments, task_labels, task_assignees, tasks, labels, users, divisions RESTART IDENTITY CASCADE`); err != nil {
-		t.Fatal(err)
-	}
-	return pool
+	return testdb.Pool(t)
 }
 
 const testPassword = "password-uji-benar"
