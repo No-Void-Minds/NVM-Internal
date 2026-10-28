@@ -74,6 +74,11 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	manage.POST("/users/:id/activate", s.setUserActive(true))
 	manage.POST("/users/:id/reset-password", s.resetUserPassword)
 	manage.POST("/users/:id/unlock", s.unlockUser)
+	app.GET("/divisions", s.listDivisions)
+	manage.POST("/divisions", s.createDivision)
+	manage.PUT("/divisions/:id", s.renameDivision)
+	manage.POST("/divisions/:id/deactivate", s.setDivisionActive(false))
+	manage.POST("/divisions/:id/activate", s.setDivisionActive(true))
 
 	return r, nil
 }

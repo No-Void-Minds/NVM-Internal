@@ -189,6 +189,10 @@ func (s *Server) writeAccountError(c *gin.Context, err error) {
 		writeError(c, http.StatusConflict, CodeConflict, "Kamu tidak bisa menonaktifkan akunmu sendiri.")
 	case errors.Is(err, account.ErrLastManager):
 		writeError(c, http.StatusConflict, CodeConflict, "Harus ada minimal satu Admin atau Manajer yang aktif.")
+	case errors.Is(err, account.ErrDivisionNotFound):
+		writeError(c, http.StatusNotFound, CodeNotFound, "Divisi tidak ditemukan.")
+	case errors.Is(err, account.ErrDivisionNameTaken):
+		writeError(c, http.StatusConflict, CodeConflict, "Nama divisi sudah dipakai.")
 	default:
 		s.internalError(c, err)
 	}
