@@ -11,7 +11,14 @@ import { listUsers, type UserItem } from '../api/users'
 import { listLabels, type LabelItem } from '../api/labels'
 import { listDivisions, type DivisionItem } from '../api/divisions'
 import { useSessionStore } from '../stores/session'
-import { dueOptions, hasFilters, parseBoardQuery, toRouteQuery } from '../utils/boardQuery'
+import {
+  dueOptions,
+  hasFilters,
+  normalizeBoardQuery,
+  parseBoardQuery,
+  sameRouteQuery,
+  toRouteQuery,
+} from '../utils/boardQuery'
 import { statusClass, statusLabel, urgencies, urgencyLabel, type Urgency } from '../utils/task'
 import type { DueFilter } from '../api/board'
 
@@ -22,14 +29,32 @@ const isManager = computed(() => session.user?.role === 'manager')
 const isStaff = computed(() => session.user?.role === 'staff')
 
 // URL adalah sumber filter: bisa di-refresh, dibagikan, dan tombol Back browser tetap bekerja.
-const query = computed(() => parseBoardQuery(route.query, isStaff.value))
+const staffUsername = computed(() => (isStaff.value ? (session.user?.username ?? null) : null))
+
+// URL adalah sumber filter: bisa di-refresh, dibagikan, dan tombol Back browser tetap bekerja.
+const query = computed(() => parseBoardQuery(route.query, staffUsername.value))
 const filtered = computed(() => hasFilters(query.value))
 // Di "Task saya" isinya sudah pasti milik sendiri, jadi filter PIC baru berguna di "Semua task".
 const showPicFilter = computed(() => !isStaff.value || query.value.scope === 'all')
+// Kunci berupa teks supaya papan hanya dimuat ulang saat filternya benar-benar berubah,
+// bukan setiap kali objek query dibuat ulang.
+const queryKey = computed(() => new URLSearchParams(toRouteQuery(query.value)).toString())
 
 function setQuery(patch: Partial<BoardQuery>) {
-  void router.push({ query: toRouteQuery({ ...query.value, ...patch }) })
+  void router.push({
+    query: toRouteQuery(normalizeBoardQuery({ ...query.value, ...patch }, staffUsername.value)),
+  })
 }
+
+// URL yang tidak sesuai aturan dirapikan dengan replace, supaya tidak menambah langkah di tombol Back.
+watch(
+  () => route.query,
+  (q) => {
+    const canonical = toRouteQuery(query.value)
+    if (!sameRouteQuery(canonical, q)) void router.replace({ query: canonical })
+  },
+  { immediate: true },
+)
 
 function selected(e: Event): string {
   return (e.target as HTMLSelectElement).value
@@ -71,7 +96,7 @@ async function load(quiet = false) {
     loadState.value = 'error'
   }
 }
-watch(query, () => load())
+watch(queryKey, () => load())
 
 const labels = ref<LabelItem[]>([])
 const divisions = ref<DivisionItem[]>([])
@@ -155,7 +180,7 @@ const buttonSecondary =
         type="button"
         :class="scopeButton"
         :aria-pressed="query.scope === 'mine'"
-        @click="setQuery({ scope: 'mine' })"
+        @click="setQuery({ scope: 'mine', pic: undefined })"
       >
         Task saya
       </button>
@@ -183,7 +208,9 @@ const buttonSecondary =
           @change="setQuery({ pic: selected($event) || undefined })"
         >
           <option value="">Semua orang</option>
-          <option v-for="p in people" :key="p.id" :value="p.username">{{ p.name }}</option>
+          <option v-for="p in people" :key="p.id" :value="p.username">
+            {{ p.name }} ({{ p.username === staffUsername ? 'kamu' : p.division_name }})
+          </option>
         </select>
       </div>
       <div class="min-w-0">
