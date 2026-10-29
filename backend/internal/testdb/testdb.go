@@ -49,6 +49,9 @@ func Pool(t *testing.T) *pgxpool.Pool {
 	if _, err := pool.Exec(ctx, `TRUNCATE audit_logs, task_attachments, task_labels, task_assignees, tasks, labels, users, divisions RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := pool.Exec(ctx, `SELECT setval('task_number_seq', 1, false)`); err != nil {
+		t.Fatal(err)
+	}
 	return pool
 }
 

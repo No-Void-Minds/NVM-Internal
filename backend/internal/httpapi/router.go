@@ -94,6 +94,11 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	app.GET("/tasks", s.listTasks)
 	app.GET("/tasks/:id", s.getTask)
 	app.POST("/tasks", requireRole(sqlc.UserRoleManager), s.createTask)
+	managerOnly := requireRole(sqlc.UserRoleManager)
+	app.PUT("/tasks/:id", managerOnly, s.updateTask)
+	app.DELETE("/tasks/:id", managerOnly, s.deleteTask)
+	app.PUT("/tasks/:id/labels", s.setTaskLabels)
+	app.PUT("/tasks/:id/deliverable", s.setTaskDeliverable)
 
 	return r, nil
 }
