@@ -11,10 +11,17 @@ import (
 	"nvm-internal/internal/task"
 )
 
+// boardTask menambahkan tujuan perpindahan yang boleh bagi pengguna ini. Dihitung dengan aturan yang sama
+// dengan detail task, supaya tombol di kartu tidak pernah menawarkan perpindahan yang akan ditolak.
+type boardTask struct {
+	taskSummary
+	MoveTo []task.Status `json:"move_to"`
+}
+
 type boardColumn struct {
-	Status string        `json:"status"`
-	Count  int           `json:"count"`
-	Tasks  []taskSummary `json:"tasks"`
+	Status string      `json:"status"`
+	Count  int         `json:"count"`
+	Tasks  []boardTask `json:"tasks"`
 }
 
 type person struct {
@@ -47,11 +54,20 @@ func (s *Server) board(c *gin.Context) {
 		s.writeTaskError(c, err)
 		return
 	}
+	actor := taskActor(c)
 	out := make([]boardColumn, 0, len(cols))
 	for _, col := range cols {
-		items := make([]taskSummary, 0, len(col.Tasks))
+		items := make([]boardTask, 0, len(col.Tasks))
 		for _, r := range col.Tasks {
-			items = append(items, summaryOf(r))
+			isPIC := false
+			for _, a := range r.Assignees {
+				if a.ID == actor.ID {
+					isPIC = true
+					break
+				}
+			}
+			can := task.PermissionsFor(actor.Role, isPIC, task.Status(r.Task.Status))
+			items = append(items, boardTask{taskSummary: summaryOf(r), MoveTo: can.MoveTo})
 		}
 		out = append(out, boardColumn{Status: string(col.Status), Count: len(items), Tasks: items})
 	}

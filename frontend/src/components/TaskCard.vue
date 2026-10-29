@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { TaskSummary } from '../api/tasks'
-import { formatDay, formatMoment, isOverdue, urgencyClass, urgencyLabel } from '../utils/task'
+import type { BoardTask } from '../api/board'
+import { formatDay, formatMoment, isOverdue, statusLabel, urgencyClass, urgencyLabel } from '../utils/task'
 
-const props = defineProps<{ task: TaskSummary }>()
-defineEmits<{ open: [id: string] }>()
+const props = defineProps<{ task: BoardTask }>()
+defineEmits<{ open: [id: string]; move: [task: BoardTask] }>()
 
 const overdue = computed(() => isOverdue(props.task.due_date, props.task.status))
+const moveLabel = computed(() =>
+  props.task.move_to.length === 1 ? `Pindahkan ke ${statusLabel[props.task.move_to[0]]}` : 'Pindahkan',
+)
 
 function initials(name: string): string {
   return name
@@ -22,7 +25,7 @@ function initials(name: string): string {
   <!-- Judul adalah tombol yang membentang ke seluruh kartu (after:inset-0), sehingga di langkah 4 tombol
        Pindahkan bisa ditaruh di dalam kartu tanpa menjadi tombol di dalam tombol. -->
   <article
-    class="relative rounded-card border border-line bg-surface p-3 hover:border-ink has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent"
+    class="relative rounded-card border border-line bg-surface p-3 hover:border-ink has-[h3_button:focus-visible]:outline-2 has-[h3_button:focus-visible]:outline-offset-2 has-[h3_button:focus-visible]:outline-accent"
   >
     <div class="flex items-center gap-2 text-sm">
       <span class="rounded-chip bg-canvas px-1.5 font-mono text-ink-muted">{{ task.id }}</span>
@@ -74,5 +77,14 @@ function initials(name: string): string {
         {{ overdue ? 'Terlambat, ' : 'Tenggat ' }}{{ formatDay(task.due_date) }}
       </span>
     </div>
+    <!-- relative z-10 supaya tombol ini berada di atas lapisan klik judul yang membentang ke seluruh kartu. -->
+    <button
+      v-if="task.move_to.length"
+      type="button"
+      class="relative z-10 mt-2 inline-flex min-h-11 w-full items-center justify-center rounded-card border border-line text-sm font-medium hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent active:translate-y-px"
+      @click="$emit('move', task)"
+    >
+      {{ moveLabel }}<span class="sr-only"> {{ task.id }}</span>
+    </button>
   </article>
 </template>

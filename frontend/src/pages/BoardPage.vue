@@ -5,7 +5,7 @@ import TaskCard from '../components/TaskCard.vue'
 import TaskDetailPanel from '../components/TaskDetailPanel.vue'
 import TaskFormPanel from '../components/TaskFormPanel.vue'
 import { ApiError } from '../api/client'
-import { getBoard, listPeople, type Board, type BoardQuery, type Person } from '../api/board'
+import { getBoard, listPeople, type Board, type BoardQuery, type BoardTask, type Person } from '../api/board'
 import type { TaskDetail } from '../api/tasks'
 import { listUsers, type UserItem } from '../api/users'
 import { listLabels, type LabelItem } from '../api/labels'
@@ -21,6 +21,7 @@ import {
 } from '../utils/boardQuery'
 import { statusClass, statusLabel, urgencies, urgencyLabel, type Urgency } from '../utils/task'
 import type { DueFilter } from '../api/board'
+import MoveDialog from '../components/MoveDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -123,6 +124,19 @@ onMounted(async () => {
 const detailId = ref<string | null>(null)
 const formOpen = ref(false)
 const editing = ref<TaskDetail | null>(null)
+const moving = ref<BoardTask | null>(null)
+
+async function onMoved(message: string) {
+  moving.value = null
+  notice.value = { kind: 'success', text: message }
+  await load(true)
+}
+
+async function onStale(message: string) {
+  moving.value = null
+  notice.value = { kind: 'error', text: message }
+  await load(true)
+}
 
 function openCreate() {
   editing.value = null
@@ -341,7 +355,7 @@ const buttonSecondary =
             </p>
             <ul v-if="col.tasks.length" class="space-y-2">
               <li v-for="t in col.tasks" :key="t.id">
-                <TaskCard :task="t" @open="detailId = $event" />
+                <TaskCard :task="t" @open="detailId = $event" @move="moving = $event" />
               </li>
             </ul>
             <p v-else class="px-1 py-4 text-center text-sm text-ink-muted">Tidak ada task.</p>
@@ -349,7 +363,7 @@ const buttonSecondary =
         </div>
       </div>
     </template>
-
+    <MoveDialog :task="moving" @close="moving = null" @moved="onMoved" @stale="onStale" />
     <TaskDetailPanel
       :task-id="detailId"
       :labels="labels"

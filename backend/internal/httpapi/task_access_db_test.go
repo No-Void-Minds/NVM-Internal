@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"nvm-internal/internal/testdb"
+	"slices"
 	"strings"
 	"testing"
-
-	"nvm-internal/internal/testdb"
 )
 
 // taskTeam berisi Manajer, Admin, Staf PIC, dan Staf lain yang sudah login. Staf lain sengaja satu divisi
@@ -245,6 +245,51 @@ func TestTaskReadRoutesNeedLogin(t *testing.T) {
 	for _, path := range []string{"/api/tasks", "/api/tasks/T-0001", "/api/board", "/api/board?scope=mine", "/api/people", "/api/labels", "/api/divisions"} {
 		if got := s.call(t, anon, http.MethodGet, path, ""); got != http.StatusUnauthorized {
 			t.Errorf("GET %s tanpa login: status %d, mau 401", path, got)
+		}
+	}
+}
+
+// Tombol Pindahkan di kartu mengikuti move_to dari papan, jadi isinya harus sama dengan aturan transisi.
+func TestBoardOffersOnlyAllowedMoves(t *testing.T) {
+	tm := newTaskTeam(t)
+	id := tm.createTask(t)
+	moveTo := func(c *http.Client) []string {
+		t.Helper()
+		var out struct {
+			Columns []struct {
+				Tasks []struct {
+					ID     string   `json:"id"`
+					MoveTo []string `json:"move_to"`
+				} `json:"tasks"`
+			} `json:"columns"`
+		}
+		if code := tm.sendJSON(t, c, http.MethodGet, "/api/board", "", &out); code != http.StatusOK {
+			t.Fatalf("GET /api/board: status %d, mau 200", code)
+		}
+		for _, col := range out.Columns {
+			for _, item := range col.Tasks {
+				if item.ID == id {
+					return item.MoveTo
+				}
+			}
+		}
+		t.Fatalf("%s tidak ada di papan", id)
+		return nil
+	}
+
+	cases := []struct {
+		who  string
+		c    *http.Client
+		want []string
+	}{
+		{"Staf PIC", tm.pic, []string{"on_progress"}},
+		{"Manajer", tm.manager, []string{"on_progress"}},
+		{"Staf lain", tm.other, nil},
+		{"Admin", tm.admin, nil},
+	}
+	for _, c := range cases {
+		if got := moveTo(c.c); !slices.Equal(got, c.want) {
+			t.Errorf("%s: move_to %v, mau %v", c.who, got, c.want)
 		}
 	}
 }

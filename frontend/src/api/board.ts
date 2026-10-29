@@ -13,7 +13,8 @@ export type BoardQuery = {
   due?: DueFilter
 }
 
-export type BoardColumn = { status: TaskStatus; count: number; tasks: TaskSummary[] }
+export type BoardTask = TaskSummary & { move_to: TaskStatus[] }
+export type BoardColumn = { status: TaskStatus; count: number; tasks: BoardTask[] }
 export type Board = { columns: BoardColumn[]; completed_days: number }
 
 export type Person = {
