@@ -240,6 +240,22 @@ nvm-internal/
 - Riwayat task di panel detail dibaca dari audit log (pembuatan, perubahan, perpindahan status), terbaru di atas.
 - Palet label: 8 warna terang dengan teks warna ink, semuanya di atas 12:1.
 
+**Hasil:** selesai 2026-10-29. Lolos lewat test Go: AC-04 bagian task, AC-08 bagian backend, dan AC-14 bagian backend.
+Sisa: AC-08 papan dan arsip (Sprint 4 dan 6), AC-14 filter papan per label (Sprint 4), AC-03 nama akun nonaktif di task lama (Sprint 4).
+
+**Keputusan:**
+- Perpindahan di luar alur dibalas 409, sedangkan perpindahan yang bukan hak pengguna dibalas 403. Frontend jadi bisa membedakan "alurnya tidak ada" dan "bukan hakmu".
+- Divisi task mengikuti PIC pertama. Urutan PIC disimpan dengan `clock_timestamp()` supaya urutannya tetap walaupun beberapa PIC dimasukkan dalam satu transaksi.
+- Staf hanya mengatur label divisinya dan label untuk semua divisi. Label divisi lain di task miliknya dipertahankan, tidak ikut terhapus.
+- Label nonaktif tetap menempel di task lama, tetapi ditolak untuk pemasangan baru.
+- Untuk sementara, detail task dibuka dari halaman daftar. Papan menyusul di Sprint 4.
+- Di Pengaturan, Divisi dan Label disusun berurutan ke bawah, tanpa tab, karena kedua daftarnya pendek.
+- Aksi task di Audit Log menampilkan ID (T-nnnn), bukan judul, karena judul bisa berubah.
+
+**Retro:**
+- Macet: `task_number_seq` tidak ikut di-reset oleh TRUNCATE di test; `entity_id` yang nullable jadi `pgtype.Text` di sqlc; ReferenceError karena `watch` dengan `immediate` jalan sebelum `const` dideklarasikan; garis merah palsu di VS Code karena indeks basi.
+- Lancar: (isi sendiri)
+- Diubah untuk Sprint 4: (isi sendiri)
 ---
 
 ## Sprint 4: Papan Kanban
