@@ -4,9 +4,10 @@ import BaseDialog from './BaseDialog.vue'
 import { ApiError } from '../api/client'
 import { moveTask } from '../api/tasks'
 import type { BoardTask } from '../api/board'
-import { statusLabel, type TaskStatus } from '../utils/task'
+import { staleMoveMessage, statusLabel, type TaskStatus } from '../utils/task'
+// initialTarget diisi saat kartu dilepas di kolom revisi, supaya tujuan sudah terpilih.
+const props = defineProps<{ task: BoardTask | null; initialTarget?: TaskStatus | null }>()
 
-const props = defineProps<{ task: BoardTask | null }>()
 const emit = defineEmits<{ close: []; moved: [message: string]; stale: [message: string] }>()
 
 // Setiap tujuan diberi penjelasan, supaya pilihannya tidak hanya berupa nama status.
@@ -30,7 +31,7 @@ watch(
   () => props.task,
   (t) => {
     // Kalau tujuannya hanya satu, langsung terpilih supaya cukup satu ketukan lagi.
-    target.value = t && t.move_to.length === 1 ? t.move_to[0] : null
+    target.value = props.initialTarget ?? (t && t.move_to.length === 1 ? t.move_to[0] : null)
     note.value = ''
     error.value = null
   },
@@ -52,21 +53,9 @@ async function submit() {
     await moveTask(t.id, t.version, target.value, isRevision.value ? note.value.trim() : '')
     emit('moved', `${t.id} dipindahkan ke ${statusLabel[target.value]}.`)
   } catch (err) {
-    // Kartu di layar sudah basi: dialog ditutup dan papan dimuat ulang, karena mencoba lagi dengan
-    // versi lama pasti ditolak lagi (AC-10).
-    if (err instanceof ApiError && err.status === 409) {
-      emit(
-        'stale',
-        `${t.id} sudah diubah orang lain. Papan dimuat ulang, cek statusnya sebelum memindahkan lagi.`,
-      )
-      return
-    }
-    if (err instanceof ApiError && err.status === 403) {
-      emit('stale', `Kamu tidak lagi punya hak memindahkan ${t.id}. Papan dimuat ulang.`)
-      return
-    }
-    if (err instanceof ApiError && err.status === 404) {
-      emit('stale', `${t.id} sudah dihapus. Papan dimuat ulang.`)
+    const stale = staleMoveMessage(err, t.id)
+    if (stale) {
+      emit('stale', stale)
       return
     }
     error.value = err instanceof ApiError ? err.message : 'Terjadi kesalahan yang tidak terduga. Coba lagi.'

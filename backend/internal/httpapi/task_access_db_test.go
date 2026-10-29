@@ -293,3 +293,99 @@ func TestBoardOffersOnlyAllowedMoves(t *testing.T) {
 		}
 	}
 }
+
+type boardCard struct {
+	ID        string   `json:"id"`
+	Status    string   `json:"status"`
+	MoveTo    []string `json:"move_to"`
+	Assignees []struct {
+		Name string `json:"name"`
+	} `json:"assignees"`
+}
+
+func (tm taskTeam) board(t *testing.T, c *http.Client, query string) map[string]boardCard {
+	t.Helper()
+	var out struct {
+		Columns []struct {
+			Tasks []boardCard `json:"tasks"`
+		} `json:"columns"`
+	}
+	if code := tm.sendJSON(t, c, http.MethodGet, "/api/board"+query, "", &out); code != http.StatusOK {
+		t.Fatalf("GET /api/board%s: status %d, mau 200", query, code)
+	}
+	cards := map[string]boardCard{}
+	for _, col := range out.Columns {
+		for _, card := range col.Tasks {
+			cards[card.ID] = card
+		}
+	}
+	return cards
+}
+
+// AC-06: task baru memakai ID berikutnya, muncul di "Task saya" setiap PIC, dan perpindahan oleh satu PIC
+// langsung terlihat oleh PIC lain. PIC lain yang masih memegang versi lama ditolak, bukan menimpa (AC-10).
+func TestTaskSharedBetweenPICs(t *testing.T) {
+	tm := newTaskTeam(t)
+	var secondID int64
+	if err := tm.pool.QueryRow(t.Context(), `SELECT id FROM users WHERE username = 'staf.b'`).Scan(&secondID); err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf(`{"title":"Live Shopee","urgency":"high","pic_ids":[%d,%d]}`, tm.picID, secondID)
+	var created struct {
+		ID string `json:"id"`
+	}
+	if code := tm.sendJSON(t, tm.manager, http.MethodPost, "/api/tasks", body, &created); code != http.StatusCreated {
+		t.Fatalf("membuat task: status %d, mau 201", code)
+	}
+	// Sequence di-reset oleh testdb, jadi task pertama pasti T-0001.
+	if created.ID != "T-0001" {
+		t.Fatalf("ID task pertama %s, mau T-0001", created.ID)
+	}
+	id := created.ID
+
+	for who, c := range map[string]*http.Client{"PIC pertama": tm.pic, "PIC kedua": tm.other} {
+		if card, ok := tm.board(t, c, "?scope=mine")[id]; !ok || card.Status != "requested" {
+			t.Fatalf("%s: %s tidak ada di Task saya sebagai Requested", who, id)
+		}
+	}
+
+	if code, _ := tm.move(t, tm.pic, id, 1, "on_progress"); code != http.StatusOK {
+		t.Fatalf("PIC pertama memindahkan: status %d, mau 200", code)
+	}
+	card := tm.board(t, tm.other, "?scope=mine")[id]
+	if card.Status != "on_progress" || !slices.Equal(card.MoveTo, []string{"ready"}) {
+		t.Fatalf("di papan PIC kedua: status %s, move_to %v; mau on_progress dan [ready]", card.Status, card.MoveTo)
+	}
+
+	if code, _ := tm.move(t, tm.other, id, 1, "ready"); code != http.StatusConflict {
+		t.Fatalf("PIC kedua dengan versi lama: status %d, mau 409", code)
+	}
+}
+
+// AC-03: akun yang dinonaktifkan hilang dari pilihan PIC, tetapi namanya tetap tampil di task lamanya.
+func TestInactivePICStaysOnOldTask(t *testing.T) {
+	tm := newTaskTeam(t)
+	id := tm.createTask(t)
+	if code := tm.call(t, tm.manager, http.MethodPost, fmt.Sprintf("/api/users/%d/deactivate", tm.picID), ""); code != http.StatusNoContent {
+		t.Fatalf("menonaktifkan PIC: status %d, mau 204", code)
+	}
+
+	card, ok := tm.board(t, tm.manager, "")[id]
+	if !ok || len(card.Assignees) != 1 || card.Assignees[0].Name == "" {
+		t.Fatalf("nama PIC nonaktif tidak tampil di %s: %+v", id, card.Assignees)
+	}
+
+	var out struct {
+		People []struct {
+			Username string `json:"username"`
+		} `json:"people"`
+	}
+	if code := tm.sendJSON(t, tm.manager, http.MethodGet, "/api/people", "", &out); code != http.StatusOK {
+		t.Fatalf("GET /api/people: status %d, mau 200", code)
+	}
+	for _, p := range out.People {
+		if p.Username == "staf.a" {
+			t.Fatal("akun nonaktif masih muncul sebagai calon PIC")
+		}
+	}
+}

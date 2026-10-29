@@ -263,19 +263,37 @@ Sisa: AC-08 papan dan arsip (Sprint 4 dan 6), AC-14 filter papan per label (Spri
 **Tujuan:** layar utama yang dipakai tiap hari.
 **SRS:** FR-TASK-08, 09, 18. **AC:** AC-05, AC-06, AC-10, AC-12.
 
-- [ ] S4-01 `GET /api/board` dengan parameter `scope` (mine/all), `pic`, `division`, `label`, `urgency`, `due`. Jumlah per status ikut lingkup.
-- [ ] S4-02 Papan desktop: 4 kolom, drag-and-drop hanya untuk kartu yang boleh dipindah oleh pengguna itu.
-- [ ] S4-03 Tombol "Pindahkan" di kartu sebagai pengganti drag (layar sentuh dan keyboard).
-- [ ] S4-04 Mobile: tab per status, bukan 4 kolom yang dikecilkan.
-- [ ] S4-05 Saklar Staf "Task saya | Semua task", default Task saya, reset setiap login, state di URL (`?scope=all&pic=staf.b`).
-- [ ] S4-06 Filter PIC: tersembunyi di mode Task saya, muncul di Semua task. Memilih orang lain pindah otomatis ke Semua task, memilih diri sendiri saja kembali ke Task saya. Manajer tanpa saklar, default "Semua orang".
-- [ ] S4-07 Kartu dan detail task orang lain: tanpa tombol aksi, baris "Kamu hanya bisa melihat task ini."
-- [ ] S4-08 Tampilan kosong dengan tombol "Lihat semua task".
-- [ ] S4-09 Dialog revisi saat Ready dikembalikan ke On Progress.
-- [ ] S4-10 Konflik 409: tampilkan pesan bahwa task sudah diubah orang lain, lalu muat ulang kartu.
-- [ ] S4-11 Penanda terlambat bila tenggat lewat dan status belum Completed.
+- [x] S4-01 `GET /api/board` dengan parameter `scope` (mine/all), `pic`, `division`, `label`, `urgency`, `due`. Jumlah per status ikut lingkup.
+- [x] S4-02 Papan desktop: 4 kolom, drag-and-drop hanya untuk kartu yang boleh dipindah oleh pengguna itu.
+- [x] S4-03 Tombol "Pindahkan" di kartu sebagai pengganti drag (layar sentuh dan keyboard).
+- [x] S4-04 Mobile: tab per status, bukan 4 kolom yang dikecilkan.
+- [x] S4-05 Saklar Staf "Task saya | Semua task", default Task saya, reset setiap login, state di URL (`?scope=all&pic=staf.b`).
+- [x] S4-06 Filter PIC: tersembunyi di mode Task saya, muncul di Semua task. Memilih orang lain pindah otomatis ke Semua task, memilih diri sendiri saja kembali ke Task saya. Manajer tanpa saklar, default "Semua orang".
+- [x] S4-07 Kartu dan detail task orang lain: tanpa tombol aksi, baris "Kamu hanya bisa melihat task ini."
+- [x] S4-08 Tampilan kosong dengan tombol "Lihat semua task".
+- [x] S4-09 Dialog revisi saat Ready dikembalikan ke On Progress.
+- [x] S4-10 Konflik 409: tampilkan pesan bahwa task sudah diubah orang lain, lalu muat ulang kartu.
+- [x] S4-11 Penanda terlambat bila tenggat lewat dan status belum Completed.
 
 **Demo:** satu sesi bareng Manajer dan satu Staf memindahkan task yang sama dari dua perangkat.
+
+**Hasil:** selesai 2026-10-29. Lolos lewat test Go dan uji manual: AC-05 (bagian papan), AC-06, AC-10, AC-12 (halaman papan), AC-03 (nama akun nonaktif di task lama), AC-08 bagian papan, AC-14 filter per label.
+Sisa: AC-05 dan AC-08 bagian arsip (Sprint 6).
+
+**Keputusan:**
+- Kolom Completed hanya berisi task yang selesai 7 hari terakhir; selebihnya hanya di Arsip. Perlu konfirmasi Manajer karena AC-08 menyebut task Completed hilang dari papan aktif.
+- `move_to` di setiap kartu dihitung backend dengan aturan yang sama dengan detail task, supaya tombol dan drag tidak menawarkan perpindahan yang akan ditolak.
+- Filter PIC memilih satu orang, memakai username di URL. Staf yang memilih dirinya sendiri kembali ke "Task saya"; URL dengan PIC orang lain otomatis menjadi "Semua task".
+- Login biasa selalu mulai dari "Task saya". Login ulang setelah sesi habis mengembalikan tampilan terakhir lewat `?kembali=`.
+- "Hari ini" untuk filter dan penanda terlambat dihitung dalam WIB, bukan jam server.
+- Drag-and-drop memakai HTML5 bawaan untuk mouse; layar sentuh dan keyboard memakai tombol Pindahkan. Revisi lewat drag tetap membuka dialog catatan.
+- Di layar sempit, papan menampilkan satu kolom dengan deretan tombol kolom (pola `aria-pressed`), bukan widget tab.
+- Kotak "Cari task" dan tautan "Lihat semua di Arsip" dari Stitch ditunda ke Sprint 6 karena halamannya belum ada.
+
+**Retro:**
+- Macet: helper test HTTP (`liveServer`) ternyata belum ada di repo; sqlc salah menulis ulang `@today::date + 6` karena operator `@` lebih lemah dari `+`, jadi harus `(@today::date) + 6`; rute `/board` dan `/people` sempat terdaftar di grup tanpa pemeriksaan login, tertangkap oleh `TestTaskReadRoutesNeedLogin`.
+- Lancar: (isi sendiri)
+- Diubah untuk Sprint 5: (isi sendiri)
 
 ---
 

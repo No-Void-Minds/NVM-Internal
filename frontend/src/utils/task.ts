@@ -1,5 +1,6 @@
 export type TaskStatus = 'requested' | 'on_progress' | 'ready' | 'completed'
 export type Urgency = 'low' | 'medium' | 'high' | 'urgent'
+import { ApiError } from '../api/client'
 
 // Nama status mengikuti dropdown Excel lama (FR-TASK-04), jadi tetap berbahasa Inggris.
 export const statusLabel: Record<TaskStatus, string> = {
@@ -55,4 +56,15 @@ export function isOverdue(due: string | null, status: TaskStatus): boolean {
 // Untuk cap waktu lengkap seperti solved_date: tanggalnya dibaca dalam zona waktu browser.
 export function formatMoment(value: string): string {
   return dateFormat.format(new Date(value))
+}
+
+// Galat yang berarti kartu di layar sudah basi. Dipakai dialog Pindahkan dan drag-and-drop,
+// supaya keduanya menampilkan pesan yang sama lalu memuat ulang papan (AC-10).
+export function staleMoveMessage(err: unknown, id: string): string | null {
+  if (!(err instanceof ApiError)) return null
+  if (err.status === 409)
+    return `${id} sudah diubah orang lain. Papan dimuat ulang, cek statusnya sebelum memindahkan lagi.`
+  if (err.status === 403) return `Kamu tidak lagi punya hak memindahkan ${id}. Papan dimuat ulang.`
+  if (err.status === 404) return `${id} sudah dihapus. Papan dimuat ulang.`
+  return null
 }

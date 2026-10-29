@@ -6,7 +6,7 @@ import TaskDetailPanel from '../components/TaskDetailPanel.vue'
 import TaskFormPanel from '../components/TaskFormPanel.vue'
 import { ApiError } from '../api/client'
 import { getBoard, listPeople, type Board, type BoardQuery, type BoardTask, type Person } from '../api/board'
-import type { TaskDetail } from '../api/tasks'
+import { moveTask, type TaskDetail } from '../api/tasks'
 import { listUsers, type UserItem } from '../api/users'
 import { listLabels, type LabelItem } from '../api/labels'
 import { listDivisions, type DivisionItem } from '../api/divisions'
@@ -19,7 +19,15 @@ import {
   sameRouteQuery,
   toRouteQuery,
 } from '../utils/boardQuery'
-import { statusClass, statusLabel, urgencies, urgencyLabel, type Urgency } from '../utils/task'
+import {
+  staleMoveMessage,
+  statusClass,
+  statusLabel,
+  urgencies,
+  urgencyLabel,
+  type TaskStatus,
+  type Urgency,
+} from '../utils/task'
 import type { DueFilter } from '../api/board'
 import MoveDialog from '../components/MoveDialog.vue'
 
@@ -125,17 +133,106 @@ const detailId = ref<string | null>(null)
 const formOpen = ref(false)
 const editing = ref<TaskDetail | null>(null)
 const moving = ref<BoardTask | null>(null)
+const movingTarget = ref<TaskStatus | null>(null)
+
+function openMove(t: BoardTask) {
+  movingTarget.value = null
+  moving.value = t
+}
+
+function closeMove() {
+  moving.value = null
+  movingTarget.value = null
+}
 
 async function onMoved(message: string) {
-  moving.value = null
+  closeMove()
   notice.value = { kind: 'success', text: message }
   await load(true)
 }
 
 async function onStale(message: string) {
-  moving.value = null
+  closeMove()
   notice.value = { kind: 'error', text: message }
   await load(true)
+}
+
+// Drag-and-drop hanya untuk mouse di desktop. Layar sentuh dan keyboard memakai tombol Pindahkan (S4-03).
+const dragging = ref<BoardTask | null>(null)
+const dropTarget = ref<TaskStatus | null>(null)
+
+function canDrop(status: TaskStatus): boolean {
+  return dragging.value?.move_to.includes(status) ?? false
+}
+
+function onDragStart(e: DragEvent, t: BoardTask) {
+  dragging.value = t
+  // Firefox tidak memulai drag kalau dataTransfer kosong.
+  e.dataTransfer?.setData('text/plain', t.id)
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+}
+
+function onDragEnd() {
+  dragging.value = null
+  dropTarget.value = null
+}
+
+function onDragOver(e: DragEvent, status: TaskStatus) {
+  if (!dragging.value || dragging.value.status === status) return
+  // Semua kolom lain menerima drop, termasuk yang tidak boleh, supaya bisa dijawab dengan pesan
+  // (alur alternatif 3a), bukan diam-diam tidak terjadi apa-apa.
+  e.preventDefault()
+  dropTarget.value = status
+}
+
+function onDragLeave(e: DragEvent, status: TaskStatus) {
+  // dragleave juga terpicu saat kursor masuk ke kartu di dalam kolom; hanya keluar kolom yang dihitung.
+  const into = e.relatedTarget as Node | null
+  if (dropTarget.value === status && !(e.currentTarget as HTMLElement).contains(into)) dropTarget.value = null
+}
+
+async function onDrop(e: DragEvent, status: TaskStatus) {
+  e.preventDefault()
+  const t = dragging.value
+  onDragEnd()
+  if (!t || t.status === status) return
+  if (!t.move_to.includes(status)) {
+    const allowed = t.move_to.map((s) => statusLabel[s]).join(' atau ')
+    notice.value = {
+      kind: 'error',
+      text: `${t.id} tidak bisa dipindahkan ke ${statusLabel[status]}. Tujuan yang boleh: ${allowed}.`,
+    }
+    return
+  }
+  // Revisi wajib catatan, jadi tetap lewat dialog dengan tujuan sudah terpilih.
+  if (t.status === 'ready' && status === 'on_progress') {
+    movingTarget.value = status
+    moving.value = t
+    return
+  }
+  try {
+    await moveTask(t.id, t.version, status)
+    notice.value = { kind: 'success', text: `${t.id} dipindahkan ke ${statusLabel[status]}.` }
+  } catch (err) {
+    notice.value = { kind: 'error', text: staleMoveMessage(err, t.id) ?? messageOf(err) }
+  }
+  await load(true)
+}
+
+// Di layar sempit hanya satu kolom yang tampil (S4-04).
+const activeColumn = ref<TaskStatus>('requested')
+let columnChosen = false
+
+// Saat pertama dimuat, kolom yang dibuka adalah kolom pertama yang berisi task, bukan kolom kosong.
+watch(board, (b) => {
+  if (!b || columnChosen) return
+  activeColumn.value = b.columns.find((c) => c.count > 0)?.status ?? 'requested'
+  columnChosen = true
+})
+
+function chooseColumn(status: TaskStatus) {
+  activeColumn.value = status
+  columnChosen = true
 }
 
 function openCreate() {
@@ -335,12 +432,34 @@ const buttonSecondary =
 
       <!-- Container query, bukan breakpoint layar: lebar papan bergantung pada sidebar AppShell, bukan lebar jendela. -->
       <div class="@container mt-6">
-        <div class="grid items-start gap-4 @2xl:grid-cols-2 @4xl:grid-cols-4">
+        <div class="grid grid-cols-4 gap-1 @2xl:hidden" role="group" aria-label="Pilih kolom">
+          <button
+            v-for="col in board.columns"
+            :key="col.status"
+            type="button"
+            :aria-pressed="activeColumn === col.status"
+            class="flex min-h-11 min-w-0 flex-col items-center justify-center rounded-card border border-line bg-surface px-1 py-1 text-xs font-medium aria-pressed:border-accent aria-pressed:bg-accent aria-pressed:text-white"
+            @click="chooseColumn(col.status)"
+          >
+            <span>{{ statusLabel[col.status] }}</span>
+            <span class="font-mono">{{ col.count }}<span class="sr-only"> task</span></span>
+          </button>
+        </div>
+
+        <div class="mt-3 grid items-start gap-4 @2xl:mt-0 @2xl:grid-cols-2 @4xl:grid-cols-4">
           <section
             v-for="col in board.columns"
             :key="col.status"
-            class="min-w-0 rounded-card border border-line bg-canvas p-2"
+            class="min-w-0 rounded-card border bg-canvas p-2"
+            :class="[
+              col.status === activeColumn ? '' : 'hidden @2xl:block',
+              dragging && canDrop(col.status) ? 'border-dashed border-accent' : 'border-line',
+              dropTarget === col.status && canDrop(col.status) ? 'bg-surface' : '',
+            ]"
             :aria-labelledby="`kolom-${col.status}`"
+            @dragover="onDragOver($event, col.status)"
+            @dragleave="onDragLeave($event, col.status)"
+            @drop="onDrop($event, col.status)"
           >
             <h2 :id="`kolom-${col.status}`" class="flex min-h-11 items-center gap-2 px-1">
               <span class="rounded-chip px-2 py-0.5 text-sm font-medium" :class="statusClass[col.status]">
@@ -354,8 +473,15 @@ const buttonSecondary =
               Hanya yang selesai {{ board.completed_days }} hari terakhir.
             </p>
             <ul v-if="col.tasks.length" class="space-y-2">
-              <li v-for="t in col.tasks" :key="t.id">
-                <TaskCard :task="t" @open="detailId = $event" @move="moving = $event" />
+              <li
+                v-for="t in col.tasks"
+                :key="t.id"
+                :draggable="t.move_to.length > 0"
+                :class="[t.move_to.length ? 'cursor-grab' : '', dragging?.id === t.id ? 'opacity-60' : '']"
+                @dragstart="onDragStart($event, t)"
+                @dragend="onDragEnd"
+              >
+                <TaskCard :task="t" @open="detailId = $event" @move="openMove" />
               </li>
             </ul>
             <p v-else class="px-1 py-4 text-center text-sm text-ink-muted">Tidak ada task.</p>
@@ -363,7 +489,13 @@ const buttonSecondary =
         </div>
       </div>
     </template>
-    <MoveDialog :task="moving" @close="moving = null" @moved="onMoved" @stale="onStale" />
+    <MoveDialog
+      :task="moving"
+      :initial-target="movingTarget"
+      @close="closeMove"
+      @moved="onMoved"
+      @stale="onStale"
+    />
     <TaskDetailPanel
       :task-id="detailId"
       :labels="labels"
