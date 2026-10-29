@@ -12,6 +12,7 @@ import (
 	"nvm-internal/internal/config"
 	"nvm-internal/internal/db/sqlc"
 	"nvm-internal/internal/label"
+	"nvm-internal/internal/task"
 )
 
 type Server struct {
@@ -23,6 +24,7 @@ type Server struct {
 	loginLimiter *ipLimiter
 	accounts     *account.Service
 	labels       *label.Service
+	tasks        *task.Service
 	// now bisa diganti di test supaya waktu kuncian dan kedaluwarsa token bisa diuji.
 	now func() time.Time
 }
@@ -47,6 +49,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 		loginLimiter: newIPLimiter(30*time.Second, 10),
 		accounts:     account.NewService(pool),
 		labels:       label.NewService(pool),
+		tasks:        task.NewService(pool),
 	}
 
 	r := gin.New()
@@ -88,6 +91,9 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	manage.PUT("/labels/:id", s.updateLabel)
 	manage.POST("/labels/:id/deactivate", s.setLabelActive(false))
 	manage.POST("/labels/:id/activate", s.setLabelActive(true))
+	app.GET("/tasks", s.listTasks)
+	app.GET("/tasks/:id", s.getTask)
+	app.POST("/tasks", requireRole(sqlc.UserRoleManager), s.createTask)
 
 	return r, nil
 }

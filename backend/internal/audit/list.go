@@ -26,6 +26,10 @@ var Categories = map[string][]string{
 	"label": {
 		"label_created", "label_updated", "label_activated", "label_deactivated",
 	},
+	"task": {
+		"task_created", "task_updated", "task_deleted",
+		"task_labels_changed", "task_deliverable_changed", "task_status_changed",
+	},
 }
 
 const PageSize = 50

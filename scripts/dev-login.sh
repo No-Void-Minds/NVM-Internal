@@ -19,3 +19,4 @@ login() {
 
 login admin "$DEV_ADMIN_PASSWORD" /tmp/admin.txt
 login "$DEV_STAFF_USERNAME" "$DEV_STAFF_PASSWORD" /tmp/staf.txt
+login "$DEV_MANAGER_USERNAME" "$DEV_MANAGER_PASSWORD" /tmp/manajer.txt
