@@ -27,6 +27,7 @@ type Server struct {
 	labels       *label.Service
 	tasks        *task.Service
 	files        *storage.Store
+	attachments  *task.Attachments
 	// now bisa diganti di test supaya waktu kuncian dan kedaluwarsa token bisa diuji.
 	now func() time.Time
 }
@@ -58,6 +59,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 		labels:       label.NewService(pool),
 		tasks:        task.NewService(pool),
 		files:        files,
+		attachments:  task.NewAttachments(pool, files),
 	}
 
 	r := gin.New()
@@ -110,6 +112,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	app.PUT("/tasks/:id/labels", s.setTaskLabels)
 	app.PUT("/tasks/:id/deliverable", s.setTaskDeliverable)
 	app.POST("/tasks/:id/move", s.moveTask)
+	app.POST("/tasks/:id/attachments", s.uploadAttachment)
 
 	return r, nil
 }

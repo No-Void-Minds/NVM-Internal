@@ -1,9 +1,11 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"nvm-internal/internal/testdb"
 	"slices"
@@ -387,5 +389,72 @@ func TestInactivePICStaysOnOldTask(t *testing.T) {
 		if p.Username == "staf.a" {
 			t.Fatal("akun nonaktif masih muncul sebagai calon PIC")
 		}
+	}
+}
+
+func (tm taskTeam) upload(t *testing.T, c *http.Client, id, kind, filename string, content []byte) int {
+	t.Helper()
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	fw, err := mw.CreateFormFile("file", filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write(content); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPost, tm.srv.URL+"/api/tasks/"+id+"/attachments?kind="+kind, &body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Origin", tm.srv.URL)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	res, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	return res.StatusCode
+}
+
+// AC-07 bagian unggah lewat HTTP: izin per jenis lampiran, dan berkas dengan isi palsu ditolak 415.
+func TestUploadAttachmentOverHTTP(t *testing.T) {
+	tm := newTaskTeam(t)
+	id := tm.createTask(t)
+	pdf := []byte("%PDF-1.7\n%uji")
+	exe := append([]byte("MZ"), make([]byte, 64)...)
+
+	cases := []struct {
+		who     string
+		c       *http.Client
+		kind    string
+		file    string
+		content []byte
+		want    int
+	}{
+		{"Manajer brief", tm.manager, "brief", "brief.pdf", pdf, http.StatusCreated},
+		{"PIC deliverable", tm.pic, "deliverable", "hasil.pdf", pdf, http.StatusCreated},
+		{"PIC brief", tm.pic, "brief", "brief.pdf", pdf, http.StatusForbidden},
+		{"Staf lain deliverable", tm.other, "deliverable", "hasil.pdf", pdf, http.StatusForbidden},
+		{"Admin brief", tm.admin, "brief", "brief.pdf", pdf, http.StatusForbidden},
+		{"jenis tidak dikenal", tm.manager, "foto", "brief.pdf", pdf, http.StatusBadRequest},
+		{"EXE diganti nama jadi PDF", tm.manager, "brief", "invoice.pdf", exe, http.StatusUnsupportedMediaType},
+		{"ekstensi EXE", tm.manager, "brief", "setup.exe", exe, http.StatusUnsupportedMediaType},
+	}
+	for _, c := range cases {
+		if got := tm.upload(t, c.c, id, c.kind, c.file, c.content); got != c.want {
+			t.Errorf("%s: status %d, mau %d", c.who, got, c.want)
+		}
+	}
+
+	var n int
+	if err := tm.pool.QueryRow(t.Context(), `SELECT count(*) FROM task_attachments WHERE task_id = $1`, id).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("lampiran tersimpan %d, mau 2 (hanya yang diterima)", n)
 	}
 }

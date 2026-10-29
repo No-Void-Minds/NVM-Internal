@@ -19,6 +19,8 @@ const (
 	CodePasswordChangeRequired = "password_change_required"
 	CodeTooManyRequests        = "too_many_requests"
 	CodeInvalidCurrentPassword = "invalid_current_password"
+	CodeUnsupportedFile        = "unsupported_file"
+	CodeFileTooLarge           = "file_too_large"
 )
 
 // Satu pesan untuk username tidak ada, password salah, dan akun nonaktif (AC-01).
