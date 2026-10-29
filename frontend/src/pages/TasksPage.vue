@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import TaskDetailPanel from '../components/TaskDetailPanel.vue'
 import TaskFormPanel from '../components/TaskFormPanel.vue'
 import { ApiError } from '../api/client'
-import { listTasks, type TaskSummary } from '../api/tasks'
+import { listTasks, type TaskDetail, type TaskSummary } from '../api/tasks'
 import { listUsers, type UserItem } from '../api/users'
 import { listLabels, type LabelItem } from '../api/labels'
 import { useSessionStore } from '../stores/session'
@@ -21,10 +22,14 @@ const notice = ref<string | null>(null)
 
 const users = ref<UserItem[]>([])
 const labels = ref<LabelItem[]>([])
-const panelOpen = ref(false)
 
-async function load() {
-  loadState.value = 'loading'
+const detailId = ref<string | null>(null)
+const formOpen = ref(false)
+const editing = ref<TaskDetail | null>(null)
+
+// quiet dipakai setelah aksi, supaya daftar tidak berkedip ke tampilan memuat.
+async function load(quiet = false) {
+  if (!quiet) loadState.value = 'loading'
   try {
     tasks.value = await listTasks(scope.value)
     loadState.value = 'ready'
@@ -34,24 +39,41 @@ async function load() {
     loadState.value = 'error'
   }
 }
-watch(scope, load)
+watch(scope, () => load())
 
 onMounted(async () => {
   void load()
-  // Daftar akun hanya bisa dibaca pengelola, dan hanya dibutuhkan untuk memilih PIC saat membuat task.
-  if (isManager.value) {
-    try {
-      ;[users.value, labels.value] = await Promise.all([listUsers(), listLabels().then((r) => r.labels)])
-    } catch {
-      notice.value = 'Daftar PIC atau label gagal dimuat. Muat ulang halaman sebelum membuat task.'
-    }
+  try {
+    labels.value = (await listLabels()).labels
+    // Daftar akun hanya bisa dibaca pengelola, dan hanya dibutuhkan Manajer untuk memilih PIC.
+    if (isManager.value) users.value = await listUsers()
+  } catch {
+    notice.value = 'Daftar label atau PIC gagal dimuat. Muat ulang halaman sebelum mengubah task.'
   }
 })
 
-async function onSaved(_id: string, message: string) {
-  panelOpen.value = false
+function openCreate() {
+  editing.value = null
+  formOpen.value = true
+}
+
+// Panel ubah menggantikan panel detail, lalu detail dibuka lagi setelah tersimpan.
+function onEdit(t: TaskDetail) {
+  editing.value = t
+  detailId.value = null
+  formOpen.value = true
+}
+
+async function onSaved(id: string, message: string) {
+  formOpen.value = false
   notice.value = message
-  await load()
+  await load(true)
+  detailId.value = id
+}
+
+async function onChanged(message: string) {
+  notice.value = message
+  await load(true)
 }
 
 const scopeButton =
@@ -66,7 +88,7 @@ const scopeButton =
         v-if="isManager"
         type="button"
         class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white active:translate-y-px"
-        @click="panelOpen = true"
+        @click="openCreate"
       >
         Buat task
       </button>
@@ -86,13 +108,15 @@ const scopeButton =
       </button>
     </div>
 
-    <p
-      v-if="notice"
-      role="status"
-      class="mt-4 rounded-card border border-line bg-surface p-3 text-sm text-progress-fg"
-    >
-      {{ notice }}
-    </p>
+    <div aria-live="polite">
+      <p
+        v-if="notice"
+        role="status"
+        class="mt-4 rounded-card border border-line bg-surface p-3 text-sm text-progress-fg"
+      >
+        {{ notice }}
+      </p>
+    </div>
 
     <p v-if="loadState === 'loading'" class="mt-6 text-ink-muted">Memuat task...</p>
 
@@ -105,7 +129,7 @@ const scopeButton =
       <button
         type="button"
         class="mt-3 inline-flex min-h-11 items-center rounded-card border border-danger px-4 font-medium"
-        @click="load"
+        @click="load()"
       >
         Muat ulang
       </button>
@@ -128,45 +152,60 @@ const scopeButton =
     </div>
 
     <ul v-else class="mt-4 space-y-3">
-      <li v-for="t in tasks" :key="t.id" class="rounded-card border border-line bg-surface p-4">
-        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-          <span class="font-mono text-ink-muted">{{ t.id }}</span>
-          <span class="rounded-chip px-2 py-0.5 font-medium" :class="statusClass[t.status]">{{
-            statusLabel[t.status]
-          }}</span>
-          <span :class="urgencyClass[t.urgency]">{{ urgencyLabel[t.urgency] }}</span>
-        </div>
-        <p class="mt-1 font-medium">{{ t.title }}</p>
-        <div v-if="t.labels.length" class="mt-2 flex flex-wrap gap-1">
-          <span
-            v-for="l in t.labels"
-            :key="l.id"
-            class="rounded-chip px-2 py-0.5 text-sm"
-            :style="{ backgroundColor: l.color }"
-          >
-            {{ l.name }}
-          </span>
-        </div>
-        <p class="mt-2 text-sm text-ink-muted">
-          {{ t.assignees.map((a) => a.name).join(', ') }} · {{ t.division.name }}
-        </p>
-        <p
-          v-if="t.due_date"
-          class="mt-1 text-sm"
-          :class="isOverdue(t.due_date, t.status) ? 'font-medium text-urgent' : 'text-ink-muted'"
+      <li v-for="t in tasks" :key="t.id">
+        <button
+          type="button"
+          class="block w-full rounded-card border border-line bg-surface p-4 text-left hover:border-accent active:bg-canvas"
+          :aria-label="`Buka ${t.id}: ${t.title}`"
+          @click="detailId = t.id"
         >
-          {{ isOverdue(t.due_date, t.status) ? 'Terlambat, ' : 'Tenggat ' }}{{ formatDay(t.due_date) }}
-        </p>
+          <span class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+            <span class="font-mono text-ink-muted">{{ t.id }}</span>
+            <span class="rounded-chip px-2 py-0.5 font-medium" :class="statusClass[t.status]">{{
+              statusLabel[t.status]
+            }}</span>
+            <span :class="urgencyClass[t.urgency]">{{ urgencyLabel[t.urgency] }}</span>
+          </span>
+          <span class="mt-1 block font-medium">{{ t.title }}</span>
+          <span v-if="t.labels.length" class="mt-2 flex flex-wrap gap-1">
+            <span
+              v-for="l in t.labels"
+              :key="l.id"
+              class="rounded-chip px-2 py-0.5 text-sm"
+              :style="{ backgroundColor: l.color }"
+            >
+              {{ l.name }}
+            </span>
+          </span>
+          <span class="mt-2 block text-sm text-ink-muted">
+            {{ t.assignees.map((a) => a.name).join(', ') }} · {{ t.division.name }}
+          </span>
+          <span
+            v-if="t.due_date"
+            class="mt-1 block text-sm"
+            :class="isOverdue(t.due_date, t.status) ? 'font-medium text-urgent' : 'text-ink-muted'"
+          >
+            {{ isOverdue(t.due_date, t.status) ? 'Terlambat, ' : 'Tenggat ' }}{{ formatDay(t.due_date) }}
+          </span>
+        </button>
       </li>
     </ul>
 
+    <TaskDetailPanel
+      :task-id="detailId"
+      :labels="labels"
+      @close="detailId = null"
+      @changed="onChanged"
+      @edit="onEdit"
+    />
+
     <TaskFormPanel
       v-if="isManager"
-      :open="panelOpen"
-      :task="null"
+      :open="formOpen"
+      :task="editing"
       :users="users"
       :labels="labels"
-      @close="panelOpen = false"
+      @close="formOpen = false"
       @saved="onSaved"
     />
   </section>
