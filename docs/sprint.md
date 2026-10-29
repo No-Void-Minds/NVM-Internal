@@ -180,13 +180,13 @@ nvm-internal/
 **Tujuan:** Admin dan Manajer bisa mengelola orang tanpa menyentuh database.
 **SRS:** FR-AUTH-02, 03, 04, 10, NFR-SEC-03, 11. **AC:** AC-03, AC-04 (bagian akun).
 
-- [ ] S2-01 Middleware RBAC: `RequireRole(admin, manager)` dan seterusnya. Manajer memegang semua hak Admin.
-- [ ] S2-02 CRUD akun: buat, ubah nama, peran, divisi, nonaktifkan, aktifkan, reset password. Nonaktif dan reset menaikkan `token_version`.
-- [ ] S2-03 Cegah akun mengunci dirinya sendiri: tidak bisa menonaktifkan diri sendiri atau menghapus peran pengelola terakhir.
-- [ ] S2-04 CRUD divisi (nama, aktif/nonaktif). Divisi yang masih dipakai tidak bisa dihapus, hanya dinonaktifkan.
-- [ ] S2-05 Audit untuk perubahan akun, peran, dan divisi, dengan `old_value` dan `new_value`.
-- [ ] S2-06 Halaman Pengguna, Pengaturan (bagian divisi), Profil (ganti password), dan Audit Log (hanya baca, dengan filter aksi dan tanggal).
-- [ ] S2-07 Menu ikut peran: Staf tidak melihat Pengguna, Pengaturan, Audit Log. Backend tetap menolak dengan 403 kalau URL-nya dibuka langsung.
+- [x] S2-01 Middleware RBAC: `requireRole(admin, manager)`. Manajer memegang semua hak Admin.
+- [x] S2-02 Kelola akun: buat, ubah nama, peran, divisi, nonaktifkan, aktifkan, reset password, buka kunci. Nonaktif dan reset menaikkan `token_version`.
+- [x] S2-03 Tidak bisa menonaktifkan diri sendiri, dan Admin atau Manajer aktif tidak boleh habis.
+- [x] S2-04 Kelola divisi: tambah, ganti nama, nonaktif/aktif. Divisi tidak bisa dihapus.
+- [x] S2-05 Audit perubahan akun, peran, dan divisi dengan `old_value` dan `new_value`, pelaku di `user_id`, sasaran di `entity` dan `entity_id`.
+- [x] S2-06 Halaman Pengguna, Pengaturan (Divisi), dan Audit Log dengan filter bulan, pengguna, dan jenis aksi. Profil sudah selesai di Sprint 1.
+- [x] S2-07 Menu ikut peran. Staf tidak melihat Pengguna, Pengaturan, Audit Log, dan backend menolak dengan 403.
 
 **Demo pertama ke Manajer:** login, buat akun Staf, login sebagai Staf, cek menu.
 **Butuh dari Manajer:** daftar pengguna awal (nama, username, peran, divisi), termasuk setiap anggota Creative.
@@ -201,6 +201,11 @@ nvm-internal/
 - Halaman awal sementara: Admin dan Manajer ke Pengguna, Staf ke Status, sampai Papan Task ada di Sprint 4.
 
 - 2026-10-28: Sprint 2 langkah 1-4 selesai (backend). Helper audit pelaku dan sasaran, middleware peran, kelola akun (buat, ubah, nonaktif/aktif, reset password, buka kunci, perlindungan pengelola terakhir), kelola divisi, daftar audit log dengan filter dan halaman. Test database diantrekan dengan advisory lock setelah deadlock antar package.
+- 2026-10-29: Sprint 2 langkah 5-6 selesai (frontend). Halaman Pengguna (tabel di layar lebar, kartu di ponsel, panel tambah/ubah, menu aksi, dialog reset dan nonaktif), Pengaturan divisi, Audit Log dengan teks aksi berbahasa Indonesia, menu sesuai peran. Semua uji browser lolos.
+
+**Selesai kalau:** AC-03 dan AC-04 (bagian akun) lolos.
+- AC-03: lolos, kecuali "nama akun nonaktif tetap tampil pada task lama", yang diuji di Sprint 4 setelah task dan papan ada.
+- AC-04 bagian akun: lolos. Bagian task diuji di Sprint 3.
 
 ## Sprint 3: Task inti dan label
 
@@ -224,6 +229,16 @@ nvm-internal/
 
 **Selesai kalau:** test Go untuk setiap baris tabel transisi, termasuk yang harus ditolak, semuanya lolos.
 **Butuh dari Manajer:** daftar label awal (nama dan warna).
+
+**Keputusan:**
+- PIC hanya boleh akun aktif dengan peran Staf atau Manajer. Admin tidak bisa jadi PIC karena Admin tidak boleh memindahkan task.
+- Divisi task mengikuti PIC pertama yang dipilih, saat dibuat maupun saat daftar PIC diubah.
+- Catatan revisi wajib saat Ready dikembalikan ke On Progress, maksimal 500 karakter. Buka kembali dari Completed tidak wajib catatan.
+- Perpindahan yang tidak ada di alur (mis. Requested langsung ke Completed) ditolak untuk semua peran.
+- Staf yang menjadi PIC boleh: memindahkan status (tanpa Completed), memasang/melepas label divisinya, dan mengisi tautan deliverable. Atribut lain hanya Manajer.
+- Task yang dihapus (soft delete) hilang dari semua daftar dan tidak bisa dipulihkan dari aplikasi; jejaknya tetap di audit log.
+- Riwayat task di panel detail dibaca dari audit log (pembuatan, perubahan, perpindahan status), terbaru di atas.
+- Palet label: 8 warna terang dengan teks warna ink, semuanya di atas 12:1.
 
 ---
 
