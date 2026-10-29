@@ -31,7 +31,7 @@ func startServer(t *testing.T) liveServer {
 	gin.SetMode(gin.TestMode)
 	pool := testdb.Pool(t)
 	division := testdb.Division(t, pool, "Marketing", true)
-	cfg := config.Config{AppEnv: "test", JWTSecret: strings.Repeat("x", 32)}
+	cfg := config.Config{AppEnv: "test", JWTSecret: strings.Repeat("x", 32), StorageDir: t.TempDir()}
 	r, err := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), pool, cfg)
 	if err != nil {
 		t.Fatal(err)

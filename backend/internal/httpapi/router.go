@@ -12,6 +12,7 @@ import (
 	"nvm-internal/internal/config"
 	"nvm-internal/internal/db/sqlc"
 	"nvm-internal/internal/label"
+	"nvm-internal/internal/storage"
 	"nvm-internal/internal/task"
 )
 
@@ -25,6 +26,7 @@ type Server struct {
 	accounts     *account.Service
 	labels       *label.Service
 	tasks        *task.Service
+	files        *storage.Store
 	// now bisa diganti di test supaya waktu kuncian dan kedaluwarsa token bisa diuji.
 	now func() time.Time
 }
@@ -38,6 +40,11 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	if err != nil {
 		return nil, err
 	}
+	files, err := storage.Open(cfg.StorageDir)
+	if err != nil {
+		return nil, err
+	}
+	log.Info("penyimpanan berkas siap", "dir", files.Root())
 
 	s := &Server{
 		log:          log,
@@ -50,6 +57,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 		accounts:     account.NewService(pool),
 		labels:       label.NewService(pool),
 		tasks:        task.NewService(pool),
+		files:        files,
 	}
 
 	r := gin.New()

@@ -294,6 +294,7 @@ Sisa: AC-05 dan AC-08 bagian arsip (Sprint 6).
 - Macet: helper test HTTP (`liveServer`) ternyata belum ada di repo; sqlc salah menulis ulang `@today::date + 6` karena operator `@` lebih lemah dari `+`, jadi harus `(@today::date) + 6`; rute `/board` dan `/people` sempat terdaftar di grup tanpa pemeriksaan login, tertangkap oleh `TestTaskReadRoutesNeedLogin`.
 - Lancar: (isi sendiri)
 - Diubah untuk Sprint 5: (isi sendiri)
+- Catatan uji: tampilan mobile diuji lewat simulator di browser; uji di ponsel sungguhan masuk S8-04.
 
 ---
 

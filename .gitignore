@@ -14,4 +14,5 @@ frontend/dist/
 .idea/
 Thumbs.db
 .DS_Store
-!.vscode/settings.json
+!.vscode/settings.jsonbackend/.data/
+backend/storage/

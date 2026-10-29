@@ -17,7 +17,7 @@ import (
 func newTestRouter(t *testing.T) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	cfg := config.Config{AppEnv: "test", JWTSecret: strings.Repeat("x", 32)}
+	cfg := config.Config{AppEnv: "test", JWTSecret: strings.Repeat("x", 32), StorageDir: t.TempDir()}
 	r, err := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), nil, cfg)
 	if err != nil {
 		t.Fatal(err)
