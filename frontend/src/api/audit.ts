@@ -1,6 +1,6 @@
 import { apiGet } from './client'
 
-export type AuditCategory = 'auth' | 'account' | 'division'
+export type AuditCategory = 'auth' | 'account' | 'division' | 'label' | 'task'
 
 export type AuditEntry = {
   id: number

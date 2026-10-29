@@ -96,6 +96,8 @@ func (s *Server) listAuditLogs(c *gin.Context) {
 				item.Target.Name = r.TargetUserName.String
 			case r.TargetDivisionName.Valid:
 				item.Target.Name = r.TargetDivisionName.String
+			case r.TargetLabelName.Valid:
+				item.Target.Name = r.TargetLabelName.String
 			}
 		}
 		items = append(items, item)

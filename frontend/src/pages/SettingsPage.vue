@@ -10,6 +10,7 @@ import {
   setDivisionActive,
   type DivisionItem,
 } from '../api/divisions'
+import LabelSettings from '../components/LabelSettings.vue'
 
 const divisions = ref<DivisionItem[]>([])
 const loadState = ref<'loading' | 'ready' | 'error'>('loading')
@@ -266,5 +267,8 @@ const buttonSecondary =
         </button>
       </template>
     </BaseDialog>
+    <div class="mt-10 border-t border-line pt-8">
+      <LabelSettings />
+    </div>
   </section>
 </template>
