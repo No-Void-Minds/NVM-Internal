@@ -4,7 +4,7 @@ package account
 import (
 	"context"
 	"errors"
-	"net/netip"
+
 	"regexp"
 	"strconv"
 	"strings"
@@ -41,10 +41,8 @@ const (
 var usernamePattern = regexp.MustCompile(`^[A-Za-z0-9._-]{3,50}$`)
 
 // Actor adalah pengelola yang melakukan aksi, dicatat sebagai pelaku di audit log.
-type Actor struct {
-	ID int64
-	IP *netip.Addr
-}
+// Actor adalah pengelola yang melakukan aksi, dicatat sebagai pelaku di audit log.
+type Actor = audit.Actor
 
 type CreateInput struct {
 	Name       string

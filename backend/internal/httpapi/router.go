@@ -11,6 +11,7 @@ import (
 	"nvm-internal/internal/auth"
 	"nvm-internal/internal/config"
 	"nvm-internal/internal/db/sqlc"
+	"nvm-internal/internal/label"
 )
 
 type Server struct {
@@ -21,6 +22,7 @@ type Server struct {
 	cookieSecure bool
 	loginLimiter *ipLimiter
 	accounts     *account.Service
+	labels       *label.Service
 	// now bisa diganti di test supaya waktu kuncian dan kedaluwarsa token bisa diuji.
 	now func() time.Time
 }
@@ -44,6 +46,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 		now:          time.Now,
 		loginLimiter: newIPLimiter(30*time.Second, 10),
 		accounts:     account.NewService(pool),
+		labels:       label.NewService(pool),
 	}
 
 	r := gin.New()
@@ -80,6 +83,11 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	manage.POST("/divisions/:id/deactivate", s.setDivisionActive(false))
 	manage.POST("/divisions/:id/activate", s.setDivisionActive(true))
 	manage.GET("/audit-logs", s.listAuditLogs)
+	app.GET("/labels", s.listLabels)
+	manage.POST("/labels", s.createLabel)
+	manage.PUT("/labels/:id", s.updateLabel)
+	manage.POST("/labels/:id/deactivate", s.setLabelActive(false))
+	manage.POST("/labels/:id/activate", s.setLabelActive(true))
 
 	return r, nil
 }

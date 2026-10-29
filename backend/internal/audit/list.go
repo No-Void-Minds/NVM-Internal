@@ -23,6 +23,9 @@ var Categories = map[string][]string{
 	"division": {
 		"division_created", "division_renamed", "division_activated", "division_deactivated",
 	},
+	"label": {
+		"label_created", "label_updated", "label_activated", "label_deactivated",
+	},
 }
 
 const PageSize = 50
