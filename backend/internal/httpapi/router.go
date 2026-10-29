@@ -99,6 +99,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	app.DELETE("/tasks/:id", managerOnly, s.deleteTask)
 	app.PUT("/tasks/:id/labels", s.setTaskLabels)
 	app.PUT("/tasks/:id/deliverable", s.setTaskDeliverable)
+	app.POST("/tasks/:id/move", s.moveTask)
 
 	return r, nil
 }
