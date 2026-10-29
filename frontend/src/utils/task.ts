@@ -51,3 +51,8 @@ export function isOverdue(due: string | null, status: TaskStatus): boolean {
   today.setHours(0, 0, 0, 0)
   return parseDay(due) < today
 }
+
+// Untuk cap waktu lengkap seperti solved_date: tanggalnya dibaca dalam zona waktu browser.
+export function formatMoment(value: string): string {
+  return dateFormat.format(new Date(value))
+}
