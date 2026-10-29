@@ -239,3 +239,12 @@ func TestLabelsEndToEnd(t *testing.T) {
 		t.Fatalf("task baru dengan label nonaktif: status %d, mau 400", code)
 	}
 }
+func TestTaskReadRoutesNeedLogin(t *testing.T) {
+	s := startServer(t)
+	anon := &http.Client{}
+	for _, path := range []string{"/api/tasks", "/api/tasks/T-0001", "/api/board", "/api/board?scope=mine", "/api/people", "/api/labels", "/api/divisions"} {
+		if got := s.call(t, anon, http.MethodGet, path, ""); got != http.StatusUnauthorized {
+			t.Errorf("GET %s tanpa login: status %d, mau 401", path, got)
+		}
+	}
+}

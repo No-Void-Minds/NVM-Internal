@@ -92,6 +92,8 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	manage.POST("/labels/:id/deactivate", s.setLabelActive(false))
 	manage.POST("/labels/:id/activate", s.setLabelActive(true))
 	app.GET("/tasks", s.listTasks)
+	app.GET("/board", s.board)
+	app.GET("/people", s.listPeople)
 	app.GET("/tasks/:id", s.getTask)
 	app.POST("/tasks", requireRole(sqlc.UserRoleManager), s.createTask)
 	managerOnly := requireRole(sqlc.UserRoleManager)

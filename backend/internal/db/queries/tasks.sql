@@ -60,3 +60,36 @@ FROM audit_logs a
 LEFT JOIN users actor ON actor.id = a.user_id
 WHERE a.entity = 'task' AND a.entity_id = @task_id::text
 ORDER BY a.occurred_at DESC, a.id DESC;
+
+-- name: ListBoardTasks :many
+-- Kolomnya sama persis dengan ListTasks supaya hasilnya bisa dikonversi dan dilengkapi PIC serta label
+-- dengan kode yang sama. Completed hanya yang selesai sejak @completed_since; sisanya hanya ada di Arsip.
+SELECT t.id, t.title, t.status, t.urgency, t.division_id, d.name AS division_name,
+       t.start_date, t.due_date, t.solved_date, t.version
+FROM tasks t
+JOIN divisions d ON d.id = t.division_id
+WHERE NOT t.is_deleted
+  AND (t.status <> 'completed' OR t.solved_date >= @completed_since::timestamptz)
+  AND ((cardinality(@pic_ids::bigint[]) = 0 AND cardinality(@pic_usernames::text[]) = 0)
+       OR EXISTS (SELECT 1 FROM task_assignees ta JOIN users u ON u.id = ta.user_id
+                  WHERE ta.task_id = t.id
+                    AND (ta.user_id = ANY(@pic_ids::bigint[]) OR lower(u.username) = ANY(@pic_usernames::text[]))))
+  AND (sqlc.narg(division_id)::bigint IS NULL OR t.division_id = sqlc.narg(division_id)::bigint)
+  AND (sqlc.narg(label_id)::bigint IS NULL
+       OR EXISTS (SELECT 1 FROM task_labels tl WHERE tl.task_id = t.id AND tl.label_id = sqlc.narg(label_id)::bigint))
+  AND (sqlc.narg(urgency)::task_urgency IS NULL OR t.urgency = sqlc.narg(urgency)::task_urgency)
+  AND (sqlc.narg(due)::text IS NULL
+       OR (sqlc.narg(due)::text = 'overdue' AND t.due_date < @today::date AND t.status <> 'completed')
+       OR (sqlc.narg(due)::text = 'week' AND t.due_date BETWEEN @today::date AND (@today::date) + 6)
+       OR (sqlc.narg(due)::text = 'none' AND t.due_date IS NULL))
+-- Bobot urgency, bukan urutan abjad (FR-TASK-14). Kolom Completed diurutkan ulang di Go berdasarkan solved_date.
+ORDER BY CASE t.urgency WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+         t.due_date NULLS LAST, t.created_at;
+
+-- name: ListPeople :many
+-- Calon PIC untuk filter papan dan form task: aturannya sama dengan GetEligiblePICs.
+SELECT u.id, u.name, u.username, u.role, d.name AS division_name
+FROM users u
+JOIN divisions d ON d.id = u.division_id
+WHERE u.is_active AND u.role IN ('staff', 'manager')
+ORDER BY lower(u.name);

@@ -190,6 +190,139 @@ func (q *Queries) GetTaskDetail(ctx context.Context, id string) (GetTaskDetailRo
 	return i, err
 }
 
+const listBoardTasks = `-- name: ListBoardTasks :many
+SELECT t.id, t.title, t.status, t.urgency, t.division_id, d.name AS division_name,
+       t.start_date, t.due_date, t.solved_date, t.version
+FROM tasks t
+JOIN divisions d ON d.id = t.division_id
+WHERE NOT t.is_deleted
+  AND (t.status <> 'completed' OR t.solved_date >= $1::timestamptz)
+  AND ((cardinality($2::bigint[]) = 0 AND cardinality($3::text[]) = 0)
+       OR EXISTS (SELECT 1 FROM task_assignees ta JOIN users u ON u.id = ta.user_id
+                  WHERE ta.task_id = t.id
+                    AND (ta.user_id = ANY($2::bigint[]) OR lower(u.username) = ANY($3::text[]))))
+  AND ($4::bigint IS NULL OR t.division_id = $4::bigint)
+  AND ($5::bigint IS NULL
+       OR EXISTS (SELECT 1 FROM task_labels tl WHERE tl.task_id = t.id AND tl.label_id = $5::bigint))
+  AND ($6::task_urgency IS NULL OR t.urgency = $6::task_urgency)
+  AND ($7::text IS NULL
+       OR ($7::text = 'overdue' AND t.due_date < $8::date AND t.status <> 'completed')
+       OR ($7::text = 'week' AND t.due_date BETWEEN $8::date AND ($8::date) + 6)
+       OR ($7::text = 'none' AND t.due_date IS NULL))
+ORDER BY CASE t.urgency WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+         t.due_date NULLS LAST, t.created_at
+`
+
+type ListBoardTasksParams struct {
+	CompletedSince pgtype.Timestamptz
+	PicIds         []int64
+	PicUsernames   []string
+	DivisionID     pgtype.Int8
+	LabelID        pgtype.Int8
+	Urgency        NullTaskUrgency
+	Due            pgtype.Text
+	Today          pgtype.Date
+}
+
+type ListBoardTasksRow struct {
+	ID           string
+	Title        string
+	Status       TaskStatus
+	Urgency      TaskUrgency
+	DivisionID   int64
+	DivisionName string
+	StartDate    pgtype.Date
+	DueDate      pgtype.Date
+	SolvedDate   pgtype.Timestamptz
+	Version      int32
+}
+
+// Kolomnya sama persis dengan ListTasks supaya hasilnya bisa dikonversi dan dilengkapi PIC serta label
+// dengan kode yang sama. Completed hanya yang selesai sejak @completed_since; sisanya hanya ada di Arsip.
+// Bobot urgency, bukan urutan abjad (FR-TASK-14). Kolom Completed diurutkan ulang di Go berdasarkan solved_date.
+func (q *Queries) ListBoardTasks(ctx context.Context, arg ListBoardTasksParams) ([]ListBoardTasksRow, error) {
+	rows, err := q.db.Query(ctx, listBoardTasks,
+		arg.CompletedSince,
+		arg.PicIds,
+		arg.PicUsernames,
+		arg.DivisionID,
+		arg.LabelID,
+		arg.Urgency,
+		arg.Due,
+		arg.Today,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListBoardTasksRow{}
+	for rows.Next() {
+		var i ListBoardTasksRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Status,
+			&i.Urgency,
+			&i.DivisionID,
+			&i.DivisionName,
+			&i.StartDate,
+			&i.DueDate,
+			&i.SolvedDate,
+			&i.Version,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPeople = `-- name: ListPeople :many
+SELECT u.id, u.name, u.username, u.role, d.name AS division_name
+FROM users u
+JOIN divisions d ON d.id = u.division_id
+WHERE u.is_active AND u.role IN ('staff', 'manager')
+ORDER BY lower(u.name)
+`
+
+type ListPeopleRow struct {
+	ID           int64
+	Name         string
+	Username     string
+	Role         UserRole
+	DivisionName string
+}
+
+// Calon PIC untuk filter papan dan form task: aturannya sama dengan GetEligiblePICs.
+func (q *Queries) ListPeople(ctx context.Context) ([]ListPeopleRow, error) {
+	rows, err := q.db.Query(ctx, listPeople)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPeopleRow{}
+	for rows.Next() {
+		var i ListPeopleRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Username,
+			&i.Role,
+			&i.DivisionName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTaskAssignees = `-- name: ListTaskAssignees :many
 SELECT ta.task_id, u.id, u.name, u.username
 FROM task_assignees ta

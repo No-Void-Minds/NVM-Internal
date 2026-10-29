@@ -170,11 +170,16 @@ func (s *Service) List(ctx context.Context, assigneeID *int64) ([]Summary, error
 	if err != nil {
 		return nil, err
 	}
+	return attachPeopleAndLabels(ctx, q, rows)
+}
+
+// attachPeopleAndLabels melengkapi task dengan PIC dan label. Keduanya diambil sekaligus untuk semua task,
+// bukan satu query per task.
+func attachPeopleAndLabels(ctx context.Context, q *sqlc.Queries, rows []sqlc.ListTasksRow) ([]Summary, error) {
 	ids := make([]string, len(rows))
 	for i, r := range rows {
 		ids[i] = r.ID
 	}
-	// PIC dan label diambil sekaligus untuk semua task, bukan satu query per task.
 	assignees, err := q.ListTaskAssignees(ctx, ids)
 	if err != nil {
 		return nil, err

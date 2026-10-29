@@ -161,20 +161,7 @@ func (s *Server) listTasks(c *gin.Context) {
 	}
 	items := make([]taskSummary, 0, len(rows))
 	for _, r := range rows {
-		t := r.Task
-		items = append(items, taskSummary{
-			ID:         t.ID,
-			Title:      t.Title,
-			Status:     string(t.Status),
-			Urgency:    string(t.Urgency),
-			Division:   idName{ID: t.DivisionID, Name: t.DivisionName},
-			StartDate:  dateString(t.StartDate),
-			DueDate:    dateString(t.DueDate),
-			SolvedDate: timePtr(t.SolvedDate),
-			Version:    t.Version,
-			Assignees:  people(r.Assignees),
-			Labels:     labelsOf(r.Labels),
-		})
+		items = append(items, summaryOf(r))
 	}
 	c.JSON(http.StatusOK, gin.H{"tasks": items})
 }
