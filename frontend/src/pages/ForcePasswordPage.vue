@@ -6,6 +6,7 @@ import { ApiError } from '../api/client'
 import { useSessionStore } from '../stores/session'
 import { useLogout } from '../composables/useLogout'
 import { validateNewPassword } from '../utils/password'
+import { homeFor } from '../router/home'
 
 const session = useSessionStore()
 const router = useRouter()
@@ -27,7 +28,7 @@ async function submit() {
   submitting.value = true
   try {
     await session.changePassword(current.value, next.value)
-    await router.replace({ name: 'status' })
+    await router.replace(homeFor(session.user))
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : 'Terjadi kesalahan yang tidak terduga. Coba lagi.'
   } finally {

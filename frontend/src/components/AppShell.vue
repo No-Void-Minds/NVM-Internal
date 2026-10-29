@@ -1,19 +1,44 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useSessionStore } from '../stores/session'
 import { useLogout } from '../composables/useLogout'
-import { roleLabel } from '../utils/roles'
+import { roleLabel, type Role } from '../utils/roles'
 
-type NavItem = { to: string; label: string; iconPath: string }
+type NavItem = { to: string; label: string; iconPath: string; roles?: Role[] }
 
 // Hanya halaman yang sudah ada yang boleh masuk sini; ditambah per sprint.
 const navItems: NavItem[] = [
   { to: '/status', label: 'Status', iconPath: 'M3 12h4l3-8 4 16 3-8h4' },
+  {
+    to: '/pengguna',
+    label: 'Pengguna',
+    roles: ['admin', 'manager'],
+    iconPath:
+      'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
+  },
   { to: '/profil', label: 'Profil', iconPath: 'M20 21a8 8 0 0 0-16 0M12 13a4 4 0 1 0 0-8 4 4 0 0 0 0 8' },
+  {
+    to: '/pengaturan',
+    label: 'Pengaturan',
+    roles: ['admin', 'manager'],
+    iconPath: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6',
+  },
+  {
+    to: '/audit-log',
+    label: 'Audit Log',
+    roles: ['admin', 'manager'],
+    iconPath:
+      'M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2M9 12h6M9 16h6',
+  },
 ]
 
 const session = useSessionStore()
 const { logout, loggingOut, logoutError } = useLogout()
+
+const visibleNav = computed(() =>
+  navItems.filter((item) => !item.roles || (session.user && item.roles.includes(session.user.role))),
+)
 </script>
 
 <template>
@@ -30,7 +55,7 @@ const { logout, loggingOut, logoutError } = useLogout()
         <span class="font-semibold">NVM Internal</span>
         <nav aria-label="Navigasi utama" class="hidden md:flex md:gap-1">
           <RouterLink
-            v-for="item in navItems"
+            v-for="item in visibleNav"
             :key="item.to"
             :to="item.to"
             class="inline-flex min-h-11 items-center rounded-card px-3 text-ink-muted hover:bg-canvas hover:text-ink active:bg-canvas aria-[current=page]:font-medium aria-[current=page]:text-ink"
@@ -73,7 +98,7 @@ const { logout, loggingOut, logoutError } = useLogout()
       class="fixed inset-x-0 bottom-0 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)] md:hidden"
     >
       <ul class="flex">
-        <li v-for="item in navItems" :key="item.to" class="flex-1">
+        <li v-for="item in visibleNav" :key="item.to" class="flex-1">
           <RouterLink
             :to="item.to"
             class="flex min-h-14 flex-col items-center justify-center gap-1 text-xs text-ink-muted active:bg-canvas aria-[current=page]:font-medium aria-[current=page]:text-accent"

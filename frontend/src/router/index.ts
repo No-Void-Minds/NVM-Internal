@@ -1,22 +1,26 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { setUnauthorizedHandler } from '../api/client'
 import { useSessionStore } from '../stores/session'
+import type { Role } from '../utils/roles'
+import { homeFor } from './home'
 import LoginPage from '../pages/LoginPage.vue'
 import ForcePasswordPage from '../pages/ForcePasswordPage.vue'
 import StatusPage from '../pages/StatusPage.vue'
 import ProfilePage from '../pages/ProfilePage.vue'
+import UsersPage from '../pages/UsersPage.vue'
 import NotFoundPage from '../pages/NotFoundPage.vue'
+import SettingsPage from '../pages/SettingsPage.vue'
+import AuditLogPage from '../pages/AuditLogPage.vue'
 
 declare module 'vue-router' {
   interface RouteMeta {
     title?: string
     public?: boolean
     layout?: 'auth' | 'app'
+    // Kosong berarti semua peran boleh membuka. Backend tetap menolak dengan 403 bila URL dipanggil langsung.
+    roles?: Role[]
   }
 }
-
-// Sementara semua peran ke Status. Sprint 2: Admin ke Pengguna; Sprint 4: Manajer dan Staf ke Papan Task.
-const home = { name: 'status' }
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -34,12 +38,30 @@ export const router = createRouter({
       meta: { title: 'Buat password baru', layout: 'auth' },
     },
     { path: '/status', name: 'status', component: StatusPage, meta: { title: 'Status sistem' } },
+    {
+      path: '/pengguna',
+      name: 'users',
+      component: UsersPage,
+      meta: { title: 'Pengguna', roles: ['admin', 'manager'] },
+    },
     { path: '/profil', name: 'profile', component: ProfilePage, meta: { title: 'Profil' } },
     {
       path: '/:pathMatch(.*)*',
       name: 'not-found',
       component: NotFoundPage,
       meta: { title: 'Halaman tidak ditemukan', public: true },
+    },
+    {
+      path: '/pengaturan',
+      name: 'settings',
+      component: SettingsPage,
+      meta: { title: 'Pengaturan', roles: ['admin', 'manager'] },
+    },
+    {
+      path: '/audit-log',
+      name: 'audit-log',
+      component: AuditLogPage,
+      meta: { title: 'Audit Log', roles: ['admin', 'manager'] },
     },
   ],
 })
@@ -56,12 +78,13 @@ router.beforeEach(async (to) => {
   }
 
   const user = session.user
-  if (to.name === 'login') return user ? home : true
+  if (to.name === 'login') return user ? homeFor(user) : true
   if (to.meta.public) return true
   if (!user) return { name: 'login', query: { kembali: to.fullPath } }
   // Password sementara wajib diganti sebelum halaman lain bisa dibuka (FR-AUTH-07).
   if (user.must_change_password && to.name !== 'force-password') return { name: 'force-password' }
-  if (!user.must_change_password && to.name === 'force-password') return home
+  if (!user.must_change_password && to.name === 'force-password') return homeFor(user)
+  if (to.meta.roles && !to.meta.roles.includes(user.role)) return homeFor(user)
   return true
 })
 

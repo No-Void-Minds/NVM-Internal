@@ -5,6 +5,7 @@ import AuthCard from '../components/AuthCard.vue'
 import { ApiError } from '../api/client'
 import { useSessionStore } from '../stores/session'
 import { safeRedirect } from '../router/redirect'
+import { homeFor } from '../router/home'
 
 const route = useRoute()
 const router = useRouter()
@@ -42,7 +43,7 @@ async function submit() {
     if (session.user?.must_change_password) {
       await router.replace({ name: 'force-password' })
     } else {
-      await router.replace(safeRedirect(route.query.kembali) ?? { name: 'status' })
+      await router.replace(safeRedirect(route.query.kembali) ?? homeFor(session.user))
     }
   } catch (err) {
     error.value = messageFor(err)
