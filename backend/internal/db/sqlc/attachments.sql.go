@@ -7,7 +7,45 @@ package sqlc
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const getAttachment = `-- name: GetAttachment :one
+SELECT a.id::text AS id, a.kind, a.original_name, a.mime_type, a.size_bytes, a.uploaded_at
+FROM task_attachments a
+JOIN tasks t ON t.id = a.task_id
+WHERE a.id = $1::uuid AND a.task_id = $2 AND NOT a.is_deleted AND NOT t.is_deleted
+`
+
+type GetAttachmentParams struct {
+	ID     pgtype.UUID
+	TaskID string
+}
+
+type GetAttachmentRow struct {
+	ID           string
+	Kind         AttachmentKind
+	OriginalName string
+	MimeType     string
+	SizeBytes    int64
+	UploadedAt   pgtype.Timestamptz
+}
+
+// Lampiran dari task yang dihapus ikut tersembunyi, sama dengan task-nya.
+func (q *Queries) GetAttachment(ctx context.Context, arg GetAttachmentParams) (GetAttachmentRow, error) {
+	row := q.db.QueryRow(ctx, getAttachment, arg.ID, arg.TaskID)
+	var i GetAttachmentRow
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.OriginalName,
+		&i.MimeType,
+		&i.SizeBytes,
+		&i.UploadedAt,
+	)
+	return i, err
+}
 
 const insertAttachment = `-- name: InsertAttachment :one
 INSERT INTO task_attachments (task_id, kind, original_name, mime_type, size_bytes, checksum, uploaded_by)
@@ -39,6 +77,68 @@ func (q *Queries) InsertAttachment(ctx context.Context, arg InsertAttachmentPara
 	var id string
 	err := row.Scan(&id)
 	return id, err
+}
+
+const listTaskAttachments = `-- name: ListTaskAttachments :many
+SELECT a.id::text AS id, a.kind, a.original_name, a.mime_type, a.size_bytes, a.uploaded_at,
+       u.name AS uploaded_by_name
+FROM task_attachments a
+JOIN users u ON u.id = a.uploaded_by
+WHERE a.task_id = $1 AND NOT a.is_deleted
+ORDER BY a.uploaded_at, a.id
+`
+
+type ListTaskAttachmentsRow struct {
+	ID             string
+	Kind           AttachmentKind
+	OriginalName   string
+	MimeType       string
+	SizeBytes      int64
+	UploadedAt     pgtype.Timestamptz
+	UploadedByName string
+}
+
+func (q *Queries) ListTaskAttachments(ctx context.Context, taskID string) ([]ListTaskAttachmentsRow, error) {
+	rows, err := q.db.Query(ctx, listTaskAttachments, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTaskAttachmentsRow{}
+	for rows.Next() {
+		var i ListTaskAttachmentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.OriginalName,
+			&i.MimeType,
+			&i.SizeBytes,
+			&i.UploadedAt,
+			&i.UploadedByName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const softDeleteAttachment = `-- name: SoftDeleteAttachment :exec
+UPDATE task_attachments SET is_deleted = true
+WHERE id = $1::uuid AND task_id = $2 AND NOT is_deleted
+`
+
+type SoftDeleteAttachmentParams struct {
+	ID     pgtype.UUID
+	TaskID string
+}
+
+func (q *Queries) SoftDeleteAttachment(ctx context.Context, arg SoftDeleteAttachmentParams) error {
+	_, err := q.db.Exec(ctx, softDeleteAttachment, arg.ID, arg.TaskID)
+	return err
 }
 
 const taskIsActive = `-- name: TaskIsActive :one

@@ -458,3 +458,79 @@ func TestUploadAttachmentOverHTTP(t *testing.T) {
 		t.Fatalf("lampiran tersimpan %d, mau 2 (hanya yang diterima)", n)
 	}
 }
+
+// NFR-SEC-09 d dan FR-TASK-18: siapa pun yang bisa membuka detail boleh mengunduh, selalu sebagai attachment
+// dengan nosniff; hanya pemilik hak unggah yang boleh menghapus.
+func TestDownloadAndDeleteAttachmentOverHTTP(t *testing.T) {
+	tm := newTaskTeam(t)
+	id := tm.createTask(t)
+	pdf := []byte("%PDF-1.7\n%uji unduh")
+	if code := tm.upload(t, tm.manager, id, "brief", "Brief Ramadan Ünïk.pdf", pdf); code != http.StatusCreated {
+		t.Fatalf("unggah: status %d", code)
+	}
+	var aid string
+	if err := tm.pool.QueryRow(t.Context(), `SELECT id::text FROM task_attachments WHERE task_id = $1`, id).Scan(&aid); err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/tasks/" + id + "/attachments/" + aid
+
+	var detail struct {
+		Task struct {
+			Attachments []struct {
+				ID   string `json:"id"`
+				Kind string `json:"kind"`
+				Name string `json:"name"`
+			} `json:"attachments"`
+		} `json:"task"`
+	}
+	if code := tm.sendJSON(t, tm.other, http.MethodGet, "/api/tasks/"+id, "", &detail); code != http.StatusOK {
+		t.Fatalf("detail: status %d", code)
+	}
+	if len(detail.Task.Attachments) != 1 || detail.Task.Attachments[0].ID != aid || detail.Task.Attachments[0].Name != "Brief Ramadan Ünïk.pdf" {
+		t.Fatalf("lampiran di detail: %+v", detail.Task.Attachments)
+	}
+
+	// Staf yang bukan PIC tetap boleh mengunduh karena detail task terbuka hanya baca untuknya.
+	req, err := http.NewRequest(http.MethodGet, tm.srv.URL+path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := tm.other.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK || !bytes.Equal(body, pdf) {
+		t.Fatalf("unduh: status %d, isi sama %t", res.StatusCode, bytes.Equal(body, pdf))
+	}
+	headers := map[string]string{
+		"Content-Type":            "application/pdf",
+		"X-Content-Type-Options":  "nosniff",
+		"Content-Security-Policy": "sandbox",
+	}
+	for k, want := range headers {
+		if got := res.Header.Get(k); got != want {
+			t.Errorf("header %s = %q, mau %q", k, got, want)
+		}
+	}
+	if cd := res.Header.Get("Content-Disposition"); !strings.HasPrefix(cd, "attachment;") || !strings.Contains(cd, "filename*=utf-8''Brief%20Ramadan%20") {
+		t.Errorf("Content-Disposition %q", cd)
+	}
+
+	for _, bad := range []string{"/api/tasks/" + id + "/attachments/bukan-uuid", "/api/tasks/T-9999/attachments/" + aid} {
+		if code := tm.call(t, tm.manager, http.MethodGet, bad, ""); code != http.StatusNotFound {
+			t.Errorf("GET %s: status %d, mau 404", bad, code)
+		}
+	}
+
+	if code := tm.call(t, tm.pic, http.MethodDelete, path, ""); code != http.StatusForbidden {
+		t.Fatalf("PIC menghapus brief: status %d, mau 403", code)
+	}
+	if code := tm.call(t, tm.manager, http.MethodDelete, path, ""); code != http.StatusNoContent {
+		t.Fatalf("Manajer menghapus brief: status %d, mau 204", code)
+	}
+	if code := tm.call(t, tm.manager, http.MethodGet, path, ""); code != http.StatusNotFound {
+		t.Fatalf("unduh setelah dihapus: status %d, mau 404", code)
+	}
+}

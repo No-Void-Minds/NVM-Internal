@@ -113,6 +113,8 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	app.PUT("/tasks/:id/deliverable", s.setTaskDeliverable)
 	app.POST("/tasks/:id/move", s.moveTask)
 	app.POST("/tasks/:id/attachments", s.uploadAttachment)
+	app.GET("/tasks/:id/attachments/:attachmentId", s.downloadAttachment)
+	app.DELETE("/tasks/:id/attachments/:attachmentId", s.deleteAttachment)
 
 	return r, nil
 }

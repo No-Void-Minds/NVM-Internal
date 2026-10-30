@@ -5,17 +5,17 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"io"
-	"os"
-
+	"fmt"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-
+	"io"
 	"nvm-internal/internal/apperr"
 	"nvm-internal/internal/attachment"
 	"nvm-internal/internal/audit"
 	"nvm-internal/internal/db/sqlc"
 	"nvm-internal/internal/storage"
+	"os"
 )
 
 type AttachmentKind string
@@ -162,4 +162,83 @@ func (a *Attachments) Upload(ctx context.Context, actor Actor, taskID string, ki
 		return SavedAttachment{}, err
 	}
 	return saved, nil
+}
+
+var ErrAttachmentNotFound = errors.New("lampiran tidak ditemukan")
+
+// uuidOf mengubah ID teks dari URL menjadi tipe UUID untuk query. Teks yang bukan UUID diperlakukan sama
+// dengan lampiran yang tidak ada.
+func uuidOf(id string) (pgtype.UUID, error) {
+	var u pgtype.UUID
+	if err := u.Scan(id); err != nil {
+		return u, ErrAttachmentNotFound
+	}
+	return u, nil
+}
+
+// List mengembalikan lampiran task yang belum dihapus, urut dari yang paling lama diunggah.
+func (a *Attachments) List(ctx context.Context, taskID string) ([]sqlc.ListTaskAttachmentsRow, error) {
+	return sqlc.New(a.pool).ListTaskAttachments(ctx, taskID)
+}
+
+// Open membuka berkas untuk diunduh. Izinnya sama dengan membaca detail task (FR-TASK-18), jadi tidak ada
+// pengecekan peran di sini; yang dicek hanya lampiran itu memang milik task ini dan belum dihapus.
+func (a *Attachments) Open(ctx context.Context, taskID, attachmentID string) (sqlc.GetAttachmentRow, *os.File, error) {
+	uid, err := uuidOf(attachmentID)
+	if err != nil {
+		return sqlc.GetAttachmentRow{}, nil, err
+	}
+	row, err := sqlc.New(a.pool).GetAttachment(ctx, sqlc.GetAttachmentParams{ID: uid, TaskID: taskID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return row, nil, ErrAttachmentNotFound
+	}
+	if err != nil {
+		return row, nil, err
+	}
+	p, err := a.store.PathFor(row.ID)
+	if err != nil {
+		return row, nil, err
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		// Baris ada tetapi berkasnya tidak: tanda masalah disk atau restore, bukan "tidak ditemukan" biasa.
+		return row, nil, fmt.Errorf("berkas lampiran %s tidak terbaca dari disk: %w", row.ID, err)
+	}
+	return row, f, nil
+}
+
+// Delete menandai lampiran terhapus. Berkasnya tetap di disk supaya bisa dipulihkan, sama seperti task (FR-TASK-16).
+// Yang boleh menghapus sama dengan yang boleh mengunggah jenis lampiran itu.
+func (a *Attachments) Delete(ctx context.Context, actor Actor, taskID, attachmentID string) error {
+	uid, err := uuidOf(attachmentID)
+	if err != nil {
+		return err
+	}
+	return pgx.BeginFunc(ctx, a.pool, func(tx pgx.Tx) error {
+		q := sqlc.New(tx)
+		if _, err := q.GetTaskForUpdate(ctx, taskID); errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		row, err := q.GetAttachment(ctx, sqlc.GetAttachmentParams{ID: uid, TaskID: taskID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrAttachmentNotFound
+		}
+		if err != nil {
+			return err
+		}
+		ok, err := canAttach(ctx, q, actor, taskID, AttachmentKind(row.Kind))
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return ErrForbidden
+		}
+		if err := q.SoftDeleteAttachment(ctx, sqlc.SoftDeleteAttachmentParams{ID: uid, TaskID: taskID}); err != nil {
+			return err
+		}
+		return audit.Change(ctx, q, actor.auditActor(), "attachment_deleted", "task", taskID,
+			map[string]any{"attachment_id": row.ID, "kind": row.Kind, "name": row.OriginalName}, nil)
+	})
 }

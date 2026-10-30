@@ -57,13 +57,14 @@ type historyItem struct {
 
 type taskDetail struct {
 	taskSummary
-	Description    string        `json:"description"`
-	RequestedBy    idName        `json:"requested_by"`
-	RequestDate    time.Time     `json:"request_date"`
-	DeliverableURL string        `json:"deliverable_url"`
-	IsMigrated     bool          `json:"is_migrated"`
-	Can            task.Can      `json:"can"`
-	History        []historyItem `json:"history"`
+	Description    string             `json:"description"`
+	RequestedBy    idName             `json:"requested_by"`
+	RequestDate    time.Time          `json:"request_date"`
+	DeliverableURL string             `json:"deliverable_url"`
+	IsMigrated     bool               `json:"is_migrated"`
+	Can            task.Can           `json:"can"`
+	History        []historyItem      `json:"history"`
+	Attachments    []attachmentDetail `json:"attachments"`
 }
 
 type createTaskRequest struct {
@@ -142,6 +143,19 @@ func (s *Server) getTask(c *gin.Context) {
 			ActorName:  h.ActorName.String,
 			OldValue:   rawJSON(h.OldValue),
 			NewValue:   rawJSON(h.NewValue),
+		})
+	}
+	files, err := s.attachments.List(c.Request.Context(), id)
+	if err != nil {
+		s.internalError(c, err)
+		return
+	}
+	out.Attachments = make([]attachmentDetail, 0, len(files))
+	for _, a := range files {
+		out.Attachments = append(out.Attachments, attachmentDetail{
+			attachmentItem: attachmentItem{ID: a.ID, Kind: string(a.Kind), Name: a.OriginalName, MIME: a.MimeType, Size: a.SizeBytes},
+			UploadedAt:     a.UploadedAt.Time,
+			UploadedBy:     a.UploadedByName,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"task": out})

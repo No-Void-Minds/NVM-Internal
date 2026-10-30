@@ -162,3 +162,96 @@ func TestUploadToDeletedTask(t *testing.T) {
 		t.Fatalf("unggah ke task terhapus: err %v, mau ErrNotFound", err)
 	}
 }
+
+func TestOpenListAndSoftDelete(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	att, store := f.attachments(t)
+	id := f.newTask(t, f.stafA.ID)
+	other := f.newTask(t, f.stafA.ID)
+
+	brief, err := att.Upload(ctx, f.manager, id, KindBrief, "brief.pdf", bytes.NewReader(pdfContent))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := att.Upload(ctx, f.stafA, id, KindDeliverable, "hasil.pdf", bytes.NewReader(pdfContent))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := att.List(ctx, id)
+	if err != nil || len(list) != 2 || list[0].ID != brief.ID || list[0].UploadedByName == "" {
+		t.Fatalf("daftar lampiran %+v, err %v", list, err)
+	}
+
+	_, file, err := att.Open(ctx, id, brief.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(file)
+	_ = file.Close()
+	if !bytes.Equal(got, pdfContent) {
+		t.Fatal("isi unduhan tidak sama dengan yang diunggah")
+	}
+	if _, _, err := att.Open(ctx, other, brief.ID); !errors.Is(err, ErrAttachmentNotFound) {
+		t.Fatalf("lampiran dibuka lewat task lain: err %v, mau ErrAttachmentNotFound", err)
+	}
+
+	deletes := []struct {
+		who   string
+		actor Actor
+		aid   string
+		want  error
+	}{
+		{"Staf PIC menghapus brief", f.stafA, brief.ID, ErrForbidden},
+		{"Staf bukan PIC menghapus deliverable", f.stafC, result.ID, ErrForbidden},
+		{"Admin menghapus brief", f.admin, brief.ID, ErrForbidden},
+		{"Staf PIC menghapus deliverable", f.stafA, result.ID, nil},
+		{"Manajer menghapus brief", f.manager, brief.ID, nil},
+		{"Manajer menghapus lagi", f.manager, brief.ID, ErrAttachmentNotFound},
+	}
+	for _, d := range deletes {
+		if err := att.Delete(ctx, d.actor, id, d.aid); !errors.Is(err, d.want) {
+			t.Errorf("%s: err %v, mau %v", d.who, err, d.want)
+		}
+	}
+
+	if list, _ := att.List(ctx, id); len(list) != 0 {
+		t.Fatalf("lampiran terhapus masih tampil: %d", len(list))
+	}
+	if _, _, err := att.Open(ctx, id, brief.ID); !errors.Is(err, ErrAttachmentNotFound) {
+		t.Fatalf("lampiran terhapus masih bisa diunduh: err %v", err)
+	}
+	// Soft delete: berkas tetap di disk supaya bisa dipulihkan.
+	p, _ := store.PathFor(brief.ID)
+	if _, err := os.Stat(p); err != nil {
+		t.Fatalf("berkas ikut terhapus dari disk: %v", err)
+	}
+
+	var audits int
+	if err := f.pool.QueryRow(ctx,
+		`SELECT count(*) FROM audit_logs WHERE action = 'attachment_deleted' AND entity_id = $1`, id,
+	).Scan(&audits); err != nil {
+		t.Fatal(err)
+	}
+	if audits != 2 {
+		t.Fatalf("audit attachment_deleted tercatat %d kali, mau 2", audits)
+	}
+}
+
+func TestAttachmentsHiddenWhenTaskDeleted(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	att, _ := f.attachments(t)
+	id := f.newTask(t, f.stafA.ID)
+	saved, err := att.Upload(ctx, f.manager, id, KindBrief, "brief.pdf", bytes.NewReader(pdfContent))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.Delete(ctx, f.manager, id, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := att.Open(ctx, id, saved.ID); !errors.Is(err, ErrAttachmentNotFound) {
+		t.Fatalf("lampiran task terhapus masih bisa diunduh: err %v", err)
+	}
+}
