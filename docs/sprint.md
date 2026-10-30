@@ -303,14 +303,35 @@ Sisa: AC-05 dan AC-08 bagian arsip (Sprint 6).
 **Tujuan:** brief dan hasil kerja bisa diunggah dengan aman.
 **SRS:** FR-TASK-15, 23, NFR-SEC-09, NFR-PERF-04. **AC:** AC-07, AC-15.
 
-- [ ] S5-01 `POST /api/tasks/:id/attachments` dengan `kind` brief (Manajer) atau deliverable (PIC atau Manajer).
+- [x] S5-01 `POST /api/tasks/:id/attachments` dengan `kind` brief (Manajer) atau deliverable (PIC atau Manajer).
 - [ ] S5-02 Validasi: allowlist PDF, CSV, TXT, DOC/DOCX, XLS/XLSX, PPT/PPTX, JPG/JPEG, PNG. Tipe dicek dari isi berkas, bukan ekstensi saja. Tolak berkas makro (DOCM, XLSM, PPTM) dan executable. Batas 50 MB di backend dan di Nginx.
-- [ ] S5-03 Simpan di disk dengan nama UUID, di luar folder yang disajikan web. Simpan checksum SHA-256.
-- [ ] S5-04 Unduh lewat endpoint yang cek izin, dengan `Content-Disposition: attachment` dan nama asli.
-- [ ] S5-05 Hapus lampiran (soft delete) dan audit `attachment_added` / `attachment_deleted`.
-- [ ] S5-06 Frontend: area tarik berkas, tombol pilih berkas (di ponsel menawarkan kamera atau galeri), tempel screenshot dengan Ctrl+V di dialog Buat task dan Ubah task.
-- [ ] S5-07 Progres unggah dan pesan galat tipe atau ukuran.
+- [x] S5-03 Simpan di disk dengan nama UUID, di luar folder yang disajikan web. Simpan checksum SHA-256.
+- [x] S5-04 Unduh lewat endpoint yang cek izin, dengan `Content-Disposition: attachment` dan nama asli.
+- [x] S5-05 Hapus lampiran (soft delete) dan audit `attachment_added` / `attachment_deleted`.
+- [x] S5-06 Frontend: area tarik berkas, tombol pilih berkas (di ponsel menawarkan kamera atau galeri), tempel screenshot dengan Ctrl+V di dialog Buat task dan Ubah task.
+- [x] S5-07 Progres unggah dan pesan galat tipe atau ukuran.
 - [ ] S5-08 Tautan deliverable hanya menerima `http` dan `https` (NFR-SEC-06).
+
+**Hasil:** selesai 2026-10-30. Lolos lewat test Go, curl, dan uji browser: AC-07 dan AC-15.
+Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 7; S5-08 sudah selesai sejak Sprint 3 (`cleanURL`).
+
+**Keputusan:**
+- Berkas disimpan di `STORAGE_DIR` (dev: `backend/storage`, produksi: `/srv/nvm-internal/storage` di VM, milik UID 10001, mode 0750). Di dalamnya ada `attachments/` dan `tmp/` pada disk yang sama, supaya pemindahan dari `tmp/` bersifat atomik.
+- Nama berkas di disk adalah UUID dari database, disebar per dua huruf pertama. Nama asli hanya disimpan di database, dan tidak pernah dipakai sebagai path.
+- Tipe dicek dari isi dan ekstensi: tanda tangan format untuk PDF, PNG, dan JPG; isi ZIP untuk DOCX, XLSX, dan PPTX; stream Compound File untuk DOC, XLS, dan PPT (library `richardlehane/mscfb`); tanpa byte kontrol untuk TXT dan CSV.
+- Batasan yang diketahui: makro di PPT lama (97-2003) tidak terdeteksi. Diterima karena SRS mengizinkan PPT, dengan peredam berupa unduhan yang selalu `attachment` dan `nosniff`. **Perlu ditanyakan ke Manajer apakah tim masih memakai .ppt; kalau tidak, hapus dari daftar izin.**
+- Izin dicek sebelum isi berkas dibaca (`kind` dikirim lewat URL), lalu dicek ulang di dalam transaksi.
+- Melihat dan mengunduh boleh oleh semua akun yang bisa membuka detail task (FR-TASK-18). Unggah dan hapus: brief hanya Manajer, deliverable Manajer atau PIC.
+- Hapus lampiran berupa soft delete; berkasnya tetap di disk.
+- Unggah tidak menaikkan `version` task, supaya tidak memicu konflik 409 dengan orang yang sedang mengedit.
+- Di form Buat/Ubah task, brief ditahan di browser lalu diunggah setelah task tersimpan. Kalau ada yang gagal, task tidak dibatalkan; pesannya menyebut berkas yang gagal, dan detail task terbuka untuk unggah ulang.
+
+**Retro:**
+- Macet: Go menganggap paket `storage` tidak ada karena filenya tersimpan di `backend/storage` (folder data yang di-gitignore), bukan `backend/internal/storage`; otomasi Word lewat PowerShell menggantung karena dialog yang tersembunyi; sqlc membuat `pgtype.UUID` dari `@id::uuid`, sehingga butuh konversi di Go.
+- Catatan uji: menu kamera atau galeri di ponsel sungguhan, dan Ctrl+V di Safari, masuk S8-04.
+- Untuk Sprint 7: pasang `client_max_body_size` di Nginx, masukkan `/srv/nvm-internal/storage` ke backup harian, dan buat pembersihan berkas yatim (berkas di `attachments/` tanpa baris database).
+- Lancar: (isi sendiri)
+- Diubah untuk Sprint 6: (isi sendiri)
 
 ---
 

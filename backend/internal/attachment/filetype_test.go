@@ -80,6 +80,8 @@ func TestDetect(t *testing.T) {
 		{"ekstensi DOCM", "laporan.docm", docx, "", "macro"},
 		{"ekstensi XLSM", "data.XLSM", xlsx, "", "macro"},
 		{"EXE", "setup.exe", exe, "", "tidak diizinkan"},
+		{"BAT (AC-07)", "jalankan.bat", []byte("@echo off\r\nexit\r\n"), "", "tidak diizinkan"},
+		{"BAT diganti nama jadi TXT", "catatan.txt", []byte("@echo off\r\ndel *.*\r\n"), "text/plain", ""},
 		{"tanpa ekstensi", "README", []byte("teks"), "", "tidak diizinkan"},
 		{"DOC lama yang rusak", "lama.doc", oleGarbage, "", "tidak sesuai"},
 		{"EXE diganti nama jadi DOC", "lama.doc", exe, "", "tidak sesuai"},
