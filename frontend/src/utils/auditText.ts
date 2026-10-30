@@ -94,6 +94,10 @@ export function describeAudit(e: AuditEntry, divisionName: (id: number) => strin
       return `Mengubah tautan deliverable ${e.target?.id ?? ''}`
     case 'task_status_changed':
       return `Memindahkan ${e.target?.id ?? ''} ke ${statusLabel[after.status as TaskStatus] ?? str(after.status)}`
+    case 'attachment_added':
+      return `Mengunggah ${str(after.name)} ke ${e.target?.id ?? ''}`
+    case 'attachment_deleted':
+      return `Menghapus lampiran dari ${e.target?.id ?? ''}`
     default:
       return e.action
   }

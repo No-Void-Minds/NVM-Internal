@@ -23,6 +23,7 @@ import {
   urgencyLabel,
   type TaskStatus,
 } from '../utils/task'
+import AttachmentSection from './AttachmentSection.vue'
 
 const props = defineProps<{ taskId: string | null; labels: LabelItem[] }>()
 const emit = defineEmits<{ close: []; changed: [message: string]; edit: [task: TaskDetail] }>()
@@ -37,9 +38,10 @@ const busy = ref(false)
 const editingLabels = ref(false)
 const chosenLabels = ref<number[]>([])
 
-async function load() {
+// quiet dipakai setelah unggah atau hapus berkas, supaya panel tidak berkedip ke tampilan memuat.
+async function load(quiet = false) {
   if (!props.taskId) return
-  loadState.value = 'loading'
+  if (!quiet) loadState.value = 'loading'
   try {
     task.value = await getTask(props.taskId)
     loadState.value = 'ready'
@@ -81,6 +83,14 @@ async function run(action: () => Promise<unknown>, success: string): Promise<boo
   } finally {
     busy.value = false
   }
+}
+
+const briefs = computed(() => task.value?.attachments.filter((a) => a.kind === 'brief') ?? [])
+const deliverables = computed(() => task.value?.attachments.filter((a) => a.kind === 'deliverable') ?? [])
+
+function onFilesChanged(message: string) {
+  emit('changed', message)
+  void load(true)
 }
 
 const readOnly = computed(() => {
@@ -212,7 +222,7 @@ const buttonSecondary =
       <button
         type="button"
         class="mt-3 inline-flex min-h-11 items-center rounded-card border border-danger px-4 font-medium"
-        @click="load"
+        @click="load()"
       >
         Muat ulang
       </button>
@@ -320,7 +330,17 @@ const buttonSecondary =
         <h4 class="font-semibold">Deskripsi</h4>
         <p class="mt-2 text-sm whitespace-pre-line break-words">{{ task.description }}</p>
       </section>
-
+      <section>
+        <h4 class="font-semibold">Lampiran brief</h4>
+        <AttachmentSection
+          :task-id="task.id"
+          kind="brief"
+          :items="briefs"
+          :can-upload="task.can.edit"
+          :can-delete="task.can.edit"
+          @changed="onFilesChanged"
+        />
+      </section>
       <section>
         <h4 class="font-semibold">Deliverable</h4>
         <form
@@ -351,6 +371,14 @@ const buttonSecondary =
           </a>
         </p>
         <p v-else-if="!task.can.edit_deliverable" class="mt-2 text-sm text-ink-muted">Belum ada tautan.</p>
+        <AttachmentSection
+          :task-id="task.id"
+          kind="deliverable"
+          :items="deliverables"
+          :can-upload="task.can.edit_deliverable"
+          :can-delete="task.can.edit_deliverable"
+          @changed="onFilesChanged"
+        />
       </section>
 
       <section>

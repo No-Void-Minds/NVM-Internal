@@ -33,6 +33,12 @@ export function describeTaskHistory(h: TaskHistoryItem): string {
       return after.deliverable_url ? 'mengisi tautan deliverable' : 'menghapus tautan deliverable'
     case 'task_deleted':
       return 'menghapus task'
+    case 'attachment_added':
+      return `mengunggah ${after.kind === 'brief' ? 'lampiran brief' : 'berkas deliverable'} ${String(after.name ?? '')}`
+    case 'attachment_deleted': {
+      const before = h.old_value ?? {}
+      return `menghapus ${before.kind === 'brief' ? 'lampiran brief' : 'berkas deliverable'} ${String(before.name ?? '')}`
+    }
     default:
       return h.action
   }

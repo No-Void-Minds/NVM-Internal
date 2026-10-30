@@ -1,5 +1,6 @@
 import { apiGet, apiPost, apiPut, request } from './client'
 import type { TaskStatus, Urgency } from '../utils/task'
+import type { TaskAttachment } from './attachments'
 
 export type TaskPerson = { id: number; name: string; username: string }
 export type TaskLabel = { id: number; name: string; color: string; is_active: boolean }
@@ -43,6 +44,7 @@ export type TaskDetail = TaskSummary & {
   is_migrated: boolean
   can: TaskCan
   history: TaskHistoryItem[]
+  attachments: TaskAttachment[]
 }
 
 export type TaskFields = {
