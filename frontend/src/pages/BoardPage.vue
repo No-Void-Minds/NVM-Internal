@@ -248,9 +248,9 @@ function onEdit(t: TaskDetail) {
   formOpen.value = true
 }
 
-async function onSaved(id: string, message: string) {
+async function onSaved(id: string, message: string, partial: boolean) {
   formOpen.value = false
-  notice.value = { kind: 'success', text: message }
+  notice.value = { kind: partial ? 'error' : 'success', text: message }
   await load(true)
   detailId.value = id
 }

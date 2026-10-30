@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, useId } from 'vue'
+import { computed, ref } from 'vue'
 import BaseDialog from './BaseDialog.vue'
 import { ApiError } from '../api/client'
 import {
@@ -10,7 +10,8 @@ import {
   type TaskAttachment,
   type UploadHandle,
 } from '../api/attachments'
-import { acceptAttr, allowedText, formatBytes, isImage, precheck } from '../utils/attachment'
+import FileDropzone from './FileDropzone.vue'
+import { formatBytes, isImage, precheck } from '../utils/attachment'
 import { formatDateTime } from '../utils/format'
 
 const props = defineProps<{
@@ -22,7 +23,6 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ changed: [message: string] }>()
 
-const inputId = useId()
 const kindLabel = computed(() => (props.kind === 'brief' ? 'lampiran brief' : 'berkas deliverable'))
 
 function messageOf(err: unknown): string {
@@ -42,8 +42,8 @@ const uploading = ref(false)
 let nextKey = 0
 let current: UploadHandle | null = null
 
-function addFiles(files: FileList | File[] | null) {
-  for (const file of Array.from(files ?? [])) {
+function addFiles(files: File[]) {
+  for (const file of files) {
     const error = precheck(file)
     queue.value.push({ key: nextKey++, file, status: error ? 'failed' : 'waiting', progress: 0, error })
   }
@@ -86,25 +86,6 @@ function nextWaiting(): QueueItem | undefined {
 
 function dismiss(key: number) {
   queue.value = queue.value.filter((q) => q.key !== key)
-}
-
-function onPick(e: Event) {
-  const input = e.target as HTMLInputElement
-  addFiles(input.files)
-  // Dikosongkan supaya memilih berkas yang sama lagi (misalnya setelah gagal) tetap memicu change.
-  input.value = ''
-}
-
-const dragOver = ref(false)
-
-function onDragLeave(e: DragEvent) {
-  // dragleave juga terpicu saat kursor masuk ke teks di dalam area; hanya keluar area yang dihitung.
-  if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) dragOver.value = false
-}
-
-function onDrop(e: DragEvent) {
-  dragOver.value = false
-  addFiles(e.dataTransfer?.files ?? null)
 }
 
 const toDelete = ref<TaskAttachment | null>(null)
@@ -221,35 +202,7 @@ const buttonSecondary =
     </ul>
     <p v-else-if="!canUpload" class="mt-2 text-sm text-ink-muted">Belum ada {{ kindLabel }}.</p>
 
-    <!-- label membungkus input supaya area ini bisa diklik, diketuk, dan dibuka dengan Tab lalu Enter. -->
-    <label
-      v-if="canUpload"
-      class="mt-2 flex min-h-24 cursor-pointer flex-col items-center justify-center gap-1 rounded-card border border-dashed p-4 text-center text-sm has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent"
-      :class="dragOver ? 'border-accent bg-surface' : 'border-line'"
-      @dragover.prevent="dragOver = true"
-      @dragleave="onDragLeave"
-      @drop.prevent="onDrop"
-    >
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 24 24"
-        class="size-6 text-ink-muted"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.75"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      >
-        <path d="M12 16V5" />
-        <path d="m7 10 5-5 5 5" />
-        <path d="M5 20h14" />
-      </svg>
-      <span
-        >Tarik berkas ke sini atau <span class="font-medium text-accent underline">pilih berkas</span>.</span
-      >
-      <span class="text-ink-muted">{{ allowedText }}</span>
-      <input :id="inputId" type="file" multiple :accept="acceptAttr" class="sr-only" @change="onPick" />
-    </label>
+    <FileDropzone v-if="canUpload" class="mt-2" @files="addFiles" />
 
     <ul v-if="queue.length" class="mt-2 space-y-2">
       <li v-for="q in queue" :key="q.key" class="rounded-card border border-line p-3 text-sm">
