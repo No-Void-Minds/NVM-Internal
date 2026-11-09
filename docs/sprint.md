@@ -2,7 +2,7 @@
 
 Acuan: SRS Sistem Internal NVM v1.0, ERD `nvm_internal.dbml`, layar Stitch, dan DESIGN.md.
 Stack: Go, PostgreSQL, Vue 3 dengan Tailwind CSS, Docker di VM Ubuntu (Hyper-V) pada PC kantor.
-Revisi terakhir: 2026-11-09 (sub task dan kartu profil, lihat Daftar revisi di bagian bawah).
+Revisi terakhir: 2026-11-09 (sub task dan kartu profil, lihat Daftar revisi di bagian bawah). Sprint 7 selesai 2026-11-09.
 
 ## Cara kerja
 
@@ -369,17 +369,17 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 **Tujuan:** task punya sub task, dan PIC (bisa lebih dari satu) menempel di sub task. Revisi 1 dari Manajer.
 **Aturan baru:** Manajer mengisi judul task, lalu sub task di bawahnya. Tiap sub task punya nama dan satu atau lebih PIC. Status Kanban tetap di task induk, sub task tidak punya status. Sub task opsional.
 
-- [ ] S7-00 Ubah `scripts/check.sh` jadi dua mode: bawaan (gofmt, `go build`, `npm run check`) dan `--full` (ditambah `go vet` dan `go test`). Alasan: selama fase build, test tidak ditulis ulang, dan `go test` lewat SSH tunnel yang membuat pemeriksaan 4 sampai 6 menit.
-- [ ] S7-01 Migrasi `000003`: tabel sub task (task, judul, urutan, waktu) dan tabel PIC sub task (sub task, akun, waktu pemasangan dengan `clock_timestamp()`). Tabel PIC level task yang lama dihapus; `down` mengembalikan strukturnya.
-- [ ] S7-02 Data task di database dev dikosongkan saat migrasi (belum ada data produksi).
-- [ ] S7-03 Query sqlc untuk sub task: tambah, ubah nama, hapus, atur urutan, ganti daftar PIC.
-- [ ] S7-04 Service: buat task beserta sub task dalam satu transaksi; ubah task menggantikan daftar sub task secara utuh, dengan optimistic locking `version` task.
-- [ ] S7-05 Validasi: judul sub task wajib dan tidak lebih panjang dari judul task; PIC hanya akun aktif berperan Staf atau Manajer; tanpa PIC ganda pada satu sub task.
-- [ ] S7-06 PIC dan divisi task menjadi turunan: PIC task adalah gabungan unik PIC semua sub task; divisi task mengikuti PIC pertama dari sub task pertama yang punya PIC. Dihitung ulang setiap daftar sub task berubah.
-- [ ] S7-07 Hak akses: Staf yang menjadi PIC di salah satu sub task dianggap PIC task itu. Hak PIC (pindah status tanpa Completed, label divisinya, tautan deliverable, lampiran deliverable) mengikuti definisi baru. Mengubah sub task dan PIC-nya hanya Manajer.
-- [ ] S7-08 Papan dan daftar: `scope=mine` dan filter `pic` membaca PIC lewat sub task. Kartu membawa jumlah sub task dan daftar PIC unik.
-- [ ] S7-09 `GET /api/tasks/:id` memuat sub task beserta PIC masing-masing.
-- [ ] S7-10 Audit: `subtask_added`, `subtask_renamed`, `subtask_removed`, `subtask_assignees_changed`, dengan `old_value` dan `new_value`.
+- [x] S7-00 Ubah `scripts/check.sh` jadi dua mode: bawaan (gofmt, `go build`, `npm run check`) dan `--full` (ditambah `go vet` dan `go test`). Alasan: selama fase build, test tidak ditulis ulang, dan `go test` lewat SSH tunnel yang membuat pemeriksaan 4 sampai 6 menit.
+- [x] S7-01 Migrasi `000003`: tabel sub task (task, judul, urutan, waktu) dan tabel PIC sub task (sub task, akun, waktu pemasangan dengan `clock_timestamp()`). Tabel PIC level task yang lama dihapus; `down` mengembalikan strukturnya.
+- [x] S7-02 Data task di database dev dikosongkan saat migrasi (belum ada data produksi).
+- [x] S7-03 Query sqlc untuk sub task: tambah, ubah nama, hapus, atur urutan, ganti daftar PIC.
+- [x] S7-04 Service: buat task beserta sub task dalam satu transaksi; ubah task menggantikan daftar sub task secara utuh, dengan optimistic locking `version` task.
+- [x] S7-05 Validasi: judul sub task wajib dan tidak lebih panjang dari judul task; PIC hanya akun aktif berperan Staf atau Manajer; tanpa PIC ganda pada satu sub task.
+- [x] S7-06 PIC dan divisi task menjadi turunan: PIC task adalah gabungan unik PIC semua sub task; divisi task mengikuti PIC pertama dari sub task pertama yang punya PIC. Dihitung ulang setiap daftar sub task berubah.
+- [x] S7-07 Hak akses: Staf yang menjadi PIC di salah satu sub task dianggap PIC task itu. Hak PIC (pindah status tanpa Completed, label divisinya, tautan deliverable, lampiran deliverable) mengikuti definisi baru. Mengubah sub task dan PIC-nya hanya Manajer.
+- [x] S7-08 Papan dan daftar: `scope=mine` dan filter `pic` membaca PIC lewat sub task. Kartu membawa jumlah sub task dan daftar PIC unik.
+- [x] S7-09 `GET /api/tasks/:id` memuat sub task beserta PIC masing-masing.
+- [x] S7-10 Audit: `subtask_added`, `subtask_renamed`, `subtask_removed`, `subtask_assignees_changed`, dengan `old_value` dan `new_value`.
 
 **Keputusan sementara (konfirmasi ke Manajer):**
 - Task tanpa sub task berarti tanpa PIC. Task seperti itu hanya bisa dipindahkan oleh Manajer. Perpindahan Requested ke On Progress tidak mewajibkan adanya PIC.
@@ -387,6 +387,25 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 - Test lama yang bergantung pada PIC level task akan gagal. Tidak diperbaiki di sprint ini; diperbaiki di Sprint 13.
 
 **Selesai kalau:** `./scripts/check.sh` lolos dan alurnya terbukti lewat curl: buat task dengan dua sub task, sub task kedua punya dua PIC, task muncul di papan akun PIC mana pun.
+
+**Hasil:** selesai 2026-11-09. Lolos lewat curl dan pemeriksaan database: buat task dengan sub task dan PIC ganda, task tanpa sub task, penolakan PIC tidak valid dan nama sub task kosong, ubah task (tambah, ganti nama, hapus, urut ulang, ganti PIC), 409 untuk versi lama, divisi mengikuti PIC pertama, "Task saya" dan hak PIC lewat sub task, enam jenis kejadian audit.
+
+**Keputusan:**
+- Daftar sub task yang dikirim saat ubah task menggantikan daftar lama secara utuh. Sub task yang tidak ikut terkirim dihapus, `id` 0 berarti baru. Frontend wajib selalu mengirim daftar lengkap dengan `id` untuk sub task yang sudah ada.
+- Sub task dihapus permanen (tanpa kolom `is_deleted`); jejaknya ada di `audit_logs`, dan PIC-nya ikut terhapus lewat `ON DELETE CASCADE`.
+- Posisi sub task unik per task lewat constraint `DEFERRABLE INITIALLY DEFERRED`, supaya dua sub task bisa bertukar urutan dalam satu transaksi.
+- Maksimal 50 sub task per task dan 200 karakter per nama. Angka 50 hanya pengaman, bukan dari SRS.
+- Task tanpa PIC memakai divisi pembuatnya saat dibuat. Saat diubah menjadi tanpa PIC, divisinya dibiarkan.
+- Divisi dihitung dari database setelah sub task ditulis (`FirstPICDivision`), bukan dari urutan form, supaya sama dengan urutan pemasangan yang tersimpan.
+- Perubahan yang hanya menyentuh sub task tetap menaikkan versi task.
+- Aksi audit baru: `subtask_added`, `subtask_removed`, `subtask_renamed`, `subtask_assignees_changed`, `subtask_reordered`. Urutan hanya dibandingkan di antara sub task yang bertahan. Frontend memetakannya ke teks Indonesia di Sprint 8 (panel detail dan Audit Log).
+- `task_created` menyimpan daftar sub task awal di `new_value.subtasks`.
+- Database test `nvm_internal_test` belum dimigrasi ke `000003`, dan test lama yang memakai `PICIDs` belum diperbaiki. Keduanya dikerjakan di Sprint 13.
+
+**Retro:**
+- Macet: akhir baris CRLF dari kode tempelan (`gofmt -l` menandai file baru); `pic_ids` ditulis angka tunggal, bukan array (ditolak dengan benar); `dev-login.sh` dijalankan dari folder yang salah; `grep` terlalu rakus menangkap riwayat audit; backend belum di-restart setelah ubah kode.
+- Lancar: (isi sendiri)
+- Diubah untuk Sprint 8: (isi sendiri)
 
 ---
 

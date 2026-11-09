@@ -115,10 +115,8 @@ func (s *Service) Update(ctx context.Context, actor Actor, id string, in UpdateI
 		diff("due_date", dateOf(cur.DueDate), dateOf(f.dueDate))
 		diff("deliverable_url", cur.DeliverableUrl.String, f.deliverableURL.String)
 		diff("division_id", cur.DivisionID, division)
-		if subChanged {
-			before["subtasks"], after["subtasks"] = oldSubs, newSubs
-		}
-		if len(after) == 0 {
+
+		if len(after) == 0 && !subChanged {
 			return nil
 		}
 
@@ -135,7 +133,17 @@ func (s *Service) Update(ctx context.Context, actor Actor, id string, in UpdateI
 		if err != nil {
 			return err
 		}
-		return audit.Change(ctx, q, actor.auditActor(), "task_updated", "task", id, before, after)
+		if len(after) > 0 {
+			if err := audit.Change(ctx, q, actor.auditActor(), "task_updated", "task", id, before, after); err != nil {
+				return err
+			}
+		}
+		for _, ev := range subtaskEvents(oldSubs, newSubs) {
+			if err := audit.Change(ctx, q, actor.auditActor(), ev.action, "task", id, ev.oldVal, ev.newVal); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	return version, err
 }

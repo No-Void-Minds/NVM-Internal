@@ -252,3 +252,58 @@ func syncSubtasks(ctx context.Context, q *sqlc.Queries, actorID int64, taskID st
 	}
 	return after, nil
 }
+
+// subtaskEvent satu baris riwayat. Nilainya map supaya bentuknya sama dengan audit lain.
+type subtaskEvent struct {
+	action string
+	oldVal map[string]any
+	newVal map[string]any
+}
+
+func snapMap(s subtaskSnapshot) map[string]any {
+	return map[string]any{"id": s.ID, "title": s.Title, "pic_ids": s.PICIDs}
+}
+
+// subtaskEvents menurunkan kejadian audit dengan membandingkan keadaan sebelum dan sesudah.
+// Urutan hanya dibandingkan di antara sub task yang bertahan, supaya menambah atau menghapus
+// satu sub task tidak ikut tercatat sebagai pengurutan ulang.
+func subtaskEvents(before, after []subtaskSnapshot) []subtaskEvent {
+	prev := make(map[int64]subtaskSnapshot, len(before))
+	for _, b := range before {
+		prev[b.ID] = b
+	}
+	kept := make(map[int64]bool, len(after))
+	for _, a := range after {
+		kept[a.ID] = true
+	}
+
+	var ev []subtaskEvent
+	var orderBefore, orderAfter []int64
+	for _, b := range before {
+		if !kept[b.ID] {
+			ev = append(ev, subtaskEvent{"subtask_removed", snapMap(b), nil})
+		} else {
+			orderBefore = append(orderBefore, b.ID)
+		}
+	}
+	for _, a := range after {
+		b, existed := prev[a.ID]
+		if !existed {
+			ev = append(ev, subtaskEvent{"subtask_added", nil, snapMap(a)})
+			continue
+		}
+		orderAfter = append(orderAfter, a.ID)
+		if b.Title != a.Title {
+			ev = append(ev, subtaskEvent{"subtask_renamed",
+				map[string]any{"id": b.ID, "title": b.Title}, map[string]any{"id": a.ID, "title": a.Title}})
+		}
+		if len(without(a.PICIDs, b.PICIDs)) > 0 || len(without(b.PICIDs, a.PICIDs)) > 0 {
+			ev = append(ev, subtaskEvent{"subtask_assignees_changed", snapMap(b), snapMap(a)})
+		}
+	}
+	if !slices.Equal(orderBefore, orderAfter) {
+		ev = append(ev, subtaskEvent{"subtask_reordered",
+			map[string]any{"order": orderBefore}, map[string]any{"order": orderAfter}})
+	}
+	return ev
+}
