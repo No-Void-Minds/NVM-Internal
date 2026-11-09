@@ -4,6 +4,9 @@ import type { TaskAttachment } from './attachments'
 
 export type TaskPerson = { id: number; name: string; username: string }
 export type TaskLabel = { id: number; name: string; color: string; is_active: boolean }
+export type TaskSubtask = { id: number; title: string; assignees: TaskPerson[] }
+// id kosong berarti sub task baru; backend memakainya untuk membedakan sub task lama yang hanya diubah.
+export type SubtaskInput = { id?: number; title: string; pic_ids: number[] }
 
 export type TaskSummary = {
   id: string
@@ -45,13 +48,14 @@ export type TaskDetail = TaskSummary & {
   can: TaskCan
   history: TaskHistoryItem[]
   attachments: TaskAttachment[]
+  subtasks: TaskSubtask[]
 }
 
 export type TaskFields = {
   title: string
   description: string
   urgency: Urgency
-  pic_ids: number[]
+  subtasks: SubtaskInput[]
   start_date: string
   due_date: string
   deliverable_url: string

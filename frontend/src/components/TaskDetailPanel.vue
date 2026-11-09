@@ -24,6 +24,7 @@ import {
   type TaskStatus,
 } from '../utils/task'
 import AttachmentSection from './AttachmentSection.vue'
+import { initials } from '../utils/person'
 
 const props = defineProps<{ taskId: string | null; labels: LabelItem[] }>()
 const emit = defineEmits<{ close: []; changed: [message: string]; edit: [task: TaskDetail] }>()
@@ -252,7 +253,9 @@ const buttonSecondary =
           <dt class="text-ink-muted">Diminta oleh</dt>
           <dd>{{ task.requested_by.name }}</dd>
           <dt class="text-ink-muted">PIC</dt>
-          <dd>{{ task.assignees.map((a) => a.name).join(', ') }}</dd>
+          <dd>
+            {{ task.assignees.length ? task.assignees.map((a) => a.name).join(', ') : 'Belum ada PIC' }}
+          </dd>
           <dt class="text-ink-muted">Divisi</dt>
           <dd>{{ task.division.name }}</dd>
           <dt class="text-ink-muted">Tanggal mulai</dt>
@@ -269,6 +272,33 @@ const buttonSecondary =
             <dd>{{ formatDateTime(task.solved_date) }}</dd>
           </template>
         </dl>
+      </section>
+
+      <section>
+        <h4 class="font-semibold">Sub task</h4>
+        <ol v-if="task.subtasks.length" class="mt-2 divide-y divide-line rounded-card border border-line">
+          <li v-for="(s, i) in task.subtasks" :key="s.id" class="p-3">
+            <p class="text-sm font-medium">
+              <span class="text-ink-muted">{{ i + 1 }}.</span> {{ s.title }}
+            </p>
+            <ul v-if="s.assignees.length" class="mt-2 flex flex-wrap gap-1">
+              <li
+                v-for="p in s.assignees"
+                :key="p.id"
+                class="inline-flex items-center gap-1.5 rounded-chip border border-line bg-canvas py-0.5 pr-2 pl-0.5 text-sm"
+              >
+                <span
+                  aria-hidden="true"
+                  class="flex size-6 items-center justify-center rounded-full border border-line bg-surface text-xs font-medium"
+                  >{{ initials(p.name) }}</span
+                >
+                {{ p.name }}<span v-if="p.id === session.user?.id" class="text-ink-muted"> (kamu)</span>
+              </li>
+            </ul>
+            <p v-else class="mt-1 text-sm text-ink-muted">Belum ada PIC.</p>
+          </li>
+        </ol>
+        <p v-else class="mt-2 text-sm text-ink-muted">Task ini tidak punya sub task, jadi tidak punya PIC.</p>
       </section>
 
       <section>

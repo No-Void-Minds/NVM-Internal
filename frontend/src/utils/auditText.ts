@@ -98,6 +98,16 @@ export function describeAudit(e: AuditEntry, divisionName: (id: number) => strin
       return `Mengunggah ${str(after.name)} ke ${e.target?.id ?? ''}`
     case 'attachment_deleted':
       return `Menghapus lampiran dari ${e.target?.id ?? ''}`
+    case 'subtask_added':
+      return `Menambah sub task "${str(after.title)}" ke ${e.target?.id ?? ''}`
+    case 'subtask_removed':
+      return `Menghapus sub task "${str(before.title)}" dari ${e.target?.id ?? ''}`
+    case 'subtask_renamed':
+      return `Mengganti nama sub task "${str(before.title)}" menjadi "${str(after.title)}" di ${e.target?.id ?? ''}`
+    case 'subtask_assignees_changed':
+      return `Mengubah PIC sub task "${str(after.title)}" di ${e.target?.id ?? ''}`
+    case 'subtask_reordered':
+      return `Mengubah urutan sub task ${e.target?.id ?? ''}`
     default:
       return e.action
   }

@@ -39,6 +39,16 @@ export function describeTaskHistory(h: TaskHistoryItem): string {
       const before = h.old_value ?? {}
       return `menghapus ${before.kind === 'brief' ? 'lampiran brief' : 'berkas deliverable'} ${String(before.name ?? '')}`
     }
+    case 'subtask_added':
+      return `menambah sub task "${String(after.title ?? '')}"`
+    case 'subtask_removed':
+      return `menghapus sub task "${String((h.old_value ?? {}).title ?? '')}"`
+    case 'subtask_renamed':
+      return `mengganti nama sub task "${String((h.old_value ?? {}).title ?? '')}" menjadi "${String(after.title ?? '')}"`
+    case 'subtask_assignees_changed':
+      return `mengubah PIC sub task "${String(after.title ?? '')}"`
+    case 'subtask_reordered':
+      return 'mengubah urutan sub task'
     default:
       return h.action
   }

@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import BaseDialog from './BaseDialog.vue'
 import FileDropzone from './FileDropzone.vue'
+import SubtaskEditor from './SubtaskEditor.vue'
+import { draftsFromTask, toPayload, type SubtaskDraft } from '../utils/subtask'
 import { ApiError } from '../api/client'
 import { uploadAttachment } from '../api/attachments'
 import { createTask, setTaskLabels, updateTask, type TaskDetail } from '../api/tasks'
@@ -23,8 +25,8 @@ const isEdit = computed(() => props.task !== null)
 
 const title = ref('')
 const urgency = ref<Urgency>('medium')
-// Urutan sesuai klik: PIC pertama menentukan divisi task (keputusan Sprint 3).
-const picIds = ref<number[]>([])
+// Urutan baris menentukan PIC pertama, dan PIC pertama menentukan divisi task (keputusan Sprint 3 dan 7).
+const subtasks = ref<SubtaskDraft[]>([])
 const labelIds = ref<number[]>([])
 const description = ref('')
 const startDate = ref('')
@@ -45,9 +47,17 @@ const picCandidates = computed(() =>
 const labelOptions = computed(() =>
   props.labels.filter((l) => l.is_active || props.task?.labels.some((t) => t.id === l.id)),
 )
-const firstPicDivision = computed(
-  () => props.users.find((u) => u.id === picIds.value[0])?.division_name ?? null,
-)
+const firstPicDivision = computed(() => {
+  const first = subtasks.value.find((s) => s.picIds.length > 0)?.picIds[0]
+  return props.users.find((u) => u.id === first)?.division_name ?? null
+})
+// PIC lama yang kini nonaktif tidak ada di daftar akun, jadi namanya diambil juga dari detail task.
+const nameById = computed(() => {
+  const m = new Map<number, string>()
+  props.users.forEach((u) => m.set(u.id, u.name))
+  props.task?.subtasks.forEach((s) => s.assignees.forEach((a) => m.set(a.id, a.name)))
+  return m
+})
 
 watch(
   () => props.open,
@@ -57,7 +67,7 @@ watch(
     error.value = null
     title.value = t?.title ?? ''
     urgency.value = t?.urgency ?? 'medium'
-    picIds.value = t?.assignees.map((a) => a.id) ?? []
+    subtasks.value = draftsFromTask(t)
     labelIds.value = t?.labels.map((l) => l.id) ?? []
     description.value = t?.description ?? ''
     startDate.value = t?.start_date ?? ''
@@ -67,10 +77,6 @@ watch(
     pendingError.value = null
   },
 )
-
-function togglePic(id: number) {
-  picIds.value = picIds.value.includes(id) ? picIds.value.filter((p) => p !== id) : [...picIds.value, id]
-}
 
 function toggleLabel(id: number) {
   labelIds.value = labelIds.value.includes(id)
@@ -152,7 +158,8 @@ const submitLabel = computed(() => {
 
 function validate(): string | null {
   if (!title.value.trim()) return 'Judul wajib diisi.'
-  if (picIds.value.length === 0) return 'Pilih minimal satu PIC.'
+  const blank = subtasks.value.findIndex((s) => !s.title.trim())
+  if (blank !== -1) return `Nama sub task nomor ${blank + 1} wajib diisi.`
   if (startDate.value && dueDate.value && dueDate.value < startDate.value) {
     return 'Tenggat tidak boleh lebih awal dari tanggal mulai.'
   }
@@ -174,7 +181,7 @@ async function submit() {
     title: title.value.trim(),
     description: description.value.trim(),
     urgency: urgency.value,
-    pic_ids: picIds.value,
+    subtasks: toPayload(subtasks.value),
     start_date: startDate.value,
     due_date: dueDate.value,
     deliverable_url: deliverableUrl.value.trim(),
@@ -254,30 +261,18 @@ const optionClass =
         </div>
       </fieldset>
 
-      <fieldset>
-        <legend class="text-sm font-medium">PIC (wajib, bisa lebih dari satu)</legend>
-        <ul class="mt-1 divide-y divide-line rounded-card border border-line">
-          <li v-for="u in picCandidates" :key="u.id">
-            <label class="flex min-h-11 cursor-pointer items-center gap-3 px-3 hover:bg-canvas">
-              <input
-                type="checkbox"
-                class="size-5 accent-accent"
-                :checked="picIds.includes(u.id)"
-                @change="togglePic(u.id)"
-              />
-              <span class="min-w-0 flex-1">{{ u.name }}</span>
-              <span class="text-sm text-ink-muted">{{ u.division_name }}</span>
-            </label>
-          </li>
-        </ul>
-        <p class="mt-1 text-sm text-ink-muted" aria-live="polite">
+      <div>
+        <SubtaskEditor v-model="subtasks" :candidates="picCandidates" :names="nameById" />
+        <p class="mt-2 text-sm text-ink-muted" aria-live="polite">
           {{
             firstPicDivision
-              ? `Divisi task: ${firstPicDivision} (mengikuti PIC pertama yang dipilih).`
-              : 'Divisi task mengikuti PIC pertama yang dipilih.'
+              ? `Divisi task: ${firstPicDivision} (mengikuti PIC pertama).`
+              : isEdit
+                ? 'Tanpa PIC, divisi task tidak berubah.'
+                : 'Tanpa PIC, divisi task mengikuti divisimu.'
           }}
         </p>
-      </fieldset>
+      </div>
 
       <div>
         <p class="text-sm font-medium">Lampiran brief</p>
