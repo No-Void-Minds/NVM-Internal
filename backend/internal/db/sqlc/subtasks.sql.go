@@ -7,6 +7,8 @@ package sqlc
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const addSubtaskAssignee = `-- name: AddSubtaskAssignee :exec
@@ -24,6 +26,67 @@ type AddSubtaskAssigneeParams struct {
 func (q *Queries) AddSubtaskAssignee(ctx context.Context, arg AddSubtaskAssigneeParams) error {
 	_, err := q.db.Exec(ctx, addSubtaskAssignee, arg.SubtaskID, arg.UserID, arg.AssignedBy)
 	return err
+}
+
+const checkSubtask = `-- name: CheckSubtask :exec
+UPDATE task_subtasks SET done_at = now(), done_by = $1 WHERE id = $2 AND task_id = $3
+`
+
+type CheckSubtaskParams struct {
+	UserID pgtype.Int8
+	ID     int64
+	TaskID string
+}
+
+func (q *Queries) CheckSubtask(ctx context.Context, arg CheckSubtaskParams) error {
+	_, err := q.db.Exec(ctx, checkSubtask, arg.UserID, arg.ID, arg.TaskID)
+	return err
+}
+
+const countOpenSubtasks = `-- name: CountOpenSubtasks :one
+SELECT count(*) FROM task_subtasks WHERE task_id = $1 AND done_at IS NULL
+`
+
+// Dipakai syarat On Progress ke Ready. Task tanpa sub task menghasilkan 0, jadi tidak tertahan.
+func (q *Queries) CountOpenSubtasks(ctx context.Context, taskID string) (int64, error) {
+	row := q.db.QueryRow(ctx, countOpenSubtasks, taskID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countSubtasksByTask = `-- name: CountSubtasksByTask :many
+SELECT task_id, count(*) AS total, count(done_at) AS done
+FROM task_subtasks
+WHERE task_id = ANY($1::text[])
+GROUP BY task_id
+`
+
+type CountSubtasksByTaskRow struct {
+	TaskID string
+	Total  int64
+	Done   int64
+}
+
+// Satu query untuk semua task di papan, bukan satu per kartu.
+func (q *Queries) CountSubtasksByTask(ctx context.Context, taskIds []string) ([]CountSubtasksByTaskRow, error) {
+	rows, err := q.db.Query(ctx, countSubtasksByTask, taskIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountSubtasksByTaskRow{}
+	for rows.Next() {
+		var i CountSubtasksByTaskRow
+		if err := rows.Scan(&i.TaskID, &i.Total, &i.Done); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const createSubtask = `-- name: CreateSubtask :one
@@ -79,6 +142,44 @@ func (q *Queries) FirstPICDivision(ctx context.Context, taskID string) (int64, e
 	return division_id, err
 }
 
+const getSubtask = `-- name: GetSubtask :one
+SELECT id, title, done_at FROM task_subtasks WHERE id = $1 AND task_id = $2
+`
+
+type GetSubtaskParams struct {
+	ID     int64
+	TaskID string
+}
+
+type GetSubtaskRow struct {
+	ID     int64
+	Title  string
+	DoneAt pgtype.Timestamptz
+}
+
+func (q *Queries) GetSubtask(ctx context.Context, arg GetSubtaskParams) (GetSubtaskRow, error) {
+	row := q.db.QueryRow(ctx, getSubtask, arg.ID, arg.TaskID)
+	var i GetSubtaskRow
+	err := row.Scan(&i.ID, &i.Title, &i.DoneAt)
+	return i, err
+}
+
+const isSubtaskAssignee = `-- name: IsSubtaskAssignee :one
+SELECT EXISTS (SELECT 1 FROM subtask_assignees WHERE subtask_id = $1 AND user_id = $2)
+`
+
+type IsSubtaskAssigneeParams struct {
+	SubtaskID int64
+	UserID    int64
+}
+
+func (q *Queries) IsSubtaskAssignee(ctx context.Context, arg IsSubtaskAssigneeParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isSubtaskAssignee, arg.SubtaskID, arg.UserID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const listSubtaskAssignees = `-- name: ListSubtaskAssignees :many
 SELECT sa.subtask_id, u.id, u.name, u.username
 FROM subtask_assignees sa
@@ -120,17 +221,20 @@ func (q *Queries) ListSubtaskAssignees(ctx context.Context, subtaskIds []int64) 
 }
 
 const listSubtasks = `-- name: ListSubtasks :many
-SELECT id, task_id, title, position
-FROM task_subtasks
-WHERE task_id = ANY($1::text[])
-ORDER BY task_id, position
+SELECT st.id, st.task_id, st.title, st.position, st.done_at, u.name AS done_by_name
+FROM task_subtasks st
+LEFT JOIN users u ON u.id = st.done_by
+WHERE st.task_id = ANY($1::text[])
+ORDER BY st.task_id, st.position
 `
 
 type ListSubtasksRow struct {
-	ID       int64
-	TaskID   string
-	Title    string
-	Position int32
+	ID         int64
+	TaskID     string
+	Title      string
+	Position   int32
+	DoneAt     pgtype.Timestamptz
+	DoneByName pgtype.Text
 }
 
 func (q *Queries) ListSubtasks(ctx context.Context, taskIds []string) ([]ListSubtasksRow, error) {
@@ -147,6 +251,8 @@ func (q *Queries) ListSubtasks(ctx context.Context, taskIds []string) ([]ListSub
 			&i.TaskID,
 			&i.Title,
 			&i.Position,
+			&i.DoneAt,
+			&i.DoneByName,
 		); err != nil {
 			return nil, err
 		}
@@ -169,6 +275,20 @@ type RemoveSubtaskAssigneesParams struct {
 
 func (q *Queries) RemoveSubtaskAssignees(ctx context.Context, arg RemoveSubtaskAssigneesParams) error {
 	_, err := q.db.Exec(ctx, removeSubtaskAssignees, arg.SubtaskID, arg.UserIds)
+	return err
+}
+
+const uncheckSubtask = `-- name: UncheckSubtask :exec
+UPDATE task_subtasks SET done_at = NULL, done_by = NULL WHERE id = $1 AND task_id = $2
+`
+
+type UncheckSubtaskParams struct {
+	ID     int64
+	TaskID string
+}
+
+func (q *Queries) UncheckSubtask(ctx context.Context, arg UncheckSubtaskParams) error {
+	_, err := q.db.Exec(ctx, uncheckSubtask, arg.ID, arg.TaskID)
 	return err
 }
 

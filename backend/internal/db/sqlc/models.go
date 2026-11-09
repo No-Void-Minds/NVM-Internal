@@ -265,6 +265,8 @@ type TaskSubtask struct {
 	Position  int32
 	CreatedAt pgtype.Timestamptz
 	UpdatedAt pgtype.Timestamptz
+	DoneAt    pgtype.Timestamptz
+	DoneBy    pgtype.Int8
 }
 
 type User struct {

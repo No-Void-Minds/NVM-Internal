@@ -37,6 +37,13 @@ const error = ref<string | null>(null)
 // Berkas brief ditahan di browser sampai task tersimpan, karena unggahan butuh ID task.
 const pending = ref<File[]>([])
 const pendingError = ref<string | null>(null)
+// Detail tambahan terbuka otomatis saat berkas ditambahkan, supaya screenshot yang ditempel dengan
+// Ctrl+V tidak masuk ke daftar yang tersembunyi.
+const detailsOpen = ref(false)
+function onDetailsToggle(e: Event) {
+  detailsOpen.value = (e.target as HTMLDetailsElement).open
+}
+
 const progress = ref<{ index: number; total: number; fraction: number } | null>(null)
 const existingBriefs = computed(() => props.task?.attachments.filter((a) => a.kind === 'brief').length ?? 0)
 
@@ -75,6 +82,7 @@ watch(
     deliverableUrl.value = t?.deliverable_url ?? ''
     pending.value = []
     pendingError.value = null
+    detailsOpen.value = isEdit.value
   },
 )
 
@@ -85,6 +93,7 @@ function toggleLabel(id: number) {
 }
 
 function addPending(files: File[]) {
+  if (files.length) detailsOpen.value = true
   const problems: string[] = []
   for (const f of files) {
     const problem = precheck(f)
@@ -275,58 +284,58 @@ const optionClass =
       </div>
 
       <div>
-        <p class="text-sm font-medium">Lampiran brief</p>
-        <p v-if="existingBriefs" class="mt-1 text-sm text-ink-muted">
-          Sudah ada {{ existingBriefs }} berkas. Unduh atau hapus dari detail task.
-        </p>
-        <FileDropzone class="mt-1" @files="addPending" />
-        <!-- Ctrl+V tidak ada di ponsel, jadi petunjuknya hanya untuk perangkat dengan mouse. -->
-        <p class="mt-1 hidden text-sm text-ink-muted pointer-fine:block">
-          Screenshot juga bisa ditempel dengan Ctrl+V dari kolom mana pun di form ini.
-        </p>
-        <p v-if="pendingError" role="alert" class="mt-1 text-sm text-danger">{{ pendingError }}</p>
-        <ul v-if="pending.length" class="mt-2 divide-y divide-line rounded-card border border-line">
-          <li
-            v-for="(f, i) in pending"
-            :key="`${f.name}-${f.size}-${f.lastModified}-${i}`"
-            class="flex items-center gap-3 py-1 pr-1 pl-3 text-sm"
-          >
-            <span class="min-w-0 flex-1 truncate" :title="f.name">{{ f.name }}</span>
-            <span class="shrink-0 text-ink-muted">{{ formatBytes(f.size) }}</span>
-            <button
-              type="button"
-              class="inline-flex size-11 shrink-0 items-center justify-center rounded-card hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-              :aria-label="`Batalkan ${f.name}`"
-              @click="removePending(i)"
-            >
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                class="size-5"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.75"
-                stroke-linecap="round"
-              >
-                <path d="M6 6l12 12M18 6 6 18" />
-              </svg>
-            </button>
-          </li>
-        </ul>
+        <label for="task-description" class="block text-sm font-medium">Deskripsi</label>
+        <textarea
+          id="task-description"
+          v-model="description"
+          rows="4"
+          maxlength="5000"
+          class="mt-1 block w-full rounded-card border border-line bg-surface px-3 py-2"
+        />
       </div>
 
-      <details class="rounded-card border border-line" :open="isEdit">
+      <details class="rounded-card border border-line" :open="detailsOpen" @toggle="onDetailsToggle">
         <summary class="flex min-h-11 cursor-pointer items-center px-3 font-medium">Detail tambahan</summary>
         <div class="space-y-4 border-t border-line p-3">
           <div>
-            <label for="task-description" class="block text-sm font-medium">Deskripsi</label>
-            <textarea
-              id="task-description"
-              v-model="description"
-              rows="4"
-              maxlength="5000"
-              class="mt-1 block w-full rounded-card border border-line bg-surface px-3 py-2"
-            />
+            <p class="text-sm font-medium">Lampiran brief</p>
+            <p v-if="existingBriefs" class="mt-1 text-sm text-ink-muted">
+              Sudah ada {{ existingBriefs }} berkas. Unduh atau hapus dari detail task.
+            </p>
+            <FileDropzone class="mt-1" @files="addPending" />
+            <!-- Ctrl+V tidak ada di ponsel, jadi petunjuknya hanya untuk perangkat dengan mouse. -->
+            <p class="mt-1 hidden text-sm text-ink-muted pointer-fine:block">
+              Screenshot juga bisa ditempel dengan Ctrl+V dari kolom mana pun di form ini.
+            </p>
+            <p v-if="pendingError" role="alert" class="mt-1 text-sm text-danger">{{ pendingError }}</p>
+            <ul v-if="pending.length" class="mt-2 divide-y divide-line rounded-card border border-line">
+              <li
+                v-for="(f, i) in pending"
+                :key="`${f.name}-${f.size}-${f.lastModified}-${i}`"
+                class="flex items-center gap-3 py-1 pr-1 pl-3 text-sm"
+              >
+                <span class="min-w-0 flex-1 truncate" :title="f.name">{{ f.name }}</span>
+                <span class="shrink-0 text-ink-muted">{{ formatBytes(f.size) }}</span>
+                <button
+                  type="button"
+                  class="inline-flex size-11 shrink-0 items-center justify-center rounded-card hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                  :aria-label="`Batalkan ${f.name}`"
+                  @click="removePending(i)"
+                >
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    class="size-5"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.75"
+                    stroke-linecap="round"
+                  >
+                    <path d="M6 6l12 12M18 6 6 18" />
+                  </svg>
+                </button>
+              </li>
+            </ul>
           </div>
 
           <fieldset v-if="labelOptions.length > 0">

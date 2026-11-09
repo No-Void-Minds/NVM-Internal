@@ -39,22 +39,28 @@ type subtaskRequest struct {
 }
 
 type taskSummary struct {
-	ID         string       `json:"id"`
-	Title      string       `json:"title"`
-	Status     string       `json:"status"`
-	Urgency    string       `json:"urgency"`
-	Division   idName       `json:"division"`
-	StartDate  *string      `json:"start_date"`
-	DueDate    *string      `json:"due_date"`
-	SolvedDate *time.Time   `json:"solved_date"`
-	Version    int32        `json:"version"`
-	Assignees  []taskPerson `json:"assignees"`
-	Labels     []taskLabel  `json:"labels"`
+	ID           string       `json:"id"`
+	Title        string       `json:"title"`
+	Status       string       `json:"status"`
+	Urgency      string       `json:"urgency"`
+	Division     idName       `json:"division"`
+	StartDate    *string      `json:"start_date"`
+	DueDate      *string      `json:"due_date"`
+	SolvedDate   *time.Time   `json:"solved_date"`
+	Version      int32        `json:"version"`
+	Assignees    []taskPerson `json:"assignees"`
+	Labels       []taskLabel  `json:"labels"`
+	SubtaskTotal int          `json:"subtask_total"`
+	SubtaskDone  int          `json:"subtask_done"`
 }
 
 type subtaskItem struct {
 	ID        int64        `json:"id"`
 	Title     string       `json:"title"`
+	Done      bool         `json:"done"`
+	DoneAt    *time.Time   `json:"done_at"`
+	DoneBy    string       `json:"done_by"`
+	CanCheck  bool         `json:"can_check"`
 	Assignees []taskPerson `json:"assignees"`
 }
 
@@ -172,13 +178,25 @@ func (s *Server) getTask(c *gin.Context) {
 		})
 	}
 	out.Subtasks = make([]subtaskItem, 0, len(d.Subtasks))
+	doneCount := 0
 	for _, st := range d.Subtasks {
-		item := subtaskItem{ID: st.ID, Title: st.Title, Assignees: make([]taskPerson, 0, len(st.Assignees))}
+		item := subtaskItem{
+			ID: st.ID, Title: st.Title, Done: st.DoneAt.Valid, DoneAt: timePtr(st.DoneAt), DoneBy: st.DoneBy,
+			Assignees: make([]taskPerson, 0, len(st.Assignees)),
+		}
 		for _, a := range st.Assignees {
 			item.Assignees = append(item.Assignees, taskPerson{ID: a.ID, Name: a.Name, Username: a.Username})
+			// can_check dihitung di backend dengan aturan yang sama dengan SetSubtaskDone, supaya frontend tidak menebak.
+			if a.ID == actor.ID && task.Status(t.Status) == task.OnProgress {
+				item.CanCheck = true
+			}
+		}
+		if item.Done {
+			doneCount++
 		}
 		out.Subtasks = append(out.Subtasks, item)
 	}
+	out.SubtaskTotal, out.SubtaskDone = len(out.Subtasks), doneCount
 	c.JSON(http.StatusOK, gin.H{"task": out})
 }
 

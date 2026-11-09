@@ -115,6 +115,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	app.POST("/tasks/:id/attachments", s.uploadAttachment)
 	app.GET("/tasks/:id/attachments/:attachmentId", s.downloadAttachment)
 	app.DELETE("/tasks/:id/attachments/:attachmentId", s.deleteAttachment)
+	app.PUT("/tasks/:id/subtasks/:subtaskId/done", s.setSubtaskDone)
 
 	return r, nil
 }

@@ -163,9 +163,11 @@ func (s *Service) Get(ctx context.Context, id string) (Detail, error) {
 }
 
 type Summary struct {
-	Task      sqlc.ListTasksRow
-	Assignees []sqlc.ListTaskAssigneesRow
-	Labels    []sqlc.ListTaskLabelsRow
+	Task         sqlc.ListTasksRow
+	Assignees    []sqlc.ListTaskAssigneesRow
+	Labels       []sqlc.ListTaskLabelsRow
+	SubtaskTotal int
+	SubtaskDone  int
 }
 
 // List mengambil task yang belum dihapus. assigneeID diisi untuk tampilan "Task saya".
@@ -208,6 +210,14 @@ func attachPeopleAndLabels(ctx context.Context, q *sqlc.Queries, rows []sqlc.Lis
 	}
 	for _, l := range labels {
 		byTask[l.TaskID].Labels = append(byTask[l.TaskID].Labels, l)
+	}
+	counts, err := q.CountSubtasksByTask(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range counts {
+		byTask[c.TaskID].SubtaskTotal = int(c.Total)
+		byTask[c.TaskID].SubtaskDone = int(c.Done)
 	}
 	return out, nil
 }

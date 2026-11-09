@@ -3,12 +3,12 @@ package task
 import (
 	"context"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgtype"
+	"nvm-internal/internal/apperr"
+	"nvm-internal/internal/db/sqlc"
 	"slices"
 	"strings"
 	"unicode/utf8"
-
-	"nvm-internal/internal/apperr"
-	"nvm-internal/internal/db/sqlc"
 )
 
 // Batas ini mencegah request yang tidak masuk akal. Angkanya bisa dinaikkan kalau Manajer butuh lebih.
@@ -144,6 +144,8 @@ func loadSubtasks(ctx context.Context, q *sqlc.Queries, taskID string) ([]subtas
 type SubtaskView struct {
 	ID        int64
 	Title     string
+	DoneAt    pgtype.Timestamptz
+	DoneBy    string
 	Assignees []sqlc.ListSubtaskAssigneesRow
 }
 
@@ -156,7 +158,10 @@ func loadSubtaskViews(ctx context.Context, q *sqlc.Queries, taskID string) ([]Su
 	ids := make([]int64, len(rows))
 	index := make(map[int64]int, len(rows))
 	for i, r := range rows {
-		out[i] = SubtaskView{ID: r.ID, Title: r.Title, Assignees: []sqlc.ListSubtaskAssigneesRow{}}
+		out[i] = SubtaskView{
+			ID: r.ID, Title: r.Title, DoneAt: r.DoneAt, DoneBy: r.DoneByName.String,
+			Assignees: []sqlc.ListSubtaskAssigneesRow{},
+		}
 		ids[i] = r.ID
 		index[r.ID] = i
 	}

@@ -105,16 +105,18 @@ func queryID(c *gin.Context, key string) (*int64, bool) {
 func summaryOf(r task.Summary) taskSummary {
 	t := r.Task
 	return taskSummary{
-		ID:         t.ID,
-		Title:      t.Title,
-		Status:     string(t.Status),
-		Urgency:    string(t.Urgency),
-		Division:   idName{ID: t.DivisionID, Name: t.DivisionName},
-		StartDate:  dateString(t.StartDate),
-		DueDate:    dateString(t.DueDate),
-		SolvedDate: timePtr(t.SolvedDate),
-		Version:    t.Version,
-		Assignees:  people(r.Assignees),
-		Labels:     labelsOf(r.Labels),
+		ID:           t.ID,
+		Title:        t.Title,
+		Status:       string(t.Status),
+		Urgency:      string(t.Urgency),
+		Division:     idName{ID: t.DivisionID, Name: t.DivisionName},
+		StartDate:    dateString(t.StartDate),
+		DueDate:      dateString(t.DueDate),
+		SolvedDate:   timePtr(t.SolvedDate),
+		Version:      t.Version,
+		Assignees:    people(r.Assignees),
+		Labels:       labelsOf(r.Labels),
+		SubtaskTotal: r.SubtaskTotal,
+		SubtaskDone:  r.SubtaskDone,
 	}
 }

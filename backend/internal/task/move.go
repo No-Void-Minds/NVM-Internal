@@ -3,7 +3,7 @@ package task
 import (
 	"context"
 	"errors"
-
+	"fmt"
 	"github.com/jackc/pgx/v5"
 
 	"nvm-internal/internal/apperr"
@@ -50,6 +50,17 @@ func (s *Service) Move(ctx context.Context, actor Actor, id string, version int3
 			return apperr.Invalid("Catatan revisi maksimal 500 karakter.")
 		case err != nil:
 			return err
+		}
+		// Semua sub task harus tercentang sebelum Ready. Dicek di dalam transaksi yang sudah mengunci task,
+		// jadi hitungannya tidak bisa berubah di antara pengecekan dan perpindahan.
+		if from == OnProgress && to == Ready {
+			open, err := q.CountOpenSubtasks(ctx, id)
+			if err != nil {
+				return err
+			}
+			if open > 0 {
+				return apperr.Invalid(fmt.Sprintf("Masih %d sub task yang belum dicentang. Centang semuanya dulu sebelum menandai Ready.", open))
+			}
 		}
 
 		row, err := q.SetTaskStatus(ctx, sqlc.SetTaskStatusParams{ID: id, Status: sqlc.TaskStatus(to)})
