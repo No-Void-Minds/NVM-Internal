@@ -6,9 +6,11 @@ import {
   deleteTask,
   getTask,
   moveTask,
+  setSubtaskDone,
   setTaskDeliverable,
   setTaskLabels,
   type TaskDetail,
+  type TaskSubtask,
 } from '../api/tasks'
 import type { LabelItem } from '../api/labels'
 import { useSessionStore } from '../stores/session'
@@ -25,6 +27,7 @@ import {
 } from '../utils/task'
 import AttachmentSection from './AttachmentSection.vue'
 import { initials } from '../utils/person'
+import { readyBlock } from '../utils/subtaskGate'
 
 const props = defineProps<{ taskId: string | null; labels: LabelItem[] }>()
 const emit = defineEmits<{ close: []; changed: [message: string]; edit: [task: TaskDetail] }>()
@@ -110,12 +113,51 @@ const moveLabel: Record<string, string> = {
 // Perpindahan maju (menuju selesai) jadi tombol utama; mundur (revisi, buka kembali) jadi tombol biasa.
 const forward = new Set(['requested>on_progress', 'on_progress>ready', 'ready>completed'])
 
+const readyReason = computed(() => (task.value ? readyBlock(task.value) : null))
+
 const moves = computed(() =>
   (task.value?.can.move_to ?? []).map((to) => {
     const key = `${task.value?.status}>${to}`
-    return { to, label: moveLabel[key] ?? statusLabel[to], primary: forward.has(key) }
+    return {
+      to,
+      label: moveLabel[key] ?? statusLabel[to],
+      primary: forward.has(key),
+      blocked: to === 'ready' && readyReason.value !== null,
+    }
   }),
 )
+
+const checking = ref<number | null>(null)
+const rowErrors = ref<Record<number, string>>({})
+const announce = ref('')
+
+// Hasil dari server yang dipercaya: kotak centang dikembalikan ke keadaan semula kalau gagal,
+// karena DOM tidak ikut berubah sendiri bila nilai model tidak berubah.
+async function toggleSubtask(s: TaskSubtask, e: Event) {
+  const t = task.value
+  const input = e.target as HTMLInputElement
+  if (!t || checking.value !== null || busy.value) {
+    input.checked = s.done
+    return
+  }
+  const next = input.checked
+  checking.value = s.id
+  rowErrors.value = { ...rowErrors.value, [s.id]: '' }
+  try {
+    await setSubtaskDone(t.id, s.id, next)
+    const verb = next ? 'dicentang' : 'dilepas centangnya'
+    announce.value = `Sub task "${s.title}" ${verb}.`
+    emit('changed', `${t.id}: sub task "${s.title}" ${verb}.`)
+    await load(true)
+  } catch (err) {
+    input.checked = s.done
+    rowErrors.value = { ...rowErrors.value, [s.id]: messageOf(err) }
+    // Status task mungkin sudah berubah oleh orang lain, jadi muat ulang supaya keadaannya terbaca.
+    if (err instanceof ApiError && err.status !== 500) await load(true)
+  } finally {
+    checking.value = null
+  }
+}
 
 const revisionOpen = ref(false)
 const revisionNote = ref('')
@@ -124,6 +166,10 @@ const revisionError = ref<string | null>(null)
 function startMove(to: TaskStatus) {
   const t = task.value
   if (!t) return
+  if (to === 'ready' && readyReason.value) {
+    actionError.value = readyReason.value
+    return
+  }
   if (t.status === 'ready' && to === 'on_progress') {
     revisionNote.value = ''
     revisionError.value = null
@@ -275,13 +321,49 @@ const buttonSecondary =
       </section>
 
       <section>
-        <h4 class="font-semibold">Sub task</h4>
+        <h4 class="font-semibold">
+          Sub task
+          <span v-if="task.subtasks.length" class="font-normal text-ink-muted">
+            ({{ task.subtask_done }} dari {{ task.subtask_total }} tercentang)
+          </span>
+        </h4>
+        <p v-if="task.subtasks.length && task.status !== 'on_progress'" class="mt-1 text-sm text-ink-muted">
+          Sub task hanya bisa dicentang saat task berstatus On Progress.
+        </p>
+        <p v-else-if="readyReason" class="mt-1 text-sm text-ink-muted">
+          Semua sub task harus tercentang sebelum task bisa ditandai Ready. Yang bisa mencentang hanya PIC sub
+          task itu.
+        </p>
+        <p class="sr-only" role="status">{{ announce }}</p>
         <ol v-if="task.subtasks.length" class="mt-2 divide-y divide-line rounded-card border border-line">
           <li v-for="(s, i) in task.subtasks" :key="s.id" class="p-3">
-            <p class="text-sm font-medium">
-              <span class="text-ink-muted">{{ i + 1 }}.</span> {{ s.title }}
+            <label
+              class="flex min-h-11 items-start gap-3 rounded-card has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent"
+              :class="s.can_check ? 'cursor-pointer' : 'cursor-default'"
+            >
+              <input
+                type="checkbox"
+                class="mt-0.5 size-5 shrink-0 accent-accent"
+                :checked="s.done"
+                :disabled="!s.can_check"
+                :aria-busy="checking === s.id"
+                @change="toggleSubtask(s, $event)"
+              />
+              <span class="min-w-0 text-sm font-medium break-words">
+                <span class="text-ink-muted">{{ i + 1 }}.</span> {{ s.title }}
+              </span>
+            </label>
+            <p v-if="s.done" class="ml-8 text-sm text-ink-muted">
+              Dicentang oleh {{ s.done_by }}{{ s.done_at ? `, ${formatDateTime(s.done_at)}` : '' }}.
             </p>
-            <ul v-if="s.assignees.length" class="mt-2 flex flex-wrap gap-1">
+            <p
+              v-if="rowErrors[s.id]"
+              role="alert"
+              class="mt-1 ml-8 rounded-card bg-danger-bg p-2 text-sm text-danger"
+            >
+              {{ rowErrors[s.id] }}
+            </p>
+            <ul v-if="s.assignees.length" class="mt-2 ml-8 flex flex-wrap gap-1">
               <li
                 v-for="p in s.assignees"
                 :key="p.id"
@@ -295,7 +377,7 @@ const buttonSecondary =
                 {{ p.name }}<span v-if="p.id === session.user?.id" class="text-ink-muted"> (kamu)</span>
               </li>
             </ul>
-            <p v-else class="mt-1 text-sm text-ink-muted">Belum ada PIC.</p>
+            <p v-else class="mt-1 ml-8 text-sm text-ink-muted">Belum ada PIC.</p>
           </li>
         </ol>
         <p v-else class="mt-2 text-sm text-ink-muted">Task ini tidak punya sub task, jadi tidak punya PIC.</p>
@@ -432,6 +514,13 @@ const buttonSecondary =
       #footer
     >
       <div class="flex w-full flex-wrap justify-end gap-2">
+        <p
+          v-if="readyReason && moves.some((m) => m.blocked)"
+          id="ready-hint"
+          class="w-full text-right text-sm text-ink-muted"
+        >
+          {{ readyReason }}
+        </p>
         <button
           v-if="task.can.delete"
           type="button"
@@ -447,8 +536,10 @@ const buttonSecondary =
           v-for="m in moves"
           :key="m.to"
           type="button"
-          :class="m.primary ? buttonPrimary : buttonSecondary"
+          :class="[m.primary ? buttonPrimary : buttonSecondary, m.blocked ? 'opacity-60' : '']"
           :disabled="busy"
+          :aria-disabled="m.blocked"
+          :aria-describedby="m.blocked ? 'ready-hint' : undefined"
           @click="startMove(m.to)"
         >
           {{ m.label }}

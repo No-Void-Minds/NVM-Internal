@@ -5,6 +5,7 @@ import { ApiError } from '../api/client'
 import { moveTask } from '../api/tasks'
 import type { BoardTask } from '../api/board'
 import { staleMoveMessage, statusLabel, type TaskStatus } from '../utils/task'
+import { readyBlock } from '../utils/subtaskGate'
 // initialTarget diisi saat kartu dilepas di kolom revisi, supaya tujuan sudah terpilih.
 const props = defineProps<{ task: BoardTask | null; initialTarget?: TaskStatus | null }>()
 
@@ -42,6 +43,11 @@ async function submit() {
   if (!t || busy.value) return
   if (!target.value) {
     error.value = 'Pilih status tujuan.'
+    return
+  }
+  const block = target.value === 'ready' ? readyBlock(t) : null
+  if (block) {
+    error.value = block
     return
   }
   if (isRevision.value && !note.value.trim()) {

@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { BoardTask } from '../api/board'
 import { formatDay, formatMoment, isOverdue, statusLabel, urgencyClass, urgencyLabel } from '../utils/task'
+import { readyBlock } from '../utils/subtaskGate'
 
 const props = defineProps<{ task: BoardTask }>()
 defineEmits<{ open: [id: string]; move: [task: BoardTask] }>()
@@ -9,6 +10,11 @@ defineEmits<{ open: [id: string]; move: [task: BoardTask] }>()
 const overdue = computed(() => isOverdue(props.task.due_date, props.task.status))
 const moveLabel = computed(() =>
   props.task.move_to.length === 1 ? `Pindahkan ke ${statusLabel[props.task.move_to[0]]}` : 'Pindahkan',
+)
+// Selama ada sub task belum tercentang, tombol di kartu membuka detail (tempat mencentang), bukan dialog pindah.
+const blocked = computed(() => readyBlock(props.task) !== null && props.task.move_to.includes('ready'))
+const percent = computed(() =>
+  props.task.subtask_total ? Math.round((props.task.subtask_done / props.task.subtask_total) * 100) : 0,
 )
 
 function initials(name: string): string {
@@ -53,6 +59,16 @@ function initials(name: string): string {
       </span>
     </div>
 
+    <div v-if="task.subtask_total > 0" class="mt-2">
+      <p class="text-sm text-ink-muted">
+        <span class="font-mono">{{ task.subtask_done }}/{{ task.subtask_total }}</span> sub task tercentang
+      </p>
+      <!-- Dekoratif: angka di atasnya yang dibaca pembaca layar. -->
+      <div class="mt-1 h-1.5 rounded-full border border-line bg-canvas" aria-hidden="true">
+        <div class="h-full rounded-full bg-accent" :style="{ width: `${percent}%` }" />
+      </div>
+    </div>
+
     <div class="mt-3 flex items-center justify-between gap-2 border-t border-line pt-2">
       <ul class="flex -space-x-1.5">
         <li
@@ -82,9 +98,9 @@ function initials(name: string): string {
       v-if="task.move_to.length"
       type="button"
       class="relative z-10 mt-2 inline-flex min-h-11 w-full items-center justify-center rounded-card border border-line text-sm font-medium hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent active:translate-y-px"
-      @click="$emit('move', task)"
+      @click="blocked ? $emit('open', task.id) : $emit('move', task)"
     >
-      {{ moveLabel }}<span class="sr-only"> {{ task.id }}</span>
+      {{ blocked ? 'Lihat sub task' : moveLabel }}<span class="sr-only"> {{ task.id }}</span>
     </button>
   </article>
 </template>

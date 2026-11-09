@@ -47,6 +47,10 @@ export function describeTaskHistory(h: TaskHistoryItem): string {
       return `mengganti nama sub task "${String((h.old_value ?? {}).title ?? '')}" menjadi "${String(after.title ?? '')}"`
     case 'subtask_assignees_changed':
       return `mengubah PIC sub task "${String(after.title ?? '')}"`
+    case 'subtask_checked':
+      return `mencentang sub task "${String(after.title ?? '')}"`
+    case 'subtask_unchecked':
+      return `melepas centang sub task "${String(after.title ?? '')}"`
     case 'subtask_reordered':
       return 'mengubah urutan sub task'
     default:

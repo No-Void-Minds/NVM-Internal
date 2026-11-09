@@ -4,7 +4,16 @@ import type { TaskAttachment } from './attachments'
 
 export type TaskPerson = { id: number; name: string; username: string }
 export type TaskLabel = { id: number; name: string; color: string; is_active: boolean }
-export type TaskSubtask = { id: number; title: string; assignees: TaskPerson[] }
+export type TaskSubtask = {
+  id: number
+  title: string
+  done: boolean
+  done_at: string | null
+  done_by: string
+  // Dihitung backend dengan aturan yang sama dengan penolakan 403, jadi UI tidak menebak siapa yang boleh.
+  can_check: boolean
+  assignees: TaskPerson[]
+}
 // id kosong berarti sub task baru; backend memakainya untuk membedakan sub task lama yang hanya diubah.
 export type SubtaskInput = { id?: number; title: string; pic_ids: number[] }
 
@@ -20,6 +29,8 @@ export type TaskSummary = {
   version: number
   assignees: TaskPerson[]
   labels: TaskLabel[]
+  subtask_total: number
+  subtask_done: number
 }
 
 export type TaskCan = {
@@ -97,4 +108,8 @@ export function moveTask(id: string, version: number, to: TaskStatus, note = '')
 
 export function deleteTask(id: string, version: number) {
   return request<void>('DELETE', `/tasks/${id}?version=${version}`)
+}
+
+export function setSubtaskDone(taskId: string, subtaskId: number, done: boolean) {
+  return apiPut<void>(`/tasks/${taskId}/subtasks/${subtaskId}/done`, { done })
 }

@@ -30,6 +30,7 @@ import {
 } from '../utils/task'
 import type { DueFilter } from '../api/board'
 import MoveDialog from '../components/MoveDialog.vue'
+import { readyBlock } from '../utils/subtaskGate'
 
 const route = useRoute()
 const router = useRouter()
@@ -202,6 +203,11 @@ async function onDrop(e: DragEvent, status: TaskStatus) {
       kind: 'error',
       text: `${t.id} tidak bisa dipindahkan ke ${statusLabel[status]}. Tujuan yang boleh: ${allowed}.`,
     }
+    return
+  }
+  const block = status === 'ready' ? readyBlock(t) : null
+  if (block) {
+    notice.value = { kind: 'error', text: `${t.id}: ${block}` }
     return
   }
   // Revisi wajib catatan, jadi tetap lewat dialog dengan tujuan sudah terpilih.

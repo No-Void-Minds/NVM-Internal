@@ -106,6 +106,10 @@ export function describeAudit(e: AuditEntry, divisionName: (id: number) => strin
       return `Mengganti nama sub task "${str(before.title)}" menjadi "${str(after.title)}" di ${e.target?.id ?? ''}`
     case 'subtask_assignees_changed':
       return `Mengubah PIC sub task "${str(after.title)}" di ${e.target?.id ?? ''}`
+    case 'subtask_checked':
+      return `Mencentang sub task "${str(after.title)}" di ${e.target?.id ?? ''}`
+    case 'subtask_unchecked':
+      return `Melepas centang sub task "${str(after.title)}" di ${e.target?.id ?? ''}`
     case 'subtask_reordered':
       return `Mengubah urutan sub task ${e.target?.id ?? ''}`
     default:
