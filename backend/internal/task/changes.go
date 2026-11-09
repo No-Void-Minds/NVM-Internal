@@ -21,7 +21,7 @@ type UpdateInput struct {
 	Title          string
 	Description    string
 	Urgency        string
-	PICIDs         []int64
+	Subtasks       []SubtaskInput
 	StartDate      string
 	DueDate        string
 	DeliverableURL string
@@ -55,7 +55,9 @@ func canContribute(ctx context.Context, q *sqlc.Queries, actor Actor, id string)
 	}
 }
 
-// Update mengubah atribut task dan daftar PIC. Hanya Manajer; divisi ikut PIC pertama yang baru.
+// Update mengubah atribut task dan daftar sub task (beserta PIC-nya) sekaligus. Hanya Manajer.
+// Daftar sub task yang dikirim menggantikan daftar lama secara utuh. Divisi ikut PIC pertama
+// sesudah perubahan; tanpa PIC sama sekali, divisi dibiarkan seperti sebelumnya.
 func (s *Service) Update(ctx context.Context, actor Actor, id string, in UpdateInput) (int32, error) {
 	if actor.Role != RoleManager {
 		return 0, ErrForbidden
@@ -64,9 +66,9 @@ func (s *Service) Update(ctx context.Context, actor Actor, id string, in UpdateI
 	if err != nil {
 		return 0, err
 	}
-	pics := uniqueIDs(in.PICIDs)
-	if len(pics) == 0 {
-		return 0, apperr.Invalid("Pilih minimal satu PIC.")
+	subs, picIDs, err := cleanSubtasks(in.Subtasks)
+	if err != nil {
+		return 0, err
 	}
 
 	version := in.Version
@@ -76,13 +78,28 @@ func (s *Service) Update(ctx context.Context, actor Actor, id string, in UpdateI
 		if err != nil {
 			return err
 		}
-		divisionOf, err := eligiblePICs(ctx, q, pics)
+		if _, err := eligiblePICs(ctx, q, picIDs); err != nil {
+			return err
+		}
+		oldSubs, err := loadSubtasks(ctx, q, id)
 		if err != nil {
 			return err
 		}
-		oldPICs, err := q.ListAssigneeIDs(ctx, id)
-		if err != nil {
-			return err
+
+		// Divisi dibaca dari database setelah sub task ditulis, bukan dari urutan form, supaya
+		// "PIC pertama" selalu sama dengan urutan pemasangan yang tersimpan.
+		division := cur.DivisionID
+		subChanged := subtasksChanged(oldSubs, subs)
+		var newSubs []subtaskSnapshot
+		if subChanged {
+			if newSubs, err = syncSubtasks(ctx, q, actor.ID, id, oldSubs, subs); err != nil {
+				return err
+			}
+			if d, err := q.FirstPICDivision(ctx, id); err == nil {
+				division = d
+			} else if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
 		}
 
 		before, after := map[string]any{}, map[string]any{}
@@ -97,31 +114,20 @@ func (s *Service) Update(ctx context.Context, actor Actor, id string, in UpdateI
 		diff("start_date", dateOf(cur.StartDate), dateOf(f.startDate))
 		diff("due_date", dateOf(cur.DueDate), dateOf(f.dueDate))
 		diff("deliverable_url", cur.DeliverableUrl.String, f.deliverableURL.String)
-		diff("division_id", cur.DivisionID, divisionOf[pics[0]])
-		picsChanged := !slices.Equal(oldPICs, pics)
-		if picsChanged {
-			before["assignee_ids"], after["assignee_ids"] = oldPICs, pics
+		diff("division_id", cur.DivisionID, division)
+		if subChanged {
+			before["subtasks"], after["subtasks"] = oldSubs, newSubs
 		}
 		if len(after) == 0 {
 			return nil
 		}
 
-		if picsChanged {
-			if err := q.DeleteTaskAssignees(ctx, id); err != nil {
-				return err
-			}
-			for _, pic := range pics {
-				if err := q.AddTaskAssignee(ctx, sqlc.AddTaskAssigneeParams{TaskID: id, UserID: pic, AssignedBy: actor.ID}); err != nil {
-					return err
-				}
-			}
-		}
 		version, err = q.UpdateTaskFields(ctx, sqlc.UpdateTaskFieldsParams{
 			ID:             id,
 			Title:          f.title,
 			Description:    f.description,
 			Urgency:        f.urgency,
-			DivisionID:     divisionOf[pics[0]],
+			DivisionID:     division,
 			StartDate:      f.startDate,
 			DueDate:        f.dueDate,
 			DeliverableUrl: f.deliverableURL,

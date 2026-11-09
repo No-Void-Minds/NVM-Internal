@@ -22,15 +22,6 @@ func (q *Queries) BumpTaskVersion(ctx context.Context, id string) (int32, error)
 	return version, err
 }
 
-const deleteTaskAssignees = `-- name: DeleteTaskAssignees :exec
-DELETE FROM task_assignees WHERE task_id = $1
-`
-
-func (q *Queries) DeleteTaskAssignees(ctx context.Context, taskID string) error {
-	_, err := q.db.Exec(ctx, deleteTaskAssignees, taskID)
-	return err
-}
-
 const deleteTaskLabels = `-- name: DeleteTaskLabels :exec
 DELETE FROM task_labels WHERE task_id = $1
 `
@@ -79,7 +70,11 @@ func (q *Queries) GetTaskForUpdate(ctx context.Context, id string) (GetTaskForUp
 }
 
 const isTaskAssignee = `-- name: IsTaskAssignee :one
-SELECT EXISTS (SELECT 1 FROM task_assignees WHERE task_id = $1 AND user_id = $2)
+SELECT EXISTS (
+  SELECT 1 FROM task_subtasks st
+  JOIN subtask_assignees sa ON sa.subtask_id = st.id
+  WHERE st.task_id = $1 AND sa.user_id = $2
+)
 `
 
 type IsTaskAssigneeParams struct {
@@ -87,6 +82,7 @@ type IsTaskAssigneeParams struct {
 	UserID int64
 }
 
+// Nama dan parameternya dipertahankan supaya pemanggil tidak berubah: PIC task berarti PIC di salah satu sub task-nya.
 func (q *Queries) IsTaskAssignee(ctx context.Context, arg IsTaskAssigneeParams) (bool, error) {
 	row := q.db.QueryRow(ctx, isTaskAssignee, arg.TaskID, arg.UserID)
 	var exists bool
@@ -95,9 +91,15 @@ func (q *Queries) IsTaskAssignee(ctx context.Context, arg IsTaskAssigneeParams) 
 }
 
 const listAssigneeIDs = `-- name: ListAssigneeIDs :many
-SELECT user_id FROM task_assignees WHERE task_id = $1 ORDER BY assigned_at, user_id
+SELECT sa.user_id
+FROM task_subtasks st
+JOIN subtask_assignees sa ON sa.subtask_id = st.id
+WHERE st.task_id = $1
+GROUP BY sa.user_id
+ORDER BY min(st.position), min(sa.assigned_at), sa.user_id
 `
 
+// Satu baris per orang walaupun ia PIC di beberapa sub task. Urutannya sama dengan ListTaskAssignees.
 func (q *Queries) ListAssigneeIDs(ctx context.Context, taskID string) ([]int64, error) {
 	rows, err := q.db.Query(ctx, listAssigneeIDs, taskID)
 	if err != nil {

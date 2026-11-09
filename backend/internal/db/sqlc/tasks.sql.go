@@ -11,23 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const addTaskAssignee = `-- name: AddTaskAssignee :exec
-INSERT INTO task_assignees (task_id, user_id, assigned_by, assigned_at)
-VALUES ($1, $2, $3, clock_timestamp())
-`
-
-type AddTaskAssigneeParams struct {
-	TaskID     string
-	UserID     int64
-	AssignedBy int64
-}
-
-// clock_timestamp, bukan now(), supaya urutan PIC dalam satu transaksi tetap terbaca: PIC pertama = divisi task.
-func (q *Queries) AddTaskAssignee(ctx context.Context, arg AddTaskAssigneeParams) error {
-	_, err := q.db.Exec(ctx, addTaskAssignee, arg.TaskID, arg.UserID, arg.AssignedBy)
-	return err
-}
-
 const addTaskLabel = `-- name: AddTaskLabel :exec
 INSERT INTO task_labels (task_id, label_id) VALUES ($1, $2)
 `
@@ -198,9 +181,11 @@ JOIN divisions d ON d.id = t.division_id
 WHERE NOT t.is_deleted
   AND (t.status <> 'completed' OR t.solved_date >= $1::timestamptz)
   AND ((cardinality($2::bigint[]) = 0 AND cardinality($3::text[]) = 0)
-       OR EXISTS (SELECT 1 FROM task_assignees ta JOIN users u ON u.id = ta.user_id
-                  WHERE ta.task_id = t.id
-                    AND (ta.user_id = ANY($2::bigint[]) OR lower(u.username) = ANY($3::text[]))))
+       OR EXISTS (SELECT 1 FROM task_subtasks st
+                  JOIN subtask_assignees sa ON sa.subtask_id = st.id
+                  JOIN users u ON u.id = sa.user_id
+                  WHERE st.task_id = t.id
+                    AND (sa.user_id = ANY($2::bigint[]) OR lower(u.username) = ANY($3::text[]))))
   AND ($4::bigint IS NULL OR t.division_id = $4::bigint)
   AND ($5::bigint IS NULL
        OR EXISTS (SELECT 1 FROM task_labels tl WHERE tl.task_id = t.id AND tl.label_id = $5::bigint))
@@ -324,11 +309,13 @@ func (q *Queries) ListPeople(ctx context.Context) ([]ListPeopleRow, error) {
 }
 
 const listTaskAssignees = `-- name: ListTaskAssignees :many
-SELECT ta.task_id, u.id, u.name, u.username
-FROM task_assignees ta
-JOIN users u ON u.id = ta.user_id
-WHERE ta.task_id = ANY($1::text[])
-ORDER BY ta.task_id, ta.assigned_at, u.id
+SELECT st.task_id, u.id, u.name, u.username
+FROM task_subtasks st
+JOIN subtask_assignees sa ON sa.subtask_id = st.id
+JOIN users u ON u.id = sa.user_id
+WHERE st.task_id = ANY($1::text[])
+GROUP BY st.task_id, u.id, u.name, u.username
+ORDER BY st.task_id, min(st.position), min(sa.assigned_at), u.id
 `
 
 type ListTaskAssigneesRow struct {
@@ -338,6 +325,8 @@ type ListTaskAssigneesRow struct {
 	Username string
 }
 
+// PIC task adalah gabungan unik PIC semua sub task. Urutannya: sub task paling awal dulu, lalu waktu dipasang,
+// supaya PIC pertama (penentu divisi task) selalu di baris pertama.
 func (q *Queries) ListTaskAssignees(ctx context.Context, taskIds []string) ([]ListTaskAssigneesRow, error) {
 	rows, err := q.db.Query(ctx, listTaskAssignees, taskIds)
 	if err != nil {
@@ -456,7 +445,9 @@ FROM tasks t
 JOIN divisions d ON d.id = t.division_id
 WHERE NOT t.is_deleted
   AND ($1::bigint IS NULL
-       OR EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id = t.id AND ta.user_id = $1::bigint))
+       OR EXISTS (SELECT 1 FROM task_subtasks st
+                  JOIN subtask_assignees sa ON sa.subtask_id = st.id
+                  WHERE st.task_id = t.id AND sa.user_id = $1::bigint))
 ORDER BY t.created_at DESC
 `
 

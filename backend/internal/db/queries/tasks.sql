@@ -12,10 +12,6 @@ VALUES (@title, sqlc.narg(description), @division_id, @requested_by, @urgency,
         sqlc.narg(start_date), sqlc.narg(due_date), sqlc.narg(deliverable_url))
 RETURNING id;
 
--- name: AddTaskAssignee :exec
--- clock_timestamp, bukan now(), supaya urutan PIC dalam satu transaksi tetap terbaca: PIC pertama = divisi task.
-INSERT INTO task_assignees (task_id, user_id, assigned_by, assigned_at)
-VALUES (@task_id, @user_id, @assigned_by, clock_timestamp());
 
 -- name: AddTaskLabel :exec
 INSERT INTO task_labels (task_id, label_id) VALUES (@task_id, @label_id);
@@ -37,15 +33,21 @@ FROM tasks t
 JOIN divisions d ON d.id = t.division_id
 WHERE NOT t.is_deleted
   AND (sqlc.narg(assignee_id)::bigint IS NULL
-       OR EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id = t.id AND ta.user_id = sqlc.narg(assignee_id)::bigint))
+       OR EXISTS (SELECT 1 FROM task_subtasks st
+                  JOIN subtask_assignees sa ON sa.subtask_id = st.id
+                  WHERE st.task_id = t.id AND sa.user_id = sqlc.narg(assignee_id)::bigint))
 ORDER BY t.created_at DESC;
 
 -- name: ListTaskAssignees :many
-SELECT ta.task_id, u.id, u.name, u.username
-FROM task_assignees ta
-JOIN users u ON u.id = ta.user_id
-WHERE ta.task_id = ANY(@task_ids::text[])
-ORDER BY ta.task_id, ta.assigned_at, u.id;
+-- PIC task adalah gabungan unik PIC semua sub task. Urutannya: sub task paling awal dulu, lalu waktu dipasang,
+-- supaya PIC pertama (penentu divisi task) selalu di baris pertama.
+SELECT st.task_id, u.id, u.name, u.username
+FROM task_subtasks st
+JOIN subtask_assignees sa ON sa.subtask_id = st.id
+JOIN users u ON u.id = sa.user_id
+WHERE st.task_id = ANY(@task_ids::text[])
+GROUP BY st.task_id, u.id, u.name, u.username
+ORDER BY st.task_id, min(st.position), min(sa.assigned_at), u.id;
 
 -- name: ListTaskLabels :many
 SELECT tl.task_id, l.id, l.name, l.color, l.is_active
@@ -71,9 +73,11 @@ JOIN divisions d ON d.id = t.division_id
 WHERE NOT t.is_deleted
   AND (t.status <> 'completed' OR t.solved_date >= @completed_since::timestamptz)
   AND ((cardinality(@pic_ids::bigint[]) = 0 AND cardinality(@pic_usernames::text[]) = 0)
-       OR EXISTS (SELECT 1 FROM task_assignees ta JOIN users u ON u.id = ta.user_id
-                  WHERE ta.task_id = t.id
-                    AND (ta.user_id = ANY(@pic_ids::bigint[]) OR lower(u.username) = ANY(@pic_usernames::text[]))))
+       OR EXISTS (SELECT 1 FROM task_subtasks st
+                  JOIN subtask_assignees sa ON sa.subtask_id = st.id
+                  JOIN users u ON u.id = sa.user_id
+                  WHERE st.task_id = t.id
+                    AND (sa.user_id = ANY(@pic_ids::bigint[]) OR lower(u.username) = ANY(@pic_usernames::text[]))))
   AND (sqlc.narg(division_id)::bigint IS NULL OR t.division_id = sqlc.narg(division_id)::bigint)
   AND (sqlc.narg(label_id)::bigint IS NULL
        OR EXISTS (SELECT 1 FROM task_labels tl WHERE tl.task_id = t.id AND tl.label_id = sqlc.narg(label_id)::bigint))

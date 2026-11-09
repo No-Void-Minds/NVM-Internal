@@ -213,6 +213,13 @@ type Label struct {
 	CreatedAt  pgtype.Timestamptz
 }
 
+type SubtaskAssignee struct {
+	SubtaskID  int64
+	UserID     int64
+	AssignedBy int64
+	AssignedAt pgtype.Timestamptz
+}
+
 type Task struct {
 	ID             string
 	Title          string
@@ -233,13 +240,6 @@ type Task struct {
 	UpdatedAt      pgtype.Timestamptz
 }
 
-type TaskAssignee struct {
-	TaskID     string
-	UserID     int64
-	AssignedBy int64
-	AssignedAt pgtype.Timestamptz
-}
-
 type TaskAttachment struct {
 	ID           pgtype.UUID
 	TaskID       string
@@ -256,6 +256,15 @@ type TaskAttachment struct {
 type TaskLabel struct {
 	TaskID  string
 	LabelID int64
+}
+
+type TaskSubtask struct {
+	ID        int64
+	TaskID    string
+	Title     string
+	Position  int32
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
 }
 
 type User struct {

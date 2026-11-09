@@ -11,14 +11,14 @@ import (
 )
 
 type updateTaskRequest struct {
-	Version        int32   `json:"version"`
-	Title          string  `json:"title"`
-	Description    string  `json:"description"`
-	Urgency        string  `json:"urgency"`
-	PICIDs         []int64 `json:"pic_ids"`
-	StartDate      string  `json:"start_date"`
-	DueDate        string  `json:"due_date"`
-	DeliverableURL string  `json:"deliverable_url"`
+	Version        int32            `json:"version"`
+	Title          string           `json:"title"`
+	Description    string           `json:"description"`
+	Urgency        string           `json:"urgency"`
+	Subtasks       []subtaskRequest `\json:“subtasks”`
+	StartDate      string           `json:"start_date"`
+	DueDate        string           `json:"due_date"`
+	DeliverableURL string           `json:"deliverable_url"`
 }
 
 func (s *Server) updateTask(c *gin.Context) {
@@ -36,7 +36,7 @@ func (s *Server) updateTask(c *gin.Context) {
 		Title:          req.Title,
 		Description:    req.Description,
 		Urgency:        req.Urgency,
-		PICIDs:         req.PICIDs,
+		Subtasks:       subtaskInputs(req.Subtasks),
 		StartDate:      req.StartDate,
 		DueDate:        req.DueDate,
 		DeliverableURL: req.DeliverableURL,

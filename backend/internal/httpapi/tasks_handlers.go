@@ -32,6 +32,12 @@ type taskLabel struct {
 	IsActive bool   `json:"is_active"`
 }
 
+type subtaskRequest struct {
+	ID     int64   `json:"id"`
+	Title  string  `json:"title"`
+	PICIDs []int64 `json:"pic_ids"`
+}
+
 type taskSummary struct {
 	ID         string       `json:"id"`
 	Title      string       `json:"title"`
@@ -44,6 +50,12 @@ type taskSummary struct {
 	Version    int32        `json:"version"`
 	Assignees  []taskPerson `json:"assignees"`
 	Labels     []taskLabel  `json:"labels"`
+}
+
+type subtaskItem struct {
+	ID        int64        `json:"id"`
+	Title     string       `json:"title"`
+	Assignees []taskPerson `json:"assignees"`
 }
 
 type historyItem struct {
@@ -65,17 +77,18 @@ type taskDetail struct {
 	Can            task.Can           `json:"can"`
 	History        []historyItem      `json:"history"`
 	Attachments    []attachmentDetail `json:"attachments"`
+	Subtasks       []subtaskItem      `json:"subtasks"`
 }
 
 type createTaskRequest struct {
-	Title          string  `json:"title"`
-	Description    string  `json:"description"`
-	Urgency        string  `json:"urgency"`
-	PICIDs         []int64 `json:"pic_ids"`
-	LabelIDs       []int64 `json:"label_ids"`
-	StartDate      string  `json:"start_date"`
-	DueDate        string  `json:"due_date"`
-	DeliverableURL string  `json:"deliverable_url"`
+	Title          string           `json:"title"`
+	Description    string           `json:"description"`
+	Urgency        string           `json:"urgency"`
+	Subtasks       []subtaskRequest `json:"subtasks"`
+	LabelIDs       []int64          `json:"label_ids"`
+	StartDate      string           `json:"start_date"`
+	DueDate        string           `json:"due_date"`
+	DeliverableURL string           `json:"deliverable_url"`
 }
 
 func (s *Server) createTask(c *gin.Context) {
@@ -88,7 +101,7 @@ func (s *Server) createTask(c *gin.Context) {
 		Title:          req.Title,
 		Description:    req.Description,
 		Urgency:        req.Urgency,
-		PICIDs:         req.PICIDs,
+		Subtasks:       subtaskInputs(req.Subtasks),
 		LabelIDs:       req.LabelIDs,
 		StartDate:      req.StartDate,
 		DueDate:        req.DueDate,
@@ -158,6 +171,14 @@ func (s *Server) getTask(c *gin.Context) {
 			UploadedBy:     a.UploadedByName,
 		})
 	}
+	out.Subtasks = make([]subtaskItem, 0, len(d.Subtasks))
+	for _, st := range d.Subtasks {
+		item := subtaskItem{ID: st.ID, Title: st.Title, Assignees: make([]taskPerson, 0, len(st.Assignees))}
+		for _, a := range st.Assignees {
+			item.Assignees = append(item.Assignees, taskPerson{ID: a.ID, Name: a.Name, Username: a.Username})
+		}
+		out.Subtasks = append(out.Subtasks, item)
+	}
 	c.JSON(http.StatusOK, gin.H{"task": out})
 }
 
@@ -223,6 +244,14 @@ func labelsOf(rows []sqlc.ListTaskLabelsRow) []taskLabel {
 	out := make([]taskLabel, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, taskLabel{ID: r.ID, Name: r.Name, Color: r.Color, IsActive: r.IsActive})
+	}
+	return out
+}
+
+func subtaskInputs(reqs []subtaskRequest) []task.SubtaskInput {
+	out := make([]task.SubtaskInput, 0, len(reqs))
+	for _, r := range reqs {
+		out = append(out, task.SubtaskInput{ID: r.ID, Title: r.Title, PICIDs: r.PICIDs})
 	}
 	return out
 }

@@ -40,7 +40,7 @@ type CreateInput struct {
 	Title          string
 	Description    string
 	Urgency        string
-	PICIDs         []int64
+	Subtasks       []SubtaskInput
 	LabelIDs       []int64
 	StartDate      string
 	DueDate        string
@@ -55,7 +55,8 @@ func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool}
 }
 
-// Create membuat task baru berstatus Requested. Hanya Manajer (BR-01); divisi task mengikuti PIC pertama.
+// Create membuat task baru berstatus Requested. Hanya Manajer (BR-01). Sub task opsional. Divisi task mengikuti
+// PIC pertama, atau divisi pembuat kalau belum ada PIC, karena division_id wajib terisi.
 func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (string, error) {
 	if actor.Role != RoleManager {
 		return "", ErrForbidden
@@ -64,9 +65,9 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (stri
 	if err != nil {
 		return "", err
 	}
-	pics := uniqueIDs(in.PICIDs)
-	if len(pics) == 0 {
-		return "", apperr.Invalid("Pilih minimal satu PIC.")
+	subs, picIDs, err := cleanSubtasks(in.Subtasks)
+	if err != nil {
+		return "", err
 	}
 	labels := uniqueIDs(in.LabelIDs)
 
@@ -74,7 +75,7 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (stri
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := sqlc.New(tx)
 
-		divisionOf, err := eligiblePICs(ctx, q, pics)
+		divisionOf, err := eligiblePICs(ctx, q, picIDs)
 		if err != nil {
 			return err
 		}
@@ -82,10 +83,15 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (stri
 			return err
 		}
 
+		division := actor.DivisionID
+		if first, ok := firstPIC(subs); ok {
+			division = divisionOf[first]
+		}
+
 		id, err = q.CreateTask(ctx, sqlc.CreateTaskParams{
 			Title:          f.title,
 			Description:    f.description,
-			DivisionID:     divisionOf[pics[0]],
+			DivisionID:     division,
 			RequestedBy:    actor.ID,
 			Urgency:        f.urgency,
 			StartDate:      f.startDate,
@@ -95,10 +101,9 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (stri
 		if err != nil {
 			return err
 		}
-		for _, pic := range pics {
-			if err := q.AddTaskAssignee(ctx, sqlc.AddTaskAssigneeParams{TaskID: id, UserID: pic, AssignedBy: actor.ID}); err != nil {
-				return err
-			}
+		snaps, err := insertSubtasks(ctx, q, actor.ID, id, subs)
+		if err != nil {
+			return err
 		}
 		for _, l := range labels {
 			if err := q.AddTaskLabel(ctx, sqlc.AddTaskLabelParams{TaskID: id, LabelID: l}); err != nil {
@@ -106,7 +111,7 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (stri
 			}
 		}
 		return audit.Change(ctx, q, actor.auditActor(), "task_created", "task", id, nil, map[string]any{
-			"title": f.title, "urgency": f.urgency, "assignee_ids": pics, "label_ids": labels,
+			"title": f.title, "urgency": f.urgency, "subtasks": snaps, "label_ids": labels,
 		})
 	})
 	return id, err
@@ -115,6 +120,7 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (stri
 type Detail struct {
 	Task      sqlc.GetTaskDetailRow
 	Assignees []sqlc.ListTaskAssigneesRow
+	Subtasks  []SubtaskView
 	Labels    []sqlc.ListTaskLabelsRow
 	History   []sqlc.ListTaskHistoryRow
 }
@@ -142,6 +148,9 @@ func (s *Service) Get(ctx context.Context, id string) (Detail, error) {
 	d := Detail{Task: t}
 	ids := []string{id}
 	if d.Assignees, err = q.ListTaskAssignees(ctx, ids); err != nil {
+		return Detail{}, err
+	}
+	if d.Subtasks, err = loadSubtaskViews(ctx, q, id); err != nil {
 		return Detail{}, err
 	}
 	if d.Labels, err = q.ListTaskLabels(ctx, ids); err != nil {
