@@ -173,6 +173,125 @@ func (q *Queries) GetTaskDetail(ctx context.Context, id string) (GetTaskDetailRo
 	return i, err
 }
 
+const listArchiveTasks = `-- name: ListArchiveTasks :many
+SELECT t.id, t.title, t.status, t.urgency, t.division_id, d.name AS division_name,
+       t.start_date, t.due_date, t.solved_date, t.version,
+       count(*) OVER () AS total_count
+FROM tasks t
+JOIN divisions d ON d.id = t.division_id
+WHERE NOT t.is_deleted AND t.status = 'completed'
+  AND ((cardinality($1::bigint[]) = 0 AND cardinality($2::text[]) = 0)
+       OR EXISTS (SELECT 1 FROM task_subtasks st
+                  JOIN subtask_assignees sa ON sa.subtask_id = st.id
+                  JOIN users u ON u.id = sa.user_id
+                  WHERE st.task_id = t.id
+                    AND (sa.user_id = ANY($1::bigint[]) OR lower(u.username) = ANY($2::text[]))))
+  AND ($3::bigint IS NULL OR t.division_id = $3::bigint)
+  AND ($4::bigint IS NULL
+       OR EXISTS (SELECT 1 FROM task_labels tl WHERE tl.task_id = t.id AND tl.label_id = $4::bigint))
+  AND ($5::task_urgency IS NULL OR t.urgency = $5::task_urgency)
+  AND ($6::timestamptz IS NULL OR t.solved_date >= $6::timestamptz)
+  AND ($7::timestamptz IS NULL OR t.solved_date < $7::timestamptz)
+  AND ($8::text IS NULL OR (
+        t.id ILIKE $8::text
+        OR t.title ILIKE $8::text
+        OR t.description ILIKE $8::text
+        OR t.deliverable_url ILIKE $8::text
+        OR EXISTS (SELECT 1 FROM users r WHERE r.id = t.requested_by AND r.name ILIKE $8::text)
+        OR EXISTS (SELECT 1 FROM task_subtasks st
+                   WHERE st.task_id = t.id AND st.title ILIKE $8::text)
+        OR EXISTS (SELECT 1 FROM task_subtasks st
+                   JOIN subtask_assignees sa ON sa.subtask_id = st.id
+                   JOIN users u ON u.id = sa.user_id
+                   WHERE st.task_id = t.id AND u.name ILIKE $8::text)
+        OR EXISTS (SELECT 1 FROM task_labels tl JOIN labels l ON l.id = tl.label_id
+                   WHERE tl.task_id = t.id AND l.name ILIKE $8::text)
+        OR EXISTS (SELECT 1 FROM task_attachments ta
+                   WHERE ta.task_id = t.id AND NOT ta.is_deleted AND ta.original_name ILIKE $8::text)))
+ORDER BY
+  CASE WHEN $9::text = 'urgency'
+       THEN CASE t.urgency WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END END,
+  CASE WHEN $9::text = 'oldest' THEN t.solved_date END ASC,
+  CASE WHEN $9::text <> 'oldest' THEN t.solved_date END DESC,
+  t.id DESC
+LIMIT $11::int OFFSET $10::int
+`
+
+type ListArchiveTasksParams struct {
+	PicIds       []int64
+	PicUsernames []string
+	DivisionID   pgtype.Int8
+	LabelID      pgtype.Int8
+	Urgency      NullTaskUrgency
+	SolvedFrom   pgtype.Timestamptz
+	SolvedTo     pgtype.Timestamptz
+	Pattern      pgtype.Text
+	Sort         string
+	RowOffset    int32
+	RowLimit     int32
+}
+
+type ListArchiveTasksRow struct {
+	ID           string
+	Title        string
+	Status       TaskStatus
+	Urgency      TaskUrgency
+	DivisionID   int64
+	DivisionName string
+	StartDate    pgtype.Date
+	DueDate      pgtype.Date
+	SolvedDate   pgtype.Timestamptz
+	Version      int32
+	TotalCount   int64
+}
+
+// Kolom sama dengan ListTasks, ditambah total_count: jumlah seluruh hasil sebelum LIMIT, supaya halaman
+// dan total didapat dari satu query. Pola @pattern sudah berisi tanda % dan wildcard pengguna sudah di-escape.
+// Tiga urutan dalam satu query: bobot urgency (FR-TASK-14), terlama selesai, dan terbaru selesai (bawaan).
+func (q *Queries) ListArchiveTasks(ctx context.Context, arg ListArchiveTasksParams) ([]ListArchiveTasksRow, error) {
+	rows, err := q.db.Query(ctx, listArchiveTasks,
+		arg.PicIds,
+		arg.PicUsernames,
+		arg.DivisionID,
+		arg.LabelID,
+		arg.Urgency,
+		arg.SolvedFrom,
+		arg.SolvedTo,
+		arg.Pattern,
+		arg.Sort,
+		arg.RowOffset,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListArchiveTasksRow{}
+	for rows.Next() {
+		var i ListArchiveTasksRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Status,
+			&i.Urgency,
+			&i.DivisionID,
+			&i.DivisionName,
+			&i.StartDate,
+			&i.DueDate,
+			&i.SolvedDate,
+			&i.Version,
+			&i.TotalCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listBoardTasks = `-- name: ListBoardTasks :many
 SELECT t.id, t.title, t.status, t.urgency, t.division_id, d.name AS division_name,
        t.start_date, t.due_date, t.solved_date, t.version
@@ -194,6 +313,23 @@ WHERE NOT t.is_deleted
        OR ($7::text = 'overdue' AND t.due_date < $8::date AND t.status <> 'completed')
        OR ($7::text = 'week' AND t.due_date BETWEEN $8::date AND ($8::date) + 6)
        OR ($7::text = 'none' AND t.due_date IS NULL))
+         -- Blok kata kunci ini harus sama dengan ListArchiveTasks. Diubah di satu tempat, ubah di tempat lain.
+  AND ($9::text IS NULL OR (
+        t.id ILIKE $9::text
+        OR t.title ILIKE $9::text
+        OR t.description ILIKE $9::text
+        OR t.deliverable_url ILIKE $9::text
+        OR EXISTS (SELECT 1 FROM users r WHERE r.id = t.requested_by AND r.name ILIKE $9::text)
+        OR EXISTS (SELECT 1 FROM task_subtasks st
+                   WHERE st.task_id = t.id AND st.title ILIKE $9::text)
+        OR EXISTS (SELECT 1 FROM task_subtasks st
+                   JOIN subtask_assignees sa ON sa.subtask_id = st.id
+                   JOIN users u ON u.id = sa.user_id
+                   WHERE st.task_id = t.id AND u.name ILIKE $9::text)
+        OR EXISTS (SELECT 1 FROM task_labels tl JOIN labels l ON l.id = tl.label_id
+                   WHERE tl.task_id = t.id AND l.name ILIKE $9::text)
+        OR EXISTS (SELECT 1 FROM task_attachments ta
+                   WHERE ta.task_id = t.id AND NOT ta.is_deleted AND ta.original_name ILIKE $9::text)))
 ORDER BY CASE t.urgency WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
          t.due_date NULLS LAST, t.created_at
 `
@@ -207,6 +343,7 @@ type ListBoardTasksParams struct {
 	Urgency        NullTaskUrgency
 	Due            pgtype.Text
 	Today          pgtype.Date
+	Pattern        pgtype.Text
 }
 
 type ListBoardTasksRow struct {
@@ -235,6 +372,7 @@ func (q *Queries) ListBoardTasks(ctx context.Context, arg ListBoardTasksParams) 
 		arg.Urgency,
 		arg.Due,
 		arg.Today,
+		arg.Pattern,
 	)
 	if err != nil {
 		return nil, err

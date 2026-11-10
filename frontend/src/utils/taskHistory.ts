@@ -9,6 +9,7 @@ const fieldName: Record<string, string> = {
   due_date: 'tenggat',
   deliverable_url: 'tautan deliverable',
   division_id: 'divisi',
+  // Baris riwayat sebelum Sprint 7 masih memakai assignee_ids; dipertahankan supaya tetap terbaca.
   assignee_ids: 'PIC',
 }
 

@@ -86,6 +86,23 @@ WHERE NOT t.is_deleted
        OR (sqlc.narg(due)::text = 'overdue' AND t.due_date < @today::date AND t.status <> 'completed')
        OR (sqlc.narg(due)::text = 'week' AND t.due_date BETWEEN @today::date AND (@today::date) + 6)
        OR (sqlc.narg(due)::text = 'none' AND t.due_date IS NULL))
+         -- Blok kata kunci ini harus sama dengan ListArchiveTasks. Diubah di satu tempat, ubah di tempat lain.
+  AND (sqlc.narg(pattern)::text IS NULL OR (
+        t.id ILIKE sqlc.narg(pattern)::text
+        OR t.title ILIKE sqlc.narg(pattern)::text
+        OR t.description ILIKE sqlc.narg(pattern)::text
+        OR t.deliverable_url ILIKE sqlc.narg(pattern)::text
+        OR EXISTS (SELECT 1 FROM users r WHERE r.id = t.requested_by AND r.name ILIKE sqlc.narg(pattern)::text)
+        OR EXISTS (SELECT 1 FROM task_subtasks st
+                   WHERE st.task_id = t.id AND st.title ILIKE sqlc.narg(pattern)::text)
+        OR EXISTS (SELECT 1 FROM task_subtasks st
+                   JOIN subtask_assignees sa ON sa.subtask_id = st.id
+                   JOIN users u ON u.id = sa.user_id
+                   WHERE st.task_id = t.id AND u.name ILIKE sqlc.narg(pattern)::text)
+        OR EXISTS (SELECT 1 FROM task_labels tl JOIN labels l ON l.id = tl.label_id
+                   WHERE tl.task_id = t.id AND l.name ILIKE sqlc.narg(pattern)::text)
+        OR EXISTS (SELECT 1 FROM task_attachments ta
+                   WHERE ta.task_id = t.id AND NOT ta.is_deleted AND ta.original_name ILIKE sqlc.narg(pattern)::text)))
 -- Bobot urgency, bukan urutan abjad (FR-TASK-14). Kolom Completed diurutkan ulang di Go berdasarkan solved_date.
 ORDER BY CASE t.urgency WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
          t.due_date NULLS LAST, t.created_at;
@@ -97,3 +114,50 @@ FROM users u
 JOIN divisions d ON d.id = u.division_id
 WHERE u.is_active AND u.role IN ('staff', 'manager')
 ORDER BY lower(u.name);
+
+-- name: ListArchiveTasks :many
+-- Kolom sama dengan ListTasks, ditambah total_count: jumlah seluruh hasil sebelum LIMIT, supaya halaman
+-- dan total didapat dari satu query. Pola @pattern sudah berisi tanda % dan wildcard pengguna sudah di-escape.
+SELECT t.id, t.title, t.status, t.urgency, t.division_id, d.name AS division_name,
+       t.start_date, t.due_date, t.solved_date, t.version,
+       count(*) OVER () AS total_count
+FROM tasks t
+JOIN divisions d ON d.id = t.division_id
+WHERE NOT t.is_deleted AND t.status = 'completed'
+  AND ((cardinality(@pic_ids::bigint[]) = 0 AND cardinality(@pic_usernames::text[]) = 0)
+       OR EXISTS (SELECT 1 FROM task_subtasks st
+                  JOIN subtask_assignees sa ON sa.subtask_id = st.id
+                  JOIN users u ON u.id = sa.user_id
+                  WHERE st.task_id = t.id
+                    AND (sa.user_id = ANY(@pic_ids::bigint[]) OR lower(u.username) = ANY(@pic_usernames::text[]))))
+  AND (sqlc.narg(division_id)::bigint IS NULL OR t.division_id = sqlc.narg(division_id)::bigint)
+  AND (sqlc.narg(label_id)::bigint IS NULL
+       OR EXISTS (SELECT 1 FROM task_labels tl WHERE tl.task_id = t.id AND tl.label_id = sqlc.narg(label_id)::bigint))
+  AND (sqlc.narg(urgency)::task_urgency IS NULL OR t.urgency = sqlc.narg(urgency)::task_urgency)
+  AND (sqlc.narg(solved_from)::timestamptz IS NULL OR t.solved_date >= sqlc.narg(solved_from)::timestamptz)
+  AND (sqlc.narg(solved_to)::timestamptz IS NULL OR t.solved_date < sqlc.narg(solved_to)::timestamptz)
+  AND (sqlc.narg(pattern)::text IS NULL OR (
+        t.id ILIKE sqlc.narg(pattern)::text
+        OR t.title ILIKE sqlc.narg(pattern)::text
+        OR t.description ILIKE sqlc.narg(pattern)::text
+        OR t.deliverable_url ILIKE sqlc.narg(pattern)::text
+        OR EXISTS (SELECT 1 FROM users r WHERE r.id = t.requested_by AND r.name ILIKE sqlc.narg(pattern)::text)
+        OR EXISTS (SELECT 1 FROM task_subtasks st
+                   WHERE st.task_id = t.id AND st.title ILIKE sqlc.narg(pattern)::text)
+        OR EXISTS (SELECT 1 FROM task_subtasks st
+                   JOIN subtask_assignees sa ON sa.subtask_id = st.id
+                   JOIN users u ON u.id = sa.user_id
+                   WHERE st.task_id = t.id AND u.name ILIKE sqlc.narg(pattern)::text)
+        OR EXISTS (SELECT 1 FROM task_labels tl JOIN labels l ON l.id = tl.label_id
+                   WHERE tl.task_id = t.id AND l.name ILIKE sqlc.narg(pattern)::text)
+        OR EXISTS (SELECT 1 FROM task_attachments ta
+                   WHERE ta.task_id = t.id AND NOT ta.is_deleted AND ta.original_name ILIKE sqlc.narg(pattern)::text)))
+-- Tiga urutan dalam satu query: bobot urgency (FR-TASK-14), terlama selesai, dan terbaru selesai (bawaan).
+ORDER BY
+  CASE WHEN @sort::text = 'urgency'
+       THEN CASE t.urgency WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END END,
+  CASE WHEN @sort::text = 'oldest' THEN t.solved_date END ASC,
+  CASE WHEN @sort::text <> 'oldest' THEN t.solved_date END DESC,
+  t.id DESC
+LIMIT @row_limit::int OFFSET @row_offset::int;
+

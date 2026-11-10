@@ -44,6 +44,7 @@ type BoardFilter struct {
 	LabelID      *int64
 	Urgency      string
 	Due          string
+	Keyword      string
 }
 
 type BoardColumn struct {
@@ -128,6 +129,11 @@ func (f BoardFilter) params(now time.Time) (sqlc.ListBoardTasksParams, error) {
 	if f.LabelID != nil {
 		p.LabelID = pgtype.Int8{Int64: *f.LabelID, Valid: true}
 	}
+	pattern, err := keywordPattern(f.Keyword)
+	if err != nil {
+		return p, err
+	}
+	p.Pattern = pattern
 	return p, nil
 }
 

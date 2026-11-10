@@ -35,7 +35,7 @@ type person struct {
 // board menerima scope (mine/all), pic (username, dipisah koma), division, label, urgency, dan due.
 // scope=mine selalu memakai akun yang login dan mengabaikan pic, supaya URL yang membawa keduanya tidak ambigu.
 func (s *Server) board(c *gin.Context) {
-	f := task.BoardFilter{Urgency: c.Query("urgency"), Due: c.Query("due")}
+	f := task.BoardFilter{Urgency: c.Query("urgency"), Due: c.Query("due"), Keyword: c.Query("q")}
 	if c.Query("scope") == "mine" {
 		f.PICIDs = []int64{currentUser(c).ID}
 	} else if p := c.Query("pic"); p != "" {
@@ -59,15 +59,7 @@ func (s *Server) board(c *gin.Context) {
 	for _, col := range cols {
 		items := make([]boardTask, 0, len(col.Tasks))
 		for _, r := range col.Tasks {
-			isPIC := false
-			for _, a := range r.Assignees {
-				if a.ID == actor.ID {
-					isPIC = true
-					break
-				}
-			}
-			can := task.PermissionsFor(actor.Role, isPIC, task.Status(r.Task.Status))
-			items = append(items, boardTask{taskSummary: summaryOf(r), MoveTo: can.MoveTo})
+			items = append(items, withMoveTo(actor, r))
 		}
 		out = append(out, boardColumn{Status: string(col.Status), Count: len(items), Tasks: items})
 	}
