@@ -2,7 +2,7 @@
 
 Acuan: SRS Sistem Internal NVM v1.0, ERD `nvm_internal.dbml`, layar Stitch, dan DESIGN.md.
 Stack: Go, PostgreSQL, Vue 3 dengan Tailwind CSS, Docker di VM Ubuntu (Hyper-V) pada PC kantor.
-Revisi terakhir: 2026-11-09 (sub task dan kartu profil, lihat Daftar revisi di bagian bawah). Sprint 7 selesai 2026-11-09.
+Revisi terakhir: 2026-11-10 (sub task, kartu profil, centang sub task, lihat Daftar revisi di bagian bawah). Sprint 7 selesai 2026-11-09, Sprint 8 selesai 2026-11-10.
 
 ## Cara kerja
 
@@ -44,7 +44,7 @@ Revisi terakhir: 2026-11-09 (sub task dan kartu profil, lihat Daftar revisi di b
 | 5 | Lampiran | Lampiran brief dan deliverable, tempel screenshot, validasi tipe |
 | 6 | Fondasi pencarian | Index database untuk pencarian |
 | 7 | Sub task, backend | Task dengan sub task, PIC banyak per sub task |
-| 8 | Sub task, frontend | Form sub task, pemilih PIC ganda, kartu papan baru |
+| 8 | Sub task, frontend | Form sub task, pemilih PIC ganda, centang sub task, task penuh di tab baru |
 | 9 | Arsip dan pencarian | Arsip dengan pencarian, filter, urut, pagination |
 | 10 | Profil pengguna | Foto, jabatan, kartu profil di papan, ubah profil |
 | 11 | Poles UI/UX | Papan dan semua halaman dipoles, konsisten |
@@ -411,16 +411,49 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 
 ## Sprint 8: Sub task, frontend
 
-**Tujuan:** Manajer bisa mengisi sub task dan PIC dengan nyaman, semua orang melihat hasilnya di papan.
+**Tujuan:** Manajer mengisi sub task dan PIC dengan nyaman, PIC mencentang sub task yang sudah beres, dan semua orang melihat kemajuannya di papan. Revisi 1, 3, dan 4.
+**Aturan baru (revisi 3 dan 4):**
+- Sub task punya centang. Centang hanya bisa diubah saat task berstatus On Progress. Yang bisa mengubah: PIC sub task itu, dan Manajer untuk sub task yang tidak dipegang Manajer lain.
+- Task yang punya sub task baru bisa pindah dari On Progress ke Ready kalau semua sub task sudah tercentang. Yang boleh memindahkan tetap Staf yang menjadi PIC di sub task mana pun, dan Manajer.
+- Panel detail punya tombol untuk membuka task penuh di tab baru, di sebelah tombol tutup.
+- Di form task, Deskripsi tampil di bagian utama, dan Lampiran brief pindah ke Detail tambahan.
 
-- [ ] S8-01 Form Buat dan Ubah task: bagian "Sub task" berupa daftar baris. Tiap baris punya nama dan pemilih PIC. Tambah, hapus, dan ubah urutan (tombol naik dan turun, tanpa wajib drag, supaya bisa lewat keyboard dan layar sentuh).
-- [ ] S8-02 Komponen pemilih PIC ganda: cari nama, pilih beberapa, tampil sebagai chip yang bisa dilepas. Tap target 44px, operasi penuh dengan keyboard. Sementara pakai inisial; foto menyusul di Sprint 10.
-- [ ] S8-03 Panel detail task: daftar sub task beserta PIC tiap sub task.
-- [ ] S8-04 Kartu papan: jumlah sub task dan deretan PIC unik. Filter PIC dan "Task saya" mengikuti aturan baru.
-- [ ] S8-05 State kosong ("Belum ada sub task"), galat per baris, dan pesan konflik 409 saat daftar sub task diubah dua orang bersamaan.
-- [ ] S8-06 Hapus sisa UI PIC level task.
+- [x] S8-01 Form Buat dan Ubah task: bagian "Sub task" berupa daftar baris. Tiap baris punya nama dan pemilih PIC. Tambah, hapus, dan ubah urutan (tombol naik dan turun, tanpa wajib drag).
+- [x] S8-02 Komponen pemilih PIC ganda: cari nama, pilih beberapa, tampil sebagai chip yang bisa dilepas. Tap target 44px, operasi penuh dengan keyboard.
+- [x] S8-03 Panel detail task: daftar sub task beserta PIC tiap sub task. Teks riwayat dan Audit Log untuk lima aksi sub task.
+- [x] S8-04 Form: Deskripsi pindah ke bagian utama, Lampiran brief pindah ke Detail tambahan (terbuka otomatis saat ada berkas ditambahkan).
+- [x] S8-05 Backend centang sub task: migrasi `000004` (kolom `done_at` dan `done_by`), endpoint centang dan lepas centang, syarat semua tercentang untuk On Progress ke Ready, audit `subtask_checked` dan `subtask_unchecked`, jumlah sub task dan yang selesai ikut di respons papan dan daftar.
+- [x] S8-06 Frontend centang: kotak centang di panel detail (aktif sesuai `can_check` dari server), kartu papan menampilkan kemajuan dan deretan PIC, tombol dan drag ke Ready ditahan dengan alasan yang terbaca selama masih ada yang belum tercentang, teks riwayat dan Audit Log untuk centang. Kategori "Task" di filter Audit Log ikut memuat aksi sub task dan lampiran.
+- [x] S8-06b Revisi 4: Manajer boleh mencentang dan melepas centang sub task siapa pun, kecuali sub task yang dipegang Manajer lain. Satu fungsi aturan dipakai untuk penolakan 403 dan kolom `can_check`.
+- [x] S8-07 Halaman task penuh di `/task/:id` dan tombol "Buka di tab baru" di panel detail, di sebelah tombol tutup. Dua kolom di layar lebar: isi kerja di kiri, label dan riwayat di kanan.
+- [x] S8-08 State kosong, galat per baris, dan sisa UI PIC level task dibersihkan (hasil pemeriksaan: tidak ada UI PIC level task yang tersisa).
 
-**Selesai kalau:** `./scripts/check.sh` lolos dan uji manual di browser: Manajer membuat task dengan sub task, Staf PIC melihatnya di Task saya dan memindahkannya, Staf lain hanya bisa melihat.
+**Keputusan sementara revisi 3 dan 4 (konfirmasi ke Manajer):**
+- Sub task tanpa PIC boleh dicentang Manajer. Sub task dengan PIC campuran (Staf dan Manajer lain) ditolak untuk Manajer yang bukan PIC-nya.
+- Syarat semua tercentang berlaku untuk semua peran, termasuk Manajer. Task tanpa sub task tidak dikenai syarat ini.
+- Di status Requested, Ready, dan Completed centang hanya terbaca. Saat Ready dikembalikan ke On Progress untuk revisi, centang dibiarkan seperti semula dan yang berhak bisa melepasnya.
+- Mencentang tidak menaikkan `version` task, supaya dua orang yang mencentang sub task berbeda tidak saling menolak. Status task dikunci di dalam transaksi, jadi tidak bisa bentrok dengan perpindahan ke Ready.
+- Menambah sub task pada task yang sudah Ready tidak mengembalikan statusnya.
+
+**Selesai kalau:** `./scripts/check.sh` lolos dan uji manual di browser: Manajer membuat task dengan sub task, Staf PIC mencentang sub task miliknya, Ready ditahan sampai semuanya tercentang, task penuh terbuka di tab baru, Staf lain hanya bisa melihat.
+
+**Hasil:** selesai 2026-11-10. Lolos `./scripts/check.sh`. Lewat curl: Ready ditolak 400 dengan jumlah sub task tersisa, non-PIC 403, body kosong 400, centang dan lepas centang 204, centang tidak menaikkan versi, lepas centang saat Ready ditolak 400, ringkasan di papan dan detail, lima kejadian audit, Manajer bukan PIC mendapat `can_check` true dan bisa mencentang dan melepas. Lewat browser: form sub task, pemilih PIC, panel detail, kotak centang dengan keyboard, tombol kartu "Lihat sub task", drag ke Ready ditolak dengan pesan, halaman `/task/:id` di tab baru, state kosong dan galat per baris, uji Manajer kedua.
+
+**Keputusan:**
+- Kolom `done_at` dan `done_by` selalu terisi berpasangan (constraint `CHECK`), jadi tidak ada centang tanpa tahu siapa yang mencentang. Untuk Manajer yang mencentang atas nama PIC, `done_by` berisi Manajer itu.
+- `can_check` dihitung backend dengan fungsi yang sama dengan penolakan 403 (`canToggle`), supaya UI dan server tidak berbeda pendapat.
+- Syarat Ready dicek di dalam transaksi `Move` yang sudah mengunci task. Pesannya 400, bukan 409, supaya papan tidak menampilkan pesan "diubah orang lain".
+- Kartu On Progress yang sub task-nya belum lengkap memakai tombol "Lihat sub task" yang membuka detail, bukan dialog Pindahkan. Drag ke Ready ditolak dengan notice. Tombol "Tandai Ready" di panel memakai `aria-disabled` dengan alasan terhubung lewat `aria-describedby`, supaya tetap bisa difokus.
+- Isi panel detail dipindah ke `TaskDetailBody` dan dipakai bersama oleh panel dan halaman `/task/:id`, supaya logika centang, label, pindah status, dan hapus hanya ada satu. Dialog revisi dan hapus dipindah ke body lewat `Teleport`.
+- Bar aksi panel menempel di bawah area gulir. Bagian Label berada di bawah Deliverable supaya urutan Tab sama dengan urutan visual.
+- Kategori "Task" di filter Audit Log memuat aksi sub task dan lampiran (`attachment_added` dan `attachment_deleted` sebelumnya tidak masuk kategori mana pun).
+- `assignee_ids` di teks riwayat dipertahankan hanya untuk baris riwayat sebelum Sprint 7.
+- Untuk Sprint 13: uji aturan centang (PIC, Manajer bukan PIC, Manajer dengan PIC Manajer lain, Staf lain, status selain On Progress, centang berulang yang idempoten, gate Ready dengan dan tanpa sub task), perbaiki test lama yang memakai `PICIDs`, dan migrasikan database test ke `000003` dan `000004`.
+
+**Retro:**
+- Macet: id sub task di skrip uji ditebak salah (5 dan 6, seharusnya 6 dan 7); tipe `Actor.Role` berbeda dari `sqlc.UserRole`; kolom nullable membuat sqlc memakai `pgtype.Int8`; terminal baru tanpa variabel `API` (curl `[000]`) dan skrip dijalankan dari folder yang salah; beberapa file frontend yang akan diubah tidak ada versi terbarunya sehingga diminta ulang.
+- Lancar: (isi sendiri)
+- Diubah untuk Sprint 9: (isi sendiri)
 
 ---
 
@@ -445,7 +478,7 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 **Tujuan:** setiap orang punya identitas yang terlihat: foto, nama, jabatan, divisi. Revisi 2 dari Manajer (bagian data dan kartu).
 **Aturan baru:** area kiri papan yang kosong tidak diisi sidebar navigasi, tetapi kartu profil.
 
-- [ ] S10-01 Migrasi `000004`: kolom jabatan (`job_title`) dan foto profil di tabel akun.
+- [ ] S10-01 Migrasi baru (nomor berikutnya setelah migrasi centang sub task): kolom jabatan (`job_title`) dan foto profil di tabel akun.
 - [ ] S10-02 Unggah foto: JPG atau PNG, maksimal 2 MB, tipe dicek dari isi. Backend memotong jadi persegi, mengecilkan ke ukuran tetap, lalu menyimpan ulang tanpa metadata EXIF (alasan: koordinat lokasi di foto ponsel tidak ikut tersimpan). Disimpan di `STORAGE_DIR/avatars/` dengan nama UUID.
 - [ ] S10-03 Endpoint: ubah nama dan jabatan sendiri, ganti dan hapus foto sendiri, ambil foto akun mana pun (wajib login, dengan ETag supaya tidak diunduh ulang).
 - [ ] S10-04 Aturan hak: tiap pengguna mengubah nama, jabatan, dan foto miliknya sendiri. Divisi dan peran tetap hanya Admin atau Manajer, ditampilkan baca-saja di kartu dengan keterangan siapa yang mengaturnya. Audit `profile_updated`.
@@ -466,7 +499,7 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 
 - [ ] S11-01 Token desain dan satu motif identitas, diturunkan dari DESIGN.md dan brand NVM.
 - [ ] S11-02 Papan: kartu, kolom, rasa drag-and-drop, transisi saat kartu pindah kolom, penanda terlambat, tampilan kartu dengan sub task dan PIC.
-- [ ] S11-03 Panel detail dan form task, termasuk daftar sub task.
+- [ ] S11-03 Panel detail, halaman task penuh, dan form task, termasuk daftar sub task dan centangnya.
 - [ ] S11-04 Arsip, Pengguna, Pengaturan, Audit Log, dan kartu profil memakai bahasa visual yang sama.
 - [ ] S11-05 State kosong, loading (kerangka sesuai bentuk konten), dan galat yang konsisten. Ilustrasi hanya SVG buatan sendiri.
 - [ ] S11-06 Animasi: tiap animasi punya tujuan UX (umpan balik, orientasi, atau hubungan sebab akibat), tanpa loop. Versi diam untuk `prefers-reduced-motion`.
@@ -504,7 +537,7 @@ Operasional (hanya ditulis):
 
 - [ ] S13-01 Kunci Claude Code lewat `.claude/settings.local.json` (tolak `git commit`, `git push`, `git reset`, `git checkout`).
 - [ ] S13-02 Tulis `CLAUDE.md` (belum ada): stack, aturan hemat kuota, perintah `check.sh`, aturan tanpa commit, dan gerbang AntiSlop.
-- [ ] S13-03 Prompt Claude Code: perbaiki test lama yang rusak karena Sprint 7, lalu tulis test backend untuk izin, transisi status, sub task dan PIC turunan, profil dan foto, arsip dan pencarian, lampiran.
+- [ ] S13-03 Prompt Claude Code: perbaiki test lama yang rusak karena Sprint 7, lalu tulis test backend untuk izin, transisi status, sub task dan PIC turunan, profil dan foto, arsip dan pencarian, lampiran, centang sub task beserta syarat Ready.
 - [ ] S13-04 Test frontend untuk komponen dengan logika (pemilih PIC ganda, filter di URL, kartu profil).
 - [ ] S13-05 Peta AC-01 sampai AC-15 ke test atau langkah uji manual, dengan hasil PASS atau FAIL.
 - [ ] S13-06 Data dummy sekitar 2.000 task, ukur p95 dari dalam VM (bukan dari PC), cek `EXPLAIN` bahwa index pencarian terpakai. Target p95 di bawah 1 detik.
@@ -540,8 +573,10 @@ UAT:
 |---|---|---|---|
 | 1 | 2026-11-09 | Task punya sub task; PIC dipilih per sub task, bisa lebih dari satu | Sprint 7 dan 8 |
 | 2 | 2026-11-09 | Area kiri papan diisi kartu profil (foto, nama, jabatan, divisi, bisa diubah); poles UI/UX papan dan semua halaman | Sprint 10 dan 11 |
+| 3 | 2026-11-09 | Sub task bisa dicentang oleh PIC-nya saat On Progress; Ready butuh semua sub task tercentang; task penuh bisa dibuka di tab baru; di form, Deskripsi menggantikan posisi Lampiran brief, dan Lampiran brief masuk ke Detail tambahan | Sprint 8 |
+| 4 | 2026-11-10 | Manajer boleh mencentang dan melepas centang sub task siapa pun, kecuali sub task yang dipegang Manajer lain | Sprint 8 |
 
-SRS v1.0 belum memuat kedua revisi. SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat keempat revisi. SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 
@@ -550,6 +585,7 @@ SRS v1.0 belum memuat kedua revisi. SRS diperbarui sebelum UAT supaya checklist 
 - Konfirmasi kolom Completed di papan hanya 7 hari terakhir (AC-08 menyebut task Completed hilang dari papan aktif).
 - Task tanpa sub task berarti tanpa PIC, hanya Manajer yang memindahkan: setuju?
 - Jabatan diisi sendiri oleh tiap orang atau hanya pengelola.
+- Aturan centang: Manajer boleh mencentang sub task siapa pun kecuali yang dipegang Manajer lain. Bagaimana dengan sub task tanpa PIC (sekarang boleh) dan sub task dengan PIC campuran Staf dan Manajer lain (sekarang ditolak)?
 
 ## Setelah go-live (belum dijadwalkan)
 
