@@ -58,6 +58,11 @@ async function load(quiet = false) {
     task.value = await getTask(props.taskId)
     loadState.value = 'ready'
   } catch (err) {
+    // Saat memuat ulang diam-diam, isi yang sudah tampil dipertahankan; galatnya cukup diberitahukan.
+    if (quiet && task.value) {
+      actionError.value = messageOf(err)
+      return
+    }
     loadError.value = messageOf(err)
     loadState.value = 'error'
   }
@@ -160,8 +165,9 @@ async function toggleSubtask(s: TaskSubtask, e: Event) {
   } catch (err) {
     input.checked = s.done
     rowErrors.value = { ...rowErrors.value, [s.id]: messageOf(err) }
-    // Status task mungkin sudah berubah oleh orang lain, jadi muat ulang supaya keadaannya terbaca.
-    if (err instanceof ApiError && err.status !== 500) await load(true)
+    // Galat 4xx berarti keadaan di server berbeda (status berubah, hak dicabut), jadi muat ulang.
+    // Galat jaringan tidak, karena memuat ulang juga akan gagal.
+    if (err instanceof ApiError && err.status >= 400 && err.status < 500) await load(true)
   } finally {
     checking.value = null
   }
