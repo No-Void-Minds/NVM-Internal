@@ -3,9 +3,9 @@ package task
 import (
 	"context"
 	"errors"
-
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"slices"
 
 	"nvm-internal/internal/apperr"
 	"nvm-internal/internal/audit"
@@ -42,7 +42,17 @@ func (s *Service) SetSubtaskDone(ctx context.Context, actor Actor, taskID string
 		if err != nil {
 			return err
 		}
-		if !isPIC {
+		otherManager := false
+		if !isPIC && isManager(actor) {
+			others, qerr := q.ListSubtasksWithOtherManagerPIC(ctx, sqlc.ListSubtasksWithOtherManagerPICParams{
+				SubtaskIds: []int64{subtaskID}, UserID: actor.ID,
+			})
+			if qerr != nil {
+				return qerr
+			}
+			otherManager = len(others) > 0
+		}
+		if !canToggle(actor, isPIC, otherManager) {
 			return ErrNotSubtaskPIC
 		}
 		if Status(cur.Status) != OnProgress {
@@ -69,4 +79,49 @@ func (s *Service) SetSubtaskDone(ctx context.Context, actor Actor, taskID string
 		return audit.Change(ctx, q, actor.auditActor(), action, "task", taskID, nil,
 			map[string]any{"id": st.ID, "title": st.Title})
 	})
+}
+
+// canToggle adalah satu-satunya aturan siapa yang boleh mencentang: PIC sub task itu, atau Manajer
+// untuk sub task yang tidak dipegang Manajer lain. Dipakai SetSubtaskDone dan CheckableSubtasks.
+func canToggle(actor Actor, isPIC, otherManagerPIC bool) bool {
+	if isPIC {
+		return true
+	}
+	return isManager(actor) && !otherManagerPIC
+}
+
+// CheckableSubtasks menjawab sub task mana yang boleh dicentang actor, untuk kolom can_check di detail.
+// Satu query untuk semua sub task, dan kosong bila task tidak sedang On Progress.
+func (s *Service) CheckableSubtasks(ctx context.Context, actor Actor, status Status, subs []SubtaskView) (map[int64]bool, error) {
+	out := make(map[int64]bool, len(subs))
+	if status != OnProgress || len(subs) == 0 {
+		return out, nil
+	}
+	otherManager := map[int64]bool{}
+	if isManager(actor) {
+		ids := make([]int64, len(subs))
+		for i, st := range subs {
+			ids[i] = st.ID
+		}
+		rows, err := sqlc.New(s.pool).ListSubtasksWithOtherManagerPIC(ctx, sqlc.ListSubtasksWithOtherManagerPICParams{
+			SubtaskIds: ids, UserID: actor.ID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range rows {
+			otherManager[id] = true
+		}
+	}
+	for _, st := range subs {
+		isPIC := slices.ContainsFunc(st.Assignees, func(a sqlc.ListSubtaskAssigneesRow) bool { return a.ID == actor.ID })
+		out[st.ID] = canToggle(actor, isPIC, otherManager[st.ID])
+	}
+	return out, nil
+}
+
+// isManager membandingkan lewat string karena Actor.Role dan sqlc.UserRole adalah dua tipe berbeda
+// untuk nilai yang sama ("manager").
+func isManager(actor Actor) bool {
+	return string(actor.Role) == string(sqlc.UserRoleManager)
 }

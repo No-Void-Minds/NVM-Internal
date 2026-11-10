@@ -43,24 +43,27 @@ const shape = computed(() =>
   >
     <div class="flex items-center justify-between gap-4 border-b border-line px-5 py-3">
       <h2 :id="titleId" class="text-lg font-semibold">{{ title }}</h2>
-      <button
-        type="button"
-        aria-label="Tutup"
-        class="inline-flex size-11 shrink-0 items-center justify-center rounded-card text-ink-muted hover:bg-canvas hover:text-ink active:bg-canvas"
-        @click="emit('close')"
-      >
-        <svg
-          aria-hidden="true"
-          viewBox="0 0 24 24"
-          class="size-5"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.75"
-          stroke-linecap="round"
+      <div class="flex shrink-0 items-center gap-1">
+        <slot name="actions" />
+        <button
+          type="button"
+          aria-label="Tutup"
+          class="inline-flex size-11 shrink-0 items-center justify-center rounded-card text-ink-muted hover:bg-canvas hover:text-ink active:bg-canvas"
+          @click="emit('close')"
         >
-          <path d="M6 6l12 12M18 6L6 18" />
-        </svg>
-      </button>
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            class="size-5"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.75"
+            stroke-linecap="round"
+          >
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
+      </div>
     </div>
     <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
       <slot />

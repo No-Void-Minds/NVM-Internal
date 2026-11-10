@@ -67,3 +67,10 @@ SELECT task_id, count(*) AS total, count(done_at) AS done
 FROM task_subtasks
 WHERE task_id = ANY(@task_ids::text[])
 GROUP BY task_id;
+
+-- name: ListSubtasksWithOtherManagerPIC :many
+-- Sub task yang punya PIC Manajer selain si pemanggil. Dipakai aturan: Manajer tidak boleh menyentuh centang milik Manajer lain.
+SELECT DISTINCT sa.subtask_id
+FROM subtask_assignees sa
+JOIN users u ON u.id = sa.user_id
+WHERE sa.subtask_id = ANY(@subtask_ids::bigint[]) AND u.role = 'manager' AND u.id <> @user_id;

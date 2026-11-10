@@ -12,6 +12,7 @@ import NotFoundPage from '../pages/NotFoundPage.vue'
 import SettingsPage from '../pages/SettingsPage.vue'
 import AuditLogPage from '../pages/AuditLogPage.vue'
 import BoardPage from '../pages/BoardPage.vue'
+import TaskPage from '../pages/TaskPage.vue'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -65,6 +66,7 @@ export const router = createRouter({
       meta: { title: 'Audit Log', roles: ['admin', 'manager'] },
     },
     { path: '/task', name: 'tasks', component: BoardPage, meta: { title: 'Papan Task' } },
+    { path: '/task/:id', name: 'task-detail', component: TaskPage, meta: { title: 'Detail task' } },
   ],
 })
 

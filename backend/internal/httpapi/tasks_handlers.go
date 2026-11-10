@@ -179,17 +179,20 @@ func (s *Server) getTask(c *gin.Context) {
 	}
 	out.Subtasks = make([]subtaskItem, 0, len(d.Subtasks))
 	doneCount := 0
+	checkable, err := s.tasks.CheckableSubtasks(c.Request.Context(), actor, task.Status(t.Status), d.Subtasks)
+	if err != nil {
+		s.writeTaskError(c, err)
+		return
+	}
 	for _, st := range d.Subtasks {
 		item := subtaskItem{
 			ID: st.ID, Title: st.Title, Done: st.DoneAt.Valid, DoneAt: timePtr(st.DoneAt), DoneBy: st.DoneBy,
 			Assignees: make([]taskPerson, 0, len(st.Assignees)),
 		}
+		// can_check berasal dari aturan yang sama dengan SetSubtaskDone, supaya UI tidak menebak.
+		item.CanCheck = checkable[st.ID]
 		for _, a := range st.Assignees {
 			item.Assignees = append(item.Assignees, taskPerson{ID: a.ID, Name: a.Name, Username: a.Username})
-			// can_check dihitung di backend dengan aturan yang sama dengan SetSubtaskDone, supaya frontend tidak menebak.
-			if a.ID == actor.ID && task.Status(t.Status) == task.OnProgress {
-				item.CanCheck = true
-			}
 		}
 		if item.Done {
 			doneCount++
@@ -242,7 +245,7 @@ func (s *Server) writeTaskError(c *gin.Context, err error) {
 	case errors.Is(err, task.ErrNotFound):
 		writeError(c, http.StatusNotFound, CodeNotFound, "Task tidak ditemukan.")
 	case errors.Is(err, task.ErrForbidden):
-		writeError(c, http.StatusForbidden, CodeForbidden, "Kamu tidak punya hak untuk mengubah task ini.")
+		writeError(c, http.StatusForbidden, CodeForbidden, "Sub task ini hanya bisa dicentang PIC-nya, atau Manajer bila tidak dipegang Manajer lain.")
 	case errors.Is(err, task.ErrVersionConflict):
 		writeError(c, http.StatusConflict, CodeConflict, "Task ini sudah diubah orang lain. Muat ulang untuk melihat versi terbaru.")
 	default:

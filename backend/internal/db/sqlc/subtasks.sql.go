@@ -264,6 +264,39 @@ func (q *Queries) ListSubtasks(ctx context.Context, taskIds []string) ([]ListSub
 	return items, nil
 }
 
+const listSubtasksWithOtherManagerPIC = `-- name: ListSubtasksWithOtherManagerPIC :many
+SELECT DISTINCT sa.subtask_id
+FROM subtask_assignees sa
+JOIN users u ON u.id = sa.user_id
+WHERE sa.subtask_id = ANY($1::bigint[]) AND u.role = 'manager' AND u.id <> $2
+`
+
+type ListSubtasksWithOtherManagerPICParams struct {
+	SubtaskIds []int64
+	UserID     int64
+}
+
+// Sub task yang punya PIC Manajer selain si pemanggil. Dipakai aturan: Manajer tidak boleh menyentuh centang milik Manajer lain.
+func (q *Queries) ListSubtasksWithOtherManagerPIC(ctx context.Context, arg ListSubtasksWithOtherManagerPICParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listSubtasksWithOtherManagerPIC, arg.SubtaskIds, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var subtask_id int64
+		if err := rows.Scan(&subtask_id); err != nil {
+			return nil, err
+		}
+		items = append(items, subtask_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const removeSubtaskAssignees = `-- name: RemoveSubtaskAssignees :exec
 DELETE FROM subtask_assignees WHERE subtask_id = $1 AND user_id = ANY($2::bigint[])
 `
