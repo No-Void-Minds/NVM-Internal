@@ -8,19 +8,30 @@ export const dueOptions: { value: DueFilter; label: string }[] = [
   { value: 'none', label: 'Tanpa tenggat' },
 ]
 
-function one(value: LocationQuery[string]): string | undefined {
+export function one(value: LocationQuery[string]): string | undefined {
   const v = Array.isArray(value) ? value[0] : value
   return v ?? undefined
 }
 
-function positiveInt(value: string | undefined): number | undefined {
+export function positiveInt(value: string | undefined): number | undefined {
   const n = Number(value)
   return Number.isInteger(n) && n > 0 ? n : undefined
 }
 
+// Sama dengan backend (MinKeywordLen). Kata kunci yang lebih pendek dibuang dari URL, bukan dikirim lalu ditolak.
+export const minKeyword = 3
+
+export function cleanKeyword(value: string | undefined): string | undefined {
+  const text = value?.trim()
+  return text && [...text].length >= minKeyword ? text : undefined
+}
+
 // staffUsername diisi hanya untuk akun Staf; Manajer dan Admin tidak punya saklar lingkup.
 // Aturan S4-06 dikumpulkan di sini supaya tombol, select, dan URL yang diketik tangan berujung pada keadaan yang sama.
-export function normalizeBoardQuery(b: BoardQuery, staffUsername: string | null): BoardQuery {
+export function normalizeBoardQuery<T extends Pick<BoardQuery, 'scope' | 'pic'>>(
+  b: T,
+  staffUsername: string | null,
+): T {
   if (!staffUsername) return { ...b, scope: undefined }
   const pic = b.pic?.toLowerCase()
   if (pic === staffUsername.toLowerCase()) return { ...b, scope: 'mine', pic: undefined }
@@ -33,6 +44,7 @@ export function parseBoardQuery(q: LocationQuery, staffUsername: string | null):
   const urgency = one(q.urgency)
   const due = one(q.due)
   const raw: BoardQuery = {
+    q: cleanKeyword(one(q.q)),
     scope: one(q.scope) === 'all' ? 'all' : undefined,
     pic: one(q.pic)?.trim() || undefined,
     division: positiveInt(one(q.division)),
@@ -46,6 +58,7 @@ export function parseBoardQuery(q: LocationQuery, staffUsername: string | null):
 // Nilai bawaan tidak ditulis ke URL, supaya alamat papan tanpa filter tetap /task.
 export function toRouteQuery(b: BoardQuery): Record<string, string> {
   const out: Record<string, string> = {}
+  if (b.q) out.q = b.q
   if (b.scope === 'all') out.scope = 'all'
   if (b.pic) out.pic = b.pic
   if (b.division) out.division = String(b.division)
@@ -61,5 +74,5 @@ export function sameRouteQuery(a: Record<string, string>, b: LocationQuery): boo
 }
 
 export function hasFilters(b: BoardQuery): boolean {
-  return Boolean(b.pic || b.division || b.label || b.urgency || b.due)
+  return Boolean(b.q || b.pic || b.division || b.label || b.urgency || b.due)
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { useSessionStore } from '../stores/session'
 import { useLogout } from '../composables/useLogout'
 import { roleLabel, type Role } from '../utils/roles'
@@ -36,14 +36,26 @@ const navItems: NavItem[] = [
     label: 'Task',
     iconPath: 'M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11',
   },
+  {
+    to: '/arsip',
+    label: 'Arsip',
+    iconPath:
+      'M3 3h18a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4',
+  },
 ]
 
 const session = useSessionStore()
+const route = useRoute()
 const { logout, loggingOut, logoutError } = useLogout()
 
 const visibleNav = computed(() =>
   navItems.filter((item) => !item.roles || (session.user && item.roles.includes(session.user.role))),
 )
+
+// RouterLink hanya menandai rute yang persis sama, padahal /task/:id rute terpisah dan tetap bagian dari Task.
+function isCurrent(to: string): 'page' | undefined {
+  return route.path === to || route.path.startsWith(`${to}/`) ? 'page' : undefined
+}
 </script>
 
 <template>
@@ -63,6 +75,7 @@ const visibleNav = computed(() =>
             v-for="item in visibleNav"
             :key="item.to"
             :to="item.to"
+            :aria-current="isCurrent(item.to)"
             class="inline-flex min-h-11 items-center rounded-card px-3 text-ink-muted hover:bg-canvas hover:text-ink active:bg-canvas aria-[current=page]:font-medium aria-[current=page]:text-ink"
           >
             {{ item.label }}
@@ -103,9 +116,10 @@ const visibleNav = computed(() =>
       class="fixed inset-x-0 bottom-0 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)] md:hidden"
     >
       <ul class="flex">
-        <li v-for="item in visibleNav" :key="item.to" class="flex-1">
+        <li v-for="item in visibleNav" :key="item.to" class="min-w-0 flex-1">
           <RouterLink
             :to="item.to"
+            :aria-current="isCurrent(item.to)"
             class="flex min-h-14 flex-col items-center justify-center gap-1 text-xs text-ink-muted active:bg-canvas aria-[current=page]:font-medium aria-[current=page]:text-accent"
           >
             <svg
@@ -120,7 +134,8 @@ const visibleNav = computed(() =>
             >
               <path :d="item.iconPath" />
             </svg>
-            {{ item.label }}
+            <!-- Pengaman 7 item di layar 360 px sampai navigasi ponsel dirancang ulang di Sprint 11. -->
+            <span class="max-w-full truncate px-0.5">{{ item.label }}</span>
           </RouterLink>
         </li>
       </ul>

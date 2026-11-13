@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
+import KeywordSearch from '../components/KeywordSearch.vue'
 import TaskCard from '../components/TaskCard.vue'
 import TaskDetailPanel from '../components/TaskDetailPanel.vue'
 import TaskFormPanel from '../components/TaskFormPanel.vue'
@@ -37,8 +38,6 @@ const router = useRouter()
 const session = useSessionStore()
 const isManager = computed(() => session.user?.role === 'manager')
 const isStaff = computed(() => session.user?.role === 'staff')
-
-// URL adalah sumber filter: bisa di-refresh, dibagikan, dan tombol Back browser tetap bekerja.
 const staffUsername = computed(() => (isStaff.value ? (session.user?.username ?? null) : null))
 
 // URL adalah sumber filter: bisa di-refresh, dibagikan, dan tombol Back browser tetap bekerja.
@@ -71,7 +70,14 @@ function selected(e: Event): string {
 }
 
 function clearFilters() {
-  setQuery({ pic: undefined, division: undefined, label: undefined, urgency: undefined, due: undefined })
+  setQuery({
+    q: undefined,
+    pic: undefined,
+    division: undefined,
+    label: undefined,
+    urgency: undefined,
+    due: undefined,
+  })
 }
 
 const board = ref<Board | null>(null)
@@ -309,6 +315,18 @@ const buttonSecondary =
       >
         Semua task
       </button>
+    </div>
+
+    <div class="mt-4 max-w-xl">
+      <KeywordSearch id="board-search" :value="query.q" @search="setQuery({ q: $event })" />
+      <!-- Papan hanya memuat Completed 7 hari terakhir, jadi task lama yang cocok baru terlihat di Arsip. -->
+      <RouterLink
+        v-if="query.q"
+        :to="{ name: 'archive', query: { q: query.q } }"
+        class="inline-flex min-h-11 items-center rounded-card text-sm font-medium text-accent underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      >
+        Cari "{{ query.q }}" juga di Arsip
+      </RouterLink>
     </div>
 
     <div

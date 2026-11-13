@@ -5,6 +5,7 @@ import type { TaskStatus, Urgency } from '../utils/task'
 export type DueFilter = 'overdue' | 'week' | 'none'
 
 export type BoardQuery = {
+  q?: string
   scope?: 'mine' | 'all'
   pic?: string
   division?: number

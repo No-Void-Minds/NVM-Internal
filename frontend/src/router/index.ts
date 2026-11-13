@@ -13,6 +13,7 @@ import SettingsPage from '../pages/SettingsPage.vue'
 import AuditLogPage from '../pages/AuditLogPage.vue'
 import BoardPage from '../pages/BoardPage.vue'
 import TaskPage from '../pages/TaskPage.vue'
+import ArchivePage from '../pages/ArchivePage.vue'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -67,6 +68,7 @@ export const router = createRouter({
     },
     { path: '/task', name: 'tasks', component: BoardPage, meta: { title: 'Papan Task' } },
     { path: '/task/:id', name: 'task-detail', component: TaskPage, meta: { title: 'Detail task' } },
+    { path: '/arsip', name: 'archive', component: ArchivePage, meta: { title: 'Arsip' } },
   ],
 })
 
