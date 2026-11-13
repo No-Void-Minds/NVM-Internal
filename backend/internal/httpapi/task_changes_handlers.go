@@ -15,7 +15,7 @@ type updateTaskRequest struct {
 	Title          string           `json:"title"`
 	Description    string           `json:"description"`
 	Urgency        string           `json:"urgency"`
-	Subtasks       []subtaskRequest `\json:“subtasks”`
+	Subtasks       []subtaskRequest `json:"subtasks"`
 	StartDate      string           `json:"start_date"`
 	DueDate        string           `json:"due_date"`
 	DeliverableURL string           `json:"deliverable_url"`

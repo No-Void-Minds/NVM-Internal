@@ -54,6 +54,43 @@ func (q *Queries) GetActiveDivision(ctx context.Context, id int64) (GetActiveDiv
 	return i, err
 }
 
+const getOwnProfileForUpdate = `-- name: GetOwnProfileForUpdate :one
+SELECT id, name, job_title, avatar_id
+FROM users
+WHERE id = $1
+FOR UPDATE
+`
+
+type GetOwnProfileForUpdateRow struct {
+	ID       int64
+	Name     string
+	JobTitle pgtype.Text
+	AvatarID pgtype.UUID
+}
+
+func (q *Queries) GetOwnProfileForUpdate(ctx context.Context, id int64) (GetOwnProfileForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, getOwnProfileForUpdate, id)
+	var i GetOwnProfileForUpdateRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.JobTitle,
+		&i.AvatarID,
+	)
+	return i, err
+}
+
+const getUserAvatar = `-- name: GetUserAvatar :one
+SELECT avatar_id FROM users WHERE id = $1
+`
+
+func (q *Queries) GetUserAvatar(ctx context.Context, id int64) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getUserAvatar, id)
+	var avatar_id pgtype.UUID
+	err := row.Scan(&avatar_id)
+	return avatar_id, err
+}
+
 const getUserForUpdate = `-- name: GetUserForUpdate :one
 SELECT id, name, username, role, division_id, is_active, locked_until
 FROM users
@@ -88,7 +125,7 @@ func (q *Queries) GetUserForUpdate(ctx context.Context, id int64) (GetUserForUpd
 
 const listUsers = `-- name: ListUsers :many
 SELECT u.id, u.name, u.username, u.role, u.division_id, d.name AS division_name,
-       u.is_active, u.locked_until, u.last_login_at, u.created_at
+       u.is_active, u.locked_until, u.last_login_at, u.created_at, u.job_title, u.avatar_id
 FROM users u
 JOIN divisions d ON d.id = u.division_id
 ORDER BY u.is_active DESC, lower(u.name)
@@ -105,6 +142,8 @@ type ListUsersRow struct {
 	LockedUntil  pgtype.Timestamptz
 	LastLoginAt  pgtype.Timestamptz
 	CreatedAt    pgtype.Timestamptz
+	JobTitle     pgtype.Text
+	AvatarID     pgtype.UUID
 }
 
 func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
@@ -127,6 +166,8 @@ func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 			&i.LockedUntil,
 			&i.LastLoginAt,
 			&i.CreatedAt,
+			&i.JobTitle,
+			&i.AvatarID,
 		); err != nil {
 			return nil, err
 		}
@@ -205,6 +246,22 @@ func (q *Queries) SetUserActive(ctx context.Context, arg SetUserActiveParams) er
 	return err
 }
 
+const setUserAvatar = `-- name: SetUserAvatar :exec
+UPDATE users
+SET avatar_id = $1
+WHERE id = $2
+`
+
+type SetUserAvatarParams struct {
+	AvatarID pgtype.UUID
+	ID       int64
+}
+
+func (q *Queries) SetUserAvatar(ctx context.Context, arg SetUserAvatarParams) error {
+	_, err := q.db.Exec(ctx, setUserAvatar, arg.AvatarID, arg.ID)
+	return err
+}
+
 const unlockUser = `-- name: UnlockUser :exec
 UPDATE users
 SET failed_login_count = 0, lockout_level = 0, locked_until = NULL
@@ -213,6 +270,24 @@ WHERE id = $1
 
 func (q *Queries) UnlockUser(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, unlockUser, id)
+	return err
+}
+
+const updateOwnProfile = `-- name: UpdateOwnProfile :exec
+UPDATE users
+SET name = $1, job_title = $2
+WHERE id = $3
+`
+
+type UpdateOwnProfileParams struct {
+	Name     string
+	JobTitle pgtype.Text
+	ID       int64
+}
+
+// Hanya nama dan jabatan. Divisi dan peran tetap lewat UpdateUserProfile oleh Admin atau Manajer.
+func (q *Queries) UpdateOwnProfile(ctx context.Context, arg UpdateOwnProfileParams) error {
+	_, err := q.db.Exec(ctx, updateOwnProfile, arg.Name, arg.JobTitle, arg.ID)
 	return err
 }
 

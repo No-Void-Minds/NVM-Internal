@@ -500,22 +500,46 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 **Tujuan:** setiap orang punya identitas yang terlihat: foto, nama, jabatan, divisi. Revisi 2 dari Manajer (bagian data dan kartu).
 **Aturan baru:** area kiri papan yang kosong tidak diisi sidebar navigasi, tetapi kartu profil.
 
-- [ ] S10-01 Migrasi baru (nomor berikutnya setelah migrasi centang sub task): kolom jabatan (`job_title`) dan foto profil di tabel akun.
-- [ ] S10-02 Unggah foto: JPG atau PNG, maksimal 2 MB, tipe dicek dari isi. Backend memotong jadi persegi, mengecilkan ke ukuran tetap, lalu menyimpan ulang tanpa metadata EXIF (alasan: koordinat lokasi di foto ponsel tidak ikut tersimpan). Disimpan di `STORAGE_DIR/avatars/` dengan nama UUID.
-- [ ] S10-03 Endpoint: ubah nama dan jabatan sendiri, ganti dan hapus foto sendiri, ambil foto akun mana pun (wajib login, dengan ETag supaya tidak diunduh ulang).
-- [ ] S10-04 Aturan hak: tiap pengguna mengubah nama, jabatan, dan foto miliknya sendiri. Divisi dan peran tetap hanya Admin atau Manajer, ditampilkan baca-saja di kartu dengan keterangan siapa yang mengaturnya. Audit `profile_updated`.
-- [ ] S10-05 Kartu profil di area kiri papan (desktop): foto atau inisial, nama, jabatan, divisi, tombol "Ubah profil" yang membuka panel. Isian jabatan kosong tampil sebagai ajakan mengisi, bukan teks karangan.
-- [ ] S10-06 Ringkasan di kartu: jumlah task saya per status, dihitung dari data papan (tidak ada angka karangan). Klik angka menyaring papan.
-- [ ] S10-07 Ponsel: kartu menjadi bar ringkas di atas papan yang bisa dibuka, bukan kolom kiri.
-- [ ] S10-08 Foto atau inisial dipakai konsisten di top bar, chip PIC, kartu task, daftar Pengguna, dan Audit Log. Halaman Profil yang lama (ganti password) digabung ke panel ubah profil.
-- [ ] S10-09 State: foto gagal dimuat (kembali ke inisial), unggah berjalan, ukuran atau tipe ditolak, simpan gagal.
+- [x] S10-01 Migrasi baru (nomor berikutnya setelah migrasi centang sub task): kolom jabatan (`job_title`) dan foto profil di tabel akun.
+- [x] S10-02 Unggah foto: JPG atau PNG, maksimal 2 MB, tipe dicek dari isi. Backend memotong jadi persegi, mengecilkan ke ukuran tetap, lalu menyimpan ulang tanpa metadata EXIF (alasan: koordinat lokasi di foto ponsel tidak ikut tersimpan). Disimpan di `STORAGE_DIR/avatars/` dengan nama UUID.
+- [x] S10-03 Endpoint: ubah nama dan jabatan sendiri, ganti dan hapus foto sendiri, ambil foto akun mana pun (wajib login, dengan ETag supaya tidak diunduh ulang).
+- [x] S10-04 Aturan hak: tiap pengguna mengubah nama, jabatan, dan foto miliknya sendiri. Divisi dan peran tetap hanya Admin atau Manajer, ditampilkan baca-saja di kartu dengan keterangan siapa yang mengaturnya. Audit `profile_updated`.
+- [x] S10-05 Kartu profil di area kiri papan (desktop): foto atau inisial, nama, jabatan, divisi, tombol "Ubah profil" yang membuka panel. Isian jabatan kosong tampil sebagai ajakan mengisi, bukan teks karangan.
+- [x] S10-06 Ringkasan di kartu: jumlah task saya per status, dihitung dari data papan (tidak ada angka karangan). Klik angka menyaring papan.
+- [x] S10-07 Ponsel: kartu menjadi bar ringkas di atas papan yang bisa dibuka, bukan kolom kiri.
+- [x] S10-08 Foto atau inisial dipakai konsisten di top bar, chip PIC, kartu task, daftar Pengguna, dan Audit Log. Halaman Profil yang lama (ganti password) digabung ke panel ubah profil.
+- [x] S10-09 State: foto gagal dimuat (kembali ke inisial), unggah berjalan, ukuran atau tipe ditolak, simpan gagal.
 
-**Butuh dari Manajer:** apakah jabatan diisi sendiri oleh tiap orang atau hanya pengelola (usulan di atas: diisi sendiri).
+**Butuh dari Manajer:** apakah jabatan diisi sendiri oleh tiap orang atau hanya pengelola (usulan di atas: diisi sendiri). Sementara memakai usulan itu: diisi sendiri.
+
+**Hasil:** kode S10-01 sampai S10-09 selesai 2026-11-13, menunggu uji Rifky. S10-01 sudah dimigrasi ke database dev (versi 5). Lolos `./scripts/check.sh`. Pemroses foto diuji lewat test sementara (dihapus lagi, test baru ditulis di Sprint 13): orientasi EXIF diterapkan, EXIF tidak ikut tersimpan, PNG transparan jadi putih, berkas teks ditolak, PNG 100 megapiksel ditolak dari header saja, berkas di atas 2 MB dan JPEG terpotong ditolak. Uji API belum dijalankan karena `DATABASE_URL` tidak tersedia untuk Claude Code; semuanya ada di `scripts/uji-sprint10.sh`.
 
 **Keputusan:**
 - Migrasi `000005_profile`: `users.job_title varchar(100)` dan `users.avatar_id uuid`, keduanya boleh NULL. Akun lama tetap sah tanpa diisi.
 - Jabatan kosong disimpan NULL, bukan teks kosong. Constraint menolak teks kosong dan spasi di awal atau akhir, jadi backend wajib merapikan isian sebelum menyimpan.
 - `avatar_id` dipakai sebagai nama berkas di `STORAGE_DIR/avatars/` dan sebagai ETag foto. Setiap unggahan memberi UUID baru, jadi foto lama tidak tertimpa di tempat dan cache browser otomatis basi.
+- Foto: batas 2 MB (`http.MaxBytesReader`, dan `Content-Length` yang sudah terlalu besar ditolak sebelum isi dibaca). Tipe ditentukan dari isi: hanya JPEG dan PNG, dan format dari `image.DecodeConfig` harus sama dengan tanda di awal berkas. Gambar di atas 40 juta piksel ditolak sebelum decode penuh.
+- Pemrosesan memakai `github.com/disintegration/imaging` v1.6.2: decode dengan `AutoOrientation(true)` (arah putar EXIF diterapkan dulu), `Fill` 256x256 dari tengah, diratakan di atas latar putih, simpan ulang JPEG kualitas 85. Simpan ulang inilah yang membuang EXIF. `golang.org/x/image` dinaikkan ke v0.48.0 karena versi 2019 bawaan imaging punya celah di decoder TIFF dan WebP.
+- Berkas foto ditulis ke berkas sementara di `avatars/` lalu di-rename, baru database diubah. Kalau transaksi gagal, berkas baru dihapus. Berkas lama dihapus setelah transaksi berhasil; kalau gagal, hanya dicatat di log (pembersih berkas yatim di S12-07). Berkas sementara yang tertinggal di `avatars/` juga urusan S12-07.
+- Galat foto: tipe atau isi rusak 415 (`unsupported_file`), terlalu besar 413 (`file_too_large`), tidak punya foto 404. Hapus foto saat tidak ada foto dianggap beres (204, tanpa audit).
+- Endpoint profil di grup `app` (password sudah diganti): `PUT /api/me/profile`, `PUT /api/me/avatar`, `DELETE /api/me/avatar`, `GET /api/me/task-counts`, `GET /api/users/:id/avatar`. Rute `/me` tidak menerima id dari URL atau body; sasarannya selalu akun yang login.
+- `GET /api/auth/me` (endpoint sesi yang sudah ada, bukan `/api/me`) kini membawa `job_title`, `avatar_id`, dan nama divisi. `avatar_id` juga ikut di `/api/people`, daftar Pengguna, PIC task dan sub task, serta aktor Audit Log.
+- `GET /api/users/:id/avatar` memakai `Cache-Control: private, max-age=31536000, immutable` hanya bila `?v=` sama dengan `avatar_id` saat ini. Tanpa `?v=` yang cocok, `private, no-cache`, supaya URL tanpa versi tidak menyimpan foto lama. 304 ditangani `http.ServeContent` lewat ETag. Foto yang berkasnya hilang dari disk dibalas 404 dan dicatat di log.
+- Validasi nama memakai aturan nama akun yang sudah ada (wajib, maksimal 100). Galat validasi akun kini membawa `field` di JSON (`name`, `job_title`), supaya form menaruh pesan di bawah kolomnya.
+- Audit `profile_updated` masuk kategori "account". Untuk nama dan jabatan, `old_value` dan `new_value` berisi field yang berubah (jabatan kosong ditulis null). Untuk foto, hanya `new_value` `{"avatar": "diganti"}` atau `{"avatar": "dihapus"}`, karena berkas foto bukan nilai yang bisa dibandingkan. Simpan tanpa perubahan tidak dicatat.
+- Papan memakai `meta.wide`, jadi AppShell memakai kontainer `max-w-[120rem]` khusus rute itu. Kartu profil menjadi kolom kiri 17rem bila kontainer papan (`@container/board`) selebar 80rem atau lebih, artinya mulai lebar jendela sekitar 1344 px. Di 1280 px ke bawah kartu menjadi bar ringkas di atas papan yang dibuka dengan tombol (`aria-expanded`).
+- Angka di kartu (`GET /api/me/task-counts`) memakai `Board` dengan PIC akun sendiri tanpa filter lain, jadi sama dengan `scope=mine` dan Completed hanya 7 hari. Angka dimuat saat papan dibuka dan setelah setiap aksi, tidak saat filter berubah. Admin tidak pernah menjadi PIC, jadi bagian angka tidak ditampilkan untuk Admin.
+- Klik angka: Staf mendapat `scope=mine`, Manajer mendapat `pic=<username sendiri>`, filter lain dan kata kunci dikosongkan, dan di layar sempit kolom status itu dipilih.
+- Komponen `UserAvatar` (foto dengan inisial sebagai cadangan, `alt` kosong bila nama sudah tertulis di sebelahnya) dipakai di top bar, kartu dan bar profil, kartu task, chip dan daftar `PicPicker`, sub task di detail task, daftar Pengguna, dan Audit Log. Foto yang gagal dimuat kembali ke inisial.
+- `ProfileForm` dipakai di panel "Ubah profil" papan dan di halaman `/profil`. Isi S10-08 di atas diubah: ganti password tetap di halaman `/profil`, tidak masuk panel. Item Profil di navigasi tetap ada sampai Sprint 11.
+- Foto diunggah langsung saat dipilih (dengan progres), terpisah dari tombol Simpan profil. Tipe dan ukuran dicek juga di browser supaya berkas yang pasti ditolak tidak diunggah dulu; backend tetap memeriksa ulang.
+- Perbaikan di luar rencana: `.gitignore` baris `storage/` mengabaikan paket kode `backend/internal/storage` (belum pernah ter-commit sejak Sprint 5, jadi repo di remote tidak bisa di-build). Diganti `/storage/`; folder data `backend/storage/` tetap diabaikan. Baris `!.vscode/settings.json` yang menempel dengan `backend/.data/` dipisah. Tag JSON `subtasks` di `updateTaskRequest` memakai kutip miring (ditandai `go vet`) dan diperbaiki; selama ini tetap jalan karena `encoding/json` tidak peka huruf besar-kecil.
+- Untuk Sprint 13: uji `ProcessAvatar` (orientasi 1 sampai 8, PNG transparan, batas piksel, format tidak cocok), hak rute `/me`, ETag dan cache, audit `profile_updated`, kecocokan task-counts dengan papan, dan pembersihan berkas saat transaksi gagal.
+
+**Retro:**
+- Macet: `DATABASE_URL` tidak tersedia untuk Claude Code, jadi uji API tidak bisa dijalankan sendiri; paket `internal/storage` ternyata tidak pernah masuk git karena pola `.gitignore`; `py` tidak tersedia di Git Bash.
+- Lancar: (isi sendiri)
+- Diubah untuk Sprint 11: (isi sendiri)
 
 ---
 

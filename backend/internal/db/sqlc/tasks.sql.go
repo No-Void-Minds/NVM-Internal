@@ -404,7 +404,7 @@ func (q *Queries) ListBoardTasks(ctx context.Context, arg ListBoardTasksParams) 
 }
 
 const listPeople = `-- name: ListPeople :many
-SELECT u.id, u.name, u.username, u.role, d.name AS division_name
+SELECT u.id, u.name, u.username, u.role, d.name AS division_name, u.avatar_id
 FROM users u
 JOIN divisions d ON d.id = u.division_id
 WHERE u.is_active AND u.role IN ('staff', 'manager')
@@ -417,6 +417,7 @@ type ListPeopleRow struct {
 	Username     string
 	Role         UserRole
 	DivisionName string
+	AvatarID     pgtype.UUID
 }
 
 // Calon PIC untuk filter papan dan form task: aturannya sama dengan GetEligiblePICs.
@@ -435,6 +436,7 @@ func (q *Queries) ListPeople(ctx context.Context) ([]ListPeopleRow, error) {
 			&i.Username,
 			&i.Role,
 			&i.DivisionName,
+			&i.AvatarID,
 		); err != nil {
 			return nil, err
 		}
@@ -447,12 +449,12 @@ func (q *Queries) ListPeople(ctx context.Context) ([]ListPeopleRow, error) {
 }
 
 const listTaskAssignees = `-- name: ListTaskAssignees :many
-SELECT st.task_id, u.id, u.name, u.username
+SELECT st.task_id, u.id, u.name, u.username, u.avatar_id
 FROM task_subtasks st
 JOIN subtask_assignees sa ON sa.subtask_id = st.id
 JOIN users u ON u.id = sa.user_id
 WHERE st.task_id = ANY($1::text[])
-GROUP BY st.task_id, u.id, u.name, u.username
+GROUP BY st.task_id, u.id, u.name, u.username, u.avatar_id
 ORDER BY st.task_id, min(st.position), min(sa.assigned_at), u.id
 `
 
@@ -461,6 +463,7 @@ type ListTaskAssigneesRow struct {
 	ID       int64
 	Name     string
 	Username string
+	AvatarID pgtype.UUID
 }
 
 // PIC task adalah gabungan unik PIC semua sub task. Urutannya: sub task paling awal dulu, lalu waktu dipasang,
@@ -479,6 +482,7 @@ func (q *Queries) ListTaskAssignees(ctx context.Context, taskIds []string) ([]Li
 			&i.ID,
 			&i.Name,
 			&i.Username,
+			&i.AvatarID,
 		); err != nil {
 			return nil, err
 		}

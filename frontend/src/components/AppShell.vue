@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
+import UserAvatar from './UserAvatar.vue'
 import { useSessionStore } from '../stores/session'
 import { useLogout } from '../composables/useLogout'
 import { roleLabel, type Role } from '../utils/roles'
@@ -56,6 +57,9 @@ const visibleNav = computed(() =>
 function isCurrent(to: string): 'page' | undefined {
   return route.path === to || route.path.startsWith(`${to}/`) ? 'page' : undefined
 }
+
+// Papan memakai lebar layar penuh supaya kartu profil mengisi ruang kiri, bukan menyisakan ruang kosong (revisi 2).
+const container = computed(() => (route.meta.wide ? 'max-w-[120rem]' : 'max-w-6xl'))
 </script>
 
 <template>
@@ -68,7 +72,7 @@ function isCurrent(to: string): 'page' | undefined {
     </a>
 
     <header class="border-b border-line bg-surface">
-      <div class="mx-auto flex h-14 max-w-6xl items-center gap-6 px-4 md:px-8">
+      <div class="mx-auto flex h-14 items-center gap-6 px-4 md:px-8" :class="container">
         <span class="font-semibold">NVM Internal</span>
         <nav aria-label="Navigasi utama" class="hidden md:flex md:gap-1">
           <RouterLink
@@ -83,6 +87,13 @@ function isCurrent(to: string): 'page' | undefined {
         </nav>
 
         <div v-if="session.user" class="ml-auto hidden items-center gap-3 md:flex">
+          <UserAvatar
+            :user-id="session.user.id"
+            :name="session.user.name"
+            :avatar-id="session.user.avatar_id"
+            size="md"
+            decorative
+          />
           <span class="text-right text-sm leading-tight">
             <span class="block font-medium">{{ session.user.name }}</span>
             <span class="block text-ink-muted">{{ roleLabel(session.user.role) }}</span>
@@ -97,7 +108,12 @@ function isCurrent(to: string): 'page' | undefined {
           </button>
         </div>
       </div>
-      <p v-if="logoutError" role="alert" class="mx-auto max-w-6xl px-4 pb-3 text-sm text-danger md:px-8">
+      <p
+        v-if="logoutError"
+        role="alert"
+        class="mx-auto px-4 pb-3 text-sm text-danger md:px-8"
+        :class="container"
+      >
         {{ logoutError }}
       </p>
     </header>
@@ -106,7 +122,8 @@ function isCurrent(to: string): 'page' | undefined {
     <main
       id="konten"
       tabindex="-1"
-      class="mx-auto max-w-6xl px-4 pt-6 pb-[calc(5rem+env(safe-area-inset-bottom))] outline-none md:px-8 md:pb-10"
+      :class="container"
+      class="mx-auto px-4 pt-6 pb-[calc(5rem+env(safe-area-inset-bottom))] outline-none md:px-8 md:pb-10"
     >
       <slot />
     </main>

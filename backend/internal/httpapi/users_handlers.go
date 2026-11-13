@@ -22,6 +22,8 @@ type userItem struct {
 	Status       string     `json:"status"`
 	LockedUntil  *time.Time `json:"locked_until"`
 	LastLoginAt  *time.Time `json:"last_login_at"`
+	JobTitle     *string    `json:"job_title"`
+	AvatarID     *string    `json:"avatar_id"`
 }
 
 // listUsers mengembalikan semua akun sekaligus. Dengan sekitar 10 pengguna, filter peran, divisi,
@@ -43,6 +45,8 @@ func (s *Server) listUsers(c *gin.Context) {
 			DivisionID:   r.DivisionID,
 			DivisionName: r.DivisionName,
 			Status:       "aktif",
+			JobTitle:     textPtr(r.JobTitle),
+			AvatarID:     avatarID(r.AvatarID),
 		}
 		if r.LockedUntil.Valid && r.LockedUntil.Time.After(now) {
 			item.Status = "terkunci"
@@ -180,7 +184,7 @@ func (s *Server) writeAccountError(c *gin.Context, err error) {
 	var ve *account.ValidationError
 	switch {
 	case errors.As(err, &ve):
-		writeError(c, http.StatusBadRequest, CodeBadRequest, ve.Message)
+		writeFieldError(c, http.StatusBadRequest, CodeBadRequest, ve.Message, ve.Field)
 	case errors.Is(err, account.ErrNotFound):
 		writeError(c, http.StatusNotFound, CodeNotFound, "Akun tidak ditemukan.")
 	case errors.Is(err, account.ErrUsernameTaken):

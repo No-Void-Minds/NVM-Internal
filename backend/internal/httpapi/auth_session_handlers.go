@@ -19,6 +19,8 @@ func (s *Server) me(c *gin.Context) {
 		Role:               string(u.Role),
 		DivisionID:         u.DivisionID,
 		DivisionName:       u.DivisionName,
+		JobTitle:           textPtr(u.JobTitle),
+		AvatarID:           avatarID(u.AvatarID),
 		MustChangePassword: u.MustChangePassword,
 	}})
 }

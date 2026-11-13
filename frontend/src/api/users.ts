@@ -13,6 +13,8 @@ export type UserItem = {
   status: UserStatus
   locked_until: string | null
   last_login_at: string | null
+  job_title: string | null
+  avatar_id: string | null
 }
 
 export type UserProfileInput = { name: string; role: Role; division_id: number }

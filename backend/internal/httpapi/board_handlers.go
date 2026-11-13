@@ -25,11 +25,12 @@ type boardColumn struct {
 }
 
 type person struct {
-	ID           int64  `json:"id"`
-	Name         string `json:"name"`
-	Username     string `json:"username"`
-	Role         string `json:"role"`
-	DivisionName string `json:"division_name"`
+	ID           int64   `json:"id"`
+	Name         string  `json:"name"`
+	Username     string  `json:"username"`
+	Role         string  `json:"role"`
+	DivisionName string  `json:"division_name"`
+	AvatarID     *string `json:"avatar_id"`
 }
 
 // board menerima scope (mine/all), pic (username, dipisah koma), division, label, urgency, dan due.
@@ -74,7 +75,10 @@ func (s *Server) listPeople(c *gin.Context) {
 	}
 	out := make([]person, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, person{ID: r.ID, Name: r.Name, Username: r.Username, Role: string(r.Role), DivisionName: r.DivisionName})
+		out = append(out, person{
+			ID: r.ID, Name: r.Name, Username: r.Username, Role: string(r.Role), DivisionName: r.DivisionName,
+			AvatarID: avatarID(r.AvatarID),
+		})
 	}
 	c.JSON(http.StatusOK, gin.H{"people": out})
 }

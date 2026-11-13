@@ -61,7 +61,7 @@ func (q *Queries) GetPasswordHash(ctx context.Context, id int64) (string, error)
 
 const getSessionUser = `-- name: GetSessionUser :one
 SELECT u.id, u.name, u.username, u.role, u.division_id, d.name AS division_name,
-       u.is_active, u.must_change_password, u.token_version
+       u.is_active, u.must_change_password, u.token_version, u.job_title, u.avatar_id
 FROM users u
 JOIN divisions d ON d.id = u.division_id
 WHERE u.id = $1
@@ -77,6 +77,8 @@ type GetSessionUserRow struct {
 	IsActive           bool
 	MustChangePassword bool
 	TokenVersion       int32
+	JobTitle           pgtype.Text
+	AvatarID           pgtype.UUID
 }
 
 func (q *Queries) GetSessionUser(ctx context.Context, id int64) (GetSessionUserRow, error) {
@@ -92,6 +94,8 @@ func (q *Queries) GetSessionUser(ctx context.Context, id int64) (GetSessionUserR
 		&i.IsActive,
 		&i.MustChangePassword,
 		&i.TokenVersion,
+		&i.JobTitle,
+		&i.AvatarID,
 	)
 	return i, err
 }

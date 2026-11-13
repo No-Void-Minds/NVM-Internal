@@ -6,7 +6,7 @@ WHERE st.task_id = ANY(@task_ids::text[])
 ORDER BY st.task_id, st.position;
 
 -- name: ListSubtaskAssignees :many
-SELECT sa.subtask_id, u.id, u.name, u.username
+SELECT sa.subtask_id, u.id, u.name, u.username, u.avatar_id
 FROM subtask_assignees sa
 JOIN users u ON u.id = sa.user_id
 WHERE sa.subtask_id = ANY(@subtask_ids::bigint[])

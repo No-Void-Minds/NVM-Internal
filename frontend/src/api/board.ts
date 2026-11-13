@@ -24,6 +24,7 @@ export type Person = {
   username: string
   role: 'staff' | 'manager'
   division_name: string
+  avatar_id: string | null
 }
 
 export function getBoard(q: BoardQuery, signal?: AbortSignal): Promise<Board> {

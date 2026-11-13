@@ -2,11 +2,10 @@
 -- Sasaran aksi digabung ke nama akun atau divisi supaya halaman Audit Log bisa menulis
 -- "Menonaktifkan akun Staf C" tanpa query tambahan per baris.
 SELECT a.id, a.occurred_at, a.action, a.entity, a.entity_id, a.old_value, a.new_value, a.ip_address,
-       a.user_id AS actor_id, actor.name AS actor_name,
+       a.user_id AS actor_id, actor.name AS actor_name, actor.avatar_id AS actor_avatar_id,
        target_user.name AS target_user_name,
        target_division.name AS target_division_name,
        target_label.name AS target_label_name
-       
 FROM audit_logs a
 LEFT JOIN users actor ON actor.id = a.user_id
 LEFT JOIN users target_user ON a.entity = 'user' AND target_user.id::text = a.entity_id

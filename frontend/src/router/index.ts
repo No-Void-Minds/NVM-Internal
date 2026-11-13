@@ -22,6 +22,8 @@ declare module 'vue-router' {
     layout?: 'auth' | 'app'
     // Kosong berarti semua peran boleh membuka. Backend tetap menolak dengan 403 bila URL dipanggil langsung.
     roles?: Role[]
+    // Halaman yang memakai seluruh lebar layar (papan dengan kartu profil), bukan kontainer standar.
+    wide?: boolean
   }
 }
 
@@ -66,7 +68,7 @@ export const router = createRouter({
       component: AuditLogPage,
       meta: { title: 'Audit Log', roles: ['admin', 'manager'] },
     },
-    { path: '/task', name: 'tasks', component: BoardPage, meta: { title: 'Papan Task' } },
+    { path: '/task', name: 'tasks', component: BoardPage, meta: { title: 'Papan Task', wide: true } },
     { path: '/task/:id', name: 'task-detail', component: TaskPage, meta: { title: 'Detail task' } },
     { path: '/arsip', name: 'archive', component: ArchivePage, meta: { title: 'Arsip' } },
   ],

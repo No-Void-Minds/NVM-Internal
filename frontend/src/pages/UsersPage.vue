@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import BaseDialog from '../components/BaseDialog.vue'
 import RowMenu, { type MenuItem } from '../components/RowMenu.vue'
+import UserAvatar from '../components/UserAvatar.vue'
 import UserFormPanel from '../components/UserFormPanel.vue'
 import { ApiError } from '../api/client'
 import { listDivisions, type DivisionItem } from '../api/divisions'
@@ -316,7 +317,12 @@ const buttonSecondary =
           </thead>
           <tbody>
             <tr v-for="u in filtered" :key="u.id" class="border-b border-line last:border-b-0">
-              <td class="px-4 py-2">{{ u.name }}</td>
+              <td class="px-4 py-2">
+                <span class="flex items-center gap-2">
+                  <UserAvatar :user-id="u.id" :name="u.name" :avatar-id="u.avatar_id" size="sm" decorative />
+                  {{ u.name }}
+                </span>
+              </td>
               <td class="px-4 py-2 text-ink-muted">{{ u.username }}</td>
               <td class="px-4 py-2">{{ roleLabel(u.role) }}</td>
               <td class="px-4 py-2">{{ u.division_name }}</td>
@@ -338,7 +344,8 @@ const buttonSecondary =
         <ul class="mt-3 space-y-3 lg:hidden">
           <li v-for="u in filtered" :key="u.id" class="rounded-card border border-line bg-surface p-4">
             <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0">
+              <UserAvatar :user-id="u.id" :name="u.name" :avatar-id="u.avatar_id" size="md" decorative />
+              <div class="min-w-0 flex-1">
                 <p class="font-medium">{{ u.name }}</p>
                 <p class="break-words text-sm text-ink-muted">{{ u.username }}</p>
               </div>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import UserAvatar from '../components/UserAvatar.vue'
 import { ApiError } from '../api/client'
 import { listAuditLogs, type AuditCategory, type AuditEntry } from '../api/audit'
 import { listDivisions, type DivisionItem } from '../api/divisions'
@@ -185,7 +186,19 @@ const pagerButton =
         <tbody>
           <tr v-for="e in entries" :key="e.id" class="border-b border-line align-top last:border-b-0">
             <td class="px-4 py-3 whitespace-nowrap text-ink-muted">{{ formatDateTime(e.occurred_at) }}</td>
-            <td class="px-4 py-3">{{ actorName(e) }}</td>
+            <td class="px-4 py-3">
+              <span class="flex items-center gap-2">
+                <UserAvatar
+                  v-if="e.actor"
+                  :user-id="Number(e.actor.id)"
+                  :name="e.actor.name"
+                  :avatar-id="e.actor.avatar_id"
+                  size="sm"
+                  decorative
+                />
+                {{ actorName(e) }}
+              </span>
+            </td>
             <td class="px-4 py-3">{{ describeAudit(e, divisionName) }}</td>
             <td class="px-4 py-3 text-ink-muted">{{ e.ip || '-' }}</td>
           </tr>
@@ -195,7 +208,17 @@ const pagerButton =
       <ul class="mt-4 space-y-3 lg:hidden">
         <li v-for="e in entries" :key="e.id" class="rounded-card border border-line bg-surface p-4">
           <p class="text-sm text-ink-muted">{{ formatDateTime(e.occurred_at) }}</p>
-          <p class="mt-1 font-medium">{{ actorName(e) }}</p>
+          <p class="mt-1 flex items-center gap-2 font-medium">
+            <UserAvatar
+              v-if="e.actor"
+              :user-id="Number(e.actor.id)"
+              :name="e.actor.name"
+              :avatar-id="e.actor.avatar_id"
+              size="sm"
+              decorative
+            />
+            {{ actorName(e) }}
+          </p>
           <p class="mt-1 break-words">{{ describeAudit(e, divisionName) }}</p>
           <p v-if="e.ip" class="mt-1 text-sm text-ink-muted">IP {{ e.ip }}</p>
         </li>

@@ -10,6 +10,8 @@ export type SessionUser = {
   role: Role
   division_id: number
   division_name?: string
+  job_title: string | null
+  avatar_id: string | null
   must_change_password: boolean
 }
 

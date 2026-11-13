@@ -14,8 +14,9 @@ import (
 )
 
 type auditRef struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID       string  `json:"id"`
+	Name     string  `json:"name"`
+	AvatarID *string `json:"avatar_id"`
 }
 
 type auditTarget struct {
@@ -87,7 +88,9 @@ func (s *Server) listAuditLogs(c *gin.Context) {
 			item.IP = r.IpAddress.String()
 		}
 		if r.ActorID.Valid {
-			item.Actor = &auditRef{ID: strconv.FormatInt(r.ActorID.Int64, 10), Name: r.ActorName.String}
+			item.Actor = &auditRef{
+				ID: strconv.FormatInt(r.ActorID.Int64, 10), Name: r.ActorName.String, AvatarID: avatarID(r.ActorAvatarID),
+			}
 		}
 		if r.Entity.Valid && r.EntityID.Valid {
 			item.Target = &auditTarget{Type: r.Entity.String, ID: r.EntityID.String}

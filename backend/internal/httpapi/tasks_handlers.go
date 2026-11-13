@@ -20,9 +20,10 @@ type idName struct {
 }
 
 type taskPerson struct {
-	ID       int64  `json:"id"`
-	Name     string `json:"name"`
-	Username string `json:"username"`
+	ID       int64   `json:"id"`
+	Name     string  `json:"name"`
+	Username string  `json:"username"`
+	AvatarID *string `json:"avatar_id"`
 }
 
 type taskLabel struct {
@@ -192,7 +193,7 @@ func (s *Server) getTask(c *gin.Context) {
 		// can_check berasal dari aturan yang sama dengan SetSubtaskDone, supaya UI tidak menebak.
 		item.CanCheck = checkable[st.ID]
 		for _, a := range st.Assignees {
-			item.Assignees = append(item.Assignees, taskPerson{ID: a.ID, Name: a.Name, Username: a.Username})
+			item.Assignees = append(item.Assignees, taskPerson{ID: a.ID, Name: a.Name, Username: a.Username, AvatarID: avatarID(a.AvatarID)})
 		}
 		if item.Done {
 			doneCount++
@@ -256,7 +257,7 @@ func (s *Server) writeTaskError(c *gin.Context, err error) {
 func people(rows []sqlc.ListTaskAssigneesRow) []taskPerson {
 	out := make([]taskPerson, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, taskPerson{ID: r.ID, Name: r.Name, Username: r.Username})
+		out = append(out, taskPerson{ID: r.ID, Name: r.Name, Username: r.Username, AvatarID: avatarID(r.AvatarID)})
 	}
 	return out
 }

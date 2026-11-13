@@ -31,6 +31,10 @@ import {
 } from '../utils/task'
 import type { DueFilter } from '../api/board'
 import MoveDialog from '../components/MoveDialog.vue'
+import BaseDialog from '../components/BaseDialog.vue'
+import ProfileCard from '../components/ProfileCard.vue'
+import ProfileForm from '../components/ProfileForm.vue'
+import { getTaskCounts, type TaskCounts } from '../api/profile'
 import { readyBlock } from '../utils/subtaskGate'
 
 const route = useRoute()
@@ -99,6 +103,8 @@ async function load(quiet = false) {
   const c = new AbortController()
   controller = c
   if (!quiet) loadState.value = 'loading'
+  // Angka kartu profil tidak bergantung pada filter, jadi hanya dimuat ulang setelah aksi, bukan tiap filter berubah.
+  if (quiet) void loadCounts()
   try {
     board.value = await getBoard(query.value, c.signal)
     loadState.value = 'ready'
@@ -114,6 +120,39 @@ async function load(quiet = false) {
 }
 watch(queryKey, () => load())
 
+// Admin tidak pernah menjadi PIC (hanya Staf dan Manajer), jadi tidak punya "task saya".
+const showCounts = computed(() => session.user?.role !== 'admin')
+const counts = ref<TaskCounts | null>(null)
+const countsState = ref<'loading' | 'ready' | 'error'>('loading')
+
+async function loadCounts() {
+  if (!showCounts.value) return
+  countsState.value = 'loading'
+  try {
+    counts.value = await getTaskCounts()
+    countsState.value = 'ready'
+  } catch {
+    // Angka lama tetap tampil bila sudah ada; galat hanya terlihat saat belum pernah berhasil dimuat.
+    countsState.value = 'error'
+  }
+}
+
+// Klik angka menampilkan task saya di papan: filter lain dikosongkan supaya jumlahnya sama dengan angka di kartu.
+function pickCount(status: TaskStatus) {
+  const self = session.user?.username
+  const mine: Partial<BoardQuery> = isStaff.value ? { scope: 'mine' } : { pic: self }
+  void router.push({
+    query: toRouteQuery(normalizeBoardQuery({ ...mine }, staffUsername.value)),
+  })
+  chooseColumn(status)
+}
+
+const profileOpen = ref(false)
+
+function onProfileSaved(message: string) {
+  notice.value = { kind: 'success', text: message }
+}
+
 const labels = ref<LabelItem[]>([])
 const divisions = ref<DivisionItem[]>([])
 const people = ref<Person[]>([])
@@ -121,6 +160,7 @@ const users = ref<UserItem[]>([])
 
 onMounted(async () => {
   void load()
+  void loadCounts()
   try {
     const [l, d, p] = await Promise.all([listLabels(), listDivisions(), listPeople()])
     labels.value = l.labels
@@ -280,239 +320,275 @@ const buttonSecondary =
 </script>
 
 <template>
-  <section>
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <h1 class="text-2xl font-semibold">Papan Task</h1>
-      <button
-        v-if="isManager"
-        type="button"
-        class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white active:translate-y-px"
-        @click="openCreate"
-      >
-        Buat task
-      </button>
-    </div>
-
-    <div
-      v-if="isStaff"
-      class="mt-4 inline-flex rounded-card border border-line bg-surface"
-      role="group"
-      aria-label="Lingkup task"
-    >
-      <button
-        type="button"
-        :class="scopeButton"
-        :aria-pressed="query.scope === 'mine'"
-        @click="setQuery({ scope: 'mine', pic: undefined })"
-      >
-        Task saya
-      </button>
-      <button
-        type="button"
-        :class="scopeButton"
-        :aria-pressed="query.scope === 'all'"
-        @click="setQuery({ scope: 'all' })"
-      >
-        Semua task
-      </button>
-    </div>
-
-    <div class="mt-4 max-w-xl">
-      <KeywordSearch id="board-search" :value="query.q" @search="setQuery({ q: $event })" />
-      <!-- Papan hanya memuat Completed 7 hari terakhir, jadi task lama yang cocok baru terlihat di Arsip. -->
-      <RouterLink
-        v-if="query.q"
-        :to="{ name: 'archive', query: { q: query.q } }"
-        class="inline-flex min-h-11 items-center rounded-card text-sm font-medium text-accent underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-      >
-        Cari "{{ query.q }}" juga di Arsip
-      </RouterLink>
-    </div>
-
-    <div
-      class="mt-4 grid items-end gap-3 [grid-template-columns:repeat(auto-fit,minmax(10rem,1fr))]"
-      role="group"
-      aria-label="Filter papan"
-    >
-      <div v-if="showPicFilter" class="min-w-0">
-        <label for="filter-pic" class="text-sm font-medium">PIC</label>
-        <select
-          id="filter-pic"
-          :class="selectClass"
-          :value="query.pic ?? ''"
-          @change="setQuery({ pic: selected($event) || undefined })"
-        >
-          <option value="">Semua orang</option>
-          <option v-for="p in people" :key="p.id" :value="p.username">
-            {{ p.name }} ({{ p.username === staffUsername ? 'kamu' : p.division_name }})
-          </option>
-        </select>
-      </div>
+  <!-- Container query: kartu profil jadi kolom kiri hanya bila kontainer papan selebar 80rem atau lebih. -->
+  <section class="@container/board">
+    <div class="grid items-start gap-6 @min-[80rem]/board:grid-cols-[17rem_minmax(0,1fr)]">
+      <aside class="sticky top-4 hidden @min-[80rem]/board:block">
+        <ProfileCard
+          variant="card"
+          :counts="counts"
+          :counts-state="countsState"
+          :show-counts="showCounts"
+          @edit="profileOpen = true"
+          @pick="pickCount"
+          @retry="loadCounts"
+        />
+      </aside>
       <div class="min-w-0">
-        <label for="filter-division" class="text-sm font-medium">Divisi</label>
-        <select
-          id="filter-division"
-          :class="selectClass"
-          :value="query.division ?? ''"
-          @change="setQuery({ division: Number(selected($event)) || undefined })"
-        >
-          <option value="">Semua divisi</option>
-          <option v-for="d in divisions" :key="d.id" :value="d.id">
-            {{ d.name }}{{ d.is_active ? '' : ' (nonaktif)' }}
-          </option>
-        </select>
-      </div>
-      <div class="min-w-0">
-        <label for="filter-label" class="text-sm font-medium">Label</label>
-        <select
-          id="filter-label"
-          :class="selectClass"
-          :value="query.label ?? ''"
-          @change="setQuery({ label: Number(selected($event)) || undefined })"
-        >
-          <option value="">Semua label</option>
-          <option v-for="l in labels" :key="l.id" :value="l.id">
-            {{ l.name }}{{ l.is_active ? '' : ' (nonaktif)' }}
-          </option>
-        </select>
-      </div>
-      <div class="min-w-0">
-        <label for="filter-urgency" class="text-sm font-medium">Urgency</label>
-        <select
-          id="filter-urgency"
-          :class="selectClass"
-          :value="query.urgency ?? ''"
-          @change="setQuery({ urgency: (selected($event) || undefined) as Urgency | undefined })"
-        >
-          <option value="">Semua urgency</option>
-          <option v-for="u in [...urgencies].reverse()" :key="u" :value="u">{{ urgencyLabel[u] }}</option>
-        </select>
-      </div>
-      <div class="min-w-0">
-        <label for="filter-due" class="text-sm font-medium">Tenggat</label>
-        <select
-          id="filter-due"
-          :class="selectClass"
-          :value="query.due ?? ''"
-          @change="setQuery({ due: (selected($event) || undefined) as DueFilter | undefined })"
-        >
-          <option value="">Semua tenggat</option>
-          <option v-for="d in dueOptions" :key="d.value" :value="d.value">{{ d.label }}</option>
-        </select>
-      </div>
-      <div v-if="filtered">
-        <button type="button" :class="buttonSecondary" @click="clearFilters">Hapus filter</button>
-      </div>
-    </div>
-
-    <div aria-live="polite">
-      <p
-        v-if="notice"
-        :role="notice.kind === 'error' ? 'alert' : 'status'"
-        class="mt-4 rounded-card p-3 text-sm"
-        :class="
-          notice.kind === 'error'
-            ? 'bg-danger-bg text-danger'
-            : 'border border-line bg-surface text-progress-fg'
-        "
-      >
-        {{ notice.text }}
-      </p>
-    </div>
-
-    <p v-if="loadState === 'loading'" class="mt-6 text-ink-muted">Memuat papan...</p>
-
-    <div
-      v-else-if="loadState === 'error'"
-      role="alert"
-      class="mt-6 rounded-card bg-danger-bg p-4 text-danger"
-    >
-      <p class="font-medium">{{ loadError }}</p>
-      <button
-        type="button"
-        class="mt-3 inline-flex min-h-11 items-center rounded-card border border-danger px-4 font-medium"
-        @click="load()"
-      >
-        Muat ulang
-      </button>
-    </div>
-
-    <template v-else-if="board">
-      <div v-if="total === 0" class="mt-6 rounded-card border border-line bg-surface p-6 text-center">
-        <template v-if="filtered">
-          <p>Tidak ada task yang cocok dengan filter ini.</p>
-          <button type="button" :class="buttonSecondary" class="mt-3" @click="clearFilters">
-            Hapus filter
-          </button>
-        </template>
-        <template v-else-if="query.scope === 'mine'">
-          <p>Belum ada task untukmu. Task baru dari Manajer akan muncul di sini.</p>
-          <button type="button" :class="buttonSecondary" class="mt-3" @click="setQuery({ scope: 'all' })">
-            Lihat semua task
-          </button>
-        </template>
-        <p v-else>Belum ada task aktif.</p>
-      </div>
-
-      <!-- Container query, bukan breakpoint layar: lebar papan bergantung pada sidebar AppShell, bukan lebar jendela. -->
-      <div class="@container mt-6">
-        <div class="grid grid-cols-4 gap-1 @2xl:hidden" role="group" aria-label="Pilih kolom">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h1 class="text-2xl font-semibold">Papan Task</h1>
           <button
-            v-for="col in board.columns"
-            :key="col.status"
+            v-if="isManager"
             type="button"
-            :aria-pressed="activeColumn === col.status"
-            class="flex min-h-11 min-w-0 flex-col items-center justify-center rounded-card border border-line bg-surface px-1 py-1 text-xs font-medium aria-pressed:border-accent aria-pressed:bg-accent aria-pressed:text-white"
-            @click="chooseColumn(col.status)"
+            class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white active:translate-y-px"
+            @click="openCreate"
           >
-            <span>{{ statusLabel[col.status] }}</span>
-            <span class="font-mono">{{ col.count }}<span class="sr-only"> task</span></span>
+            Buat task
           </button>
         </div>
 
-        <div class="mt-3 grid items-start gap-4 @2xl:mt-0 @2xl:grid-cols-2 @4xl:grid-cols-4">
-          <section
-            v-for="col in board.columns"
-            :key="col.status"
-            class="min-w-0 rounded-card border bg-canvas p-2"
-            :class="[
-              col.status === activeColumn ? '' : 'hidden @2xl:block',
-              dragging && canDrop(col.status) ? 'border-dashed border-accent' : 'border-line',
-              dropTarget === col.status && canDrop(col.status) ? 'bg-surface' : '',
-            ]"
-            :aria-labelledby="`kolom-${col.status}`"
-            @dragover="onDragOver($event, col.status)"
-            @dragleave="onDragLeave($event, col.status)"
-            @drop="onDrop($event, col.status)"
-          >
-            <h2 :id="`kolom-${col.status}`" class="flex min-h-11 items-center gap-2 px-1">
-              <span class="rounded-chip px-2 py-0.5 text-sm font-medium" :class="statusClass[col.status]">
-                {{ statusLabel[col.status] }}
-              </span>
-              <span class="rounded-chip border border-line bg-surface px-2 font-mono text-sm">
-                {{ col.count }}<span class="sr-only"> task</span>
-              </span>
-            </h2>
-            <p v-if="col.status === 'completed'" class="px-1 pb-2 text-sm text-ink-muted">
-              Hanya yang selesai {{ board.completed_days }} hari terakhir.
-            </p>
-            <ul v-if="col.tasks.length" class="space-y-2">
-              <li
-                v-for="t in col.tasks"
-                :key="t.id"
-                :draggable="t.move_to.length > 0"
-                :class="[t.move_to.length ? 'cursor-grab' : '', dragging?.id === t.id ? 'opacity-60' : '']"
-                @dragstart="onDragStart($event, t)"
-                @dragend="onDragEnd"
-              >
-                <TaskCard :task="t" @open="detailId = $event" @move="openMove" />
-              </li>
-            </ul>
-            <p v-else class="px-1 py-4 text-center text-sm text-ink-muted">Tidak ada task.</p>
-          </section>
+        <div class="mt-4 @min-[80rem]/board:hidden">
+          <ProfileCard
+            variant="bar"
+            :counts="counts"
+            :counts-state="countsState"
+            :show-counts="showCounts"
+            @edit="profileOpen = true"
+            @pick="pickCount"
+            @retry="loadCounts"
+          />
         </div>
+
+        <div
+          v-if="isStaff"
+          class="mt-4 inline-flex rounded-card border border-line bg-surface"
+          role="group"
+          aria-label="Lingkup task"
+        >
+          <button
+            type="button"
+            :class="scopeButton"
+            :aria-pressed="query.scope === 'mine'"
+            @click="setQuery({ scope: 'mine', pic: undefined })"
+          >
+            Task saya
+          </button>
+          <button
+            type="button"
+            :class="scopeButton"
+            :aria-pressed="query.scope === 'all'"
+            @click="setQuery({ scope: 'all' })"
+          >
+            Semua task
+          </button>
+        </div>
+
+        <div class="mt-4 max-w-xl">
+          <KeywordSearch id="board-search" :value="query.q" @search="setQuery({ q: $event })" />
+          <!-- Papan hanya memuat Completed 7 hari terakhir, jadi task lama yang cocok baru terlihat di Arsip. -->
+          <RouterLink
+            v-if="query.q"
+            :to="{ name: 'archive', query: { q: query.q } }"
+            class="inline-flex min-h-11 items-center rounded-card text-sm font-medium text-accent underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          >
+            Cari "{{ query.q }}" juga di Arsip
+          </RouterLink>
+        </div>
+
+        <div
+          class="mt-4 grid items-end gap-3 [grid-template-columns:repeat(auto-fit,minmax(10rem,1fr))]"
+          role="group"
+          aria-label="Filter papan"
+        >
+          <div v-if="showPicFilter" class="min-w-0">
+            <label for="filter-pic" class="text-sm font-medium">PIC</label>
+            <select
+              id="filter-pic"
+              :class="selectClass"
+              :value="query.pic ?? ''"
+              @change="setQuery({ pic: selected($event) || undefined })"
+            >
+              <option value="">Semua orang</option>
+              <option v-for="p in people" :key="p.id" :value="p.username">
+                {{ p.name }} ({{ p.username === staffUsername ? 'kamu' : p.division_name }})
+              </option>
+            </select>
+          </div>
+          <div class="min-w-0">
+            <label for="filter-division" class="text-sm font-medium">Divisi</label>
+            <select
+              id="filter-division"
+              :class="selectClass"
+              :value="query.division ?? ''"
+              @change="setQuery({ division: Number(selected($event)) || undefined })"
+            >
+              <option value="">Semua divisi</option>
+              <option v-for="d in divisions" :key="d.id" :value="d.id">
+                {{ d.name }}{{ d.is_active ? '' : ' (nonaktif)' }}
+              </option>
+            </select>
+          </div>
+          <div class="min-w-0">
+            <label for="filter-label" class="text-sm font-medium">Label</label>
+            <select
+              id="filter-label"
+              :class="selectClass"
+              :value="query.label ?? ''"
+              @change="setQuery({ label: Number(selected($event)) || undefined })"
+            >
+              <option value="">Semua label</option>
+              <option v-for="l in labels" :key="l.id" :value="l.id">
+                {{ l.name }}{{ l.is_active ? '' : ' (nonaktif)' }}
+              </option>
+            </select>
+          </div>
+          <div class="min-w-0">
+            <label for="filter-urgency" class="text-sm font-medium">Urgency</label>
+            <select
+              id="filter-urgency"
+              :class="selectClass"
+              :value="query.urgency ?? ''"
+              @change="setQuery({ urgency: (selected($event) || undefined) as Urgency | undefined })"
+            >
+              <option value="">Semua urgency</option>
+              <option v-for="u in [...urgencies].reverse()" :key="u" :value="u">{{ urgencyLabel[u] }}</option>
+            </select>
+          </div>
+          <div class="min-w-0">
+            <label for="filter-due" class="text-sm font-medium">Tenggat</label>
+            <select
+              id="filter-due"
+              :class="selectClass"
+              :value="query.due ?? ''"
+              @change="setQuery({ due: (selected($event) || undefined) as DueFilter | undefined })"
+            >
+              <option value="">Semua tenggat</option>
+              <option v-for="d in dueOptions" :key="d.value" :value="d.value">{{ d.label }}</option>
+            </select>
+          </div>
+          <div v-if="filtered">
+            <button type="button" :class="buttonSecondary" @click="clearFilters">Hapus filter</button>
+          </div>
+        </div>
+
+        <div aria-live="polite">
+          <p
+            v-if="notice"
+            :role="notice.kind === 'error' ? 'alert' : 'status'"
+            class="mt-4 rounded-card p-3 text-sm"
+            :class="
+              notice.kind === 'error'
+                ? 'bg-danger-bg text-danger'
+                : 'border border-line bg-surface text-progress-fg'
+            "
+          >
+            {{ notice.text }}
+          </p>
+        </div>
+
+        <p v-if="loadState === 'loading'" class="mt-6 text-ink-muted">Memuat papan...</p>
+
+        <div
+          v-else-if="loadState === 'error'"
+          role="alert"
+          class="mt-6 rounded-card bg-danger-bg p-4 text-danger"
+        >
+          <p class="font-medium">{{ loadError }}</p>
+          <button
+            type="button"
+            class="mt-3 inline-flex min-h-11 items-center rounded-card border border-danger px-4 font-medium"
+            @click="load()"
+          >
+            Muat ulang
+          </button>
+        </div>
+
+        <template v-else-if="board">
+          <div v-if="total === 0" class="mt-6 rounded-card border border-line bg-surface p-6 text-center">
+            <template v-if="filtered">
+              <p>Tidak ada task yang cocok dengan filter ini.</p>
+              <button type="button" :class="buttonSecondary" class="mt-3" @click="clearFilters">
+                Hapus filter
+              </button>
+            </template>
+            <template v-else-if="query.scope === 'mine'">
+              <p>Belum ada task untukmu. Task baru dari Manajer akan muncul di sini.</p>
+              <button type="button" :class="buttonSecondary" class="mt-3" @click="setQuery({ scope: 'all' })">
+                Lihat semua task
+              </button>
+            </template>
+            <p v-else>Belum ada task aktif.</p>
+          </div>
+
+          <!-- Container query, bukan breakpoint layar: lebar papan bergantung pada sidebar AppShell, bukan lebar jendela. -->
+          <div class="@container mt-6">
+            <div class="grid grid-cols-4 gap-1 @2xl:hidden" role="group" aria-label="Pilih kolom">
+              <button
+                v-for="col in board.columns"
+                :key="col.status"
+                type="button"
+                :aria-pressed="activeColumn === col.status"
+                class="flex min-h-11 min-w-0 flex-col items-center justify-center rounded-card border border-line bg-surface px-1 py-1 text-xs font-medium aria-pressed:border-accent aria-pressed:bg-accent aria-pressed:text-white"
+                @click="chooseColumn(col.status)"
+              >
+                <span>{{ statusLabel[col.status] }}</span>
+                <span class="font-mono">{{ col.count }}<span class="sr-only"> task</span></span>
+              </button>
+            </div>
+
+            <div class="mt-3 grid items-start gap-4 @2xl:mt-0 @2xl:grid-cols-2 @4xl:grid-cols-4">
+              <section
+                v-for="col in board.columns"
+                :key="col.status"
+                class="min-w-0 rounded-card border bg-canvas p-2"
+                :class="[
+                  col.status === activeColumn ? '' : 'hidden @2xl:block',
+                  dragging && canDrop(col.status) ? 'border-dashed border-accent' : 'border-line',
+                  dropTarget === col.status && canDrop(col.status) ? 'bg-surface' : '',
+                ]"
+                :aria-labelledby="`kolom-${col.status}`"
+                @dragover="onDragOver($event, col.status)"
+                @dragleave="onDragLeave($event, col.status)"
+                @drop="onDrop($event, col.status)"
+              >
+                <h2 :id="`kolom-${col.status}`" class="flex min-h-11 items-center gap-2 px-1">
+                  <span class="rounded-chip px-2 py-0.5 text-sm font-medium" :class="statusClass[col.status]">
+                    {{ statusLabel[col.status] }}
+                  </span>
+                  <span class="rounded-chip border border-line bg-surface px-2 font-mono text-sm">
+                    {{ col.count }}<span class="sr-only"> task</span>
+                  </span>
+                </h2>
+                <p v-if="col.status === 'completed'" class="px-1 pb-2 text-sm text-ink-muted">
+                  Hanya yang selesai {{ board.completed_days }} hari terakhir.
+                </p>
+                <ul v-if="col.tasks.length" class="space-y-2">
+                  <li
+                    v-for="t in col.tasks"
+                    :key="t.id"
+                    :draggable="t.move_to.length > 0"
+                    :class="[
+                      t.move_to.length ? 'cursor-grab' : '',
+                      dragging?.id === t.id ? 'opacity-60' : '',
+                    ]"
+                    @dragstart="onDragStart($event, t)"
+                    @dragend="onDragEnd"
+                  >
+                    <TaskCard :task="t" @open="detailId = $event" @move="openMove" />
+                  </li>
+                </ul>
+                <p v-else class="px-1 py-4 text-center text-sm text-ink-muted">Tidak ada task.</p>
+              </section>
+            </div>
+          </div>
+        </template>
       </div>
-    </template>
+    </div>
+
+    <BaseDialog :open="profileOpen" title="Ubah profil" variant="panel" @close="profileOpen = false">
+      <!-- v-if supaya isian kembali ke data terbaru setiap panel dibuka. -->
+      <ProfileForm v-if="profileOpen" @saved="onProfileSaved" />
+    </BaseDialog>
     <MoveDialog
       :task="moving"
       :initial-target="movingTarget"

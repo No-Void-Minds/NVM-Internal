@@ -4,18 +4,18 @@
 
 backend/bin/
 backend/tmp/
-storage/
+backend/.data/
+# Folder berkas unggahan. Ditulis dengan garis miring di depan supaya paket kode backend/internal/storage tidak ikut terabaikan.
+/storage/
+backend/storage/
 
 node_modules/
 frontend/dist/
 
 .vscode/*
 !.vscode/extensions.json
+!.vscode/settings.json
 .idea/
 Thumbs.db
 .DS_Store
-!.vscode/settings.jsonbackend/.data/
-backend/storage/
-.claude/settings.local.json
-.claude/settings.local.json
 .claude/settings.local.json

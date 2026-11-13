@@ -181,7 +181,7 @@ func (q *Queries) IsSubtaskAssignee(ctx context.Context, arg IsSubtaskAssigneePa
 }
 
 const listSubtaskAssignees = `-- name: ListSubtaskAssignees :many
-SELECT sa.subtask_id, u.id, u.name, u.username
+SELECT sa.subtask_id, u.id, u.name, u.username, u.avatar_id
 FROM subtask_assignees sa
 JOIN users u ON u.id = sa.user_id
 WHERE sa.subtask_id = ANY($1::bigint[])
@@ -193,6 +193,7 @@ type ListSubtaskAssigneesRow struct {
 	ID        int64
 	Name      string
 	Username  string
+	AvatarID  pgtype.UUID
 }
 
 func (q *Queries) ListSubtaskAssignees(ctx context.Context, subtaskIds []int64) ([]ListSubtaskAssigneesRow, error) {
@@ -209,6 +210,7 @@ func (q *Queries) ListSubtaskAssignees(ctx context.Context, subtaskIds []int64) 
 			&i.ID,
 			&i.Name,
 			&i.Username,
+			&i.AvatarID,
 		); err != nil {
 			return nil, err
 		}

@@ -27,6 +27,7 @@ type Server struct {
 	labels       *label.Service
 	tasks        *task.Service
 	files        *storage.Store
+	avatars      *account.Avatars
 	attachments  *task.Attachments
 	// now bisa diganti di test supaya waktu kuncian dan kedaluwarsa token bisa diuji.
 	now func() time.Time
@@ -60,6 +61,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 		tasks:        task.NewService(pool),
 		files:        files,
 		attachments:  task.NewAttachments(pool, files),
+		avatars:      account.NewAvatars(pool, files, log),
 	}
 
 	r := gin.New()
@@ -82,6 +84,12 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	authed.POST("/auth/logout", s.logout)
 	authed.POST("/auth/change-password", s.limitLogin(), s.changePassword)
 	app := authed.Group("", requirePasswordChanged())
+	// Rute /me selalu memakai akun yang login, tidak pernah id dari URL (S10-04).
+	app.PUT("/me/profile", s.updateMyProfile)
+	app.PUT("/me/avatar", s.uploadMyAvatar)
+	app.DELETE("/me/avatar", s.deleteMyAvatar)
+	app.GET("/me/task-counts", s.myTaskCounts)
+	app.GET("/users/:id/avatar", s.userAvatar)
 	manage := app.Group("", requireRole(sqlc.UserRoleAdmin, sqlc.UserRoleManager))
 	manage.GET("/users", s.listUsers)
 	manage.POST("/users", s.createUser)

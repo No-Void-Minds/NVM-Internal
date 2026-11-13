@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useId } from 'vue'
 import type { UserItem } from '../api/users'
-import { initials } from '../utils/person'
+import UserAvatar from './UserAvatar.vue'
 
 const props = defineProps<{
   candidates: UserItem[]
@@ -17,12 +17,13 @@ const uid = useId()
 const toggleEl = ref<HTMLButtonElement | null>(null)
 const searchEl = ref<HTMLInputElement | null>(null)
 
-const activeIds = computed(() => new Set(props.candidates.map((u) => u.id)))
+const byId = computed(() => new Map(props.candidates.map((u) => [u.id, u])))
 const chips = computed(() =>
   picked.value.map((id) => ({
     id,
     name: props.names.get(id) ?? `Akun #${id}`,
-    active: activeIds.value.has(id),
+    avatarId: byId.value.get(id)?.avatar_id ?? null,
+    active: byId.value.has(id),
   })),
 )
 const filtered = computed(() => {
@@ -72,11 +73,7 @@ const focusRing = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-
           :aria-label="`Lepas ${c.name} dari ${subject}`"
           @click="removeChip(c.id)"
         >
-          <span
-            aria-hidden="true"
-            class="flex size-7 items-center justify-center rounded-full border border-line bg-surface text-xs font-medium"
-            >{{ initials(c.name) }}</span
-          >
+          <UserAvatar :user-id="c.id" :name="c.name" :avatar-id="c.avatarId" size="sm" decorative />
           <span>{{ c.name }}<span v-if="!c.active" class="text-ink-muted"> (tidak aktif)</span></span>
           <svg
             aria-hidden="true"
@@ -141,6 +138,7 @@ const focusRing = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-
               :checked="picked.includes(u.id)"
               @change="toggle(u.id)"
             />
+            <UserAvatar :user-id="u.id" :name="u.name" :avatar-id="u.avatar_id" size="sm" decorative />
             <span class="min-w-0 flex-1">{{ u.name }}</span>
             <span class="text-sm text-ink-muted">{{ u.division_name }}</span>
           </label>

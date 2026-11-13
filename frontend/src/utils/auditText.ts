@@ -58,6 +58,20 @@ export function describeAudit(e: AuditEntry, divisionName: (id: number) => strin
       }
       return `Mengubah akun ${target}: ${changes.join(', ')}`
     }
+    case 'profile_updated': {
+      // Pelaku dan sasaran selalu akun yang sama, karena profil hanya bisa diubah pemiliknya.
+      const changes: string[] = []
+      if ('name' in after) changes.push(`nama "${str(before.name)}" menjadi "${str(after.name)}"`)
+      if ('job_title' in after) {
+        const old = before.job_title ? `"${str(before.job_title)}"` : 'kosong'
+        changes.push(
+          after.job_title ? `jabatan ${old} menjadi "${str(after.job_title)}"` : `jabatan ${old} dikosongkan`,
+        )
+      }
+      if (after.avatar === 'diganti') changes.push('mengganti foto profil')
+      if (after.avatar === 'dihapus') changes.push('menghapus foto profil')
+      return `Mengubah profil sendiri: ${changes.join(', ')}`
+    }
     case 'user_activated':
       return `Mengaktifkan akun ${target}`
     case 'user_deactivated':

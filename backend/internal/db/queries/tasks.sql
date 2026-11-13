@@ -41,12 +41,12 @@ ORDER BY t.created_at DESC;
 -- name: ListTaskAssignees :many
 -- PIC task adalah gabungan unik PIC semua sub task. Urutannya: sub task paling awal dulu, lalu waktu dipasang,
 -- supaya PIC pertama (penentu divisi task) selalu di baris pertama.
-SELECT st.task_id, u.id, u.name, u.username
+SELECT st.task_id, u.id, u.name, u.username, u.avatar_id
 FROM task_subtasks st
 JOIN subtask_assignees sa ON sa.subtask_id = st.id
 JOIN users u ON u.id = sa.user_id
 WHERE st.task_id = ANY(@task_ids::text[])
-GROUP BY st.task_id, u.id, u.name, u.username
+GROUP BY st.task_id, u.id, u.name, u.username, u.avatar_id
 ORDER BY st.task_id, min(st.position), min(sa.assigned_at), u.id;
 
 -- name: ListTaskLabels :many
@@ -109,7 +109,7 @@ ORDER BY CASE t.urgency WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' TH
 
 -- name: ListPeople :many
 -- Calon PIC untuk filter papan dan form task: aturannya sama dengan GetEligiblePICs.
-SELECT u.id, u.name, u.username, u.role, d.name AS division_name
+SELECT u.id, u.name, u.username, u.role, d.name AS division_name, u.avatar_id
 FROM users u
 JOIN divisions d ON d.id = u.division_id
 WHERE u.is_active AND u.role IN ('staff', 'manager')

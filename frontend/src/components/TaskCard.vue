@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import type { BoardTask } from '../api/board'
 import { formatDay, formatMoment, isOverdue, statusLabel, urgencyClass, urgencyLabel } from '../utils/task'
 import { readyBlock } from '../utils/subtaskGate'
+import UserAvatar from './UserAvatar.vue'
 
 const props = defineProps<{ task: BoardTask }>()
 defineEmits<{ open: [id: string]; move: [task: BoardTask] }>()
@@ -16,15 +17,6 @@ const blocked = computed(() => readyBlock(props.task) !== null && props.task.mov
 const percent = computed(() =>
   props.task.subtask_total ? Math.round((props.task.subtask_done / props.task.subtask_total) * 100) : 0,
 )
-
-function initials(name: string): string {
-  return name
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? '')
-    .join('')
-}
 </script>
 
 <template>
@@ -75,9 +67,9 @@ function initials(name: string): string {
           v-for="p in task.assignees"
           :key="p.id"
           :title="p.name"
-          class="flex size-8 items-center justify-center rounded-full border-2 border-surface bg-canvas text-xs font-medium"
+          class="rounded-full border-2 border-surface"
         >
-          <span aria-hidden="true">{{ initials(p.name) }}</span>
+          <UserAvatar :user-id="p.id" :name="p.name" :avatar-id="p.avatar_id" size="md" decorative />
           <span class="sr-only">{{ p.name }}</span>
         </li>
       </ul>

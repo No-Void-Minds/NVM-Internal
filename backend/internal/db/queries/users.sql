@@ -1,6 +1,6 @@
 -- name: ListUsers :many
 SELECT u.id, u.name, u.username, u.role, u.division_id, d.name AS division_name,
-       u.is_active, u.locked_until, u.last_login_at, u.created_at
+       u.is_active, u.locked_until, u.last_login_at, u.created_at, u.job_title, u.avatar_id
 FROM users u
 JOIN divisions d ON d.id = u.division_id
 ORDER BY u.is_active DESC, lower(u.name);
@@ -52,3 +52,22 @@ WHERE id = @id;
 UPDATE users
 SET failed_login_count = 0, lockout_level = 0, locked_until = NULL
 WHERE id = @id;
+-- name: GetOwnProfileForUpdate :one
+SELECT id, name, job_title, avatar_id
+FROM users
+WHERE id = @id
+FOR UPDATE;
+
+-- name: UpdateOwnProfile :exec
+-- Hanya nama dan jabatan. Divisi dan peran tetap lewat UpdateUserProfile oleh Admin atau Manajer.
+UPDATE users
+SET name = @name, job_title = sqlc.narg(job_title)
+WHERE id = @id;
+
+-- name: SetUserAvatar :exec
+UPDATE users
+SET avatar_id = sqlc.narg(avatar_id)
+WHERE id = @id;
+
+-- name: GetUserAvatar :one
+SELECT avatar_id FROM users WHERE id = @id;

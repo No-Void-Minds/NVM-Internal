@@ -26,13 +26,15 @@ type loginRequest struct {
 }
 
 type sessionUser struct {
-	ID                 int64  `json:"id"`
-	Name               string `json:"name"`
-	Username           string `json:"username"`
-	Role               string `json:"role"`
-	DivisionID         int64  `json:"division_id"`
-	DivisionName       string `json:"division_name,omitempty"`
-	MustChangePassword bool   `json:"must_change_password"`
+	ID                 int64   `json:"id"`
+	Name               string  `json:"name"`
+	Username           string  `json:"username"`
+	Role               string  `json:"role"`
+	DivisionID         int64   `json:"division_id"`
+	DivisionName       string  `json:"division_name,omitempty"`
+	JobTitle           *string `json:"job_title"`
+	AvatarID           *string `json:"avatar_id"`
+	MustChangePassword bool    `json:"must_change_password"`
 }
 
 func (s *Server) login(c *gin.Context) {

@@ -2,7 +2,7 @@ import { apiGet, apiPost, apiPut, request } from './client'
 import type { TaskStatus, Urgency } from '../utils/task'
 import type { TaskAttachment } from './attachments'
 
-export type TaskPerson = { id: number; name: string; username: string }
+export type TaskPerson = { id: number; name: string; username: string; avatar_id: string | null }
 export type TaskLabel = { id: number; name: string; color: string; is_active: boolean }
 export type TaskSubtask = {
   id: number

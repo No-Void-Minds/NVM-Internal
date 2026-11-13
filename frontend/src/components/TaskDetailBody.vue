@@ -26,7 +26,7 @@ import {
   type TaskStatus,
 } from '../utils/task'
 import AttachmentSection from './AttachmentSection.vue'
-import { initials } from '../utils/person'
+import UserAvatar from './UserAvatar.vue'
 import { readyBlock } from '../utils/subtaskGate'
 
 // wide dipakai halaman penuh /task/:id; tanpa wide isinya satu kolom untuk panel samping.
@@ -392,11 +392,7 @@ const buttonSecondary =
                   :key="p.id"
                   class="inline-flex items-center gap-1.5 rounded-chip border border-line bg-canvas py-0.5 pr-2 pl-0.5 text-sm"
                 >
-                  <span
-                    aria-hidden="true"
-                    class="flex size-6 items-center justify-center rounded-full border border-line bg-surface text-xs font-medium"
-                    >{{ initials(p.name) }}</span
-                  >
+                  <UserAvatar :user-id="p.id" :name="p.name" :avatar-id="p.avatar_id" size="sm" decorative />
                   {{ p.name }}<span v-if="p.id === session.user?.id" class="text-ink-muted"> (kamu)</span>
                 </li>
               </ul>

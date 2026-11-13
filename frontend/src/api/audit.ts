@@ -6,7 +6,7 @@ export type AuditEntry = {
   id: number
   occurred_at: string
   action: string
-  actor: { id: string; name: string } | null
+  actor: { id: string; name: string; avatar_id: string | null } | null
   target: { type: string; id: string; name?: string } | null
   old_value: Record<string, unknown> | null
   new_value: Record<string, unknown> | null

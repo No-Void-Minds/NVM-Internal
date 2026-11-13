@@ -18,7 +18,7 @@ var Categories = map[string][]string{
 	},
 	"account": {
 		"user_created", "user_updated", "user_activated", "user_deactivated",
-		"password_reset", "user_unlocked",
+		"password_reset", "user_unlocked", "profile_updated",
 	},
 	"division": {
 		"division_created", "division_renamed", "division_activated", "division_deactivated",

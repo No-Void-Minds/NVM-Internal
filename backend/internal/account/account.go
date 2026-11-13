@@ -26,12 +26,26 @@ var (
 	ErrLastManager    = errors.New("harus ada minimal satu Admin atau Manajer aktif")
 )
 
-// ValidationError membawa pesan yang aman ditampilkan langsung ke pengguna.
-type ValidationError struct{ Message string }
+// ValidationError membawa pesan yang aman ditampilkan langsung ke pengguna. Field diisi bila galatnya milik
+// satu kolom form, supaya frontend bisa menaruh pesan di bawah kolom itu.
+type ValidationError struct {
+	Message string
+	Field   string
+}
 
 func (e *ValidationError) Error() string { return e.Message }
 
 func invalid(msg string) error { return &ValidationError{Message: msg} }
+
+func invalidField(field, msg string) error { return &ValidationError{Message: msg, Field: field} }
+
+func withField(err error, field string) error {
+	var ve *ValidationError
+	if errors.As(err, &ve) {
+		return invalidField(field, ve.Message)
+	}
+	return err
+}
 
 const (
 	minPasswordLen = 8

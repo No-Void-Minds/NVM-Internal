@@ -29,6 +29,8 @@ const msgInvalidCredentials = "Username atau password salah."
 type apiError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+	// Field diisi bila galat milik satu kolom form.
+	Field string `json:"field,omitempty"`
 }
 
 type errorBody struct {
@@ -37,6 +39,10 @@ type errorBody struct {
 
 func writeError(c *gin.Context, status int, code, message string) {
 	c.AbortWithStatusJSON(status, errorBody{Error: apiError{Code: code, Message: message}})
+}
+
+func writeFieldError(c *gin.Context, status int, code, message, field string) {
+	c.AbortWithStatusJSON(status, errorBody{Error: apiError{Code: code, Message: message, Field: field}})
 }
 
 // internalError mencatat detail teknis ke log dan hanya mengirim pesan umum ke pengguna (NFR-REL-06).

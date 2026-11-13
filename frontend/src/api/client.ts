@@ -1,16 +1,25 @@
-type ApiErrorBody = { error?: { code?: string; message?: string } }
+type ApiErrorBody = { error?: { code?: string; message?: string; field?: string } }
 
 export class ApiError extends Error {
   readonly status: number
   readonly code: string
   readonly retryAfterSeconds: number | null
+  // Diisi backend bila galat milik satu kolom form, mis. "name" atau "job_title".
+  readonly field: string | null
 
-  constructor(status: number, code: string, message: string, retryAfterSeconds: number | null = null) {
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    retryAfterSeconds: number | null = null,
+    field: string | null = null,
+  ) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
     this.retryAfterSeconds = retryAfterSeconds
+    this.field = field
   }
 }
 
@@ -60,6 +69,7 @@ export async function request<T>(
       detail.code,
       detail.message ?? 'Terjadi kesalahan. Coba lagi.',
       Number.isFinite(retry) && retry > 0 ? retry : null,
+      detail.field ?? null,
     )
   }
   return data as T
