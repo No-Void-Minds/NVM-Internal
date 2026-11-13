@@ -2,7 +2,7 @@
 
 Acuan: SRS Sistem Internal NVM v1.0, ERD `nvm_internal.dbml`, layar Stitch, dan DESIGN.md.
 Stack: Go, PostgreSQL, Vue 3 dengan Tailwind CSS, Docker di VM Ubuntu (Hyper-V) pada PC kantor.
-Revisi terakhir: 2026-11-10 (sub task, kartu profil, centang sub task, lihat Daftar revisi di bagian bawah). Sprint 7 selesai 2026-11-09, Sprint 8 selesai 2026-11-10.
+Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian kerja). Sprint 7 selesai 2026-11-09, Sprint 8 selesai 2026-11-10.
 
 ## Cara kerja
 
@@ -12,14 +12,17 @@ Revisi terakhir: 2026-11-10 (sub task, kartu profil, centang sub task, lihat Daf
 - Catatan harian cukup satu baris di bagian "Log" tiap sprint: hari ini mengerjakan apa, ada hambatan apa.
 - Git: `main` selalu bisa jalan. Fitur dikerjakan di branch `feat/<nama>`, merge setelah lolos DoD.
 
-## Pembagian kerja (berlaku mulai Sprint 6)
+## Pembagian kerja
 
-- Sprint 6 sampai 12 dikerjakan di percakapan bersama asisten: kode per langkah ditempel di chat, Rifky menulis dan mengujinya secara manual, lalu commit.
-- Tiap langkah ditutup dengan `./scripts/check.sh` (mode bawaan, cepat), lalu `git add`, `git commit`, `git push` oleh Rifky.
-- Test baru tidak ditulis per sprint. Semua pengujian otomatis dikerjakan di Sprint 13, dan itu satu-satunya sprint yang memakai Claude Code.
-- Claude Code tidak boleh commit dan push.
-- Revisi dari Manajer dicatat di Daftar revisi di bagian bawah, lalu disisipkan ke sprint yang sesuai.
-- Setelah tiap langkah, asisten menampilkan tabel semua langkah sprint beserta statusnya.
+**Sprint 6 sampai S9-05 (selesai):** dikerjakan di percakapan bersama asisten. Kode per langkah ditempel di chat, Rifky menulis dan mengujinya manual, lalu commit.
+
+**Mulai S9-06 (2026-11-13):** Manajer mengejar waktu, jadi sisa build (S9-06 sampai Sprint 12) dikerjakan Claude Code.
+- Aturan untuk Claude Code ada di `CLAUDE.md` di root repo, dan larangan teknisnya di `.claude/settings.json` (tolak `git commit`, `git push`, `git reset`, `git rebase`, `git clean`, `migrate ... down`, membaca `.env`). Dua butir ini semula S13-01 dan S13-02, dimajukan.
+- Claude Code tidak boleh commit dan push. Di akhir tiap langkah ia memberi perintah commit, Rifky yang menjalankan.
+- Test otomatis tetap tidak ditulis per sprint. Semuanya di Sprint 13.
+- Setiap langkah ditutup dengan `./scripts/check.sh` (mode bawaan) dan tabel status semua langkah sprint itu.
+- Revisi dari Manajer dicatat di Daftar revisi, lalu disisipkan ke sprint yang sesuai. Keputusan yang belum pasti masuk "Menunggu jawaban Manajer".
+- Plugin Claude Code yang aktif di level user: antislop, ponytail, ui-ux-pro-max. Kalau aturannya bertabrakan dengan `CLAUDE.md`, `CLAUDE.md` yang dipakai.
 
 ## Definition of Done (berlaku untuk semua item)
 
@@ -462,14 +465,23 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 **Tujuan:** task lama gampang dicari, termasuk lewat nama sub task. Sisa Sprint 6 versi lama.
 **SRS:** FR-TASK-12, 13, 14, NFR-PERF-02, 03. **AC:** AC-09.
 
-- [ ] S9-01 `GET /api/archive`: task Completed tanpa batas 7 hari, ikut saklar lingkup Staf (Task saya atau Semua task).
-- [ ] S9-02 Kata kunci (pg_trgm, minimal 3 huruf) di ID, judul, deskripsi, tautan deliverable, nama pemohon, nama PIC, nama sub task, nama label, dan nama berkas lampiran.
-- [ ] S9-03 Filter PIC, divisi, label, urgency, dan rentang tanggal selesai. Urutan bawaan terakhir selesai di atas; pilihan terlama dan urgency berbobot.
-- [ ] S9-04 Halaman 25 task per halaman dengan total.
-- [ ] S9-05 Kata kunci juga di papan (`GET /api/board`).
-- [ ] S9-06 Halaman Arsip: tabel di desktop, kartu di ponsel, filter di URL, tombol buka kembali untuk Manajer. Kotak "Cari task" dan tautan "Lihat semua di Arsip" di papan. Teks Stitch "Semua proyek dan tugas studio..." dan "Tips Workflow" tidak dipakai.
+- [x] S9-01 `GET /api/archive`: task Completed tanpa batas 7 hari, ikut saklar lingkup Staf (Task saya atau Semua task).
+- [x] S9-02 Kata kunci (pg_trgm, minimal 3 huruf) di ID, judul, deskripsi, tautan deliverable, nama pemohon, nama PIC, nama sub task, nama label, dan nama berkas lampiran.
+- [x] S9-03 Filter PIC, divisi, label, urgency, dan rentang tanggal selesai. Urutan bawaan terakhir selesai di atas; pilihan terlama dan urgency berbobot.
+- [x] S9-04 Halaman 25 task per halaman dengan total.
+- [x] S9-05 Kata kunci juga di papan (`GET /api/board?q=`).
+- [ ] S9-06 Halaman Arsip `/arsip`: tabel di desktop, kartu di ponsel, filter dan kata kunci dan halaman di URL, tombol "Buka kembali" (lewat `MoveDialog`, hanya bila `move_to` memuat On Progress). Komponen `KeywordSearch` dipakai papan dan Arsip (cari saat Enter atau tombol Cari, galat per kolom bila kurang dari 3 huruf). Di papan, tautan "Cari ... juga di Arsip" saat ada kata kunci. Item Arsip di navigasi; item Task tetap tersorot di `/task/:id`; navigasi bawah ponsel tidak boleh membuat gulir horizontal. Teks Stitch "Semua proyek dan tugas studio..." dan "Tips Workflow" tidak dipakai. Kode lengkapnya sudah diberikan di chat 2026-11-10; cek dulu apakah sudah terpasang (`frontend/src/pages/ArchivePage.vue`).
 
-**Catatan:** pengukuran p95 dengan data dummy 2.000 task dipindah ke Sprint 13.
+**Hasil sementara:** S9-01 sampai S9-05 selesai dan ter-commit 2026-11-10. Lewat curl: 12 skenario Arsip (urutan bawaan dan terlama, kata kunci judul dan nama PIC, kata kunci kurang dari 3 huruf ditolak, `%` dicari apa adanya, rentang tanggal, rentang terbalik ditolak, halaman melewati akhir kembali ke 1, halaman 0 ditolak, Task saya) dan 6 skenario papan dengan kata kunci. Belum terbukti dengan data: pagination lebih dari 25 baris, filter divisi dan label, pencarian lewat label, lampiran, dan nama sub task (Sprint 13).
+
+**Keputusan:**
+- Arsip memuat semua task Completed. Papan tetap hanya Completed 7 hari terakhir.
+- Kata kunci dicari sebagai satu potongan teks utuh dengan `ILIKE`. Karakter `%`, `_`, dan `\` di-escape supaya dicari apa adanya. Minimal 3 huruf (batas index trigram), maksimal 100.
+- Aturan kata kunci satu fungsi (`keywordPattern`) untuk papan dan Arsip. Blok SQL-nya disalin di `ListBoardTasks` dan `ListArchiveTasks` karena sqlc tidak mendukung potongan query; keduanya harus diubah bersama.
+- Total diambil dengan `count(*) OVER ()` dalam query yang sama. Halaman yang melewati akhir daftar mengembalikan halaman 1, dan respons menyebut halaman yang benar-benar dikembalikan.
+- Rentang tanggal selesai dibaca sebagai tanggal WIB, keduanya inklusif.
+- Arsip dan papan memakai `withMoveTo` yang sama untuk menghitung `move_to`.
+- Di panel detail, galat saat memuat ulang diam-diam tidak lagi mengganti seluruh panel dengan tampilan galat.
 
 ---
 
@@ -530,17 +542,17 @@ Operasional (hanya ditulis):
 
 ---
 
-## Sprint 13: Pengujian (satu-satunya sprint yang memakai Claude Code)
+## Sprint 13: Pengujian
 
 **Tujuan:** semua yang dibangun di Sprint 7 sampai 12 teruji, dikerjakan Claude Code secara otomatis, lalu direview.
 **Aturan:** Claude Code tidak boleh commit dan push. Commit dan push dijalankan Rifky.
 
-- [ ] S13-01 Kunci Claude Code lewat `.claude/settings.local.json` (tolak `git commit`, `git push`, `git reset`, `git checkout`).
-- [ ] S13-02 Tulis `CLAUDE.md` (belum ada): stack, aturan hemat kuota, perintah `check.sh`, aturan tanpa commit, dan gerbang AntiSlop.
+- [x] S13-01 Kunci Claude Code lewat `.claude/settings.json` (dimajukan ke 2026-11-13, lihat Pembagian kerja).
+- [x] S13-02 Tulis `CLAUDE.md` (dimajukan ke 2026-11-13). Perbarui bila ada aturan baru saat Sprint 13.
 - [ ] S13-03 Prompt Claude Code: perbaiki test lama yang rusak karena Sprint 7, lalu tulis test backend untuk izin, transisi status, sub task dan PIC turunan, profil dan foto, arsip dan pencarian, lampiran, centang sub task beserta syarat Ready.
 - [ ] S13-04 Test frontend untuk komponen dengan logika (pemilih PIC ganda, filter di URL, kartu profil).
 - [ ] S13-05 Peta AC-01 sampai AC-15 ke test atau langkah uji manual, dengan hasil PASS atau FAIL.
-- [ ] S13-06 Data dummy sekitar 2.000 task, ukur p95 dari dalam VM (bukan dari PC), cek `EXPLAIN` bahwa index pencarian terpakai. Target p95 di bawah 1 detik.
+- [ ] S13-06 Data dummy sekitar 2.000 task, ukur p95 dari dalam VM (bukan dari PC), cek `EXPLAIN ANALYZE` bahwa index pencarian terpakai. Target p95 di bawah 1 detik. Blok kata kunci di `ListArchiveTasks` dan `ListBoardTasks` memakai `OR` dengan banyak `EXISTS`, yang kemungkinan membuat index trigram tidak terpakai. Kalau lambat atau tidak memakai index, tulis ulang jadi `t.id IN (SELECT ... UNION SELECT ...)` di kedua query sekaligus.
 - [ ] S13-07 Review hasil bersama, perbaiki temuan, commit.
 - [ ] S13-08 Uji yang tidak bisa otomatis: ponsel sungguhan (kamera atau galeri, Safari, tempel gambar), pembaca layar, cek keyboard saja.
 
@@ -585,6 +597,7 @@ SRS v1.0 belum memuat keempat revisi. SRS diperbarui sebelum UAT supaya checklis
 - Konfirmasi kolom Completed di papan hanya 7 hari terakhir (AC-08 menyebut task Completed hilang dari papan aktif).
 - Task tanpa sub task berarti tanpa PIC, hanya Manajer yang memindahkan: setuju?
 - Jabatan diisi sendiri oleh tiap orang atau hanya pengelola.
+- Sub task yang sudah dicentang lalu PIC-nya diganti Manajer saat ini tetap tercentang atas nama orang lama. Dibiarkan, atau centangnya dilepas otomatis saat PIC diganti?
 - Aturan centang: Manajer boleh mencentang sub task siapa pun kecuali yang dipegang Manajer lain. Bagaimana dengan sub task tanpa PIC (sekarang boleh) dan sub task dengan PIC campuran Staf dan Manajer lain (sekarang ditolak)?
 
 ## Setelah go-live (belum dijadwalkan)

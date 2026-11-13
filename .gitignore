@@ -16,3 +16,6 @@ Thumbs.db
 .DS_Store
 !.vscode/settings.jsonbackend/.data/
 backend/storage/
+.claude/settings.local.json
+.claude/settings.local.json
+.claude/settings.local.json
