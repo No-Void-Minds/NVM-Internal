@@ -2,7 +2,7 @@
 
 Acuan: SRS Sistem Internal NVM v1.0, ERD `nvm_internal.dbml`, layar Stitch, dan DESIGN.md.
 Stack: Go, PostgreSQL, Vue 3 dengan Tailwind CSS, Docker di VM Ubuntu (Hyper-V) pada PC kantor.
-Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian kerja). Sprint 7 selesai 2026-11-09, Sprint 8 selesai 2026-11-10.
+Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian kerja). Sprint 7 selesai 2026-11-09, Sprint 8 selesai 2026-11-10, Sprint 9 selesai 2026-11-13.
 
 ## Cara kerja
 
@@ -470,9 +470,9 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 - [x] S9-03 Filter PIC, divisi, label, urgency, dan rentang tanggal selesai. Urutan bawaan terakhir selesai di atas; pilihan terlama dan urgency berbobot.
 - [x] S9-04 Halaman 25 task per halaman dengan total.
 - [x] S9-05 Kata kunci juga di papan (`GET /api/board?q=`).
-- [ ] S9-06 Halaman Arsip `/arsip`: tabel di desktop, kartu di ponsel, filter dan kata kunci dan halaman di URL, tombol "Buka kembali" (lewat `MoveDialog`, hanya bila `move_to` memuat On Progress). Komponen `KeywordSearch` dipakai papan dan Arsip (cari saat Enter atau tombol Cari, galat per kolom bila kurang dari 3 huruf). Di papan, tautan "Cari ... juga di Arsip" saat ada kata kunci. Item Arsip di navigasi; item Task tetap tersorot di `/task/:id`; navigasi bawah ponsel tidak boleh membuat gulir horizontal. Teks Stitch "Semua proyek dan tugas studio..." dan "Tips Workflow" tidak dipakai. Kode lengkapnya sudah diberikan di chat 2026-11-10; cek dulu apakah sudah terpasang (`frontend/src/pages/ArchivePage.vue`).
+- [x] S9-06 Halaman Arsip `/arsip`: tabel di desktop, kartu di ponsel, filter dan kata kunci dan halaman di URL, tombol "Buka kembali" (lewat `MoveDialog`, hanya bila `move_to` memuat On Progress). Komponen `KeywordSearch` dipakai papan dan Arsip (cari saat Enter atau tombol Cari, galat per kolom bila kurang dari 3 huruf). Di papan, tautan "Cari ... juga di Arsip" saat ada kata kunci. Item Arsip di navigasi; item Task tetap tersorot di `/task/:id`; navigasi bawah ponsel tidak boleh membuat gulir horizontal. Teks Stitch "Semua proyek dan tugas studio..." dan "Tips Workflow" tidak dipakai. Kode lengkapnya sudah diberikan di chat 2026-11-10; cek dulu apakah sudah terpasang (`frontend/src/pages/ArchivePage.vue`).
 
-**Hasil sementara:** S9-01 sampai S9-05 selesai dan ter-commit 2026-11-10. Lewat curl: 12 skenario Arsip (urutan bawaan dan terlama, kata kunci judul dan nama PIC, kata kunci kurang dari 3 huruf ditolak, `%` dicari apa adanya, rentang tanggal, rentang terbalik ditolak, halaman melewati akhir kembali ke 1, halaman 0 ditolak, Task saya) dan 6 skenario papan dengan kata kunci. Belum terbukti dengan data: pagination lebih dari 25 baris, filter divisi dan label, pencarian lewat label, lampiran, dan nama sub task (Sprint 13).
+**Hasil:** selesai 2026-11-13. S9-01 sampai S9-05 ter-commit 2026-11-10, S9-06 ter-commit 2026-11-13. Lolos `./scripts/check.sh`. Lewat browser (S9-06): kata kunci kurang dari 3 huruf ditolak per kolom, cari di papan dan tautan ke Arsip membawa kata kunci, Hapus filter ikut mengosongkan kata kunci, filter dan urutan dan halaman Arsip tersimpan di URL (refresh dan Back), Buka kembali lewat `MoveDialog`, panel detail dari Arsip, state kosong dan galat, saklar Task saya dan Semua task untuk Staf, kartu di 360 px dan tabel di 1280 px, Task tetap tersorot di `/task/:id`, tanpa gulir horizontal di 360, 768, dan 1280 px untuk akun Manajer (7 item navigasi). Lewat curl: 12 skenario Arsip (urutan bawaan dan terlama, kata kunci judul dan nama PIC, kata kunci kurang dari 3 huruf ditolak, `%` dicari apa adanya, rentang tanggal, rentang terbalik ditolak, halaman melewati akhir kembali ke 1, halaman 0 ditolak, Task saya) dan 6 skenario papan dengan kata kunci. Belum terbukti dengan data: pagination lebih dari 25 baris, filter divisi dan label, pencarian lewat label, lampiran, dan nama sub task (Sprint 13).
 
 **Keputusan:**
 - Arsip memuat semua task Completed. Papan tetap hanya Completed 7 hari terakhir.
@@ -482,6 +482,16 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 - Rentang tanggal selesai dibaca sebagai tanggal WIB, keduanya inklusif.
 - Arsip dan papan memakai `withMoveTo` yang sama untuk menghitung `move_to`.
 - Di panel detail, galat saat memuat ulang diam-diam tidak lagi mengganti seluruh panel dengan tampilan galat.
+- Buka kembali (Completed ke On Progress) hanya hak Manajer. Staf yang menjadi PIC pun tidak melihat tombolnya, karena tombol hanya tampil bila `move_to` dari server memuat On Progress.
+- Kata kunci di URL yang kurang dari 3 huruf dibuang saat dibaca (`cleanKeyword`), bukan dikirim lalu ditolak server. Komponen `KeywordSearch` dipakai papan dan Arsip.
+- Filter apa pun yang berubah di Arsip kembali ke halaman 1. Hapus filter di papan dan Arsip ikut mengosongkan kata kunci.
+- Sorotan navigasi memakai `isCurrent(to)`: path sama persis atau diawali `to/`, karena `/task/:id` rute terpisah dari `/task`.
+- Label navigasi bawah ponsel dipotong (`truncate`) supaya 7 item muat di 360 px. Ini pengaman sementara sampai navigasi ponsel dirancang ulang di Sprint 11.
+
+**Retro:**
+- Macet: kode S9-06 dari chat 2026-11-10 baru terpasang separuh (halaman dan komponen ada, rute, navigasi, dan template papan belum); empat file baru belum dirapikan Prettier sehingga `check.sh` gagal di format; `py` tidak tersedia di Git Bash yang dipakai Claude Code.
+- Lancar: (isi sendiri)
+- Diubah untuk Sprint 10: (isi sendiri)
 
 ---
 
@@ -501,6 +511,11 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 - [ ] S10-09 State: foto gagal dimuat (kembali ke inisial), unggah berjalan, ukuran atau tipe ditolak, simpan gagal.
 
 **Butuh dari Manajer:** apakah jabatan diisi sendiri oleh tiap orang atau hanya pengelola (usulan di atas: diisi sendiri).
+
+**Keputusan:**
+- Migrasi `000005_profile`: `users.job_title varchar(100)` dan `users.avatar_id uuid`, keduanya boleh NULL. Akun lama tetap sah tanpa diisi.
+- Jabatan kosong disimpan NULL, bukan teks kosong. Constraint menolak teks kosong dan spasi di awal atau akhir, jadi backend wajib merapikan isian sebelum menyimpan.
+- `avatar_id` dipakai sebagai nama berkas di `STORAGE_DIR/avatars/` dan sebagai ETag foto. Setiap unggahan memberi UUID baru, jadi foto lama tidak tertimpa di tempat dan cache browser otomatis basi.
 
 ---
 

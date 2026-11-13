@@ -285,4 +285,6 @@ type User struct {
 	LastLoginAt        pgtype.Timestamptz
 	CreatedAt          pgtype.Timestamptz
 	UpdatedAt          pgtype.Timestamptz
+	JobTitle           pgtype.Text
+	AvatarID           pgtype.UUID
 }
