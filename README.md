@@ -14,7 +14,7 @@ Autentikasi dan Task Tracker untuk tim NVM. Kebutuhan lengkap ada di docs/SRS_Si
 
 Tiga terminal:
 
-1. Tunnel ke database di server: `ssh -N -o ServerAliveInterval=60 -L 15432:127.0.0.1:5432 nvmadmin@192.168.68.144`
+1. Tunnel ke database di server: `ssh -N -o ServerAliveInterval=60 -L 15432:127.0.0.1:5432 nvmadmin@192.168.68.69`
 2. Backend, dari `backend/`: `go run ./cmd/server`
 3. Frontend, dari `frontend/`: `npm run dev`, lalu buka http://localhost:5173
 
