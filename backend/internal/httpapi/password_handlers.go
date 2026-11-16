@@ -81,11 +81,10 @@ func (s *Server) changePassword(c *gin.Context) {
 		return
 	}
 
-	token, expires, err := s.tokens.Issue(u.ID, string(u.Role), newVersion, now)
-	if err != nil {
+	// token_version sudah naik, jadi sesi lama di semua perangkat batal; perangkat ini mendapat sesi baru.
+	if err := s.startSession(c, u.ID, u.Role, newVersion, now); err != nil {
 		s.internalError(c, err)
 		return
 	}
-	s.setSessionCookie(c, token, int(expires.Sub(now).Seconds()))
 	c.Status(http.StatusNoContent)
 }

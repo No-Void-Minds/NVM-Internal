@@ -3,10 +3,13 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
+	"nvm-internal/internal/auth"
 	"nvm-internal/internal/db/sqlc"
 )
 
@@ -42,18 +45,70 @@ func (s *Server) requireSession() gin.HandlerFunc {
 			s.expireSession(c)
 			return
 		}
-
-		// Idle timeout bergeser: setiap request yang lolos memperpanjang sesi 30 menit dari sekarang (FR-AUTH-05).
-		token, expires, err := s.tokens.Issue(u.ID, string(u.Role), u.TokenVersion, now)
+		alive, err := s.touchSession(c, u.ID, claims.SessionID, now)
 		if err != nil {
 			s.internalError(c, err)
 			return
 		}
-		s.setSessionCookie(c, token, int(expires.Sub(now).Seconds()))
+		if !alive {
+			s.expireSession(c)
+			return
+		}
 
 		c.Set(sessionUserKey, u)
 		c.Next()
 	}
+}
+
+// sessionTouchEvery membatasi penulisan last_seen_at: Caddy memanggil verify untuk setiap aset dashboard,
+// jadi tanpa batas ini satu halaman dashboard bisa menulis puluhan kali ke database.
+const sessionTouchEvery = 60 * time.Second
+
+// touchSession menegakkan idle timeout di server (FR-AUTH-05) dan mencatat aktivitas. Cookie tidak diterbitkan
+// ulang di sini, sehingga verify untuk Caddy (yang tidak meneruskan Set-Cookie) tetap memperpanjang sesi, dan
+// token tidak berganti di setiap request.
+func (s *Server) touchSession(c *gin.Context, userID int64, sid string, now time.Time) (bool, error) {
+	var id pgtype.UUID
+	if err := id.Scan(sid); err != nil || !id.Valid {
+		return false, nil
+	}
+	q := sqlc.New(s.pool)
+	row, err := q.GetUserSession(c.Request.Context(), sqlc.GetUserSessionParams{ID: id, UserID: userID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	// Batas mutlak juga dicek dari database, bukan hanya dari exp di JWT, supaya tetap berlaku bila umur token
+	// di kode suatu saat diubah tanpa mengubah aturan sesi.
+	idle := now.Sub(row.LastSeenAt.Time)
+	if idle > auth.IdleTimeout || now.Sub(row.CreatedAt.Time) > auth.SessionMaxAge {
+		return false, nil
+	}
+	if idle >= sessionTouchEvery {
+		err = q.TouchUserSession(c.Request.Context(), sqlc.TouchUserSessionParams{
+			ID: id, Now: pgtype.Timestamptz{Time: now, Valid: true},
+		})
+	}
+	return true, err
+}
+
+// startSession membuat baris sesi baru dan memasang cookie. Dipakai saat login dan setelah ganti password, satu-
+// satunya saat cookie diterbitkan. Umur cookie sama dengan umur mutlak token (auth.SessionMaxAge).
+func (s *Server) startSession(c *gin.Context, userID int64, role sqlc.UserRole, tokenVersion int32, now time.Time) error {
+	sid, err := sqlc.New(s.pool).CreateUserSession(c.Request.Context(), sqlc.CreateUserSessionParams{
+		UserID: userID, Now: pgtype.Timestamptz{Time: now, Valid: true},
+	})
+	if err != nil {
+		return err
+	}
+	token, expires, err := s.tokens.Issue(userID, string(role), tokenVersion, sid.String(), now)
+	if err != nil {
+		return err
+	}
+	s.setSessionCookie(c, token, int(expires.Sub(now).Seconds()))
+	return nil
 }
 
 // requirePasswordChanged menutup endpoint fitur sampai password sementara diganti (FR-AUTH-07).

@@ -48,6 +48,23 @@ func (q *Queries) ChangePassword(ctx context.Context, arg ChangePasswordParams) 
 	return token_version, err
 }
 
+const createUserSession = `-- name: CreateUserSession :one
+INSERT INTO user_sessions (user_id, created_at, last_seen_at) VALUES ($1, $2, $2) RETURNING id
+`
+
+type CreateUserSessionParams struct {
+	UserID int64
+	Now    pgtype.Timestamptz
+}
+
+// Waktu dari jam aplikasi, bukan now() database, supaya perbandingan idle tidak terganggu selisih jam dua mesin.
+func (q *Queries) CreateUserSession(ctx context.Context, arg CreateUserSessionParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, createUserSession, arg.UserID, arg.Now)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getPasswordHash = `-- name: GetPasswordHash :one
 SELECT password_hash FROM users WHERE id = $1
 `
@@ -145,6 +162,28 @@ func (q *Queries) GetUserForLogin(ctx context.Context, username string) (GetUser
 	return i, err
 }
 
+const getUserSession = `-- name: GetUserSession :one
+SELECT created_at, last_seen_at FROM user_sessions WHERE id = $1 AND user_id = $2
+`
+
+type GetUserSessionParams struct {
+	ID     pgtype.UUID
+	UserID int64
+}
+
+type GetUserSessionRow struct {
+	CreatedAt  pgtype.Timestamptz
+	LastSeenAt pgtype.Timestamptz
+}
+
+// user_id ikut dicocokkan supaya sid dari token akun lain tidak bisa dipakai.
+func (q *Queries) GetUserSession(ctx context.Context, arg GetUserSessionParams) (GetUserSessionRow, error) {
+	row := q.db.QueryRow(ctx, getUserSession, arg.ID, arg.UserID)
+	var i GetUserSessionRow
+	err := row.Scan(&i.CreatedAt, &i.LastSeenAt)
+	return i, err
+}
+
 const insertAuditLog = `-- name: InsertAuditLog :exec
 INSERT INTO audit_logs (user_id, action, entity, entity_id, old_value, new_value, ip_address)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -209,5 +248,19 @@ func (q *Queries) SaveLockState(ctx context.Context, arg SaveLockStateParams) er
 		arg.LockedUntil,
 		arg.ID,
 	)
+	return err
+}
+
+const touchUserSession = `-- name: TouchUserSession :exec
+UPDATE user_sessions SET last_seen_at = $1 WHERE id = $2
+`
+
+type TouchUserSessionParams struct {
+	Now pgtype.Timestamptz
+	ID  pgtype.UUID
+}
+
+func (q *Queries) TouchUserSession(ctx context.Context, arg TouchUserSessionParams) error {
+	_, err := q.db.Exec(ctx, touchUserSession, arg.Now, arg.ID)
 	return err
 }

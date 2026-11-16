@@ -1,6 +1,6 @@
 # NVM Internal
 
-Sistem internal NVM untuk tim marketing: autentikasi, akun dan divisi, task tracker dengan papan Kanban, sub task, lampiran, arsip, audit log. Dipakai di LAN kantor, dihosting di VM Ubuntu pada PC kantor.
+Sistem internal NVM untuk tim marketing: autentikasi, akun dan divisi, task tracker dengan papan Kanban, sub task, lampiran, arsip, audit log. Publik di `https://novoidminds.xyz` lewat Cloudflare Tunnel, dihosting di VM `nvm-server` (revisi 5). NVM Launcher di `dash.novoidminds.xyz` dan Remotion Studio di `studio.novoidminds.xyz` (PC tim) dijaga Caddy forward_auth ke `/api/auth/verify`, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk.
 
 Sumber kebenaran urutan kerja, aturan bisnis, keputusan, dan revisi: `docs/sprint.md`. Baca bagian sprint yang sedang dikerjakan sebelum menulis kode. ID kebutuhan (FR-..., NFR-..., BR-..., AC-...) merujuk ke SRS v1.0 yang tidak ada di repo; kutipan yang perlu sudah ada di `docs/sprint.md`.
 
@@ -13,7 +13,7 @@ Sumber kebenaran urutan kerja, aturan bisnis, keputusan, dan revisi: `docs/sprin
 
 ## Peta repo
 
-- `backend/migrations`: migrasi berurutan (`000001` sampai `000004` sudah ada). Migrasi baru memakai nomor berikutnya, selalu dengan `up` dan `down`.
+- `backend/migrations`: migrasi berurutan (`000001` sampai `000007` sudah ada). Migrasi baru memakai nomor berikutnya, selalu dengan `up` dan `down`.
 - `backend/internal/db/queries/*.sql`: query sqlc. `backend/internal/db/sqlc`: hasil generate, jangan diedit tangan.
 - `backend/internal/task`: aturan bisnis task (service, sub task, centang, papan, arsip).
 - `backend/internal/httpapi`: handler dan `router.go`. Grup rute: `api` (sameOrigin), `authed`, `app` (password sudah diganti), `manage` (Admin dan Manajer).
@@ -34,6 +34,7 @@ Sumber kebenaran urutan kerja, aturan bisnis, keputusan, dan revisi: `docs/sprin
 
 - Jangan `git commit`, `git push`, atau mengubah riwayat git. Di akhir tiap langkah berikan satu perintah yang siap ditempel: `./scripts/check.sh && git add <path> && git commit -m "<pesan>" && git push`.
 - Kerjakan per langkah sprint (mis. S9-06) sesuai `docs/sprint.md`. Setelah tiap langkah tampilkan tabel semua langkah sprint itu beserta statusnya.
+- Verifikasi per sprint cukup `./scripts/check.sh`. Skrip uji API (`scripts/uji-*.sh`) hanya dijalankan kalau backend berubah. Screenshot dan Playwright hanya di Sprint 13 atau kalau Rifky memintanya.
 - Test otomatis tidak ditulis sebelum Sprint 13. Jangan memperbaiki test lama yang memakai `PICIDs`.
 - `nvm_internal_test` sengaja belum dimigrasi ke `000003` dan `000004`. Jangan dimigrasi sebelum Sprint 13.
 - Jangan menjalankan `migrate ... down`, `DROP`, `TRUNCATE`, atau `DELETE` massal tanpa izin eksplisit untuk perintah itu.

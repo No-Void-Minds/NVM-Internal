@@ -15,19 +15,19 @@ func TestTokenRoundTrip(t *testing.T) {
 	}
 	now := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
 
-	tok, exp, err := issuer.Issue(7, "staff", 3, now)
+	tok, exp, err := issuer.Issue(7, "staff", 3, "sid-uji", now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if exp.Sub(now) != SessionTTL {
-		t.Fatalf("umur token %v, mau %v", exp.Sub(now), SessionTTL)
+	if exp.Sub(now) != SessionMaxAge {
+		t.Fatalf("umur token %v, mau %v", exp.Sub(now), SessionMaxAge)
 	}
 
 	claims, userID, err := issuer.Parse(tok, now.Add(29*time.Minute))
 	if err != nil {
 		t.Fatalf("token yang masih berlaku ditolak: %v", err)
 	}
-	if userID != 7 || claims.TokenVersion != 3 || claims.Role != "staff" {
+	if userID != 7 || claims.TokenVersion != 3 || claims.Role != "staff" || claims.SessionID != "sid-uji" {
 		t.Fatalf("isi token salah: userID=%d claims=%+v", userID, claims)
 	}
 }
@@ -35,17 +35,17 @@ func TestTokenRoundTrip(t *testing.T) {
 func TestExpiredTokenRejected(t *testing.T) {
 	issuer, _ := NewTokenIssuer(testSecret)
 	now := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
-	tok, _, _ := issuer.Issue(7, "staff", 0, now)
+	tok, _, _ := issuer.Issue(7, "staff", 0, "sid-uji", now)
 
-	if _, _, err := issuer.Parse(tok, now.Add(SessionTTL+time.Second)); err == nil {
-		t.Fatal("token yang sudah lewat 30 menit harus ditolak")
+	if _, _, err := issuer.Parse(tok, now.Add(SessionMaxAge+time.Second)); err == nil {
+		t.Fatal("token yang sudah lewat umur mutlaknya harus ditolak")
 	}
 }
 
 func TestTokenFromOtherSecretRejected(t *testing.T) {
 	now := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
 	other, _ := NewTokenIssuer(strings.Repeat("z", 40))
-	tok, _, _ := other.Issue(7, "admin", 0, now)
+	tok, _, _ := other.Issue(7, "admin", 0, "sid-uji", now)
 
 	issuer, _ := NewTokenIssuer(testSecret)
 	if _, _, err := issuer.Parse(tok, now); err == nil {

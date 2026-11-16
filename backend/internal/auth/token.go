@@ -8,8 +8,13 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// SessionTTL adalah umur token sekaligus batas idle (FR-AUTH-05, NFR-SEC-02).
-const SessionTTL = 30 * time.Minute
+const (
+	// IdleTimeout ditegakkan di server dari user_sessions.last_seen_at (FR-AUTH-05, NFR-SEC-02).
+	IdleTimeout = 30 * time.Minute
+	// SessionMaxAge adalah umur mutlak token dan cookie sejak login. Harus lebih panjang dari IdleTimeout, supaya
+	// cookie tidak kedaluwarsa duluan saat sesi diperpanjang tanpa cookie baru (verify untuk dashboard, revisi 5).
+	SessionMaxAge = 12 * time.Hour
+)
 
 var ErrInvalidToken = errors.New("token tidak valid")
 
@@ -18,6 +23,8 @@ var ErrInvalidToken = errors.New("token tidak valid")
 type Claims struct {
 	Role         string `json:"role"`
 	TokenVersion int32  `json:"tv"`
+	// SessionID menunjuk baris user_sessions; token tanpa sid (sebelum migrasi 000006) ditolak.
+	SessionID string `json:"sid"`
 	jwt.RegisteredClaims
 }
 
@@ -32,11 +39,12 @@ func NewTokenIssuer(secret string) (TokenIssuer, error) {
 	return TokenIssuer{secret: []byte(secret)}, nil
 }
 
-func (t TokenIssuer) Issue(userID int64, role string, tokenVersion int32, now time.Time) (string, time.Time, error) {
-	expires := now.Add(SessionTTL)
+func (t TokenIssuer) Issue(userID int64, role string, tokenVersion int32, sessionID string, now time.Time) (string, time.Time, error) {
+	expires := now.Add(SessionMaxAge)
 	claims := Claims{
 		Role:         role,
 		TokenVersion: tokenVersion,
+		SessionID:    sessionID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   strconv.FormatInt(userID, 10),
 			IssuedAt:  jwt.NewNumericDate(now),

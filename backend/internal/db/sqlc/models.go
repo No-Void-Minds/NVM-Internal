@@ -288,3 +288,10 @@ type User struct {
 	JobTitle           pgtype.Text
 	AvatarID           pgtype.UUID
 }
+
+type UserSession struct {
+	ID         pgtype.UUID
+	UserID     int64
+	CreatedAt  pgtype.Timestamptz
+	LastSeenAt pgtype.Timestamptz
+}

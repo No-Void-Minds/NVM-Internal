@@ -50,3 +50,13 @@ RETURNING token_version;
 -- name: InsertAuditLog :exec
 INSERT INTO audit_logs (user_id, action, entity, entity_id, old_value, new_value, ip_address)
 VALUES (@user_id, @action, @entity, @entity_id, @old_value, @new_value, @ip_address);
+-- name: CreateUserSession :one
+-- Waktu dari jam aplikasi, bukan now() database, supaya perbandingan idle tidak terganggu selisih jam dua mesin.
+INSERT INTO user_sessions (user_id, created_at, last_seen_at) VALUES (@user_id, @now, @now) RETURNING id;
+
+-- name: GetUserSession :one
+-- user_id ikut dicocokkan supaya sid dari token akun lain tidak bisa dipakai.
+SELECT created_at, last_seen_at FROM user_sessions WHERE id = @id AND user_id = @user_id;
+
+-- name: TouchUserSession :exec
+UPDATE user_sessions SET last_seen_at = @now WHERE id = @id;

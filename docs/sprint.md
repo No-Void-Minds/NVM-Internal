@@ -558,13 +558,13 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 **Tujuan:** papan Kanban dan semua halaman terasa rapi, hidup, dan konsisten. Revisi 2 dari Manajer (bagian tampilan).
 **Syarat mulai:** `docs/DESIGN.md` ditempel ke percakapan. Dial ENERGY, RHYTHM, MOTION ditetapkan di awal sprint beserta satu kalimat alasan, lalu dipegang sampai akhir. Tanpa DESIGN.md hasilnya ditandai draf.
 
-- [ ] S11-01 Token desain dan satu motif identitas, diturunkan dari DESIGN.md dan brand NVM.
-- [ ] S11-02 Papan: kartu, kolom, rasa drag-and-drop, transisi saat kartu pindah kolom, penanda terlambat, tampilan kartu dengan sub task dan PIC.
-- [ ] S11-03 Panel detail, halaman task penuh, dan form task, termasuk daftar sub task dan centangnya.
-- [ ] S11-04 Arsip, Pengguna, Pengaturan, Audit Log, dan kartu profil memakai bahasa visual yang sama.
-- [ ] S11-05 State kosong, loading (kerangka sesuai bentuk konten), dan galat yang konsisten. Ilustrasi hanya SVG buatan sendiri.
-- [ ] S11-06 Animasi: tiap animasi punya tujuan UX (umpan balik, orientasi, atau hubungan sebab akibat), tanpa loop. Versi diam untuk `prefers-reduced-motion`.
-- [ ] S11-07 Audit kontras dengan perhitungan, tap target, fokus keyboard, dan lebar 360, 768, 1280, serta 1920 px tanpa scroll horizontal.
+- [x] S11-01 Token desain dan satu motif identitas, diturunkan dari DESIGN.md dan brand NVM.
+- [x] S11-02 Papan: kartu, kolom, rasa drag-and-drop, transisi saat kartu pindah kolom, penanda terlambat, tampilan kartu dengan sub task dan PIC.
+- [x] S11-03 Panel detail, halaman task penuh, dan form task, termasuk daftar sub task dan centangnya.
+- [x] S11-04 Arsip, Pengguna, Pengaturan, Audit Log, dan kartu profil memakai bahasa visual yang sama.
+- [x] S11-05 State kosong, loading (kerangka sesuai bentuk konten), dan galat yang konsisten. Ilustrasi hanya SVG buatan sendiri.
+- [x] S11-06 Animasi: tiap animasi punya tujuan UX (umpan balik, orientasi, atau hubungan sebab akibat), tanpa loop. Versi diam untuk `prefers-reduced-motion`.
+- [ ] S11-07 Dipindah ke S13-09 (2026-11-16): audit visual dan aksesibilitas ditunda ke Sprint 13 bersama hasil Sprint 10 dan tombol Dashboard.
 
 **Selesai kalau:** `./scripts/check.sh` lolos dan semua halaman dicek di rentang lebar di atas.
 
@@ -578,7 +578,23 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 - Header YAML di atas `docs/DESIGN.md` adalah palet otomatis Stitch dan tidak dipakai. Yang berlaku nilai di bagian teks: kanvas `#F4F1EA`, surface `#FFFFFF`, teks `#1F1D1A`, muted `#635C52`, garis `#8F8678`, aksen `#3F5A3A`, chip status, urgency `#9C3A22` dan `#8A5A12`. Nilai itu sudah sama dengan token di `style.css`, jadi S11-01 menyamakan yang belum sama, bukan mengganti palet.
 - Label urgency tetap Low, Medium, High, Urgent (mengikuti SRS dan Excel lama), bukan Mendesak, Tinggi, Sedang, Rendah seperti di DESIGN.md.
 - Contoh isi di DESIGN.md ("Contoh: ...", "Staf A", "Manajer A") hanya untuk mockup dan tidak dipakai sebagai teks aplikasi.
-- Font IBM Plex Sans dan Mono di-host sendiri lewat `@fontsource` (hanya bobot yang dipakai), bukan Google Fonts, karena aplikasi jalan di LAN kantor dan tidak boleh bergantung ke server luar untuk tampil benar.
+- Font IBM Plex Sans dan Mono di-host sendiri lewat `@fontsource` (hanya bobot yang dipakai), bukan Google Fonts, karena aplikasi tidak boleh bergantung ke server pihak ketiga untuk tampil benar (semula alasannya LAN kantor; sejak revisi 5 aplikasi publik, tetapi alasan ini tetap berlaku).
+- Selama pengerjaan:
+  - Skala teks mengikuti DESIGN.md: body 15px/24px, `text-xs` dinaikkan ke 13px (tidak ada teks di bawah itu), 18px dan 24px untuk judul. Kontras dihitung ulang dan semua pasangan teks lolos AA tanpa mengubah palet. Garis 1px label spesimen di atas latarnya 2.76:1, tetapi yang memisahkan label dari sekelilingnya adalah garis terhadap surface (3.59) dan canvas (3.18), dan isinya dibawa teks (12.90).
+  - Mono hanya untuk ID dan kode (DESIGN.md). Angka jumlah di papan, kartu profil, dan sub task memakai Plex Sans `tabular-nums`.
+  - Urgency High dan Urgent diberi penanda bentuk (persegi dan belah ketupat) di depan kata (`UrgencyLabel`), dipakai di kartu, detail, dan Arsip. Tenggat lewat ditandai ikon jam dan kata "Terlambat".
+  - Drag: kartu terangkat (bayangan dan miring 1 derajat) hanya saat browser mengambil gambar drag-nya. Kolom sah bergaris putus-putus olive dengan teks "Lepas di sini untuk memindahkan". Kolom yang ditolak meredup, dan berubah merah saat disentuh sebelum dilepas. Kartu yang masuk kolom muncul dengan transisi 200 ms.
+  - Navigasi ponsel: bar bawah berisi Task, Arsip, Profil, dan Lainnya. Menu Lainnya memakai pola disclosure (tombol `aria-expanded` dan daftar tautan biasa): Tab, Enter, Escape (fokus kembali ke tombol), tertutup saat fokus keluar atau pindah halaman. Isinya sisa halaman sesuai peran, nama akun, dan Keluar. Navigasi desktop memindahkan Task dan Arsip ke depan.
+  - Kerangka memuat (`LoadingSkeleton`) dalam bentuk kolom papan, baris daftar, dan isi detail, sengaja diam (tanpa pulse). State galat dan kosong sudah seragam sebelum sprint ini, jadi tidak diubah. Tidak ada ilustrasi, karena pesan kosong yang ada sudah jelas.
+  - Animasi 150 sampai 220 ms: notifikasi, panel masuk dari kanan, dialog dengan latar memudar, menu dari arah pemicunya, dan kartu masuk kolom. Satu aturan `prefers-reduced-motion` mematikan semuanya.
+  - Bug yang ditemukan dan diperbaiki: aturan "garis isian olive saat fokus" di `@layer base` kalah oleh kelas utilitas `border-line`, sehingga tidak pernah berlaku. Dipindah ke luar layer, dan isian yang sedang galat (`aria-invalid`) tetap bergaris merah.
+
+**Hasil:** S11-01 sampai S11-06 selesai 2026-11-16. `./scripts/check.sh` lolos di setiap langkah; uji browser ditunda ke Sprint 13 (S13-09), karena backend dan Vite tidak menyala selama sprint ini.
+
+**Retro:**
+- Macet: backend dan Vite tidak bisa dijangkau sepanjang sprint, jadi screenshot sebelum dan sesudah serta audit S11-07 tidak bisa dijalankan.
+- Lancar: (isi sendiri)
+- Diubah untuk Sprint 12: (isi sendiri)
 
 ---
 
@@ -596,9 +612,9 @@ Migrasi data:
 Operasional (hanya ditulis):
 - [ ] S12-05 `Dockerfile` backend, `docker-compose.prod.yml` (PostgreSQL, backend, Nginx), dan `nginx.conf` dengan `client_max_body_size 51m` serta `proxy_set_header Host $host`.
 - [ ] S12-06 Skrip backup harian (database dan `/srv/nvm-internal/storage`), penyalinan ke hard disk eksternal, PC IT, dan laptop IT (salinan laptop dienkripsi).
-- [ ] S12-07 Pembersih berkas yatim (berkas di `attachments/` dan `avatars/` tanpa baris database) dan job harian penghapus audit log login yang lebih tua dari 1 tahun.
+- [ ] S12-07 Pembersih berkas yatim (berkas di `attachments/` dan `avatars/` tanpa baris database) dan job harian penghapus audit log login yang lebih tua dari 1 tahun, serta baris `user_sessions` yang sudah kedaluwarsa (`last_seen_at` lebih dari 30 menit lalu atau `created_at` lebih dari 12 jam lalu; baris yang sudah dicabut lewat `token_version` ikut terhapus karena tidak lagi diperbarui).
 - [ ] S12-08 Panduan satu halaman untuk tim (login, memindahkan task, sub task, unggah, profil) dan catatan operasional di README (backup, restore, update versi).
-- [ ] S12-09 Role database terpisah seperti di compro dan doomsday: `nvm_internal_migrator` untuk DDL (dipakai `migrate`) dan `nvm_internal_app` untuk aplikasi. Hak DELETE hanya untuk tabel yang memang dihapus permanen oleh kode. Hasil audit query DELETE di `backend/internal/db/queries` (2026-11-16): `task_subtasks` (`DeleteSubtasks`), `subtask_assignees` (`RemoveSubtaskAssignees`, juga lewat `ON DELETE CASCADE`), dan `task_labels` (`DeleteTaskLabels`). Task dan lampiran memakai `is_deleted`, jadi tidak butuh DELETE. Penghapus audit log login di S12-07 akan butuh DELETE di `audit_logs`; tambahkan saat job itu ditulis. Audit ulang daftar ini bila ada query DELETE baru.
+- [ ] S12-09 Role database terpisah seperti di compro dan doomsday: `nvm_internal_migrator` untuk DDL (dipakai `migrate`) dan `nvm_internal_app` untuk aplikasi. Hak DELETE hanya untuk tabel yang memang dihapus permanen oleh kode. Hasil audit query DELETE di `backend/internal/db/queries` (2026-11-16): `task_subtasks` (`DeleteSubtasks`), `subtask_assignees` (`RemoveSubtaskAssignees`, juga lewat `ON DELETE CASCADE`), dan `task_labels` (`DeleteTaskLabels`). Task dan lampiran memakai `is_deleted`, jadi tidak butuh DELETE. Penghapus audit log login di S12-07 akan butuh DELETE di `audit_logs`; tambahkan saat job itu ditulis. Tabel `user_sessions` (migrasi 000006): role aplikasi butuh SELECT, INSERT, UPDATE, dan DELETE. Pencabutan sesi tidak memakai DELETE (lewat UPDATE `users.token_version`); DELETE dipakai job pembersih sesi kedaluwarsa di S12-07, yang berjalan di dalam backend dengan role aplikasi. Jadi daftar tabel dengan DELETE menjadi empat: `task_subtasks`, `subtask_assignees`, `task_labels`, dan `user_sessions` (ditambah `audit_logs` saat job audit S12-07 ditulis). Audit ulang daftar ini bila ada query DELETE baru.
 - [ ] S12-10 Binary backend dibangun statis (`CGO_ENABLED=0`) supaya jalan di image distroless. Di compro, binary yang tidak statis gagal jalan di server.
 - [ ] S12-11 Skrip backup memperhitungkan UID pemilik folder storage di container, karena di compro izin folder sempat membuat backup gagal diam-diam. Uji restore sebelum butir ini dianggap selesai.
 - [ ] S12-12 Cache: endpoint yang dibaca halaman pengelola (Pengguna, Pengaturan, Audit Log) tidak boleh tertahan cache di Nginx atau browser. Di compro, halaman admin sempat menampilkan data basi.
@@ -609,12 +625,24 @@ Revisi 5 (kode, dikerjakan 2026-11-16 di luar urutan karena dibutuhkan sebelum p
 - [x] S12-15 Pemeriksaan sameOrigin menerima origin produksi tanpa hardcode: host dari header `Origin` (atau `Referer`) dibandingkan dengan header `Host` permintaan. Syaratnya proxy meneruskan `Host` asli (`proxy_set_header Host $host` di S12-05, dan Cloudflare Tunnel tanpa `httpHostHeader`).
 - [x] S12-16 `?kembali=` di halaman login dan setelah ganti password paksa hanya menerima path internal (diawali `/`, bukan `//` atau `/\`, dan bukan halaman login itu sendiri) atau URL `https` tanpa port dan userinfo yang host-nya tercantum di `VITE_ALLOWED_RETURN_HOSTS`. Selain itu diabaikan dan pengguna masuk ke halaman awal.
 - [x] S12-17 Tombol Dashboard di top bar desktop dan menu Lainnya di ponsel, alamat dari `VITE_DASHBOARD_URL` (kosong berarti tidak tampil), buka di tab baru, untuk semua akun yang login.
+- [x] S12-18 Idle timeout ditegakkan di server lewat tabel `user_sessions` (migrasi `000006`, index per akun di `000007`), supaya verify tidak perlu menerbitkan cookie. Cookie dan JWT diterbitkan sekali saat login dan ganti password, dengan umur mutlak 12 jam. Lihat Keputusan revisi 5.
 
 **Butuh dari Manajer:** pemetaan nama di Excel ke username akun.
 
 **Keputusan (revisi 5, 2026-11-16):**
-- `/api/auth/verify` memakai `requireSession`, jadi setiap pemanggilan membaca ulang akun dari database (akun nonaktif dan logout langsung berlaku di dashboard) dan menerbitkan ulang cookie sesi seperti request lain. Pemakaian dashboard dihitung sebagai aktivitas untuk idle timeout 30 menit. Catatan untuk S14-13: Caddy forward_auth tidak meneruskan `Set-Cookie` dari jawaban 2xx ke browser, jadi perpanjangan itu baru sampai ke browser bila konfigurasi Caddy meneruskannya. Tanpa itu, sesi tetap berakhir 30 menit setelah request terakhir ke NVM-Internal sendiri; uji ini saat pemasangan.
-- Tidak ada rate limiter umum. Limiter per IP (`limitLogin`, 10 percobaan lalu 1 per 30 detik) hanya dipasang di `POST /api/auth/login` dan `POST /api/auth/change-password`, jadi verify yang dipanggil Caddy di setiap permintaan dashboard tidak ikut tertahan. Bebannya satu query sesi per permintaan dashboard, dapat diterima untuk tim kecil.
+- `/api/auth/verify` memakai `requireSession`, jadi setiap pemanggilan membaca ulang akun dari database: akun nonaktif dan logout langsung berlaku di dashboard.
+- Sesi (diubah 2026-11-16, migrasi `000006_user_sessions`). Sebelumnya sesi berupa JWT tanpa catatan di server: setiap request yang lolos menerbitkan JWT baru (`iat` dan `exp` baru, jadi nilai token berganti) dengan cookie `Max-Age` 30 menit, dan idle timeout ditegakkan oleh `exp` di dalam token. Token lama tidak dicabut, tetap sah sampai `exp`-nya sendiri; pencabutan hanya lewat `token_version`. Karena Caddy forward_auth tidak meneruskan `Set-Cookie` dari jawaban 2xx, cara itu membuat pemakaian dashboard tidak pernah memperpanjang sesi. Sekarang:
+  - Login dan ganti password membuat satu baris `user_sessions`, dan JWT membawa `sid`. Hanya dua titik itu yang menerbitkan cookie. Tidak ada lagi terbit ulang atau rotasi token di endpoint mana pun, termasuk verify.
+  - Idle timeout 30 menit (`auth.IdleTimeout`) ditegakkan di server dari `last_seen_at`. Setiap request yang lolos, termasuk `/api/auth/verify`, memperbarui `last_seen_at` paling sering sekali per 60 detik (`sessionTouchEvery`), supaya permintaan dashboard yang beruntun tidak menulis ke database setiap kali. Pemakaian dashboard dihitung sebagai aktivitas.
+  - JWT dan cookie memakai umur mutlak 12 jam sejak login (`auth.SessionMaxAge`), lebih panjang dari idle timeout, sehingga cookie tidak kedaluwarsa duluan selama sesi masih aktif di server. Setelah 12 jam pengguna login ulang walaupun terus aktif.
+  - Waktu sesi diambil dari jam aplikasi, bukan `now()` database, supaya selisih jam dua mesin tidak memengaruhi idle.
+  - Token tanpa `sid` (terbit sebelum migrasi) ditolak, jadi semua pengguna login ulang sekali setelah pemasangan.
+  - Logout tetap menaikkan `token_version` (semua perangkat), tanpa menghapus baris sesi.
+  - Yang disimpan di `user_sessions` hanya id sesi acak (UUID v4 dari `gen_random_uuid()`, 122 bit acak), `user_id`, `created_at`, dan `last_seen_at`. Tidak ada token mentah atau data yang bisa dipakai login: id sesi hanya berguna di dalam JWT yang ditandatangani `JWT_SECRET`, jadi bocornya isi tabel tidak cukup untuk masuk.
+  - Batas mutlak 12 jam dicek dua kali di server: dari `exp` JWT (`auth.Parse`) dan dari `created_at` di database (`touchSession`). Cookie `Max-Age` sama dengan batas itu (12 jam), tidak lebih pendek.
+  - Pencabutan memakai `token_version` di tabel `users` (UPDATE), bukan menghapus baris sesi. Yang menaikkannya: logout (`BumpTokenVersion`, berlaku untuk semua perangkat sekaligus, jadi "keluar dari semua perangkat" adalah logout biasa), ganti password (`ChangePassword`; perangkat yang mengganti langsung mendapat sesi baru), reset password oleh pengelola (`ResetUserPassword`), dan akun dinonaktifkan (`SetUserActive`, dan `requireSession` juga menolak akun nonaktif). Perubahan peran atau divisi (`UpdateUserProfile`) tidak menaikkannya, sama seperti sebelum revisi 5: hak akses dibaca ulang dari database di setiap request, jadi perubahan langsung berlaku tanpa login ulang.
+  - Index: pencarian per sesi memakai primary key `id`. Pencarian per akun memakai `user_sessions_user_id_idx` di migrasi `000007`, dipisah dari `000006` karena `000006` sudah terpasang di database dev. `last_seen_at` ber-index untuk pembersihan.
+- Tidak ada rate limiter umum. Limiter per IP (`limitLogin`, 10 percobaan lalu 1 per 30 detik) hanya dipasang di `POST /api/auth/login` dan `POST /api/auth/change-password`, jadi verify yang dipanggil Caddy di setiap permintaan dashboard tidak ikut tertahan. Bebannya dua query baca per permintaan dashboard (akun dan sesi) ditambah satu UPDATE paling sering sekali per 60 detik per sesi, dapat diterima untuk tim kecil.
 - Cookie lama dengan Domain berbeda (mis. cookie dev tanpa Domain, lalu produksi memakai `novoidminds.xyz`) dianggap cookie lain oleh browser. Mengganti `COOKIE_DOMAIN` berarti pengguna perlu login ulang sekali.
 - Env frontend memakai awalan `VITE_` (`VITE_DASHBOARD_URL`, `VITE_ALLOWED_RETURN_HOSTS`) karena Vite hanya menanam variabel berawalan itu ke bundle. Nilainya terlihat di browser, jadi tidak boleh berisi rahasia.
 - Tujuan `?kembali=` yang berupa halaman login itu sendiri (`/`) diabaikan, supaya pengguna yang sudah login tidak berputar di halaman login.
@@ -634,6 +662,8 @@ Revisi 5 (kode, dikerjakan 2026-11-16 di luar urutan karena dibutuhkan sebelum p
 - [ ] S13-06 Data dummy sekitar 2.000 task, ukur p95 dari dalam VM (bukan dari PC), cek `EXPLAIN ANALYZE` bahwa index pencarian terpakai. Target p95 di bawah 1 detik. Blok kata kunci di `ListArchiveTasks` dan `ListBoardTasks` memakai `OR` dengan banyak `EXISTS`, yang kemungkinan membuat index trigram tidak terpakai. Kalau lambat atau tidak memakai index, tulis ulang jadi `t.id IN (SELECT ... UNION SELECT ...)` di kedua query sekaligus.
 - [ ] S13-07 Review hasil bersama, perbaiki temuan, commit.
 - [ ] S13-08 Uji yang tidak bisa otomatis: ponsel sungguhan (kamera atau galeri, Safari, tempel gambar), pembaca layar, cek keyboard saja.
+- [ ] S13-09 Audit visual dan aksesibilitas hasil Sprint 10, Sprint 11, dan tombol Dashboard (dipindah dari S11-07), dengan Playwright dan `VITE_DASHBOARD_URL` terisi: `document.documentElement.scrollWidth <= window.innerWidth` di 360, 768, 1280, dan 1920 px untuk Admin, Manajer, dan Staf di semua halaman (perhatikan top bar 768 px: tombol Dashboard menambah sekitar 60 px), Tab dan Escape di panel, dialog, dan menu Lainnya, emulasi `prefers-reduced-motion` (tidak ada transisi), kontras dihitung, galat console 0, dan screenshot untuk dibandingkan dengan versi sebelum Sprint 11 (commit `8b36389`).
+- [ ] S13-10 Test otomatis model sesi (revisi 5, migrasi 000006 dan 000007): tabel hanya menyimpan id acak dan waktu (tanpa token); idle 30 menit ditolak di server; batas mutlak 12 jam ditolak dari `exp` JWT dan dari `created_at`; cookie `Max-Age` 12 jam; verify tanpa `Set-Cookie` dan tidak merotasi token; `last_seen_at` hanya ditulis bila aktivitas terakhir lebih dari 60 detik lalu (verify beruntun tidak menulis); token tanpa `sid` atau dengan `sid` akun lain ditolak; pencabutan setelah logout (semua perangkat), ganti password (perangkat lain 401, perangkat yang mengganti 204), reset password, dan nonaktif; perubahan peran tidak memaksa login ulang. `scripts/uji-verify.sh` sudah mencakup sebagian lewat API.
 
 ---
 
@@ -680,6 +710,7 @@ SRS v1.0 belum memuat kelima revisi (revisi 5 di S14-17). SRS diperbarui sebelum
 
 ## Menunggu jawaban Manajer
 
+- Umur mutlak sesi 12 jam sejak login (revisi 5): setelah itu pengguna login ulang walaupun terus aktif. Idle timeout tetap 30 menit. Sementara dipakai 12 jam (satu hari kerja).
 - Daftar label awal (nama dan warna) dan daftar pengguna awal (nama, username, peran, divisi).
 - Apakah tim masih memakai berkas .ppt lama. Kalau tidak, hapus dari daftar izin.
 - Konfirmasi kolom Completed di papan hanya 7 hari terakhir (AC-08 menyebut task Completed hilang dari papan aktif).

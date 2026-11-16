@@ -73,12 +73,10 @@ func (s *Server) login(c *gin.Context) {
 	}
 
 	u := res.User
-	token, expires, err := s.tokens.Issue(u.ID, string(u.Role), u.TokenVersion, now)
-	if err != nil {
+	if err := s.startSession(c, u.ID, u.Role, u.TokenVersion, now); err != nil {
 		s.internalError(c, err)
 		return
 	}
-	s.setSessionCookie(c, token, int(expires.Sub(now).Seconds()))
 
 	c.JSON(http.StatusOK, gin.H{"user": sessionUser{
 		ID:                 u.ID,
