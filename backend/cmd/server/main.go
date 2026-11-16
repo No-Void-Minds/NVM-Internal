@@ -23,6 +23,14 @@ func main() {
 	}
 
 	log := newLogger(cfg.AppEnv)
+	// `server maintenance [--dry-run]`: job harian S12-07 dari cron host, memakai image dan env yang sama.
+	if len(os.Args) > 1 && os.Args[1] == "maintenance" {
+		if err := runMaintenance(cfg, log, os.Args[2:]); err != nil {
+			log.Error("maintenance gagal", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(cfg, log); err != nil {
 		log.Error("server berhenti karena galat", "err", err)
 		os.Exit(1)

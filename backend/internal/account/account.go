@@ -48,7 +48,8 @@ func withField(err error, field string) error {
 }
 
 const (
-	minPasswordLen = 8
+	// 12 sejak sistem publik (revisi 5), untuk akun baru dan password sementara dari reset.
+	minPasswordLen = 12
 	maxPasswordLen = 72
 )
 
@@ -289,7 +290,7 @@ func validateName(name string) error {
 
 func validatePassword(p string) error {
 	if utf8.RuneCountInString(p) < minPasswordLen {
-		return invalid("Password minimal 8 karakter.")
+		return invalid("Password minimal 12 karakter.")
 	}
 	if len(p) > maxPasswordLen {
 		return invalid("Password terlalu panjang, maksimal 72 karakter.")

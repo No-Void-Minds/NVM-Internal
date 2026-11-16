@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -19,6 +20,8 @@ type Config struct {
 	// sesi juga terkirim ke subdomain dashboard dan studio yang dijaga forward_auth.
 	CookieDomain string
 	StorageDir   string
+	// TrustedProxies: CIDR yang boleh mengisi X-Forwarded-For dan X-Real-IP. Kosong berarti tidak ada.
+	TrustedProxies []string
 }
 
 // Load membaca .env bila ada (dev). Di produksi file itu tidak ada dan nilainya datang dari Docker Compose.
@@ -26,12 +29,13 @@ func Load() (Config, error) {
 	_ = godotenv.Load()
 
 	c := Config{
-		AppEnv:       getenv("APP_ENV", "development"),
-		HTTPAddr:     getenv("HTTP_ADDR", ":8080"),
-		DatabaseURL:  os.Getenv("DATABASE_URL"),
-		JWTSecret:    os.Getenv("JWT_SECRET"),
-		StorageDir:   getenv("STORAGE_DIR", "./storage"),
-		CookieDomain: os.Getenv("COOKIE_DOMAIN"),
+		AppEnv:         getenv("APP_ENV", "development"),
+		HTTPAddr:       getenv("HTTP_ADDR", ":8080"),
+		DatabaseURL:    os.Getenv("DATABASE_URL"),
+		JWTSecret:      os.Getenv("JWT_SECRET"),
+		StorageDir:     getenv("STORAGE_DIR", "./storage"),
+		CookieDomain:   os.Getenv("COOKIE_DOMAIN"),
+		TrustedProxies: splitList(os.Getenv("TRUSTED_PROXIES")),
 	}
 
 	secure, err := strconv.ParseBool(getenv("COOKIE_SECURE", "false"))
@@ -55,4 +59,15 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// splitList membaca daftar dipisah koma; nilai kosong menghasilkan nil, yang bagi Gin berarti tidak memercayai siapa pun.
+func splitList(v string) []string {
+	var out []string
+	for _, s := range strings.Split(v, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }

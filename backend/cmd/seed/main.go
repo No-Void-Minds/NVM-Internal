@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
@@ -40,6 +41,10 @@ func run(ctx context.Context) error {
 	}
 	if password == "" || password == "GANTI" {
 		return errors.New("SEED_ADMIN_PASSWORD belum diisi di .env")
+	}
+	// Sama dengan batas akun baru (12 sejak revisi 5); seed menulis langsung ke database, jadi dicek di sini.
+	if utf8.RuneCountInString(password) < 12 {
+		return errors.New("SEED_ADMIN_PASSWORD minimal 12 karakter")
 	}
 
 	pool, err := db.Connect(ctx, cfg.DatabaseURL)

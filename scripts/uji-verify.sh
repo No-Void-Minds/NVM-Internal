@@ -82,10 +82,20 @@ P1="Sementara-$(date +%s)-$RANDOM"
 P2="Baru-$(date +%s)-$RANDOM"
 P3="Reset-$(date +%s)-$RANDOM"
 
-# login PASSWORD JAR: mencetak kode HTTP login uji.verify.
+# login PASSWORD JAR: mencetak kode HTTP login uji.verify. Limiter login per IP (10 percobaan, lalu 1 per 30
+# detik) ikut terpakai oleh dev-login.sh dari 127.0.0.1, jadi bila mendapat 429 skrip menunggu Retry-After lalu
+# mencoba sekali lagi.
 login() {
-  curl -s -o /dev/null -w '%{http_code}' -c "$2" -H "Origin: $API" -H 'Content-Type: application/json' \
-    --data "{\"username\":\"$UJI\",\"password\":\"$1\"}" "$API/api/auth/login"
+  local code wait
+  for _ in 1 2; do
+    code=$(curl -s -o /dev/null -D "$TMP/lhead" -w '%{http_code}' -c "$2" -H "Origin: $API" \
+      -H 'Content-Type: application/json' --data "{\"username\":\"$UJI\",\"password\":\"$1\"}" "$API/api/auth/login")
+    [[ "$code" != 429 ]] && break
+    wait=$(grep -i '^retry-after:' "$TMP/lhead" | tr -dc '0-9')
+    echo "      limiter login: menunggu ${wait:-30} detik" >&2
+    sleep "${wait:-30}"
+  done
+  echo "$code"
 }
 
 admin GET /divisions >/dev/null

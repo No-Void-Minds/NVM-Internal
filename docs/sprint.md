@@ -604,20 +604,20 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 **SRS:** FR-TASK-20, BR-09, NFR-SEC-07, 08, NFR-REL-01 sampai 05, NFR-RET-03.
 
 Migrasi data:
-- [ ] S12-01 CLI impor Go dari sheet Task Tracker dan Completed Task di `NVM - Marketing & Sales.xlsx`. ID asli dipertahankan, `is_migrated = true`. Setiap baris Excel menjadi satu task tanpa sub task.
-- [ ] S12-02 Pemetaan nama di Request By dan Solved By ke username lewat file CSV. Nilai "Creative" dipetakan ke akun anggota divisi Creative.
-- [ ] S12-03 Task Completed di Excel tanpa Solved Date ditolak CHECK database. Putuskan saat dry-run: isi dari tanggal lain di baris itu, atau tandai untuk diisi manual.
-- [ ] S12-04 Mode `--dry-run` dengan laporan baris terbaca dan baris gagal beserta alasannya. Setelah impor, `setval` sequence ke ID terbesar.
+- [x] S12-01 CLI impor Go dari sheet Task Tracker dan Completed Task di `NVM - Marketing & Sales.xlsx`. ID asli dipertahankan, `is_migrated = true`. Setiap baris Excel menjadi satu task tanpa sub task.
+- [x] S12-02 Pemetaan nama di Request By dan Solved By ke username lewat file CSV. Nilai "Creative" dipetakan ke akun anggota divisi Creative.
+- [x] S12-03 Task Completed di Excel tanpa Solved Date ditolak CHECK database. Putuskan saat dry-run: isi dari tanggal lain di baris itu, atau tandai untuk diisi manual.
+- [x] S12-04 Mode `--dry-run` dengan laporan baris terbaca dan baris gagal beserta alasannya. Setelah impor, `setval` sequence ke ID terbesar.
 
 Operasional (hanya ditulis):
-- [ ] S12-05 `Dockerfile` backend, `docker-compose.prod.yml` (PostgreSQL, backend, Nginx), dan `nginx.conf` dengan `client_max_body_size 51m` serta `proxy_set_header Host $host`.
-- [ ] S12-06 Skrip backup harian (database dan `/srv/nvm-internal/storage`), penyalinan ke hard disk eksternal, PC IT, dan laptop IT (salinan laptop dienkripsi).
-- [ ] S12-07 Pembersih berkas yatim (berkas di `attachments/` dan `avatars/` tanpa baris database) dan job harian penghapus audit log login yang lebih tua dari 1 tahun, serta baris `user_sessions` yang sudah kedaluwarsa (`last_seen_at` lebih dari 30 menit lalu atau `created_at` lebih dari 12 jam lalu; baris yang sudah dicabut lewat `token_version` ikut terhapus karena tidak lagi diperbarui).
-- [ ] S12-08 Panduan satu halaman untuk tim (login, memindahkan task, sub task, unggah, profil) dan catatan operasional di README (backup, restore, update versi).
-- [ ] S12-09 Role database terpisah seperti di compro dan doomsday: `nvm_internal_migrator` untuk DDL (dipakai `migrate`) dan `nvm_internal_app` untuk aplikasi. Hak DELETE hanya untuk tabel yang memang dihapus permanen oleh kode. Hasil audit query DELETE di `backend/internal/db/queries` (2026-11-16): `task_subtasks` (`DeleteSubtasks`), `subtask_assignees` (`RemoveSubtaskAssignees`, juga lewat `ON DELETE CASCADE`), dan `task_labels` (`DeleteTaskLabels`). Task dan lampiran memakai `is_deleted`, jadi tidak butuh DELETE. Penghapus audit log login di S12-07 akan butuh DELETE di `audit_logs`; tambahkan saat job itu ditulis. Tabel `user_sessions` (migrasi 000006): role aplikasi butuh SELECT, INSERT, UPDATE, dan DELETE. Pencabutan sesi tidak memakai DELETE (lewat UPDATE `users.token_version`); DELETE dipakai job pembersih sesi kedaluwarsa di S12-07, yang berjalan di dalam backend dengan role aplikasi. Jadi daftar tabel dengan DELETE menjadi empat: `task_subtasks`, `subtask_assignees`, `task_labels`, dan `user_sessions` (ditambah `audit_logs` saat job audit S12-07 ditulis). Audit ulang daftar ini bila ada query DELETE baru.
-- [ ] S12-10 Binary backend dibangun statis (`CGO_ENABLED=0`) supaya jalan di image distroless. Di compro, binary yang tidak statis gagal jalan di server.
-- [ ] S12-11 Skrip backup memperhitungkan UID pemilik folder storage di container, karena di compro izin folder sempat membuat backup gagal diam-diam. Uji restore sebelum butir ini dianggap selesai.
-- [ ] S12-12 Cache: endpoint yang dibaca halaman pengelola (Pengguna, Pengaturan, Audit Log) tidak boleh tertahan cache di Nginx atau browser. Di compro, halaman admin sempat menampilkan data basi.
+- [x] S12-05 `Dockerfile` backend, `deploy/docker-compose.yml` (backend dan Nginx; PostgreSQL memakai container bersama di VM), dan `nginx.conf` dengan `client_max_body_size 51m` serta `proxy_set_header Host $host`.
+- [x] S12-06 Skrip backup harian (database dan `/srv/nvm-internal/storage`), penyalinan ke hard disk eksternal, PC IT, dan laptop IT (salinan laptop dienkripsi).
+- [x] S12-07 Pembersih berkas yatim (berkas di `attachments/` dan `avatars/` tanpa baris database) dan job harian penghapus audit log login yang lebih tua dari 1 tahun, serta baris `user_sessions` yang sudah kedaluwarsa (`last_seen_at` lebih dari 30 menit lalu atau `created_at` lebih dari 12 jam lalu; baris yang sudah dicabut lewat `token_version` ikut terhapus karena tidak lagi diperbarui).
+- [x] S12-08 Panduan satu halaman untuk tim (login, memindahkan task, sub task, unggah, profil) dan catatan operasional di README (backup, restore, update versi).
+- [x] S12-09 Role database terpisah seperti di compro dan doomsday: `nvm_internal_migrator` untuk DDL (dipakai `migrate`) dan `nvm_internal_app` untuk aplikasi. Hak DELETE hanya untuk tabel yang memang dihapus permanen oleh kode. Hasil audit query DELETE di `backend/internal/db/queries` (2026-11-16): `task_subtasks` (`DeleteSubtasks`), `subtask_assignees` (`RemoveSubtaskAssignees`, juga lewat `ON DELETE CASCADE`), dan `task_labels` (`DeleteTaskLabels`). Task dan lampiran memakai `is_deleted`, jadi tidak butuh DELETE. Penghapus audit log login di S12-07 akan butuh DELETE di `audit_logs`; tambahkan saat job itu ditulis. Tabel `user_sessions` (migrasi 000006): role aplikasi butuh SELECT, INSERT, UPDATE, dan DELETE. Pencabutan sesi tidak memakai DELETE (lewat UPDATE `users.token_version`); DELETE dipakai job pembersih sesi kedaluwarsa di S12-07, yang berjalan di dalam backend dengan role aplikasi. Jadi daftar tabel dengan DELETE menjadi empat: `task_subtasks`, `subtask_assignees`, `task_labels`, dan `user_sessions` (ditambah `audit_logs` saat job audit S12-07 ditulis). Audit ulang daftar ini bila ada query DELETE baru.
+- [x] S12-10 Binary backend dibangun statis (`CGO_ENABLED=0`) supaya jalan di image distroless. Di compro, binary yang tidak statis gagal jalan di server.
+- [x] S12-11 Skrip backup memperhitungkan UID pemilik folder storage di container, karena di compro izin folder sempat membuat backup gagal diam-diam. Uji restore sebelum butir ini dianggap selesai.
+- [x] S12-12 Cache: endpoint yang dibaca halaman pengelola (Pengguna, Pengaturan, Audit Log) tidak boleh tertahan cache di Nginx atau browser. Di compro, halaman admin sempat menampilkan data basi.
 
 Revisi 5 (kode, dikerjakan 2026-11-16 di luar urutan karena dibutuhkan sebelum pemasangan dashboard):
 - [x] S12-13 `GET /api/auth/verify` untuk Caddy forward_auth: 204 tanpa body bila sesi sah dan password sudah diganti, 401 bila tidak ada sesi atau sesi tidak sah, 403 bila password masih harus diganti. Selalu `Cache-Control: no-store`; `X-NVM-User` berisi username pada 204. Memakai `requireSession` dan `requirePasswordChanged` yang sudah ada. Uji: `scripts/uji-verify.sh`.
@@ -646,6 +646,40 @@ Revisi 5 (kode, dikerjakan 2026-11-16 di luar urutan karena dibutuhkan sebelum p
 - Cookie lama dengan Domain berbeda (mis. cookie dev tanpa Domain, lalu produksi memakai `novoidminds.xyz`) dianggap cookie lain oleh browser. Mengganti `COOKIE_DOMAIN` berarti pengguna perlu login ulang sekali.
 - Env frontend memakai awalan `VITE_` (`VITE_DASHBOARD_URL`, `VITE_ALLOWED_RETURN_HOSTS`) karena Vite hanya menanam variabel berawalan itu ke bundle. Nilainya terlihat di browser, jadi tidak boleh berisi rahasia.
 - Tujuan `?kembali=` yang berupa halaman login itu sendiri (`/`) diabaikan, supaya pengguna yang sudah login tidak berputar di halaman login.
+
+**Keputusan (deploy dan impor, 2026-11-16):**
+- Ditiru dari compro: role migrator dan app dengan `00-bootstrap.sql` yang meminta password interaktif dan menutup database dari role lain; migrasi lewat image `migrate/migrate` di jaringan Postgres; Nginx dari template dengan `NGINX_ENVSUBST_FILTER`; `set_real_ip_from` gateway jaringan Docker dengan `real_ip_header CF-Connecting-IP`; `X-Forwarded-For` ditimpa, bukan ditambah; header keamanan di berkas yang di-include per location; folder storage milik UID 65532; format satu baris per run di `backup.log`; cron dalam UTC.
+- Ditiru dari doomsday: healthcheck `wget /api/health` di container Nginx (backend distroless tidak punya shell); batas log Docker 10 MB x 3; `resolver 127.0.0.11` dengan variabel backend; pemeriksaan `CGO_ENABLED=0` lewat `go version -m` saat build; `pg_restore --list` untuk membuktikan dump bisa dibaca; `trap ERR` di skrip backup.
+- Sengaja berbeda dari keduanya:
+  - Port Nginx diikat ke `127.0.0.1:8094`, bukan semua antarmuka (S14-03). Subnet `172.30.94.0/24` dan port 8094 meneruskan urutan compro (`.92`, 8092) dan doomsday (`.93`, 8090).
+  - Hak DELETE tidak diberikan lewat default privileges, tetapi per tabel di `deploy/sql/10-grants.sql` (dijalankan ulang setelah migrasi yang menambah tabel), sesuai audit S12-09. compro memberi DELETE ke semua tabel.
+  - CSP lebih ketat: `style-src 'self'` tanpa `unsafe-inline`. Hasil pemeriksaan build sungguhan: `index.html` tanpa script atau style inline, bundle tanpa `eval`, font dan foto dari origin sendiri, dan binding `:style` Vue memakai CSSOM yang tidak diatur `style-src`. Belum diuji di browser; cek galat CSP di console masuk daftar cek runbook dan S13-09.
+  - Backup storage dibuat di container `alpine` yang berjalan sebagai UID 65532 dengan mount baca-saja, karena backend menulis berkas 0600 dan folder 0750. compro memilih mengubah izin berkas (`chmod a+rX`).
+  - Rotasi 14 harian dan 8 mingguan (salinan hari Minggu lewat hard link); compro dan doomsday hanya 14 harian.
+  - Satu image backend berisi `server` (dengan subperintah `maintenance`), `seed`, dan `import-excel`. compro dan doomsday memakai binary admin terpisah.
+- Backend memercayai `X-Forwarded-For` dan `X-Real-IP` hanya dari `TRUSTED_PROXIES` (subnet Nginx di produksi, kosong di dev). Limiter login dan kolom `ip_address` audit log memakai `ClientIP` hasil itu. Uji di dev: `scripts/uji-ip.sh`.
+- Semua jawaban `/api` memakai `Cache-Control: no-store` lewat middleware grup `/api`; foto profil menimpanya dengan `immutable` bila `?v=` cocok. Unduhan lampiran diubah dari `private, no-cache` ke `private, no-store`.
+- Password minimal 12 karakter (sebelumnya 8) untuk akun baru, password sementara dari reset, ganti password sendiri, dan `seed`. Password lama tetap berlaku sampai diganti.
+- Job harian `server maintenance [--dry-run]` dijalankan cron host lewat `docker compose run --rm`: menghapus sesi kedaluwarsa, audit log `login_success`, `login_failed`, `account_locked`, dan `logout` yang lebih tua dari 1 tahun (perubahan password dan akun tidak termasuk), serta berkas yatim di `attachments/` dan `avatars/` (termasuk sisa `.upload-*`). Berkas yang lebih muda dari 1 jam tidak disentuh, karena lampiran sudah ada di disk sebelum transaksinya selesai. Berkas lampiran yang `is_deleted` bukan yatim dan tetap disimpan. Nama berkas yang bukan bentuk nama aplikasi hanya dilaporkan.
+- Impor Excel:
+  - Berkas `.xlsx` dibaca dengan pustaka standar (zip dan XML), tanpa dependensi baru. Kolom dicari dari baris header berisi ID Task dan Judul Task (SRS 2.1, sembilan kolom), bukan dari posisi.
+  - Satu baris menjadi satu task tanpa sub task (S12-01), jadi tanpa PIC. Solved By hanya menentukan divisi task (divisi akun hasil pemetaan) dan dicatat di deskripsi ("Solved By: ..."). Request By menjadi `requested_by`.
+  - Ditolak dan dilaporkan, tidak diperbaiki diam-diam: ID bukan format T-nnnn atau kembar di berkas atau sudah ada di database, judul kosong atau lebih dari 200 karakter, status atau urgency di luar daftar, nama yang belum dipetakan, tanggal yang tidak terbaca, Completed tanpa Solved Date (S12-03), dan Solved Date pada status selain Completed.
+  - Deliverable yang bukan tautan `http(s)` dipindah ke deskripsi (constraint menolaknya sebagai tautan). Status kosong di sheet Completed Task dianggap Completed, dengan catatan di laporan.
+  - Tanggal dibaca sebagai hari WIB: nomor seri Excel, `dd/mm/yyyy`, atau `yyyy-mm-dd`.
+  - Impor sungguhan menolak jalan bila masih ada baris yang ditolak, dan semua task ditulis dalam satu transaksi beserta audit `task_created` (pelaku "Sistem"), lalu `task_number_seq` disetel ke ID terbesar tanpa pernah mundur. Impor memakai role migrator karena `setval` tidak diizinkan untuk role aplikasi.
+
+**Butuh dari Manajer (tambahan):**
+- Isi CSV pemetaan `deploy/import/pemetaan-nama.example.csv` (nama di Request By dan Solved By, termasuk "Creative", ke username).
+- Task hasil migrasi tanpa PIC tidak tampil di "Task saya" Staf. Setuju, atau Solved By dijadikan satu sub task dengan PIC?
+- Task Completed tanpa Solved Date (S12-03): isi dari Request Date, atau diisi manual sebelum impor?
+
+**Hasil:** kode dan berkas Sprint 12 selesai 2026-11-16; belum ada yang dijalankan di VM. `./scripts/check.sh` lolos. Pembaca `.xlsx` dan aturan baris diuji lewat test sementara (dihapus lagi): teks bersama dan inline, header yang tidak di baris pertama, nomor seri tanggal, penolakan urgency dan tanggal, pemetaan nama, normalisasi ID. Uji dengan berkas Excel sungguhan menunggu berkasnya (tidak ada di `~/Documents/NVM`). Docker tidak ada di PC kantor, jadi build image, Nginx, CSP di browser, dan healthcheck pertama kali berjalan di VM (runbook langkah 4 dan 7). Uji API setelah restart backend: lihat laporan Sprint 12.
+
+**Retro:**
+- Macet: (isi sendiri)
+- Lancar: (isi sendiri)
+- Diubah untuk Sprint 13: (isi sendiri)
 
 ---
 

@@ -1,0 +1,8 @@
+# Rahasia dan data dev tidak boleh masuk image.
+.env
+.env.*
+storage/
+.data/
+bin/
+tmp/
+*_test.go

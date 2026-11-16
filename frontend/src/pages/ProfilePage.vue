@@ -4,7 +4,7 @@ import { ApiError } from '../api/client'
 import ProfileForm from '../components/ProfileForm.vue'
 import { useSessionStore } from '../stores/session'
 import { useLogout } from '../composables/useLogout'
-import { validateNewPassword } from '../utils/password'
+import { MIN_PASSWORD_LENGTH, validateNewPassword } from '../utils/password'
 
 const session = useSessionStore()
 const { logout, loggingOut, logoutError } = useLogout()
@@ -78,7 +78,9 @@ async function submit() {
           aria-describedby="profile-new-hint"
           class="mt-1 block min-h-11 w-full rounded-card border border-line bg-surface px-3"
         />
-        <p id="profile-new-hint" class="mt-1 text-sm text-ink-muted">Minimal 8 karakter.</p>
+        <p id="profile-new-hint" class="mt-1 text-sm text-ink-muted">
+          Minimal {{ MIN_PASSWORD_LENGTH }} karakter.
+        </p>
       </div>
       <div>
         <label for="profile-confirm" class="block text-sm font-medium">Ulangi password baru</label>

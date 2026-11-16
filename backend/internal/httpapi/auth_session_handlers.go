@@ -46,7 +46,8 @@ func (s *Server) logout(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// noStore dipasang sebelum pengecekan sesi, supaya jawaban 401 dan 403 juga tidak disimpan cache mana pun.
+// noStore dipasang di grup /api sebelum pengecekan sesi, supaya jawaban 401 dan 403 (termasuk verify untuk
+// Caddy) juga tidak disimpan cache mana pun.
 func noStore() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")

@@ -7,6 +7,8 @@ backend/tmp/
 backend/.data/
 # Folder berkas unggahan. Ditulis dengan garis miring di depan supaya paket kode backend/internal/storage tidak ikut terabaikan.
 /storage/
+# Cadangan harian di VM (/srv/nvm-internal/backup), berisi dump database. Tidak boleh masuk git.
+/backup/
 backend/storage/
 
 node_modules/

@@ -27,3 +27,7 @@ go run ./cmd/seed
 ```
 
 Sebelum commit: `./scripts/check.sh`
+
+## Produksi
+
+Deploy, migrasi, backup dan restore, job harian, update versi, dan rollback ditulis langkah per langkah di [docs/runbook-deploy.md](docs/runbook-deploy.md). Berkas deploy ada di `deploy/` (compose, contoh `.env`, SQL role database, skrip backup). Panduan pemakaian untuk tim: [docs/panduan-tim.md](docs/panduan-tim.md).

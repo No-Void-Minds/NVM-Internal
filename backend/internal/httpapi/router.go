@@ -67,9 +67,10 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	}
 
 	r := gin.New()
-	// Belum ada reverse proxy, jadi header X-Forwarded-For tidak dipercaya. ClientIP dipakai
-	// untuk audit log dan rate limit login; di produksi isi dengan IP Nginx (Sprint 7).
-	if err := r.SetTrustedProxies(nil); err != nil {
+	// ClientIP dipakai limiter login dan kolom ip_address audit log. Header X-Forwarded-For dan X-Real-IP hanya
+	// dipercaya dari TRUSTED_PROXIES (subnet jaringan Nginx di produksi, yang mengisinya dari CF-Connecting-IP).
+	// Kosong di dev: tidak ada header yang dipercaya, jadi IP selalu alamat koneksi langsung.
+	if err := r.SetTrustedProxies(cfg.TrustedProxies); err != nil {
 		return nil, err
 	}
 	r.Use(withRequestID(), s.accessLog(), s.recoverer())
@@ -78,11 +79,13 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 		writeError(c, 404, CodeNotFound, "Alamat tidak ditemukan.")
 	})
 
-	api := r.Group("/api", sameOrigin())
+	// no-store untuk semua jawaban API (S12-12): data pengelola dan sesi tidak boleh tertahan cache Cloudflare,
+	// Nginx, atau browser. Foto profil menimpanya dengan cache sendiri karena URL-nya berversi (?v=).
+	api := r.Group("/api", sameOrigin(), noStore())
 	api.GET("/health", s.health)
 	api.POST("/auth/login", s.limitLogin(), s.login)
 	// Untuk forward_auth Caddy: dipanggil di setiap permintaan dashboard, jadi tidak memakai rate limit login.
-	api.GET("/auth/verify", noStore(), s.requireSession(), requirePasswordChanged(), s.verify)
+	api.GET("/auth/verify", s.requireSession(), requirePasswordChanged(), s.verify)
 	authed := api.Group("", s.requireSession())
 	authed.GET("/auth/me", s.me)
 	authed.POST("/auth/logout", s.logout)

@@ -125,3 +125,8 @@ func (s *Store) AvatarPath(id string) (string, error) {
 	}
 	return filepath.Join(s.avatars, id+".jpg"), nil
 }
+
+// AttachmentsDir dan AvatarsDir dipakai pembersih berkas yatim (job harian S12-07).
+func (s *Store) AttachmentsDir() string { return s.files }
+
+func (s *Store) AvatarsDir() string { return s.avatars }

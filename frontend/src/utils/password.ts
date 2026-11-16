@@ -1,5 +1,5 @@
 // Aturan yang sama dengan backend (password_handlers.go), dicek lebih dulu supaya pengguna tidak menunggu respons server.
-export const MIN_PASSWORD_LENGTH = 8
+export const MIN_PASSWORD_LENGTH = 12
 const MAX_PASSWORD_BYTES = 72
 
 export function validateNewPassword(current: string, next: string, confirm: string): string | null {

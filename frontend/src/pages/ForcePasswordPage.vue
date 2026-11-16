@@ -5,7 +5,7 @@ import AuthCard from '../components/AuthCard.vue'
 import { ApiError } from '../api/client'
 import { useSessionStore } from '../stores/session'
 import { useLogout } from '../composables/useLogout'
-import { validateNewPassword } from '../utils/password'
+import { MIN_PASSWORD_LENGTH, validateNewPassword } from '../utils/password'
 import { goAfterLogin } from '../router/home'
 
 const session = useSessionStore()
@@ -71,7 +71,9 @@ async function submit() {
           aria-describedby="new-password-hint"
           class="mt-1 block min-h-11 w-full rounded-card border border-line bg-surface px-3"
         />
-        <p id="new-password-hint" class="mt-1 text-sm text-ink-muted">Minimal 8 karakter.</p>
+        <p id="new-password-hint" class="mt-1 text-sm text-ink-muted">
+          Minimal {{ MIN_PASSWORD_LENGTH }} karakter.
+        </p>
       </div>
 
       <div>

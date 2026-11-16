@@ -65,7 +65,7 @@ func (s *Server) downloadAttachment(c *gin.Context) {
 	h.Set("X-Content-Type-Options", "nosniff")
 	// Lapis tambahan: kalau berkas terbuka di tab browser, skrip di dalamnya tetap tidak bisa jalan.
 	h.Set("Content-Security-Policy", "sandbox")
-	h.Set("Cache-Control", "private, no-cache")
+	h.Set("Cache-Control", "private, no-store")
 	// ServeContent mendukung Range, jadi unduhan yang terputus bisa dilanjutkan.
 	http.ServeContent(c.Writer, c.Request, att.OriginalName, att.UploadedAt.Time, f)
 }
