@@ -94,7 +94,7 @@ async function submit() {
       <button
         type="submit"
         :disabled="submitting"
-        class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
+        class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white hover:bg-accent-hover active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
       >
         {{ submitting ? 'Menyimpan...' : 'Simpan password' }}
       </button>

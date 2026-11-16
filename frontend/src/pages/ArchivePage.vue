@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import KeywordSearch from '../components/KeywordSearch.vue'
@@ -15,7 +16,8 @@ import { listUsers, type UserItem } from '../api/users'
 import { useSessionStore } from '../stores/session'
 import { hasArchiveFilters, parseArchiveQuery, sortOptions, toArchiveRouteQuery } from '../utils/archiveQuery'
 import { normalizeBoardQuery, sameRouteQuery } from '../utils/boardQuery'
-import { formatMoment, urgencies, urgencyClass, urgencyLabel, type Urgency } from '../utils/task'
+import { formatMoment, urgencies, urgencyLabel, type Urgency } from '../utils/task'
+import UrgencyLabel from '../components/UrgencyLabel.vue'
 import type { ArchiveSort } from '../api/archive'
 
 const route = useRoute()
@@ -329,23 +331,26 @@ const buttonSecondary =
     </div>
 
     <div aria-live="polite">
-      <p
-        v-if="notice"
-        :role="notice.kind === 'error' ? 'alert' : 'status'"
-        class="mt-4 rounded-card p-3 text-sm"
-        :class="
-          notice.kind === 'error'
-            ? 'bg-danger-bg text-danger'
-            : 'border border-line bg-surface text-progress-fg'
-        "
-      >
-        {{ notice.text }}
-      </p>
+      <Transition name="notice">
+        <p
+          v-if="notice"
+          :key="notice.text"
+          :role="notice.kind === 'error' ? 'alert' : 'status'"
+          class="mt-4 rounded-card p-3 text-sm"
+          :class="
+            notice.kind === 'error'
+              ? 'bg-danger-bg text-danger'
+              : 'border border-line bg-surface text-progress-fg'
+          "
+        >
+          {{ notice.text }}
+        </p>
+      </Transition>
     </div>
 
     <h2 ref="resultsHeading" tabindex="-1" class="sr-only">Daftar task selesai</h2>
 
-    <p v-if="loadState === 'loading'" class="mt-6 text-ink-muted">Memuat arsip...</p>
+    <LoadingSkeleton v-if="loadState === 'loading'" class="mt-6" label="Memuat arsip..." />
 
     <div
       v-else-if="loadState === 'error'"
@@ -388,7 +393,7 @@ const buttonSecondary =
         <p class="text-sm text-ink-muted">{{ rangeText }}</p>
 
         <!-- Tabel hanya bila kontainer cukup lebar; di bawah itu kartu, supaya tidak ada gulir horizontal. -->
-        <table class="mt-2 hidden w-full text-sm @3xl:table">
+        <table class="mt-2 hidden w-full border-collapse border border-line bg-surface text-sm @3xl:table">
           <caption class="sr-only">
             Task selesai,
             {{
@@ -397,19 +402,21 @@ const buttonSecondary =
           </caption>
           <thead class="border-b border-line text-left text-ink-muted">
             <tr>
-              <th scope="col" class="py-2 pr-3 font-medium">ID</th>
-              <th scope="col" class="py-2 pr-3 font-medium">Judul</th>
-              <th scope="col" class="py-2 pr-3 font-medium">PIC</th>
-              <th scope="col" class="py-2 pr-3 font-medium">Divisi</th>
-              <th scope="col" class="py-2 pr-3 font-medium">Urgency</th>
-              <th scope="col" class="py-2 pr-3 font-medium">Selesai</th>
+              <th scope="col" class="py-2 px-4 font-medium">ID</th>
+              <th scope="col" class="py-2 px-4 font-medium">Judul</th>
+              <th scope="col" class="py-2 px-4 font-medium">PIC</th>
+              <th scope="col" class="py-2 px-4 font-medium">Divisi</th>
+              <th scope="col" class="py-2 px-4 font-medium">Urgency</th>
+              <th scope="col" class="py-2 px-4 font-medium">Selesai</th>
               <th scope="col" class="py-2"><span class="sr-only">Aksi</span></th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-line">
+          <tbody class="divide-y divide-line border-t border-line">
             <tr v-for="t in result.tasks" :key="t.id" class="align-top">
-              <td class="py-3 pr-3 font-mono whitespace-nowrap text-ink-muted">{{ t.id }}</td>
-              <td class="min-w-0 py-1 pr-3">
+              <td class="py-3 px-4">
+                <span class="specimen-tag">{{ t.id }}</span>
+              </td>
+              <td class="min-w-0 py-1 px-4">
                 <button
                   type="button"
                   class="min-h-11 rounded-card text-left font-medium break-words hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
@@ -427,10 +434,10 @@ const buttonSecondary =
                   >
                 </div>
               </td>
-              <td class="py-3 pr-3">{{ names(t) }}</td>
-              <td class="py-3 pr-3">{{ t.division.name }}</td>
-              <td class="py-3 pr-3" :class="urgencyClass[t.urgency]">{{ urgencyLabel[t.urgency] }}</td>
-              <td class="py-3 pr-3 whitespace-nowrap">
+              <td class="py-3 px-4">{{ names(t) }}</td>
+              <td class="py-3 px-4">{{ t.division.name }}</td>
+              <td class="py-3 px-4"><UrgencyLabel :urgency="t.urgency" /></td>
+              <td class="py-3 px-4 whitespace-nowrap">
                 {{ t.solved_date ? formatMoment(t.solved_date) : '' }}
               </td>
               <td class="py-1 text-right">
@@ -445,8 +452,8 @@ const buttonSecondary =
         <ul class="mt-2 space-y-2 @3xl:hidden">
           <li v-for="t in result.tasks" :key="t.id" class="rounded-card border border-line bg-surface p-3">
             <div class="flex items-center gap-2 text-sm">
-              <span class="rounded-chip bg-canvas px-1.5 font-mono text-ink-muted">{{ t.id }}</span>
-              <span :class="urgencyClass[t.urgency]">{{ urgencyLabel[t.urgency] }}</span>
+              <span class="specimen-tag">{{ t.id }}</span>
+              <UrgencyLabel :urgency="t.urgency" />
             </div>
             <h3 class="font-medium">
               <button

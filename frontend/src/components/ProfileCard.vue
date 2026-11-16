@@ -125,7 +125,7 @@ const buttonSecondary =
               <span class="rounded-chip px-2 py-0.5 text-sm font-medium" :class="statusClass[s]">
                 {{ statusLabel[s] }}
               </span>
-              <span class="font-mono font-medium">
+              <span class="font-medium tabular-nums">
                 {{ counts.counts[s] ?? 0 }}<span class="sr-only"> task, tampilkan di papan</span>
               </span>
             </button>

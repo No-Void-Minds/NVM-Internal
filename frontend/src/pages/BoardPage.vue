@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import KeywordSearch from '../components/KeywordSearch.vue'
@@ -221,8 +222,14 @@ function canDrop(status: TaskStatus): boolean {
   return dragging.value?.move_to.includes(status) ?? false
 }
 
+// Kartu tampil terangkat (bayangan dan miring 1 derajat) hanya saat browser mengambil gambar drag-nya,
+// lalu kartu asli di kolom menjadi bayangan pudar sebagai penanda asal.
+const lifting = ref<string | null>(null)
+
 function onDragStart(e: DragEvent, t: BoardTask) {
   dragging.value = t
+  lifting.value = t.id
+  setTimeout(() => (lifting.value = null))
   // Firefox tidak memulai drag kalau dataTransfer kosong.
   e.dataTransfer?.setData('text/plain', t.id)
   if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
@@ -231,6 +238,18 @@ function onDragStart(e: DragEvent, t: BoardTask) {
 function onDragEnd() {
   dragging.value = null
   dropTarget.value = null
+}
+
+// Selama drag: kolom tujuan yang sah bergaris putus-putus olive, kolom yang tidak boleh meredup, dan kolom yang
+// sedang disentuh menunjukkan sebelum dilepas apakah perpindahan akan diterima.
+function columnDragClass(status: TaskStatus): string {
+  const t = dragging.value
+  if (!t || t.status === status) return 'border-line'
+  if (!canDrop(status))
+    return dropTarget.value === status ? 'border-danger bg-danger-bg' : 'border-line opacity-60'
+  return dropTarget.value === status
+    ? 'border-accent bg-surface outline-2 outline-accent'
+    : 'border-dashed border-accent'
 }
 
 function onDragOver(e: DragEvent, status: TaskStatus) {
@@ -349,7 +368,7 @@ const buttonSecondary =
           <button
             v-if="isManager"
             type="button"
-            class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white active:translate-y-px"
+            class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white hover:bg-accent-hover active:translate-y-px"
             @click="openCreate"
           >
             Buat task
@@ -481,21 +500,24 @@ const buttonSecondary =
         </div>
 
         <div aria-live="polite">
-          <p
-            v-if="notice"
-            :role="notice.kind === 'error' ? 'alert' : 'status'"
-            class="mt-4 rounded-card p-3 text-sm"
-            :class="
-              notice.kind === 'error'
-                ? 'bg-danger-bg text-danger'
-                : 'border border-line bg-surface text-progress-fg'
-            "
-          >
-            {{ notice.text }}
-          </p>
+          <Transition name="notice">
+            <p
+              v-if="notice"
+              :key="notice.text"
+              :role="notice.kind === 'error' ? 'alert' : 'status'"
+              class="mt-4 rounded-card p-3 text-sm"
+              :class="
+                notice.kind === 'error'
+                  ? 'bg-danger-bg text-danger'
+                  : 'border border-line bg-surface text-progress-fg'
+              "
+            >
+              {{ notice.text }}
+            </p>
+          </Transition>
         </div>
 
-        <p v-if="loadState === 'loading'" class="mt-6 text-ink-muted">Memuat papan...</p>
+        <LoadingSkeleton v-if="loadState === 'loading'" class="mt-6" label="Memuat papan..." shape="board" />
 
         <div
           v-else-if="loadState === 'error'"
@@ -541,7 +563,7 @@ const buttonSecondary =
                 @click="chooseColumn(col.status)"
               >
                 <span>{{ statusLabel[col.status] }}</span>
-                <span class="font-mono">{{ col.count }}<span class="sr-only"> task</span></span>
+                <span class="tabular-nums">{{ col.count }}<span class="sr-only"> task</span></span>
               </button>
             </div>
 
@@ -549,12 +571,8 @@ const buttonSecondary =
               <section
                 v-for="col in board.columns"
                 :key="col.status"
-                class="min-w-0 rounded-card border bg-canvas p-2"
-                :class="[
-                  col.status === activeColumn ? '' : 'hidden @2xl:block',
-                  dragging && canDrop(col.status) ? 'border-dashed border-accent' : 'border-line',
-                  dropTarget === col.status && canDrop(col.status) ? 'bg-surface' : '',
-                ]"
+                class="min-w-0 rounded-card border bg-canvas p-2 transition-colors duration-150"
+                :class="[col.status === activeColumn ? '' : 'hidden @2xl:block', columnDragClass(col.status)]"
                 :aria-labelledby="`kolom-${col.status}`"
                 @dragover="onDragOver($event, col.status)"
                 @dragleave="onDragLeave($event, col.status)"
@@ -564,28 +582,41 @@ const buttonSecondary =
                   <span class="rounded-chip px-2 py-0.5 text-sm font-medium" :class="statusClass[col.status]">
                     {{ statusLabel[col.status] }}
                   </span>
-                  <span class="rounded-chip border border-line bg-surface px-2 font-mono text-sm">
+                  <span
+                    class="rounded-chip border border-line bg-surface px-2 text-sm font-medium tabular-nums"
+                  >
                     {{ col.count }}<span class="sr-only"> task</span>
                   </span>
                 </h2>
+                <p
+                  v-if="dragging && dragging.status !== col.status"
+                  class="px-1 pb-2 text-sm font-medium"
+                  :class="canDrop(col.status) ? 'text-accent' : 'text-ink-muted'"
+                >
+                  {{
+                    canDrop(col.status) ? 'Lepas di sini untuk memindahkan' : 'Tidak bisa dipindah ke sini'
+                  }}
+                </p>
                 <p v-if="col.status === 'completed'" class="px-1 pb-2 text-sm text-ink-muted">
                   Hanya yang selesai {{ board.completed_days }} hari terakhir.
                 </p>
-                <ul v-if="col.tasks.length" class="space-y-2">
+                <!-- Kartu yang masuk kolom (mis. setelah dipindah) muncul dengan transisi singkat sebagai umpan balik. -->
+                <TransitionGroup v-if="col.tasks.length" tag="ul" name="card" class="space-y-2">
                   <li
                     v-for="t in col.tasks"
                     :key="t.id"
                     :draggable="t.move_to.length > 0"
+                    class="rounded-card"
                     :class="[
                       t.move_to.length ? 'cursor-grab' : '',
-                      dragging?.id === t.id ? 'opacity-60' : '',
+                      lifting === t.id ? 'rotate-1 shadow-drag' : dragging?.id === t.id ? 'opacity-40' : '',
                     ]"
                     @dragstart="onDragStart($event, t)"
                     @dragend="onDragEnd"
                   >
                     <TaskCard :task="t" @open="detailId = $event" @move="openMove" />
                   </li>
-                </ul>
+                </TransitionGroup>
                 <p v-else class="px-1 py-4 text-center text-sm text-ink-muted">Tidak ada task.</p>
               </section>
             </div>

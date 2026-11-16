@@ -17,7 +17,13 @@ function fullHref(id: string): string {
 </script>
 
 <template>
-  <BaseDialog :open="taskId !== null" :title="taskId ?? 'Detail task'" variant="panel" @close="emit('close')">
+  <BaseDialog
+    :open="taskId !== null"
+    :title="taskId ?? 'Detail task'"
+    :tag="taskId !== null"
+    variant="panel"
+    @close="emit('close')"
+  >
     <template v-if="taskId" #actions>
       <a
         :href="fullHref(taskId)"

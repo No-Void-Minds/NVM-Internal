@@ -76,23 +76,25 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onOutside))
       </svg>
     </button>
     <!-- Bayangan dipakai hanya di sini untuk memisahkan menu yang melayang dari isi di bawahnya. -->
-    <div
-      v-if="open"
-      :id="menuId"
-      role="menu"
-      class="absolute right-0 z-20 mt-1 min-w-52 rounded-card border border-line bg-surface py-1 shadow-md"
-    >
-      <button
-        v-for="item in items"
-        :key="item.label"
-        type="button"
-        role="menuitem"
-        class="flex min-h-11 w-full items-center px-3.5 text-left hover:bg-canvas focus-visible:bg-canvas active:bg-canvas"
-        :class="item.danger ? 'font-medium text-urgent' : ''"
-        @click="choose(item.action)"
+    <Transition name="pop-down">
+      <div
+        v-if="open"
+        :id="menuId"
+        role="menu"
+        class="absolute right-0 z-20 mt-1 min-w-52 rounded-card border border-line bg-surface py-1 shadow-menu"
       >
-        {{ item.label }}
-      </button>
-    </div>
+        <button
+          v-for="item in items"
+          :key="item.label"
+          type="button"
+          role="menuitem"
+          class="flex min-h-11 w-full items-center px-3.5 text-left hover:bg-canvas focus-visible:bg-canvas active:bg-canvas"
+          :class="item.danger ? 'font-medium text-urgent' : ''"
+          @click="choose(item.action)"
+        >
+          {{ item.label }}
+        </button>
+      </div>
+    </Transition>
   </div>
 </template>

@@ -76,24 +76,29 @@ function backToBoard() {
       Papan Task
     </RouterLink>
 
-    <h1 class="mt-1 font-mono text-sm text-ink-muted">{{ taskId }}</h1>
+    <h1 class="mt-1">
+      <span class="specimen-tag">{{ taskId }}</span>
+    </h1>
 
     <div aria-live="polite">
       <p v-if="setupError" role="alert" class="mt-3 rounded-card bg-danger-bg p-3 text-sm text-danger">
         {{ setupError }}
       </p>
-      <p
-        v-if="notice"
-        :role="notice.kind === 'error' ? 'alert' : 'status'"
-        class="mt-3 rounded-card p-3 text-sm"
-        :class="
-          notice.kind === 'error'
-            ? 'bg-danger-bg text-danger'
-            : 'border border-line bg-surface text-progress-fg'
-        "
-      >
-        {{ notice.text }}
-      </p>
+      <Transition name="notice">
+        <p
+          v-if="notice"
+          :key="notice.text"
+          :role="notice.kind === 'error' ? 'alert' : 'status'"
+          class="mt-3 rounded-card p-3 text-sm"
+          :class="
+            notice.kind === 'error'
+              ? 'bg-danger-bg text-danger'
+              : 'border border-line bg-surface text-progress-fg'
+          "
+        >
+          {{ notice.text }}
+        </p>
+      </Transition>
     </div>
 
     <div class="mt-4">

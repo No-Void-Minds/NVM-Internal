@@ -568,6 +568,18 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 
 **Selesai kalau:** `./scripts/check.sh` lolos dan semua halaman dicek di rentang lebar di atas.
 
+**Keputusan (ditetapkan 2026-11-16, sebelum mulai):**
+- Dial ENERGY 2 (seimbang): aplikasi dipakai seharian dan DESIGN.md meminta suasana tenang ala lab arsip, jadi kesan rapi datang dari tipografi, kerapian, dan detail interaksi, bukan warna atau efek ramai.
+- Dial RHYTHM 2 (sedikit variasi): papan butuh struktur seragam supaya mudah dipindai; variasi hanya di hierarki (kartu profil, kepala kolom, panel detail).
+- Dial MOTION 2 (transisi dan umpan balik): animasi hanya untuk umpan balik dan orientasi, tanpa parallax atau loop.
+- Motif identitas "label spesimen": ID task dan kode lain tampil sebagai label kecil IBM Plex Mono 13px dengan latar `#E6E1D7` dan garis 1px, sama di kartu, panel, Arsip, dan Audit Log.
+- Satu aksen: olive `#3F5A3A`. Radius 6px untuk kartu, input, tombol, dan dialog; chip 4px; bentuk bulat hanya untuk avatar. Bayangan hanya untuk menu, dialog, dan kartu yang sedang di-drag.
+- Larangan dari DESIGN.md dan AntiSlop: tanpa glassmorphism, blur, glow, gradien biru-ungu, grid titik, ikon sparkle atau robot, dan emoji.
+- Header YAML di atas `docs/DESIGN.md` adalah palet otomatis Stitch dan tidak dipakai. Yang berlaku nilai di bagian teks: kanvas `#F4F1EA`, surface `#FFFFFF`, teks `#1F1D1A`, muted `#635C52`, garis `#8F8678`, aksen `#3F5A3A`, chip status, urgency `#9C3A22` dan `#8A5A12`. Nilai itu sudah sama dengan token di `style.css`, jadi S11-01 menyamakan yang belum sama, bukan mengganti palet.
+- Label urgency tetap Low, Medium, High, Urgent (mengikuti SRS dan Excel lama), bukan Mendesak, Tinggi, Sedang, Rendah seperti di DESIGN.md.
+- Contoh isi di DESIGN.md ("Contoh: ...", "Staf A", "Manajer A") hanya untuk mockup dan tidak dipakai sebagai teks aplikasi.
+- Font IBM Plex Sans dan Mono di-host sendiri lewat `@fontsource` (hanya bobot yang dipakai), bukan Google Fonts, karena aplikasi jalan di LAN kantor dan tidak boleh bergantung ke server luar untuk tampil benar.
+
 ---
 
 ## Sprint 12: Persiapan deploy dan migrasi data
@@ -591,7 +603,21 @@ Operasional (hanya ditulis):
 - [ ] S12-11 Skrip backup memperhitungkan UID pemilik folder storage di container, karena di compro izin folder sempat membuat backup gagal diam-diam. Uji restore sebelum butir ini dianggap selesai.
 - [ ] S12-12 Cache: endpoint yang dibaca halaman pengelola (Pengguna, Pengaturan, Audit Log) tidak boleh tertahan cache di Nginx atau browser. Di compro, halaman admin sempat menampilkan data basi.
 
+Revisi 5 (kode, dikerjakan 2026-11-16 di luar urutan karena dibutuhkan sebelum pemasangan dashboard):
+- [x] S12-13 `GET /api/auth/verify` untuk Caddy forward_auth: 204 tanpa body bila sesi sah dan password sudah diganti, 401 bila tidak ada sesi atau sesi tidak sah, 403 bila password masih harus diganti. Selalu `Cache-Control: no-store`; `X-NVM-User` berisi username pada 204. Memakai `requireSession` dan `requirePasswordChanged` yang sudah ada. Uji: `scripts/uji-verify.sh`.
+- [x] S12-14 Cookie sesi lewat env `COOKIE_DOMAIN` (kosong di dev) dan `COOKIE_SECURE` (wajib true bila `APP_ENV=production`, backend menolak start bila tidak). Atribut yang sama dipakai saat cookie dihapus (logout dan sesi berakhir).
+- [x] S12-15 Pemeriksaan sameOrigin menerima origin produksi tanpa hardcode: host dari header `Origin` (atau `Referer`) dibandingkan dengan header `Host` permintaan. Syaratnya proxy meneruskan `Host` asli (`proxy_set_header Host $host` di S12-05, dan Cloudflare Tunnel tanpa `httpHostHeader`).
+- [x] S12-16 `?kembali=` di halaman login dan setelah ganti password paksa hanya menerima path internal (diawali `/`, bukan `//` atau `/\`, dan bukan halaman login itu sendiri) atau URL `https` tanpa port dan userinfo yang host-nya tercantum di `VITE_ALLOWED_RETURN_HOSTS`. Selain itu diabaikan dan pengguna masuk ke halaman awal.
+- [x] S12-17 Tombol Dashboard di top bar desktop dan menu Lainnya di ponsel, alamat dari `VITE_DASHBOARD_URL` (kosong berarti tidak tampil), buka di tab baru, untuk semua akun yang login.
+
 **Butuh dari Manajer:** pemetaan nama di Excel ke username akun.
+
+**Keputusan (revisi 5, 2026-11-16):**
+- `/api/auth/verify` memakai `requireSession`, jadi setiap pemanggilan membaca ulang akun dari database (akun nonaktif dan logout langsung berlaku di dashboard) dan menerbitkan ulang cookie sesi seperti request lain. Pemakaian dashboard dihitung sebagai aktivitas untuk idle timeout 30 menit. Catatan untuk S14-13: Caddy forward_auth tidak meneruskan `Set-Cookie` dari jawaban 2xx ke browser, jadi perpanjangan itu baru sampai ke browser bila konfigurasi Caddy meneruskannya. Tanpa itu, sesi tetap berakhir 30 menit setelah request terakhir ke NVM-Internal sendiri; uji ini saat pemasangan.
+- Tidak ada rate limiter umum. Limiter per IP (`limitLogin`, 10 percobaan lalu 1 per 30 detik) hanya dipasang di `POST /api/auth/login` dan `POST /api/auth/change-password`, jadi verify yang dipanggil Caddy di setiap permintaan dashboard tidak ikut tertahan. Bebannya satu query sesi per permintaan dashboard, dapat diterima untuk tim kecil.
+- Cookie lama dengan Domain berbeda (mis. cookie dev tanpa Domain, lalu produksi memakai `novoidminds.xyz`) dianggap cookie lain oleh browser. Mengganti `COOKIE_DOMAIN` berarti pengguna perlu login ulang sekali.
+- Env frontend memakai awalan `VITE_` (`VITE_DASHBOARD_URL`, `VITE_ALLOWED_RETURN_HOSTS`) karena Vite hanya menanam variabel berawalan itu ke bundle. Nilainya terlihat di browser, jadi tidak boleh berisi rahasia.
+- Tujuan `?kembali=` yang berupa halaman login itu sendiri (`/`) diabaikan, supaya pengguna yang sudah login tidak berputar di halaman login.
 
 ---
 
@@ -618,10 +644,17 @@ Operasional (hanya ditulis):
 Deploy (dijalankan Rifky di VM):
 - [ ] S14-01 Deploy ke VM `nvm-server` 192.168.68.69 di `/srv/nvm-internal`. Cek dulu lokasi disk data untuk `STORAGE_DIR` di VM baru; mount hard disk baru ke `/srv/nvm-internal/storage` bila sudah ada.
 - [ ] S14-02 Jalankan `docker-compose.prod.yml`; VM menyala otomatis saat Windows menyala; container `restart: unless-stopped`.
-- [ ] S14-03 Port database tidak dibuka keluar VM; firewall hanya izinkan port 80 dari subnet kantor. Pengikatan port Postgres, Redis, dan RabbitMQ ke 127.0.0.1 masih tertunda sejak Oktober: cek keadaannya di VM baru dan selesaikan sebelum go-live.
+- [ ] S14-03 Port database tidak dibuka keluar VM; firewall hanya izinkan port 80 dari subnet kantor. Pengikatan port Postgres, Redis, dan RabbitMQ ke 127.0.0.1 masih tertunda sejak Oktober: cek keadaannya di VM baru dan selesaikan sebelum go-live. Sejak revisi 5 akses publik lewat Cloudflare Tunnel (koneksi keluar dari VM), jadi tidak ada port masuk yang perlu dibuka untuk publik; tinjau ulang aturan port 80 subnet kantor saat pemasangan.
 - [ ] S14-04 Backup harian berjalan, dan uji restore pertama ke database kosong dicatat waktunya (target di bawah 4 jam).
 - [ ] S14-05 Diagnosa jaringan PC tim 192.168.68.68, host Hyper-V untuk VM baru (`Get-NetAdapter`, `Get-VMSwitch`, ping ke gateway), dan catat hasilnya.
 - [ ] S14-10 Aktifkan GitHub secret scanning, push protection, dan Dependabot untuk repo ini, lalu pilah peringatannya menjadi runtime dan dev-only (seperti di compro).
+- [ ] S14-11 HTTPS, lalu `COOKIE_SECURE=true` dan `COOKIE_DOMAIN=novoidminds.xyz` (dipindah dari "Setelah go-live" karena revisi 5 membuat sistem publik).
+- [ ] S14-12 `novoidminds.xyz` sebagai public hostname di tunnel `nvm-server`.
+- [ ] S14-13 Tunnel baru di PC tim 192.168.68.68 untuk `dash.novoidminds.xyz` (NVM Launcher) dan `studio.novoidminds.xyz` (Remotion Studio), keduanya lewat Caddy dengan forward_auth ke `https://novoidminds.xyz/api/auth/verify`. Saat 401 atau 403, arahkan ke `https://novoidminds.xyz/?kembali=<URL asli>`. Isi `VITE_DASHBOARD_URL` dan `VITE_ALLOWED_RETURN_HOSTS` saat build frontend produksi.
+- [ ] S14-14 Caddy dan NVM Launcher menyala otomatis di PC tim.
+- [ ] S14-15 Rate limit Cloudflare untuk `POST /api/auth/login`, di atas limiter per IP di backend (backend hanya melihat IP Cloudflare atau proxy, kecuali header IP asli dipercaya).
+- [ ] S14-16 Password awal akun tim kuat (bukan pola mudah ditebak), karena halaman login sekarang terbuka ke internet.
+- [ ] S14-17 Perbarui SRS: sistem tidak lagi LAN-only (revisi 5).
 
 UAT:
 - [ ] S14-06 Checklist AC-01 sampai AC-15 bersama Manajer, hasil PASS atau FAIL.
@@ -641,8 +674,9 @@ UAT:
 | 2 | 2026-11-09 | Area kiri papan diisi kartu profil (foto, nama, jabatan, divisi, bisa diubah); poles UI/UX papan dan semua halaman | Sprint 10 dan 11 |
 | 3 | 2026-11-09 | Sub task bisa dicentang oleh PIC-nya saat On Progress; Ready butuh semua sub task tercentang; task penuh bisa dibuka di tab baru; di form, Deskripsi menggantikan posisi Lampiran brief, dan Lampiran brief masuk ke Detail tambahan | Sprint 8 |
 | 4 | 2026-11-10 | Manajer boleh mencentang dan melepas centang sub task siapa pun, kecuali sub task yang dipegang Manajer lain | Sprint 8 |
+| 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat keempat revisi. SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat kelima revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 
@@ -656,7 +690,6 @@ SRS v1.0 belum memuat keempat revisi. SRS diperbarui sebelum UAT supaya checklis
 
 ## Setelah go-live (belum dijadwalkan)
 
-- HTTPS, lalu atribut cookie Secure, sebelum ada akses dari luar kantor.
 - Fitur ekspor untuk Manajer (BR-11, belum ada di versi ini).
 - Uji restore rutin tiap 3 bulan (NFR-REL-04).
 - Upgrade npm 12 (ditunda).

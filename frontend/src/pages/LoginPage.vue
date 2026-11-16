@@ -4,8 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import AuthCard from '../components/AuthCard.vue'
 import { ApiError } from '../api/client'
 import { useSessionStore } from '../stores/session'
-import { safeRedirect } from '../router/redirect'
-import { homeFor } from '../router/home'
+import { goAfterLogin, keepKembali } from '../router/home'
 
 const route = useRoute()
 const router = useRouter()
@@ -41,9 +40,9 @@ async function submit() {
   try {
     await session.login(username.value.trim(), password.value)
     if (session.user?.must_change_password) {
-      await router.replace({ name: 'force-password' })
+      await router.replace({ name: 'force-password', query: keepKembali(route.query.kembali) })
     } else {
-      await router.replace(safeRedirect(route.query.kembali) ?? homeFor(session.user))
+      await goAfterLogin(router, route.query.kembali, session.user)
     }
   } catch (err) {
     error.value = messageFor(err)
@@ -97,7 +96,7 @@ async function submit() {
       <button
         type="submit"
         :disabled="submitting"
-        class="flex min-h-11 w-full items-center justify-center rounded-card bg-accent px-4 font-medium text-white active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
+        class="flex min-h-11 w-full items-center justify-center rounded-card bg-accent px-4 font-medium text-white hover:bg-accent-hover active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
       >
         {{ submitting ? 'Memproses...' : 'Masuk' }}
       </button>

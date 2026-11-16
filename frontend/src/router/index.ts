@@ -2,7 +2,8 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { setUnauthorizedHandler } from '../api/client'
 import { useSessionStore } from '../stores/session'
 import type { Role } from '../utils/roles'
-import { homeFor } from './home'
+import { homeFor, keepKembali } from './home'
+import { returnTarget } from './redirect'
 import LoginPage from '../pages/LoginPage.vue'
 import ForcePasswordPage from '../pages/ForcePasswordPage.vue'
 import StatusPage from '../pages/StatusPage.vue'
@@ -86,11 +87,22 @@ router.beforeEach(async (to) => {
   }
 
   const user = session.user
-  if (to.name === 'login') return user ? homeFor(user) : true
+  if (to.name === 'login') {
+    if (!user) return true
+    if (user.must_change_password) return { name: 'force-password', query: keepKembali(to.query.kembali) }
+    // Sudah login tetapi dikirim ke sini oleh dashboard (mis. cookie lama): langsung ke tujuan bila sah.
+    const target = returnTarget(to.query.kembali)
+    if (target && 'external' in target) {
+      window.location.assign(target.external)
+      return false
+    }
+    return target?.internal ?? homeFor(user)
+  }
   if (to.meta.public) return true
   if (!user) return { name: 'login', query: { kembali: to.fullPath } }
   // Password sementara wajib diganti sebelum halaman lain bisa dibuka (FR-AUTH-07).
-  if (user.must_change_password && to.name !== 'force-password') return { name: 'force-password' }
+  if (user.must_change_password && to.name !== 'force-password')
+    return { name: 'force-password', query: keepKembali(to.fullPath) }
   if (!user.must_change_password && to.name === 'force-password') return homeFor(user)
   if (to.meta.roles && !to.meta.roles.includes(user.role)) return homeFor(user)
   return true

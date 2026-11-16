@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LoadingSkeleton from './LoadingSkeleton.vue'
 import { computed, ref, watch } from 'vue'
 import BaseDialog from './BaseDialog.vue'
 import { ApiError } from '../api/client'
@@ -16,16 +17,9 @@ import type { LabelItem } from '../api/labels'
 import { useSessionStore } from '../stores/session'
 import { formatDateTime } from '../utils/format'
 import { describeTaskHistory, historyNote } from '../utils/taskHistory'
-import {
-  formatDay,
-  isOverdue,
-  statusClass,
-  statusLabel,
-  urgencyClass,
-  urgencyLabel,
-  type TaskStatus,
-} from '../utils/task'
+import { formatDay, isOverdue, statusClass, statusLabel, type TaskStatus } from '../utils/task'
 import AttachmentSection from './AttachmentSection.vue'
+import UrgencyLabel from './UrgencyLabel.vue'
 import UserAvatar from './UserAvatar.vue'
 import { readyBlock } from '../utils/subtaskGate'
 
@@ -264,13 +258,13 @@ async function confirmDelete() {
 }
 
 const buttonPrimary =
-  'inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white active:translate-y-px disabled:opacity-60'
+  'inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white hover:bg-accent-hover active:translate-y-px disabled:opacity-60'
 const buttonSecondary =
   'inline-flex min-h-11 items-center rounded-card border border-line px-4 font-medium hover:bg-canvas active:translate-y-px disabled:opacity-60'
 </script>
 
 <template>
-  <p v-if="loadState === 'loading'" class="text-ink-muted">Memuat task...</p>
+  <LoadingSkeleton v-if="loadState === 'loading'" label="Memuat task..." shape="detail" />
 
   <div v-else-if="loadState === 'error'" role="alert" class="rounded-card bg-danger-bg p-4 text-danger">
     <p class="font-medium">{{ loadError }}</p>
@@ -289,7 +283,7 @@ const buttonSecondary =
         <span class="rounded-chip px-2 py-0.5 font-medium" :class="statusClass[task.status]">{{
           statusLabel[task.status]
         }}</span>
-        <span :class="urgencyClass[task.urgency]">{{ urgencyLabel[task.urgency] }}</span>
+        <UrgencyLabel :urgency="task.urgency" />
       </div>
       <component
         :is="titleTag"
@@ -520,7 +514,7 @@ const buttonSecondary =
 
         <section>
           <component :is="sectionTag" class="font-semibold">Riwayat</component>
-          <ol class="mt-2 space-y-3 text-sm">
+          <ol class="mt-2 space-y-3 border-l border-line pl-3 text-sm">
             <li v-for="h in task.history" :key="h.id">
               <p>
                 <span class="font-medium">{{ h.actor_name || 'Sistem' }}</span> {{ describeTaskHistory(h) }}

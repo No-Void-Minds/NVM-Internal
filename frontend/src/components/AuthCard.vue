@@ -7,7 +7,7 @@ defineProps<{ title: string; subtitle: string }>()
     <main class="w-full max-w-sm">
       <p class="font-semibold">NVM Internal</p>
       <div class="mt-4 rounded-card border border-line bg-surface p-6">
-        <h1 class="text-xl font-semibold">{{ title }}</h1>
+        <h1 class="text-2xl font-semibold">{{ title }}</h1>
         <p class="mt-1 text-sm text-ink-muted">{{ subtitle }}</p>
         <slot />
       </div>

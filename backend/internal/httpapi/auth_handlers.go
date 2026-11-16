@@ -95,6 +95,7 @@ func (s *Server) setSessionCookie(c *gin.Context, token string, maxAge int) {
 		Name:     sessionCookie,
 		Value:    token,
 		Path:     "/",
+		Domain:   s.cookieDomain,
 		MaxAge:   maxAge,
 		HttpOnly: true,
 		// Lax cukup karena semua perubahan data memakai POST/PUT/DELETE; ditambah cek Origin di langkah 5.

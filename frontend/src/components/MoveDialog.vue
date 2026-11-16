@@ -125,7 +125,7 @@ const buttonSecondary =
         type="submit"
         form="move-form"
         :disabled="busy"
-        class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white active:translate-y-px disabled:opacity-60"
+        class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white hover:bg-accent-hover active:translate-y-px disabled:opacity-60"
       >
         {{ busy ? 'Memindahkan...' : isRevision ? 'Kembalikan ke On Progress' : 'Pindahkan' }}
       </button>

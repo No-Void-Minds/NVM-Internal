@@ -22,6 +22,7 @@ type Server struct {
 	auth         *auth.Service
 	tokens       auth.TokenIssuer
 	cookieSecure bool
+	cookieDomain string
 	loginLimiter *ipLimiter
 	accounts     *account.Service
 	labels       *label.Service
@@ -54,6 +55,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 		auth:         auth.NewService(pool),
 		tokens:       tokens,
 		cookieSecure: cfg.CookieSecure,
+		cookieDomain: cfg.CookieDomain,
 		now:          time.Now,
 		loginLimiter: newIPLimiter(30*time.Second, 10),
 		accounts:     account.NewService(pool),
@@ -79,6 +81,8 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	api := r.Group("/api", sameOrigin())
 	api.GET("/health", s.health)
 	api.POST("/auth/login", s.limitLogin(), s.login)
+	// Untuk forward_auth Caddy: dipanggil di setiap permintaan dashboard, jadi tidak memakai rate limit login.
+	api.GET("/auth/verify", noStore(), s.requireSession(), requirePasswordChanged(), s.verify)
 	authed := api.Group("", s.requireSession())
 	authed.GET("/auth/me", s.me)
 	authed.POST("/auth/logout", s.logout)

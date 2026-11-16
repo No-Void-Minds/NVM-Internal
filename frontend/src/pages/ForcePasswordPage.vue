@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import AuthCard from '../components/AuthCard.vue'
 import { ApiError } from '../api/client'
 import { useSessionStore } from '../stores/session'
 import { useLogout } from '../composables/useLogout'
 import { validateNewPassword } from '../utils/password'
-import { homeFor } from '../router/home'
+import { goAfterLogin } from '../router/home'
 
 const session = useSessionStore()
 const router = useRouter()
+const route = useRoute()
 const { logout, loggingOut, logoutError } = useLogout()
 
 // Setelah halaman dimuat ulang, password login sudah hilang dari memori, jadi perlu diketik lagi.
@@ -28,7 +29,7 @@ async function submit() {
   submitting.value = true
   try {
     await session.changePassword(current.value, next.value)
-    await router.replace(homeFor(session.user))
+    await goAfterLogin(router, route.query.kembali, session.user)
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : 'Terjadi kesalahan yang tidak terduga. Coba lagi.'
   } finally {
@@ -87,7 +88,7 @@ async function submit() {
       <button
         type="submit"
         :disabled="submitting"
-        class="flex min-h-11 w-full items-center justify-center rounded-card bg-accent px-4 font-medium text-white active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
+        class="flex min-h-11 w-full items-center justify-center rounded-card bg-accent px-4 font-medium text-white hover:bg-accent-hover active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
       >
         {{ submitting ? 'Menyimpan...' : 'Simpan password' }}
       </button>

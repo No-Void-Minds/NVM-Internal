@@ -10,7 +10,7 @@ import { RouterLink } from 'vue-router'
     </p>
     <RouterLink
       to="/"
-      class="mt-6 inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white hover:underline active:translate-y-px"
+      class="mt-6 inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white hover:bg-accent-hover active:translate-y-px"
     >
       Kembali ke halaman awal
     </RouterLink>

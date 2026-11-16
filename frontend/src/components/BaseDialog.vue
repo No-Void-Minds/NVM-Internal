@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, useId, watch } from 'vue'
 
-const props = withDefaults(defineProps<{ open: boolean; title: string; variant?: 'modal' | 'panel' }>(), {
-  variant: 'modal',
-})
+const props = withDefaults(
+  // tag: judul berupa kode (mis. ID task), ditampilkan sebagai label spesimen.
+  defineProps<{ open: boolean; title: string; variant?: 'modal' | 'panel'; tag?: boolean }>(),
+  { variant: 'modal', tag: false },
+)
 const emit = defineEmits<{ close: [] }>()
 
 const el = ref<HTMLDialogElement | null>(null)
@@ -28,8 +30,8 @@ function onCancel(e: Event) {
 
 const shape = computed(() =>
   props.variant === 'panel'
-    ? 'm-0 ml-auto h-dvh max-h-dvh w-full max-w-md open:flex open:flex-col'
-    : 'm-auto w-[calc(100%-2rem)] max-w-md rounded-card',
+    ? 'dialog-panel m-0 ml-auto h-dvh max-h-dvh w-full max-w-md border-l border-line shadow-dialog open:flex open:flex-col'
+    : 'dialog-modal m-auto w-[calc(100%-2rem)] max-w-md rounded-card border border-line shadow-dialog',
 )
 </script>
 
@@ -42,7 +44,10 @@ const shape = computed(() =>
     @cancel="onCancel"
   >
     <div class="flex items-center justify-between gap-4 border-b border-line px-5 py-3">
-      <h2 :id="titleId" class="text-lg font-semibold">{{ title }}</h2>
+      <h2 :id="titleId" class="text-lg font-semibold">
+        <span v-if="tag" class="specimen-tag">{{ title }}</span>
+        <template v-else>{{ title }}</template>
+      </h2>
       <div class="flex shrink-0 items-center gap-1">
         <slot name="actions" />
         <button

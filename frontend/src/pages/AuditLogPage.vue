@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import UserAvatar from '../components/UserAvatar.vue'
+import IdText from '../components/IdText.vue'
 import { ApiError } from '../api/client'
 import { listAuditLogs, type AuditCategory, type AuditEntry } from '../api/audit'
 import { listDivisions, type DivisionItem } from '../api/divisions'
@@ -145,7 +147,7 @@ const pagerButton =
       </div>
     </div>
 
-    <p v-if="loadState === 'loading'" class="mt-6 text-ink-muted" role="status">Memuat audit log...</p>
+    <LoadingSkeleton v-if="loadState === 'loading'" class="mt-6" label="Memuat audit log..." />
 
     <div
       v-else-if="loadState === 'error'"
@@ -199,7 +201,7 @@ const pagerButton =
                 {{ actorName(e) }}
               </span>
             </td>
-            <td class="px-4 py-3">{{ describeAudit(e, divisionName) }}</td>
+            <td class="px-4 py-3"><IdText :text="describeAudit(e, divisionName)" /></td>
             <td class="px-4 py-3 text-ink-muted">{{ e.ip || '-' }}</td>
           </tr>
         </tbody>
@@ -219,7 +221,7 @@ const pagerButton =
             />
             {{ actorName(e) }}
           </p>
-          <p class="mt-1 break-words">{{ describeAudit(e, divisionName) }}</p>
+          <p class="mt-1 break-words"><IdText :text="describeAudit(e, divisionName)" /></p>
           <p v-if="e.ip" class="mt-1 text-sm text-ink-muted">IP {{ e.ip }}</p>
         </li>
       </ul>

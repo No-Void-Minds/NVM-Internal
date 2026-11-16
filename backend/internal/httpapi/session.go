@@ -77,6 +77,8 @@ func (s *Server) expireSession(c *gin.Context) {
 	writeError(c, http.StatusUnauthorized, CodeSessionExpired, "Sesi kamu sudah berakhir. Silakan masuk lagi.")
 }
 
+// clearSessionCookie memakai setSessionCookie yang sama, jadi Domain, Path, dan Secure selalu sama dengan saat
+// cookie dibuat. Kalau berbeda, browser menganggapnya cookie lain dan cookie lama tertinggal.
 func (s *Server) clearSessionCookie(c *gin.Context) {
 	s.setSessionCookie(c, "", -1)
 }

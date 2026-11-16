@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LoadingSkeleton from './LoadingSkeleton.vue'
 import { computed, onMounted, ref } from 'vue'
 import BaseDialog from './BaseDialog.vue'
 import RowMenu, { type MenuItem } from './RowMenu.vue'
@@ -143,7 +144,7 @@ const buttonSecondary =
       </div>
       <button
         type="button"
-        class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white active:translate-y-px"
+        class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white hover:bg-accent-hover active:translate-y-px"
         @click="openForm(null)"
       >
         Tambah label
@@ -151,21 +152,24 @@ const buttonSecondary =
     </div>
 
     <div aria-live="polite">
-      <p
-        v-if="notice"
-        :role="notice.kind === 'error' ? 'alert' : 'status'"
-        class="mt-4 rounded-card p-3 text-sm"
-        :class="
-          notice.kind === 'error'
-            ? 'bg-danger-bg text-danger'
-            : 'border border-line bg-surface text-progress-fg'
-        "
-      >
-        {{ notice.text }}
-      </p>
+      <Transition name="notice">
+        <p
+          v-if="notice"
+          :key="notice.text"
+          :role="notice.kind === 'error' ? 'alert' : 'status'"
+          class="mt-4 rounded-card p-3 text-sm"
+          :class="
+            notice.kind === 'error'
+              ? 'bg-danger-bg text-danger'
+              : 'border border-line bg-surface text-progress-fg'
+          "
+        >
+          {{ notice.text }}
+        </p>
+      </Transition>
     </div>
 
-    <p v-if="loadState === 'loading'" class="mt-6 text-ink-muted">Memuat daftar label...</p>
+    <LoadingSkeleton v-if="loadState === 'loading'" class="mt-6" label="Memuat daftar label..." />
 
     <div
       v-else-if="loadState === 'error'"
@@ -281,7 +285,7 @@ const buttonSecondary =
           type="submit"
           form="label-form"
           :disabled="saving"
-          class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white active:translate-y-px disabled:opacity-60"
+          class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white hover:bg-accent-hover active:translate-y-px disabled:opacity-60"
         >
           {{ saving ? 'Menyimpan...' : 'Simpan' }}
         </button>

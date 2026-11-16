@@ -45,3 +45,19 @@ func (s *Server) logout(c *gin.Context) {
 	s.clearSessionCookie(c)
 	c.Status(http.StatusNoContent)
 }
+
+// noStore dipasang sebelum pengecekan sesi, supaya jawaban 401 dan 403 juga tidak disimpan cache mana pun.
+func noStore() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		c.Next()
+	}
+}
+
+// verify dipanggil Caddy (forward_auth) untuk dashboard dan studio di PC tim (revisi 5). 401 dan 403 sudah dijawab
+// requireSession dan requirePasswordChanged; sampai di sini berarti sesi sah dan password sudah diganti.
+func (s *Server) verify(c *gin.Context) {
+	// Username untuk log Caddy; bukan rahasia dan sudah terlihat di aplikasi.
+	c.Header("X-NVM-User", currentUser(c).Username)
+	c.Status(http.StatusNoContent)
+}
