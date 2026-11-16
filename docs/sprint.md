@@ -512,7 +512,12 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 
 **Butuh dari Manajer:** apakah jabatan diisi sendiri oleh tiap orang atau hanya pengelola (usulan di atas: diisi sendiri). Sementara memakai usulan itu: diisi sendiri.
 
-**Hasil:** kode S10-01 sampai S10-09 selesai 2026-11-13, menunggu uji Rifky. S10-01 sudah dimigrasi ke database dev (versi 5). Lolos `./scripts/check.sh`. Pemroses foto diuji lewat test sementara (dihapus lagi, test baru ditulis di Sprint 13): orientasi EXIF diterapkan, EXIF tidak ikut tersimpan, PNG transparan jadi putih, berkas teks ditolak, PNG 100 megapiksel ditolak dari header saja, berkas di atas 2 MB dan JPEG terpotong ditolak. Uji API belum dijalankan karena `DATABASE_URL` tidak tersedia untuk Claude Code; semuanya ada di `scripts/uji-sprint10.sh`.
+**Hasil:** kode S10-01 sampai S10-09 selesai 2026-11-13; uji otomatis lolos, menunggu uji manual Rifky dengan foto asli dari ponsel. S10-01 sudah dimigrasi ke database dev (versi 5). Lolos `./scripts/check.sh`.
+- Pemroses foto diuji lewat test sementara (dihapus lagi, test baru ditulis di Sprint 13): orientasi EXIF diterapkan, EXIF tidak ikut tersimpan, PNG transparan jadi putih, berkas teks ditolak, PNG 100 megapiksel ditolak dari header saja, berkas di atas 2 MB dan JPEG terpotong ditolak.
+- API: `scripts/uji-sprint10.sh` lolos 26 dari 26 (profil, jabatan kosong jadi null, batas 100 karakter, galat per kolom, unggah JPEG dan PNG, hasil 256x256 tegak tanpa EXIF, header foto, 304, 401 tanpa login, 415, 413, hapus lalu 404, empat jalur ubah profil orang lain ditolak, task-counts cocok dengan papan untuk Staf dan Manajer, audit).
+- Browser: Playwright dengan Edge (di folder sementara di luar repo, tidak ada dependensi baru), sesi dari cookie `dev-login.sh`. Lolos 21 kasus: kartu kiri di 1920 px, ajakan jabatan, ubah profil, galat per kolom, foto EXIF orientasi 6 tegak di halaman, tipe dan ukuran ditolak tanpa mengunggah, foto baru dan foto terhapus langsung terlihat di kartu profil, top bar, kartu task, detail task, dan Pengguna tanpa refresh, klik angka untuk Manajer dan Staf, angka tidak dimuat saat filter berubah tetapi dimuat setelah aksi, bar di 768 dan 360 px, keyboard penuh di panel, chip PIC dan Audit Log, berkas foto hilang tampil sebagai inisial, Admin tanpa angka, dan tanpa gulir horizontal di 75 kombinasi (Admin, Manajer, Staf x 360, 768, 1024, 1280, 1920 px x 5 halaman). Tidak ada galat console selain 404 gambar yang memang disengaja di uji berkas hilang.
+- Belum diuji otomatis: foto asli dari kamera ponsel, pembaca layar sungguhan, dan form login (sesi uji memakai cookie).
+- Setelah uji 2026-11-13, database dev pindah ke VM `nvm-server` 192.168.68.69. Semua hasil uji di atas dijalankan di VM lama (192.168.68.144). Uji foto ponsel asli masih menunggu dan dijalankan di VM baru.
 
 **Keputusan:**
 - Migrasi `000005_profile`: `users.job_title varchar(100)` dan `users.avatar_id uuid`, keduanya boleh NULL. Akun lama tetap sah tanpa diisi.
@@ -534,10 +539,15 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 - `ProfileForm` dipakai di panel "Ubah profil" papan dan di halaman `/profil`. Isi S10-08 di atas diubah: ganti password tetap di halaman `/profil`, tidak masuk panel. Item Profil di navigasi tetap ada sampai Sprint 11.
 - Foto diunggah langsung saat dipilih (dengan progres), terpisah dari tombol Simpan profil. Tipe dan ukuran dicek juga di browser supaya berkas yang pasti ditolak tidak diunggah dulu; backend tetap memeriksa ulang.
 - Perbaikan di luar rencana: `.gitignore` baris `storage/` mengabaikan paket kode `backend/internal/storage` (belum pernah ter-commit sejak Sprint 5, jadi repo di remote tidak bisa di-build). Diganti `/storage/`; folder data `backend/storage/` tetap diabaikan. Baris `!.vscode/settings.json` yang menempel dengan `backend/.data/` dipisah. Tag JSON `subtasks` di `updateTaskRequest` memakai kutip miring (ditandai `go vet`) dan diperbaiki; selama ini tetap jalan karena `encoding/json` tidak peka huruf besar-kecil.
+- Hasil review dan uji browser (diperbaiki 2026-11-13):
+  - Top bar meluap di 768 px untuk Admin dan Manajer (7 item navigasi ditambah foto, nama, dan Keluar; `scrollWidth` 854). Di lebar `md` nama dan peran disembunyikan secara visual (`sr-only lg:not-sr-only`, tetap dibaca pembaca layar), teks navigasi `text-sm` dengan `px-2`, jarak header `gap-4`, dan nama aplikasi tidak boleh terlipat. Mulai `lg` tampilan kembali seperti semula.
+  - Setelah foto diganti atau dihapus, kartu task masih memakai foto lama karena hanya data sesi yang dimuat ulang. `ProfileForm` kini memberi tahu induknya setelah unggah dan hapus foto, dan papan memuat ulang datanya.
+  - Permintaan angka kartu profil yang lama kini dibatalkan (`AbortController`), supaya jawaban yang terlambat tidak menimpa angka terbaru.
+  - Galat per kolom di form profil hilang begitu kolomnya diketik ulang, bukan menunggu Simpan berikutnya.
 - Untuk Sprint 13: uji `ProcessAvatar` (orientasi 1 sampai 8, PNG transparan, batas piksel, format tidak cocok), hak rute `/me`, ETag dan cache, audit `profile_updated`, kecocokan task-counts dengan papan, dan pembersihan berkas saat transaksi gagal.
 
 **Retro:**
-- Macet: `DATABASE_URL` tidak tersedia untuk Claude Code, jadi uji API tidak bisa dijalankan sendiri; paket `internal/storage` ternyata tidak pernah masuk git karena pola `.gitignore`; `py` tidak tersedia di Git Bash.
+- Macet: `DATABASE_URL` tidak tersedia untuk Claude Code di putaran pertama, jadi uji API baru jalan setelah Rifky menyalakan backend; paket `internal/storage` ternyata tidak pernah masuk git karena pola `.gitignore`; `py` tidak tersedia di Git Bash; curl di MSYS2 UCRT64 adalah program Windows dan tidak membaca path `/tmp/...` di argumen `-F` yang mengandung `;` (skrip uji memakai `cygpath -m`); memuat `backend/.env` untuk login Playwright ditolak, jadi sesi uji memakai cookie dari `dev-login.sh`; beberapa kegagalan Playwright pertama ternyata salah skrip (menunggu `networkidle` sebelum permintaan dimulai, cache foto `immutable`, Tab ke UI browser di `<dialog>`).
 - Lancar: (isi sendiri)
 - Diubah untuk Sprint 11: (isi sendiri)
 
@@ -576,6 +586,10 @@ Operasional (hanya ditulis):
 - [ ] S12-06 Skrip backup harian (database dan `/srv/nvm-internal/storage`), penyalinan ke hard disk eksternal, PC IT, dan laptop IT (salinan laptop dienkripsi).
 - [ ] S12-07 Pembersih berkas yatim (berkas di `attachments/` dan `avatars/` tanpa baris database) dan job harian penghapus audit log login yang lebih tua dari 1 tahun.
 - [ ] S12-08 Panduan satu halaman untuk tim (login, memindahkan task, sub task, unggah, profil) dan catatan operasional di README (backup, restore, update versi).
+- [ ] S12-09 Role database terpisah seperti di compro dan doomsday: `nvm_internal_migrator` untuk DDL (dipakai `migrate`) dan `nvm_internal_app` untuk aplikasi. Hak DELETE hanya untuk tabel yang memang dihapus permanen oleh kode. Hasil audit query DELETE di `backend/internal/db/queries` (2026-11-16): `task_subtasks` (`DeleteSubtasks`), `subtask_assignees` (`RemoveSubtaskAssignees`, juga lewat `ON DELETE CASCADE`), dan `task_labels` (`DeleteTaskLabels`). Task dan lampiran memakai `is_deleted`, jadi tidak butuh DELETE. Penghapus audit log login di S12-07 akan butuh DELETE di `audit_logs`; tambahkan saat job itu ditulis. Audit ulang daftar ini bila ada query DELETE baru.
+- [ ] S12-10 Binary backend dibangun statis (`CGO_ENABLED=0`) supaya jalan di image distroless. Di compro, binary yang tidak statis gagal jalan di server.
+- [ ] S12-11 Skrip backup memperhitungkan UID pemilik folder storage di container, karena di compro izin folder sempat membuat backup gagal diam-diam. Uji restore sebelum butir ini dianggap selesai.
+- [ ] S12-12 Cache: endpoint yang dibaca halaman pengelola (Pengguna, Pengaturan, Audit Log) tidak boleh tertahan cache di Nginx atau browser. Di compro, halaman admin sempat menampilkan data basi.
 
 **Butuh dari Manajer:** pemetaan nama di Excel ke username akun.
 
@@ -602,11 +616,12 @@ Operasional (hanya ditulis):
 **Tujuan:** tim memakai sistem ini, bukan Excel.
 
 Deploy (dijalankan Rifky di VM):
-- [ ] S14-01 Rapikan `~/nvm-internal` ke `/srv/nvm-internal`; mount hard disk baru ke `/srv/nvm-internal/storage` bila sudah ada.
+- [ ] S14-01 Deploy ke VM `nvm-server` 192.168.68.69 di `/srv/nvm-internal`. Cek dulu lokasi disk data untuk `STORAGE_DIR` di VM baru; mount hard disk baru ke `/srv/nvm-internal/storage` bila sudah ada.
 - [ ] S14-02 Jalankan `docker-compose.prod.yml`; VM menyala otomatis saat Windows menyala; container `restart: unless-stopped`.
-- [ ] S14-03 Port database tidak dibuka keluar VM; firewall hanya izinkan port 80 dari subnet kantor.
+- [ ] S14-03 Port database tidak dibuka keluar VM; firewall hanya izinkan port 80 dari subnet kantor. Pengikatan port Postgres, Redis, dan RabbitMQ ke 127.0.0.1 masih tertunda sejak Oktober: cek keadaannya di VM baru dan selesaikan sebelum go-live.
 - [ ] S14-04 Backup harian berjalan, dan uji restore pertama ke database kosong dicatat waktunya (target di bawah 4 jam).
-- [ ] S14-05 Diagnosa jaringan PC kantor (`Get-NetAdapter`, `Get-VMSwitch`, ping ke gateway) dan catat hasilnya.
+- [ ] S14-05 Diagnosa jaringan PC tim 192.168.68.68, host Hyper-V untuk VM baru (`Get-NetAdapter`, `Get-VMSwitch`, ping ke gateway), dan catat hasilnya.
+- [ ] S14-10 Aktifkan GitHub secret scanning, push protection, dan Dependabot untuk repo ini, lalu pilah peringatannya menjadi runtime dan dev-only (seperti di compro).
 
 UAT:
 - [ ] S14-06 Checklist AC-01 sampai AC-15 bersama Manajer, hasil PASS atau FAIL.

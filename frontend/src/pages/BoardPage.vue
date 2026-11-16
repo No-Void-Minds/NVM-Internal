@@ -125,13 +125,20 @@ const showCounts = computed(() => session.user?.role !== 'admin')
 const counts = ref<TaskCounts | null>(null)
 const countsState = ref<'loading' | 'ready' | 'error'>('loading')
 
+let countsController: AbortController | null = null
+
 async function loadCounts() {
   if (!showCounts.value) return
+  // Dua aksi beruntun memicu dua permintaan; yang lama dibatalkan supaya jawabannya tidak menimpa angka terbaru.
+  countsController?.abort()
+  const c = new AbortController()
+  countsController = c
   countsState.value = 'loading'
   try {
-    counts.value = await getTaskCounts()
+    counts.value = await getTaskCounts(c.signal)
     countsState.value = 'ready'
   } catch {
+    if (c.signal.aborted) return
     // Angka lama tetap tampil bila sudah ada; galat hanya terlihat saat belum pernah berhasil dimuat.
     countsState.value = 'error'
   }
@@ -149,8 +156,10 @@ function pickCount(status: TaskStatus) {
 
 const profileOpen = ref(false)
 
-function onProfileSaved(message: string) {
+// Papan dimuat ulang karena kartu task membawa nama dan foto PIC dari data papan, bukan dari data sesi.
+async function onProfileSaved(message: string) {
   notice.value = { kind: 'success', text: message }
+  await load(true)
 }
 
 const labels = ref<LabelItem[]>([])

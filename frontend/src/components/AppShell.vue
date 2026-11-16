@@ -72,15 +72,15 @@ const container = computed(() => (route.meta.wide ? 'max-w-[120rem]' : 'max-w-6x
     </a>
 
     <header class="border-b border-line bg-surface">
-      <div class="mx-auto flex h-14 items-center gap-6 px-4 md:px-8" :class="container">
-        <span class="font-semibold">NVM Internal</span>
+      <div class="mx-auto flex h-14 items-center gap-4 px-4 md:px-8 lg:gap-6" :class="container">
+        <span class="shrink-0 font-semibold whitespace-nowrap">NVM Internal</span>
         <nav aria-label="Navigasi utama" class="hidden md:flex md:gap-1">
           <RouterLink
             v-for="item in visibleNav"
             :key="item.to"
             :to="item.to"
             :aria-current="isCurrent(item.to)"
-            class="inline-flex min-h-11 items-center rounded-card px-3 text-ink-muted hover:bg-canvas hover:text-ink active:bg-canvas aria-[current=page]:font-medium aria-[current=page]:text-ink"
+            class="inline-flex min-h-11 items-center rounded-card px-2 text-sm whitespace-nowrap text-ink-muted lg:text-base hover:bg-canvas lg:px-3 hover:text-ink active:bg-canvas aria-[current=page]:font-medium aria-[current=page]:text-ink"
           >
             {{ item.label }}
           </RouterLink>
@@ -94,7 +94,8 @@ const container = computed(() => (route.meta.wide ? 'max-w-[120rem]' : 'max-w-6x
             size="md"
             decorative
           />
-          <span class="text-right text-sm leading-tight">
+          <!-- Di lebar md tujuh item navigasi Manajer dan Admin tidak muat bersama nama; nama tetap dibaca pembaca layar. -->
+          <span class="sr-only text-right text-sm leading-tight lg:not-sr-only">
             <span class="block font-medium">{{ session.user.name }}</span>
             <span class="block text-ink-muted">{{ roleLabel(session.user.role) }}</span>
           </span>

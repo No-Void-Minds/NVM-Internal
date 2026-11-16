@@ -85,6 +85,7 @@ async function onFile(e: Event) {
     await uploadAvatar(file, (f) => (progress.value = Math.round(f * 100)))
     await refreshSession()
     photoNotice.value = 'Foto profil diganti.'
+    emit('saved', 'Foto profil diganti.')
   } catch (err) {
     photoError.value = messageOf(err)
   } finally {
@@ -101,6 +102,7 @@ async function removePhoto() {
     await deleteAvatar()
     await refreshSession()
     photoNotice.value = 'Foto profil dihapus. Inisial namamu dipakai sebagai gantinya.'
+    emit('saved', 'Foto profil dihapus.')
   } catch (err) {
     photoError.value = messageOf(err)
   } finally {
@@ -186,6 +188,7 @@ const buttonSecondary =
         <input
           id="profile-name"
           v-model="name"
+          @input="errors.name = undefined"
           type="text"
           autocomplete="name"
           maxlength="100"
@@ -201,6 +204,7 @@ const buttonSecondary =
         <input
           id="profile-job"
           v-model="jobTitle"
+          @input="errors.job_title = undefined"
           type="text"
           autocomplete="organization-title"
           maxlength="100"

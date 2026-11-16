@@ -48,6 +48,14 @@ num() {
   grep -o "\"$1\":[0-9]*" "$TMP/body" | head -1 | cut -d: -f2
 }
 
+# Argumen -F untuk curl. curl di MSYS2 UCRT64 adalah program Windows, dan MSYS tidak mengonversi path /tmp/...
+# di argumen yang mengandung ";", jadi path diubah ke bentuk Windows dulu bila cygpath ada.
+berkas() {
+  local p="$TMP/gen/$1"
+  command -v cygpath >/dev/null && p=$(cygpath -m "$p")
+  printf 'file=@%s;type=%s' "$p" "$2"
+}
+
 for jar in "$STAF" "$MANAJER" "$ADMIN"; do
   if [[ ! -f "$jar" ]]; then
     echo "Cookie $jar tidak ada. Jalankan ../scripts/dev-login.sh dulu."
@@ -171,7 +179,7 @@ hasil 'Nama kosong ditolak, galat di kolom name' "$code" 400 "$ok"
 
 echo
 echo '== Foto'
-code=$(req "$STAF" PUT /me/avatar -F "file=@$TMP/gen/tegak.jpg;type=image/jpeg")
+code=$(req "$STAF" PUT /me/avatar -F "$(berkas tegak.jpg image/jpeg)")
 AVATAR=$(field avatar_id)
 hasil 'Unggah JPEG valid (foto ponsel EXIF orientasi 6)' "$code" 200
 code=$(req "$STAF" GET "/users/$STAF_ID/avatar?v=$AVATAR")
@@ -194,7 +202,7 @@ hasil 'Foto Staf bisa dilihat akun lain yang login' "$code" 200
 code=$(curl -s -o /dev/null -w '%{http_code}' "$API/api/users/$STAF_ID/avatar?v=$AVATAR")
 hasil 'Foto tanpa login ditolak' "$code" 401
 
-code=$(req "$STAF" PUT /me/avatar -F "file=@$TMP/gen/transparan.png;type=image/png")
+code=$(req "$STAF" PUT /me/avatar -F "$(berkas transparan.png image/png)")
 NEW=$(field avatar_id)
 ok=1
 [[ -n "$NEW" && "$NEW" != "$AVATAR" ]] && ok=0
@@ -202,9 +210,9 @@ hasil 'Unggah PNG valid, avatar_id berganti' "$code" 200 "$ok"
 code=$(req "$STAF" GET "/users/$STAF_ID/avatar?v=$NEW" -H "If-None-Match: \"$AVATAR\"")
 hasil 'ETag lama tidak lagi cocok setelah foto diganti' "$code" 200
 
-code=$(req "$STAF" PUT /me/avatar -F "file=@$TMP/gen/teks.jpg;type=image/jpeg")
+code=$(req "$STAF" PUT /me/avatar -F "$(berkas teks.jpg image/jpeg)")
 hasil 'Berkas teks berganti nama .jpg ditolak' "$code" 415
-code=$(req "$STAF" PUT /me/avatar -F "file=@$TMP/gen/besar.jpg;type=image/jpeg")
+code=$(req "$STAF" PUT /me/avatar -F "$(berkas besar.jpg image/jpeg)")
 hasil 'Berkas di atas 2 MB ditolak' "$code" 413
 
 code=$(req "$STAF" DELETE /me/avatar)
@@ -223,7 +231,7 @@ req "$MANAJER" GET /auth/me >/dev/null
 ok=1
 [[ "$(field name)" == "$MANAJER_NAME" ]] && ok=0
 hasil 'PUT /me/profile dengan id Manajer hanya mengubah akun sendiri' "$code" 204 "$ok"
-code=$(req "$STAF" PUT "/users/$MANAJER_ID/avatar" -F "file=@$TMP/gen/tegak.jpg;type=image/jpeg")
+code=$(req "$STAF" PUT "/users/$MANAJER_ID/avatar" -F "$(berkas tegak.jpg image/jpeg)")
 ok=1
 [[ "$code" == 404 || "$code" == 405 ]] && ok=0
 hasil 'Tidak ada rute unggah foto untuk akun lain' "$code" "$code" "$ok"
