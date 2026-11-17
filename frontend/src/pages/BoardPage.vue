@@ -37,6 +37,9 @@ import ProfileCard from '../components/ProfileCard.vue'
 import ProfileForm from '../components/ProfileForm.vue'
 import { getTaskCounts, type TaskCounts } from '../api/profile'
 import { readyBlock } from '../utils/subtaskGate'
+import PageHeader from '../components/PageHeader.vue'
+import FilterToolbar from '../components/FilterToolbar.vue'
+import { filterControl } from '../utils/ui'
 
 const route = useRoute()
 const router = useRouter()
@@ -48,6 +51,13 @@ const staffUsername = computed(() => (isStaff.value ? (session.user?.username ??
 // URL adalah sumber filter: bisa di-refresh, dibagikan, dan tombol Back browser tetap bekerja.
 const query = computed(() => parseBoardQuery(route.query, staffUsername.value))
 const filtered = computed(() => hasFilters(query.value))
+// Kata kunci tidak dihitung: kolom cari selalu terlihat, jumlah ini untuk tombol Filter yang dilipat di ponsel.
+const activeFilterCount = computed(
+  () =>
+    [query.value.pic, query.value.division, query.value.label, query.value.urgency, query.value.due].filter(
+      Boolean,
+    ).length,
+)
 // Di "Task saya" isinya sudah pasti milik sendiri, jadi filter PIC baru berguna di "Semua task".
 const showPicFilter = computed(() => !isStaff.value || query.value.scope === 'all')
 // Kunci berupa teks supaya papan hanya dimuat ulang saat filternya benar-benar berubah,
@@ -340,7 +350,6 @@ async function onChanged(message: string) {
   await load(true)
 }
 
-const selectClass = 'mt-1 block min-h-11 w-full min-w-0 rounded-card border border-line bg-surface px-3'
 const scopeButton =
   'inline-flex min-h-11 items-center px-4 font-medium first:rounded-l-card last:rounded-r-card aria-pressed:bg-accent aria-pressed:text-on-accent aria-pressed:outline aria-pressed:outline-1 aria-pressed:-outline-offset-1 aria-pressed:outline-mark'
 const buttonSecondary =
@@ -350,8 +359,8 @@ const buttonSecondary =
 <template>
   <!-- Container query: kartu profil jadi kolom kiri hanya bila kontainer papan selebar 80rem atau lebih. -->
   <section class="@container/board">
-    <div class="grid items-start gap-6 @min-[80rem]/board:grid-cols-[17rem_minmax(0,1fr)]">
-      <aside class="sticky top-4 hidden @min-[80rem]/board:block">
+    <div class="grid items-start gap-6 @min-[90rem]/board:grid-cols-[17rem_minmax(0,1fr)]">
+      <aside class="sticky top-4 hidden @min-[90rem]/board:block">
         <ProfileCard
           variant="card"
           :counts="counts"
@@ -363,19 +372,19 @@ const buttonSecondary =
         />
       </aside>
       <div class="min-w-0">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <h1 class="text-2xl font-semibold">Papan Task</h1>
-          <button
-            v-if="isManager"
-            type="button"
-            class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-on-accent hover:bg-accent-hover active:translate-y-px"
-            @click="openCreate"
-          >
-            Buat task
-          </button>
-        </div>
+        <PageHeader title="Papan Task">
+          <template v-if="isManager" #actions>
+            <button
+              type="button"
+              class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-on-accent hover:bg-accent-hover active:translate-y-px"
+              @click="openCreate"
+            >
+              Buat task
+            </button>
+          </template>
+        </PageHeader>
 
-        <div class="mt-4 @min-[80rem]/board:hidden">
+        <div class="mt-4 @min-[90rem]/board:hidden">
           <ProfileCard
             variant="bar"
             :counts="counts"
@@ -411,28 +420,28 @@ const buttonSecondary =
           </button>
         </div>
 
-        <div class="mt-4 max-w-xl">
-          <KeywordSearch id="board-search" :value="query.q" @search="setQuery({ q: $event })" />
-          <!-- Papan hanya memuat Completed 7 hari terakhir, jadi task lama yang cocok baru terlihat di Arsip. -->
-          <RouterLink
-            v-if="query.q"
-            :to="{ name: 'archive', query: { q: query.q } }"
-            class="inline-flex min-h-11 items-center rounded-card text-sm font-medium text-mark underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
-          >
-            Cari "{{ query.q }}" juga di Arsip
-          </RouterLink>
-        </div>
-
-        <div
-          class="mt-4 grid items-end gap-3 [grid-template-columns:repeat(auto-fit,minmax(10rem,1fr))]"
-          role="group"
-          aria-label="Filter papan"
+        <FilterToolbar
+          label="Filter papan"
+          :active-count="activeFilterCount"
+          :can-clear="filtered"
+          @clear="clearFilters"
         >
+          <template #search>
+            <KeywordSearch id="board-search" :value="query.q" @search="setQuery({ q: $event })" />
+            <!-- Papan hanya memuat Completed 7 hari terakhir, jadi task lama yang cocok baru terlihat di Arsip. -->
+            <RouterLink
+              v-if="query.q"
+              :to="{ name: 'archive', query: { q: query.q } }"
+              class="inline-flex min-h-11 items-center rounded-card text-sm font-medium text-mark underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
+            >
+              Cari "{{ query.q }}" juga di Arsip
+            </RouterLink>
+          </template>
           <div v-if="showPicFilter" class="min-w-0">
-            <label for="filter-pic" class="text-sm font-medium">PIC</label>
+            <label for="filter-pic" class="sr-only">PIC</label>
             <select
               id="filter-pic"
-              :class="selectClass"
+              :class="filterControl"
               :value="query.pic ?? ''"
               @change="setQuery({ pic: selected($event) || undefined })"
             >
@@ -443,10 +452,10 @@ const buttonSecondary =
             </select>
           </div>
           <div class="min-w-0">
-            <label for="filter-division" class="text-sm font-medium">Divisi</label>
+            <label for="filter-division" class="sr-only">Divisi</label>
             <select
               id="filter-division"
-              :class="selectClass"
+              :class="filterControl"
               :value="query.division ?? ''"
               @change="setQuery({ division: Number(selected($event)) || undefined })"
             >
@@ -457,10 +466,10 @@ const buttonSecondary =
             </select>
           </div>
           <div class="min-w-0">
-            <label for="filter-label" class="text-sm font-medium">Label</label>
+            <label for="filter-label" class="sr-only">Label</label>
             <select
               id="filter-label"
-              :class="selectClass"
+              :class="filterControl"
               :value="query.label ?? ''"
               @change="setQuery({ label: Number(selected($event)) || undefined })"
             >
@@ -471,10 +480,10 @@ const buttonSecondary =
             </select>
           </div>
           <div class="min-w-0">
-            <label for="filter-urgency" class="text-sm font-medium">Urgency</label>
+            <label for="filter-urgency" class="sr-only">Urgency</label>
             <select
               id="filter-urgency"
-              :class="selectClass"
+              :class="filterControl"
               :value="query.urgency ?? ''"
               @change="setQuery({ urgency: (selected($event) || undefined) as Urgency | undefined })"
             >
@@ -483,10 +492,10 @@ const buttonSecondary =
             </select>
           </div>
           <div class="min-w-0">
-            <label for="filter-due" class="text-sm font-medium">Tenggat</label>
+            <label for="filter-due" class="sr-only">Tenggat</label>
             <select
               id="filter-due"
-              :class="selectClass"
+              :class="filterControl"
               :value="query.due ?? ''"
               @change="setQuery({ due: (selected($event) || undefined) as DueFilter | undefined })"
             >
@@ -494,10 +503,7 @@ const buttonSecondary =
               <option v-for="d in dueOptions" :key="d.value" :value="d.value">{{ d.label }}</option>
             </select>
           </div>
-          <div v-if="filtered">
-            <button type="button" :class="buttonSecondary" @click="clearFilters">Hapus filter</button>
-          </div>
-        </div>
+        </FilterToolbar>
 
         <div aria-live="polite">
           <Transition name="notice">
@@ -535,21 +541,15 @@ const buttonSecondary =
         </div>
 
         <template v-else-if="board">
-          <div v-if="total === 0" class="mt-6 rounded-card border border-line bg-surface p-6 text-center">
-            <template v-if="filtered">
-              <p>Tidak ada task yang cocok dengan filter ini.</p>
-              <button type="button" :class="buttonSecondary" class="mt-3" @click="clearFilters">
-                Hapus filter
-              </button>
-            </template>
-            <template v-else-if="query.scope === 'mine'">
-              <p>Belum ada task untukmu. Task baru dari Manajer akan muncul di sini.</p>
-              <button type="button" :class="buttonSecondary" class="mt-3" @click="setQuery({ scope: 'all' })">
-                Lihat semua task
-              </button>
-            </template>
-            <p v-else>Belum ada task aktif.</p>
-          </div>
+          <!-- Kolom kosong sudah memberi tahu sendiri; baris ini hanya saat filter atau pencarian membuat papan kosong. -->
+          <p
+            v-if="total === 0 && filtered"
+            role="status"
+            class="mt-6 flex flex-wrap items-center gap-3 text-ink-muted"
+          >
+            Tidak ada task yang cocok dengan pencarian atau filter ini.
+            <button type="button" :class="buttonSecondary" @click="clearFilters">Hapus filter</button>
+          </p>
 
           <!-- Container query, bukan breakpoint layar: lebar papan bergantung pada sidebar AppShell, bukan lebar jendela. -->
           <div class="@container mt-6">

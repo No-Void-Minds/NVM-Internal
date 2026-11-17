@@ -5,6 +5,9 @@ import BaseDialog from '../components/BaseDialog.vue'
 import RowMenu, { type MenuItem } from '../components/RowMenu.vue'
 import UserAvatar from '../components/UserAvatar.vue'
 import UserFormPanel from '../components/UserFormPanel.vue'
+import PageHeader from '../components/PageHeader.vue'
+import FilterToolbar from '../components/FilterToolbar.vue'
+import { filterControl } from '../utils/ui'
 import { ApiError } from '../api/client'
 import { listDivisions, type DivisionItem } from '../api/divisions'
 import {
@@ -50,6 +53,10 @@ const filtered = computed(() => {
       (!statusFilter.value || u.status === statusFilter.value),
   )
 })
+// Kolom cari tidak dihitung: jumlah ini untuk tombol Filter yang dilipat di ponsel.
+const activeFilterCount = computed(
+  () => [roleFilter.value, divisionFilter.value, statusFilter.value].filter((v) => v !== '').length,
+)
 const hasFilter = computed(
   () => !!search.value || !!roleFilter.value || divisionFilter.value !== '' || !!statusFilter.value,
 )
@@ -204,16 +211,17 @@ const buttonSecondary =
 
 <template>
   <section>
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <h1 class="text-2xl font-semibold">Pengguna</h1>
-      <button
-        type="button"
-        class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-on-accent hover:bg-accent-hover active:translate-y-px"
-        @click="openCreate"
-      >
-        Tambah pengguna
-      </button>
-    </div>
+    <PageHeader title="Pengguna">
+      <template #actions>
+        <button
+          type="button"
+          class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-on-accent hover:bg-accent-hover active:translate-y-px"
+          @click="openCreate"
+        >
+          Tambah pengguna
+        </button>
+      </template>
+    </PageHeader>
 
     <div aria-live="polite">
       <Transition name="notice">
@@ -233,10 +241,13 @@ const buttonSecondary =
       </Transition>
     </div>
 
-    <div
-      class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,2fr)_repeat(3,minmax(0,1fr))]"
+    <FilterToolbar
+      label="Filter pengguna"
+      :active-count="activeFilterCount"
+      :can-clear="hasFilter"
+      @clear="clearFilters"
     >
-      <div>
+      <template #search>
         <label for="user-search" class="sr-only">Cari nama atau username</label>
         <input
           id="user-search"
@@ -245,10 +256,10 @@ const buttonSecondary =
           placeholder="Cari nama atau username"
           :class="selectClass"
         />
-      </div>
+      </template>
       <div>
         <label for="filter-role" class="sr-only">Filter peran</label>
-        <select id="filter-role" v-model="roleFilter" :class="selectClass">
+        <select id="filter-role" v-model="roleFilter" :class="filterControl">
           <option value="">Semua peran</option>
           <option value="admin">Admin</option>
           <option value="manager">Manajer</option>
@@ -257,21 +268,21 @@ const buttonSecondary =
       </div>
       <div>
         <label for="filter-division" class="sr-only">Filter divisi</label>
-        <select id="filter-division" v-model="divisionFilter" :class="selectClass">
+        <select id="filter-division" v-model="divisionFilter" :class="filterControl">
           <option value="">Semua divisi</option>
           <option v-for="d in divisions" :key="d.id" :value="d.id">{{ d.name }}</option>
         </select>
       </div>
       <div>
         <label for="filter-status" class="sr-only">Filter status</label>
-        <select id="filter-status" v-model="statusFilter" :class="selectClass">
+        <select id="filter-status" v-model="statusFilter" :class="filterControl">
           <option value="">Semua status</option>
           <option value="aktif">Aktif</option>
           <option value="terkunci">Terkunci</option>
           <option value="nonaktif">Nonaktif</option>
         </select>
       </div>
-    </div>
+    </FilterToolbar>
 
     <LoadingSkeleton v-if="loadState === 'loading'" class="mt-6" label="Memuat daftar pengguna..." />
 

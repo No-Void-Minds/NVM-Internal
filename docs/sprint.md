@@ -52,6 +52,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 10 | Profil pengguna | Foto, jabatan, kartu profil di papan, ubah profil |
 | 11 | Poles UI/UX | Papan dan semua halaman dipoles, konsisten |
 | 11b | Identitas brand NVM | Monokrom NVM dengan aksen krem, mode terang dan gelap, D-DIN, logo resmi |
+| 11c | Satu kerangka tata letak | Top bar dan tepi kiri sama di semua halaman, kepala halaman dan toolbar filter bersama |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -622,6 +623,34 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 - Kontras (terang / gelap), semua lolos AA: teks di kanvas 15.23 / 16.66, di surface 17.06 / 16.05; teks redup 5.73 sampai 6.42; teks tombol utama 13.31 / 13.31, hover 10.16 / 14.99; label ID 13.31; penanda di surface 17.06 / 14.97; garis isian 3.45 sampai 4.05; urgent 6.18 sampai 9.14; high 5.67 sampai 10.67; danger 6.81 sampai 9.56; chip status 7.21 sampai 10.25.
 
 **Hasil:** kode selesai 2026-11-17, `./scripts/check.sh` lolos, build memuat D-DIN, JetBrains Mono, logo, favicon, dan `tema.js`. Menunggu lihat Rifky di kedua mode dan di lebar ponsel (login dan papan sudah dilihat). Audit browser otomatis (lebar, Tab, Escape, reduced motion, console) tetap di S13-09.
+
+**Retro:**
+- Macet: (isi sendiri)
+- Lancar: (isi sendiri)
+- Diubah untuk sprint berikutnya: (isi sendiri)
+
+---
+
+## Sprint 11c: Satu kerangka tata letak
+
+**Tujuan:** semua halaman yang login terasa satu aplikasi. Masalah dari Rifky di produksi (1920 px): top bar dan logo berpindah posisi antar halaman (x sekitar 32 px di `/task`, sekitar 416 px di `/arsip`), papan rata kiri selebar layar sementara halaman lain ditengahkan, dan papan terasa kosong (banner kosong ganda, cari dan filter memakan tinggi, judul tanpa baris aksi). Hanya frontend.
+
+- [x] S11c-01 Kerangka AppShell: top bar dan wadah konten selebar layar dengan satu sumber padding, tanpa `mx-auto`.
+- [x] S11c-02 Komponen kepala halaman bersama (`PageHeader`) di semua halaman yang login.
+- [x] S11c-03 Papan: banner kosong dihapus, toolbar cari dan filter, "Buat task" di slot aksi, batas kartu profil.
+- [x] S11c-04 Arsip, Pengguna, dan Audit Log memakai toolbar yang sama (`FilterToolbar`).
+
+**Keputusan (aturan kerangka):**
+- Tepi kiri bersama: AppShell memakai satu konstanta padding (`gutter`, `px-4 md:px-8`) untuk top bar, baris galat logout, dan wadah konten. Keduanya selebar layar, tidak ada `mx-auto` di kerangka atau di halaman, jadi logo, menu, dan aksi kanan tidak berpindah antar halaman, dan tepi kiri judul sejajar dengan logo. `meta.wide` dihapus karena semua halaman sekarang lebar penuh.
+- Kapan memakai `max-w`: hanya halaman yang isinya form atau teks (Profil `max-w-xl`, Status `max-w-xl`, Pengaturan `max-w-3xl`, 404 `max-w-xl`), selalu rata kiri pada tepi yang sama. Halaman tabel (Arsip, Pengguna, Audit Log), papan, dan halaman task penuh memakai lebar penuh wadah.
+- Login dan Buat password baru tetap di layout tanpa AppShell (kartu di tengah). Buat password baru tidak dipindah ke AppShell karena menu navigasi di sana hanya akan mengembalikan pengguna ke halaman yang sama sampai password diganti.
+- `PageHeader`: judul `text-2xl` tebal, deskripsi opsional, dan slot aksi di kanan (turun ke bawah judul di layar sempit). Dipakai di Papan, Arsip, Pengguna, Audit Log, Pengaturan, Profil, Status, halaman task penuh (judul berupa label ID lewat slot `title`), dan 404.
+- `FilterToolbar`: kolom cari di kiri (slot `search`), filter sebaris di sebelahnya, lalu "Hapus filter" bila ada yang aktif. Kontrol memakai kelas bersama `filterControl` (`utils/ui.ts`), tinggi minimal 44 px. Label filter hanya untuk pembaca layar bila opsi pertama sudah menjelaskan ("Semua divisi" dan seterusnya). Kontrol yang opsinya tidak menjelaskan diri sendiri (tanggal dan urutan di Arsip) memakai label sebaris di depan kontrol (`inlineLabel`), supaya tetap terlihat tanpa menambah tinggi. Di bawah 768 px filter dilipat ke tombol "Filter (n)" dengan `aria-expanded`; n menghitung filter aktif tanpa kata kunci dan urutan.
+- `KeywordSearch` dibuat padat: label dan petunjuk hanya untuk pembaca layar, isinya diringkas di placeholder ("Cari ID, judul, PIC, label, atau berkas"); galat kurang dari 3 huruf tetap terlihat. Warna placeholder memakai `ink-muted` supaya kontrasnya terjaga di kedua mode (5.73 sampai 6.42).
+- Papan: banner "Belum ada task aktif" dan variannya dihapus; kolom kosong sudah memberi tahu sendiri. Bila filter atau pencarian membuat papan kosong, satu baris di atas kolom menyebutnya dengan tombol "Hapus filter". "Buat task" ada di slot aksi `PageHeader` dan tetap hanya untuk Manajer (peran dari sesi server).
+- Kartu profil di kiri papan baru muncul bila kontainer papan selebar 90rem atau lebih (jendela sekitar 1504 px; sebelumnya 80rem). Di bawah itu, termasuk 1280 px, kartu menjadi bar ringkas di atas papan. Alasannya: di sekitar 80rem empat kolom hanya kebagian sekitar 230 px; di 90rem sekitar 280 px.
+
+**Hasil:** kode selesai 2026-11-17, `./scripts/check.sh` lolos. Pemeriksaan kode: tidak ada `mx-auto` di wadah halaman, semua halaman yang login memakai `PageHeader`, padding top bar dan wadah konten dari satu konstanta di AppShell. Menunggu lihat Rifky di 360, 768, 1280, dan 1920 px pada kedua mode.
 
 **Retro:**
 - Macet: (isi sendiri)

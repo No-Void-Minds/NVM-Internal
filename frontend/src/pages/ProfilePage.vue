@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from '../components/PageHeader.vue'
 import { ref } from 'vue'
 import { ApiError } from '../api/client'
 import ProfileForm from '../components/ProfileForm.vue'
@@ -39,7 +40,7 @@ async function submit() {
 
 <template>
   <section v-if="session.user" class="max-w-xl">
-    <h1 class="text-2xl font-semibold">Profil</h1>
+    <PageHeader title="Profil" />
 
     <div class="mt-6">
       <ProfileForm />

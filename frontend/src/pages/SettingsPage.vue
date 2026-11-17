@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from '../components/PageHeader.vue'
 import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import { onMounted, ref } from 'vue'
 import BaseDialog from '../components/BaseDialog.vue'
@@ -136,7 +137,7 @@ const buttonSecondary =
 
 <template>
   <section class="max-w-3xl">
-    <h1 class="text-2xl font-semibold">Pengaturan</h1>
+    <PageHeader title="Pengaturan" />
 
     <div class="mt-6 flex flex-wrap items-center justify-between gap-3">
       <div>

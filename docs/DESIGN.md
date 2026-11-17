@@ -44,6 +44,15 @@ Status diredam supaya serasi dengan monokrom, dan selalu berupa teks: Requested,
 - Radius 4px untuk kartu, isian, tombol, dan dialog; 2px untuk chip. Bentuk bulat hanya untuk avatar.
 - Bayangan hanya untuk menu, dialog, dan kartu yang sedang di-drag. Selebihnya garis 1px.
 
+## Tata letak
+
+- Satu kerangka untuk semua halaman yang login (Sprint 11c). Top bar dan wadah konten selebar layar dengan padding kiri dan kanan dari satu sumber (`gutter` di `AppShell.vue`: 16px, 32px mulai 768px). Tidak ada halaman yang ditengahkan, jadi logo, menu, dan aksi kanan tidak berpindah antar halaman, dan tepi kiri judul sejajar dengan logo.
+- Halaman berisi form atau teks (Profil, Status, Pengaturan, 404) membatasi lebar isinya dengan `max-w`, tetap rata kiri. Papan, tabel (Arsip, Pengguna, Audit Log), dan halaman task penuh memakai lebar penuh.
+- Setiap halaman dibuka dengan `PageHeader`: judul 24px tebal, deskripsi opsional, aksi di kanan.
+- Cari dan filter selalu lewat `FilterToolbar`: cari di kiri, filter sebaris (kontrol `filterControl`, tinggi 44px), "Hapus filter" bila ada yang aktif. Label tersembunyi bila opsi pertama sudah menjelaskan; label sebaris untuk tanggal dan urutan. Di bawah 768px filter dilipat ke tombol "Filter (n)".
+- Kartu profil hanya di papan, di kiri mulai kontainer 90rem; di bawahnya bar ringkas di atas papan.
+- Login dan Buat password baru memakai kartu di tengah, tanpa top bar.
+
 ## Logo
 
 - Logo resmi `frontend/public/brand/nvm-logo.png` (putih di atas transparan, sama dengan compro) dipakai sebagai mask CSS yang diisi warna `ink`, jadi benar di kedua mode tanpa salinan yang diwarnai ulang (`BrandLogo.vue`). Tidak digambar ulang.

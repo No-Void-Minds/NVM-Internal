@@ -147,6 +147,12 @@
     outline: 2px solid var(--color-mark);
     outline-offset: 2px;
   }
+
+  /* Placeholder membawa petunjuk isi (toolbar cari), jadi warnanya ikut token supaya kontrasnya terjaga di kedua mode. */
+  ::placeholder {
+    color: var(--color-ink-muted);
+    opacity: 1;
+  }
 }
 /* Kartu yang masuk kolom (setelah dipindah) dan bergeser posisinya: umpan balik singkat, bukan dekorasi. */
 .card-enter-active,

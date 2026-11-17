@@ -39,13 +39,15 @@ const buttonSecondary =
 
 <template>
   <form role="search" class="min-w-0" novalidate @submit.prevent="submit">
-    <label :for="id" class="text-sm font-medium">Cari task</label>
-    <div class="mt-1 flex flex-wrap gap-2">
+    <!-- Padat untuk toolbar: label dan petunjuk hanya untuk pembaca layar, isinya diringkas di placeholder. -->
+    <label :for="id" class="sr-only">Cari task</label>
+    <div class="flex flex-wrap gap-2">
       <input
         :id="id"
         v-model="draft"
         type="search"
         enterkeyhint="search"
+        placeholder="Cari ID, judul, PIC, label, atau berkas"
         maxlength="100"
         :aria-invalid="error ? 'true' : undefined"
         :aria-describedby="error ? `${id}-error` : `${id}-hint`"
@@ -57,7 +59,7 @@ const buttonSecondary =
       </button>
     </div>
     <p v-if="error" :id="`${id}-error`" role="alert" class="mt-1 text-sm text-danger">{{ error }}</p>
-    <p v-else :id="`${id}-hint`" class="mt-1 text-sm text-ink-muted">
+    <p v-else :id="`${id}-hint`" class="sr-only">
       ID, judul, deskripsi, pemohon, PIC, sub task, label, atau nama berkas. Minimal {{ minKeyword }} huruf.
     </p>
   </form>

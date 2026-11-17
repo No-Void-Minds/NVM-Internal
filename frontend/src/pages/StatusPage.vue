@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from '../components/PageHeader.vue'
 import { onMounted, onUnmounted, ref } from 'vue'
 import { ApiError, apiGet } from '../api/client'
 
@@ -34,8 +35,10 @@ onUnmounted(() => controller?.abort())
 
 <template>
   <section class="max-w-xl">
-    <h1 class="text-2xl font-semibold">Status sistem</h1>
-    <p class="mt-1 text-ink-muted">Memeriksa apakah server aplikasi dan database bisa dihubungi.</p>
+    <PageHeader
+      title="Status sistem"
+      description="Memeriksa apakah server aplikasi dan database bisa dihubungi."
+    />
 
     <div aria-live="polite" class="mt-6">
       <div v-if="state.kind === 'loading'" class="rounded-card border border-line bg-surface p-4">

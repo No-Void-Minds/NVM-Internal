@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from '../components/PageHeader.vue'
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import TaskDetailBody from '../components/TaskDetailBody.vue'
@@ -76,9 +77,11 @@ function backToBoard() {
       Papan Task
     </RouterLink>
 
-    <h1 class="mt-1">
-      <span class="specimen-tag">{{ taskId }}</span>
-    </h1>
+    <PageHeader class="mt-1">
+      <template #title
+        ><span class="specimen-tag">{{ taskId }}</span></template
+      >
+    </PageHeader>
 
     <div aria-live="polite">
       <p v-if="setupError" role="alert" class="mt-3 rounded-card bg-danger-bg p-3 text-sm text-danger">

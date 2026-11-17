@@ -3,6 +3,9 @@ import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import UserAvatar from '../components/UserAvatar.vue'
 import IdText from '../components/IdText.vue'
+import PageHeader from '../components/PageHeader.vue'
+import FilterToolbar from '../components/FilterToolbar.vue'
+import { filterControl } from '../utils/ui'
 import { ApiError } from '../api/client'
 import { listAuditLogs, type AuditCategory, type AuditEntry } from '../api/audit'
 import { listDivisions, type DivisionItem } from '../api/divisions'
@@ -49,6 +52,9 @@ const loadError = ref('')
 let requestSeq = 0
 
 const hasFilter = computed(() => !!monthFilter.value || userFilter.value !== '' || !!categoryFilter.value)
+const activeFilterCount = computed(
+  () => [monthFilter.value, userFilter.value, categoryFilter.value].filter((v) => v !== '').length,
+)
 
 function divisionName(id: number): string {
   return divisions.value.find((d) => d.id === id)?.name ?? `divisi #${id}`
@@ -111,41 +117,45 @@ onMounted(async () => {
   }
 })
 
-const selectClass = 'min-h-11 w-full rounded-card border border-line bg-surface px-3'
 const pagerButton =
   'inline-flex min-h-11 items-center rounded-card border border-line px-4 font-medium hover:bg-canvas active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60'
 </script>
 
 <template>
   <section>
-    <h1 class="text-2xl font-semibold">Audit Log</h1>
-    <p class="mt-1 text-ink-muted">
-      Catatan siapa melakukan apa, kapan, dan dari alamat IP mana. Hanya bisa dibaca.
-    </p>
+    <PageHeader
+      title="Audit Log"
+      description="Catatan siapa melakukan apa, kapan, dan dari alamat IP mana. Hanya bisa dibaca."
+    />
 
-    <div class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+    <FilterToolbar
+      label="Filter audit log"
+      :active-count="activeFilterCount"
+      :can-clear="hasFilter"
+      @clear="clearFilters"
+    >
       <div>
-        <label for="audit-month" class="block text-sm font-medium">Rentang tanggal</label>
-        <select id="audit-month" v-model="monthFilter" :class="selectClass" class="mt-1">
+        <label for="audit-month" class="sr-only">Rentang tanggal</label>
+        <select id="audit-month" v-model="monthFilter" :class="filterControl">
           <option value="">Semua tanggal</option>
           <option v-for="m in months" :key="m.key" :value="m.key">{{ m.label }}</option>
         </select>
       </div>
       <div>
-        <label for="audit-user" class="block text-sm font-medium">Pengguna</label>
-        <select id="audit-user" v-model="userFilter" :class="selectClass" class="mt-1">
+        <label for="audit-user" class="sr-only">Pengguna</label>
+        <select id="audit-user" v-model="userFilter" :class="filterControl">
           <option value="">Semua pengguna</option>
           <option v-for="u in users" :key="u.id" :value="u.id">{{ u.name }}</option>
         </select>
       </div>
       <div>
-        <label for="audit-category" class="block text-sm font-medium">Jenis aksi</label>
-        <select id="audit-category" v-model="categoryFilter" :class="selectClass" class="mt-1">
+        <label for="audit-category" class="sr-only">Jenis aksi</label>
+        <select id="audit-category" v-model="categoryFilter" :class="filterControl">
           <option value="">Semua jenis aksi</option>
           <option v-for="c in categories" :key="c.value" :value="c.value">{{ c.label }}</option>
         </select>
       </div>
-    </div>
+    </FilterToolbar>
 
     <LoadingSkeleton v-if="loadState === 'loading'" class="mt-6" label="Memuat audit log..." />
 

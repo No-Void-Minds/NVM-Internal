@@ -105,8 +105,9 @@ watch(
   () => closeMore(false),
 )
 
-// Papan memakai lebar layar penuh supaya kartu profil mengisi ruang kiri, bukan menyisakan ruang kosong (revisi 2).
-const container = computed(() => (route.meta.wide ? 'max-w-[120rem]' : 'max-w-6xl'))
+// Satu sumber padding kiri dan kanan untuk top bar dan wadah konten (Sprint 11c): selebar layar dan tanpa
+// mx-auto, jadi tepi kiri judul halaman sejajar dengan logo dan posisi top bar tidak berubah antar halaman.
+const gutter = 'px-4 md:px-8'
 </script>
 
 <template>
@@ -119,7 +120,7 @@ const container = computed(() => (route.meta.wide ? 'max-w-[120rem]' : 'max-w-6x
     </a>
 
     <header class="border-b border-line bg-surface">
-      <div class="mx-auto flex h-14 items-center gap-4 px-4 md:px-8 lg:gap-6" :class="container">
+      <div class="flex h-14 items-center gap-4 lg:gap-6" :class="gutter">
         <!-- Logo resmi NVM diikuti "Internal". Di lebar md kata itu hanya untuk pembaca layar, karena tujuh item navigasi
              Manajer dan Admin tidak muat bersama teksnya. -->
         <span class="flex shrink-0 items-center gap-2">
@@ -185,12 +186,7 @@ const container = computed(() => (route.meta.wide ? 'max-w-[120rem]' : 'max-w-6x
           </button>
         </div>
       </div>
-      <p
-        v-if="logoutError"
-        role="alert"
-        class="mx-auto px-4 pb-3 text-sm text-danger md:px-8"
-        :class="container"
-      >
+      <p v-if="logoutError" role="alert" class="pb-3 text-sm text-danger" :class="gutter">
         {{ logoutError }}
       </p>
     </header>
@@ -199,8 +195,8 @@ const container = computed(() => (route.meta.wide ? 'max-w-[120rem]' : 'max-w-6x
     <main
       id="konten"
       tabindex="-1"
-      :class="container"
-      class="mx-auto px-4 pt-6 pb-[calc(5rem+env(safe-area-inset-bottom))] outline-none md:px-8 md:pb-10"
+      :class="gutter"
+      class="pt-6 pb-[calc(5rem+env(safe-area-inset-bottom))] outline-none md:pb-10"
     >
       <slot />
     </main>

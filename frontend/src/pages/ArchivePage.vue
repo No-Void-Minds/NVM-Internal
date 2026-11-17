@@ -18,6 +18,9 @@ import { hasArchiveFilters, parseArchiveQuery, sortOptions, toArchiveRouteQuery 
 import { normalizeBoardQuery, sameRouteQuery } from '../utils/boardQuery'
 import { formatMoment, urgencies, urgencyLabel, type Urgency } from '../utils/task'
 import UrgencyLabel from '../components/UrgencyLabel.vue'
+import PageHeader from '../components/PageHeader.vue'
+import FilterToolbar from '../components/FilterToolbar.vue'
+import { filterControl, inlineControl, inlineLabel } from '../utils/ui'
 import type { ArchiveSort } from '../api/archive'
 
 const route = useRoute()
@@ -30,6 +33,18 @@ const staffUsername = computed(() => (isStaff.value ? (session.user?.username ??
 // URL adalah sumber filter, sama seperti papan: bisa di-refresh, dibagikan, dan tombol Back tetap bekerja.
 const query = computed(() => parseArchiveQuery(route.query, staffUsername.value))
 const filtered = computed(() => hasArchiveFilters(query.value))
+// Kata kunci dan urutan tidak dihitung: jumlah ini untuk tombol Filter yang dilipat di ponsel.
+const activeFilterCount = computed(
+  () =>
+    [
+      query.value.pic,
+      query.value.division,
+      query.value.label,
+      query.value.urgency,
+      query.value.from,
+      query.value.to,
+    ].filter(Boolean).length,
+)
 const showPicFilter = computed(() => !isStaff.value || query.value.scope === 'all')
 const queryKey = computed(() => new URLSearchParams(toArchiveRouteQuery(query.value)).toString())
 
@@ -191,7 +206,6 @@ async function onSaved(id: string, message: string, partial: boolean) {
   detailId.value = id
 }
 
-const selectClass = 'mt-1 block min-h-11 w-full min-w-0 rounded-card border border-line bg-surface px-3'
 const scopeButton =
   'inline-flex min-h-11 items-center px-4 font-medium first:rounded-l-card last:rounded-r-card aria-pressed:bg-accent aria-pressed:text-on-accent aria-pressed:outline aria-pressed:outline-1 aria-pressed:-outline-offset-1 aria-pressed:outline-mark'
 const buttonSecondary =
@@ -200,10 +214,10 @@ const buttonSecondary =
 
 <template>
   <section>
-    <h1 class="text-2xl font-semibold">Arsip</h1>
-    <p class="mt-1 text-ink-muted">
-      Semua task yang sudah Completed, termasuk yang tidak lagi tampil di papan.
-    </p>
+    <PageHeader
+      title="Arsip"
+      description="Semua task yang sudah Completed, termasuk yang tidak lagi tampil di papan."
+    />
 
     <div
       v-if="isStaff"
@@ -229,20 +243,20 @@ const buttonSecondary =
       </button>
     </div>
 
-    <div class="mt-4 max-w-xl">
-      <KeywordSearch id="archive-search" :value="query.q" @search="setQuery({ q: $event })" />
-    </div>
-
-    <div
-      class="mt-4 grid items-end gap-3 [grid-template-columns:repeat(auto-fit,minmax(10rem,1fr))]"
-      role="group"
-      aria-label="Filter arsip"
+    <FilterToolbar
+      label="Filter arsip"
+      :active-count="activeFilterCount"
+      :can-clear="filtered"
+      @clear="clearFilters"
     >
+      <template #search>
+        <KeywordSearch id="archive-search" :value="query.q" @search="setQuery({ q: $event })" />
+      </template>
       <div v-if="showPicFilter" class="min-w-0">
-        <label for="archive-pic" class="text-sm font-medium">PIC</label>
+        <label for="archive-pic" class="sr-only">PIC</label>
         <select
           id="archive-pic"
-          :class="selectClass"
+          :class="filterControl"
           :value="query.pic ?? ''"
           @change="setQuery({ pic: selected($event) || undefined })"
         >
@@ -253,10 +267,10 @@ const buttonSecondary =
         </select>
       </div>
       <div class="min-w-0">
-        <label for="archive-division" class="text-sm font-medium">Divisi</label>
+        <label for="archive-division" class="sr-only">Divisi</label>
         <select
           id="archive-division"
-          :class="selectClass"
+          :class="filterControl"
           :value="query.division ?? ''"
           @change="setQuery({ division: Number(selected($event)) || undefined })"
         >
@@ -267,10 +281,10 @@ const buttonSecondary =
         </select>
       </div>
       <div class="min-w-0">
-        <label for="archive-label" class="text-sm font-medium">Label</label>
+        <label for="archive-label" class="sr-only">Label</label>
         <select
           id="archive-label"
-          :class="selectClass"
+          :class="filterControl"
           :value="query.label ?? ''"
           @change="setQuery({ label: Number(selected($event)) || undefined })"
         >
@@ -281,10 +295,10 @@ const buttonSecondary =
         </select>
       </div>
       <div class="min-w-0">
-        <label for="archive-urgency" class="text-sm font-medium">Urgency</label>
+        <label for="archive-urgency" class="sr-only">Urgency</label>
         <select
           id="archive-urgency"
-          :class="selectClass"
+          :class="filterControl"
           :value="query.urgency ?? ''"
           @change="setQuery({ urgency: (selected($event) || undefined) as Urgency | undefined })"
         >
@@ -292,43 +306,40 @@ const buttonSecondary =
           <option v-for="u in [...urgencies].reverse()" :key="u" :value="u">{{ urgencyLabel[u] }}</option>
         </select>
       </div>
-      <div class="min-w-0">
-        <label for="archive-from" class="text-sm font-medium">Selesai dari</label>
+      <div :class="inlineLabel">
+        <label for="archive-from">Selesai dari</label>
         <input
           id="archive-from"
           type="date"
-          :class="selectClass"
+          :class="inlineControl"
           :value="query.from ?? ''"
           :max="query.to"
           @change="setQuery({ from: selected($event) || undefined })"
         />
       </div>
-      <div class="min-w-0">
-        <label for="archive-to" class="text-sm font-medium">Selesai sampai</label>
+      <div :class="inlineLabel">
+        <label for="archive-to">Selesai sampai</label>
         <input
           id="archive-to"
           type="date"
-          :class="selectClass"
+          :class="inlineControl"
           :value="query.to ?? ''"
           :min="query.from"
           @change="setQuery({ to: selected($event) || undefined })"
         />
       </div>
-      <div class="min-w-0">
-        <label for="archive-sort" class="text-sm font-medium">Urutkan</label>
+      <div :class="inlineLabel">
+        <label for="archive-sort">Urutkan</label>
         <select
           id="archive-sort"
-          :class="selectClass"
+          :class="inlineControl"
           :value="query.sort ?? 'newest'"
           @change="setQuery({ sort: selected($event) as ArchiveSort })"
         >
           <option v-for="s in sortOptions" :key="s.value" :value="s.value">{{ s.label }}</option>
         </select>
       </div>
-      <div v-if="filtered">
-        <button type="button" :class="buttonSecondary" @click="clearFilters">Hapus filter</button>
-      </div>
-    </div>
+    </FilterToolbar>
 
     <div aria-live="polite">
       <Transition name="notice">
