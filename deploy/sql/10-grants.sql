@@ -11,6 +11,7 @@ REVOKE DELETE ON ALL TABLES IN SCHEMA public FROM nvm_internal_app;
 GRANT DELETE ON
   task_subtasks,      -- DeleteSubtasks
   subtask_assignees,  -- RemoveSubtaskAssignees (juga lewat ON DELETE CASCADE)
+  task_assignees,     -- RemoveTaskAssignees saat Manajer mengganti PIC task (revisi 6)
   task_labels,        -- DeleteTaskLabels
   user_sessions,      -- job maintenance: sesi kedaluwarsa
   audit_logs          -- job maintenance: audit log login lebih dari 1 tahun

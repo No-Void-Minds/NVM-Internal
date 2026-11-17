@@ -107,7 +107,7 @@ docker exec "$PG_CONTAINER" psql -U nvm_internal_migrator -d nvm_internal_prod -
 docker exec "$PG_CONTAINER" rm /tmp/10-grants.sql
 ```
 
-Hasil query terakhir di `10-grants.sql` harus tepat lima tabel: `audit_logs`, `subtask_assignees`, `task_labels`, `task_subtasks`, `user_sessions`.
+Hasil query terakhir di `10-grants.sql` harus tepat enam tabel: `audit_logs`, `subtask_assignees`, `task_assignees`, `task_labels`, `task_subtasks`, `user_sessions`.
 
 Cek bahwa role aplikasi tidak bisa mengubah skema (harus `permission denied`):
 
@@ -265,7 +265,7 @@ git pull
 set -a; source deploy/.env; set +a
 docker run --rm --network "$PG_NETWORK" -v "$PWD/backend/migrations:/migrations:ro" \
   migrate/migrate:v4.18.3 -path=/migrations -database "$MIGRATOR_URL" up
-# Bila ada tabel baru: jalankan lagi 10-grants.sql (langkah 3).
+# Bila ada tabel baru: jalankan lagi 10-grants.sql (langkah 3). Migrasi 000008 menambah task_assignees, jadi wajib.
 docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
 curl -s http://127.0.0.1:8094/api/health
 ```
