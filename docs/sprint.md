@@ -59,7 +59,8 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 11g | Tautan hasil sub task | Sub task punya tautan deliverable; pembuat sub task ikut boleh mencentang |
 | 11h | Acuan dan pratinjau sub task | Tautan acuan diisi saat membuat; berkas sub task bisa dipratinjau |
 | 11i | PIC sub task dari semua akun | Sub task bisa dititipkan ke siapa pun, walau bukan PIC task |
-| 11j | Manajer membagi, bukan menerima | Sub task hanya bisa ditugaskan ke Staf |
+| 11j | Manajer membagi, bukan menerima | Sub task hanya bisa ditugaskan ke Staf (dibatalkan revisi 13) |
+| 11k | Manajer kembali boleh menjadi PIC sub task | Daftar "Dikerjakan" memuat Staf dan Manajer aktif |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -803,6 +804,8 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 
 ## Sprint 11j: Manajer membagi, bukan menerima
 
+**Dibatalkan revisi 13 (Sprint 11k).** Aturan PIC di bawah tidak berlaku lagi; perbaikan bar aksi S11j-03 tetap.
+
 **Tujuan:** revisi 12 Manajer. Sub task adalah pekerjaan yang dibagikan, dan Manajer ada di sisi yang membagi. Jadi Manajer tidak bisa dipilih sebagai PIC sub task, tetapi tetap bisa membuat sub task dan menugaskannya ke orang lain.
 
 - [x] S11j-01 Query `IsSubtaskPICEligible`: kandidat PIC sub task adalah akun aktif berperan Staf saja. Dipakai `setSubtaskPIC`, jadi aturannya berlaku untuk form tambah maupun form Ubah.
@@ -819,6 +822,24 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 **Selesai kalau:** `./scripts/check.sh` lolos dan terbukti di browser: daftar "Dikerjakan" tidak memuat satu pun akun Manajer, Manajer masih bisa menambah sub task dan menugaskannya ke Staf, dan permintaan yang memaksa `pic_id` akun Manajer ditolak dengan pesan "Sub task hanya bisa ditugaskan ke akun Staf yang aktif."
 
 **Hasil:** kode selesai 2026-11-17, `./scripts/check.sh` lolos. Tidak ada migrasi baru. Uji browser menunggu Rifky.
+
+## Sprint 11k: Manajer kembali boleh menjadi PIC sub task
+
+**Tujuan:** revisi 13 Manajer, membatalkan revisi 12. Manajer kembali bisa dipilih sebagai PIC sub task, dan tetap bisa membuat sub task serta menugaskan orang, sama seperti PIC task.
+
+- [x] S11k-01 `setSubtaskPIC` memvalidasi kandidat dengan `GetEligiblePICs` (akun aktif berperan Staf atau Manajer), aturan yang sama dengan PIC task. Query `IsSubtaskPICEligible` dari revisi 12 dihapus. Tidak ada migrasi.
+- [x] S11k-02 Frontend: pilihan "Dikerjakan" kembali memuat Manajer. Saringan peran dihapus, karena `/people` sudah hanya berisi Staf dan Manajer aktif.
+
+**Keputusan:**
+- Kandidat PIC sub task: akun aktif berperan Staf atau Manajer. Admin tetap tidak bisa, sesuai Sprint 11i: Admin mengelola sistem, bukan mengerjakan task.
+- PIC lama yang akunnya sudah nonaktif tetap bertahan saat hanya nama, deskripsi, atau tautan sub task yang diubah. Backend hanya memeriksa kandidat bila `pic_id` berubah, dan form Ubah tetap menampilkan PIC lama itu sebagai pilihan barisnya sendiri karena dia tidak ada di `/people`.
+- Aturan centang tidak berubah (`canToggle`): PIC sub task, pembuatnya, PIC task mana pun untuk sub task tanpa PIC (Sprint 11e), dan Manajer kecuali sub task itu dipegang Manajer lain. Pembuat dicek lebih dulu, jadi Manajer yang membuat sub task tetap boleh mencentangnya walaupun PIC-nya Manajer lain. `can_check` dihitung dari fungsi yang sama.
+- Hak ubah, hapus, tautan hasil, dan berkas sub task tidak berubah: pembuat, PIC sub task, dan Manajer mana pun (Sprint 11e, 11i).
+- Sub task yang selama revisi 12 berlaku ditugaskan ke Staf tidak diubah.
+
+**Selesai kalau:** `./scripts/check.sh` lolos, test sub task Sprint 13 lolos, dan terbukti di browser: daftar "Dikerjakan" memuat Manajer, Manajer A bisa ditugaskan di sub task, Manajer B tidak bisa mencentang sub task itu kecuali dia pembuatnya.
+
+**Hasil:** kode selesai 2026-11-17, `./scripts/check.sh` lolos. Tidak ada migrasi baru. Perlu restart backend.
 
 ## Sprint 12: Persiapan deploy dan migrasi data
 
@@ -986,9 +1007,10 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 10 | 2026-11-17 | Tautan sudah bisa diisi saat sub task dibuat. Sub task punya dua tautan: acuan dari yang menugaskan dan hasil dari yang mengerjakan. Berkas sub task bisa dipratinjau di web | Sprint 11h |
 | 11 | 2026-11-17 | PIC sub task boleh siapa saja yang akunnya aktif, bukan hanya PIC task. Yang membuat sub task tetap PIC task pilihan Manajer | Sprint 11i |
 | 12 | 2026-11-17 | Manajer tidak bisa ditugaskan di sub task. Dia tetap bisa membuat sub task dan menugaskannya ke orang lain | Sprint 11j |
+| 13 | 2026-11-17 | Revisi 12 dibatalkan. Manajer kembali boleh menjadi PIC sub task, dan tetap boleh membuat sub task serta menugaskan orang, sama seperti PIC task | Sprint 11k |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat kedua belas revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat ketiga belas revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

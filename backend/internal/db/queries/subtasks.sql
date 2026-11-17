@@ -102,8 +102,3 @@ DELETE FROM subtask_assignees WHERE subtask_id = @subtask_id;
 DELETE FROM subtask_assignees sa
 USING task_subtasks st
 WHERE sa.subtask_id = st.id AND st.task_id = @task_id AND sa.user_id = ANY(@user_ids::bigint[]);
-
--- name: IsSubtaskPICEligible :one
--- Revisi 12: yang dikerjakan di sub task hanya Staf. Manajer membagi pekerjaan, bukan menerimanya,
--- jadi perannya tidak ikut daftar kandidat walau akunnya aktif.
-SELECT EXISTS (SELECT 1 FROM users WHERE id = @user_id AND is_active AND role = 'staff');

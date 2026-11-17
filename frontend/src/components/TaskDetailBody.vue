@@ -75,16 +75,15 @@ const savingLink = ref(false)
 // dari /people. Sekali per panel: isinya jarang berubah dan dipakai semua baris sub task.
 const people = ref<Person[]>([])
 type PicOption = { id: number; name: string }
-// Manajer tidak ikut: dia membagi pekerjaan di sub task, bukan menerimanya (revisi 12).
+// Isinya Staf dan Manajer aktif, aturan /people sama dengan backend (revisi 13 membatalkan revisi 12).
 // PIC task ditaruh di atas karena merekalah yang paling sering dipilih.
 const picOptions = computed<PicOption[]>(() => {
-  const staf = people.value.filter((p) => p.role === 'staff')
   const picked = new Set((task.value?.assignees ?? []).map((p) => p.id))
-  return [...staf.filter((p) => picked.has(p.id)), ...staf.filter((p) => !picked.has(p.id))]
+  return [...people.value.filter((p) => picked.has(p.id)), ...people.value.filter((p) => !picked.has(p.id))]
 })
 
-// PIC lama yang sekarang tidak memenuhi syarat, misalnya Manajer yang ditugaskan sebelum revisi 12,
-// tetap ditampilkan di barisnya sendiri supaya menyimpan perubahan lain tidak memaksa menggantinya.
+// PIC lama yang akunnya sudah nonaktif tidak ada di /people, jadi ditampilkan di barisnya sendiri supaya
+// mengubah nama sub task tidak memaksa mengganti PIC-nya. Backend tidak memeriksa ulang PIC yang tidak berubah.
 function picOptionsFor(s: TaskSubtask): PicOption[] {
   const cur = s.assignees[0]
   if (!cur || picOptions.value.some((p) => p.id === cur.id)) return picOptions.value
