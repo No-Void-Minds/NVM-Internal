@@ -52,7 +52,7 @@ func (s *Server) writeSubtaskError(c *gin.Context, err error) {
 	case errors.Is(err, task.ErrSubtaskLocked):
 		writeError(c, http.StatusForbidden, CodeForbidden, "Sub task ini urusan orang lain. Yang bisa mengubahnya: pembuatnya, PIC-nya, dan Manajer.")
 	case errors.Is(err, task.ErrForbidden):
-		writeError(c, http.StatusForbidden, CodeForbidden, "Hanya PIC task ini atau Manajer yang bisa menyusun sub task.")
+		writeError(c, http.StatusForbidden, CodeForbidden, "Hanya PIC task ini, Manajer, atau orang yang ditugaskan di sub task itu yang bisa mengubahnya.")
 	default:
 		s.writeTaskError(c, err)
 	}

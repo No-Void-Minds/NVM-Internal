@@ -58,6 +58,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 11f | Isi sub task dan aturan masuk | Sub task punya deskripsi dan lampiran sendiri; password 6, sesi 9 jam |
 | 11g | Tautan hasil sub task | Sub task punya tautan deliverable; pembuat sub task ikut boleh mencentang |
 | 11h | Acuan dan pratinjau sub task | Tautan acuan diisi saat membuat; berkas sub task bisa dipratinjau |
+| 11i | PIC sub task dari semua akun | Sub task bisa dititipkan ke siapa pun, walau bukan PIC task |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -780,6 +781,25 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 
 **Hasil:** kode selesai 2026-11-17, `./scripts/check.sh` lolos. Migrasi `000012` belum dijalankan di dev maupun produksi. Uji browser menunggu Rifky.
 
+## Sprint 11i: PIC sub task dari semua akun
+
+**Tujuan:** revisi 11 Manajer. Pekerjaan satu sub task sering perlu dititipkan ke orang di luar daftar PIC task, misalnya minta tolong satu desain ke divisi lain. Yang menyusun sub task tetap PIC task pilihan Manajer, tetapi yang ditugaskan boleh siapa saja.
+
+- [x] S11i-01 `setSubtaskPIC` memvalidasi kandidat dengan `GetEligiblePICs` (akun aktif berperan Staf atau Manajer), bukan lagi `IsTaskAssignee`.
+- [x] S11i-02 `lockForSubtask` menerima `subtaskID`. Menambah sub task tetap hanya untuk PIC task dan Manajer (`subtaskID` 0), sedangkan mengubah, menghapus, dan mengisi tautan hasil juga terbuka untuk orang yang ditugaskan di sub task itu.
+- [x] S11i-03 Lampiran sub task: `canAttachSubtask` memberi jalan masuk tambahan untuk PIC sub task, supaya yang mengerjakan bisa menaruh dan menghapus berkasnya sendiri.
+- [x] S11i-04 Frontend: pilihan PIC sub task diisi dari `/people` (semua akun aktif), dengan PIC task di urutan atas karena merekalah yang paling sering dipilih.
+
+**Keputusan:**
+- Yang boleh menyusun sub task tidak berubah: PIC task dan Manajer. Kalau orang luar juga boleh menambah sub task, daftar pekerjaan sebuah task bisa bertambah tanpa sepengetahuan siapa pun yang bertanggung jawab atasnya.
+- Orang luar yang ditugaskan tidak ikut menjadi PIC task. Daftar PIC task tetap keputusan Manajer, dan papan, filter PIC, serta divisi task tetap membacanya. Konsekuensinya: task itu tidak muncul di "Task saya" milik orang luar tadi, dan dia menemukannya lewat papan atau tautan langsung. Dicatat di sini supaya Sprint 13 tahu ini memang disengaja, bukan bug.
+- Orang luar yang ditugaskan tetap boleh mencentang sub task-nya (aturan `canToggle` tidak berubah, dia PIC sub task), mengisi tautan hasil, dan mengurus berkas sub task itu. Tanpa itu penugasannya tidak ada gunanya.
+- Kandidatnya akun aktif berperan Staf atau Manajer, aturan yang sama dengan PIC task (`GetEligiblePICs`). Akun Admin tetap di luar, karena Admin mengelola sistem, bukan mengerjakan task.
+
+**Selesai kalau:** `./scripts/check.sh` lolos dan terbukti di browser: PIC task memilih orang yang bukan PIC task sebagai PIC sub task, orang itu bisa membuka task lewat papan, mencentang sub task-nya, mengisi tautan hasil, dan mengunggah berkas, tetapi tidak bisa menambah sub task baru.
+
+**Hasil:** kode selesai 2026-11-17, `./scripts/check.sh` lolos. Tidak ada migrasi baru. Uji browser menunggu Rifky.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -944,9 +964,10 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 8 | 2026-11-17 | Sub task menampilkan pembuat dan PIC-nya, serta punya deskripsi dan lampiran sendiri. Password minimal 6 karakter dan sesi paling lama 9 jam | Sprint 11f |
 | 9 | 2026-11-17 | Sub task punya tautan deliverable sendiri, bukan hanya berkas. Yang boleh mencentang: PIC sub task, yang membuatnya, dan Manajer | Sprint 11g |
 | 10 | 2026-11-17 | Tautan sudah bisa diisi saat sub task dibuat. Sub task punya dua tautan: acuan dari yang menugaskan dan hasil dari yang mengerjakan. Berkas sub task bisa dipratinjau di web | Sprint 11h |
+| 11 | 2026-11-17 | PIC sub task boleh siapa saja yang akunnya aktif, bukan hanya PIC task. Yang membuat sub task tetap PIC task pilihan Manajer | Sprint 11i |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat kesepuluh revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat kesebelas revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

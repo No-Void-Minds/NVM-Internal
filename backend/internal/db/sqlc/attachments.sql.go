@@ -12,7 +12,7 @@ import (
 )
 
 const getAttachment = `-- name: GetAttachment :one
-SELECT a.id::text AS id, a.kind, a.original_name, a.mime_type, a.size_bytes, a.uploaded_at
+SELECT a.id::text AS id, a.kind, a.subtask_id, a.original_name, a.mime_type, a.size_bytes, a.uploaded_at
 FROM task_attachments a
 JOIN tasks t ON t.id = a.task_id
 WHERE a.id = $1::uuid AND a.task_id = $2 AND NOT a.is_deleted AND NOT t.is_deleted
@@ -26,6 +26,7 @@ type GetAttachmentParams struct {
 type GetAttachmentRow struct {
 	ID           string
 	Kind         AttachmentKind
+	SubtaskID    pgtype.Int8
 	OriginalName string
 	MimeType     string
 	SizeBytes    int64
@@ -39,6 +40,7 @@ func (q *Queries) GetAttachment(ctx context.Context, arg GetAttachmentParams) (G
 	err := row.Scan(
 		&i.ID,
 		&i.Kind,
+		&i.SubtaskID,
 		&i.OriginalName,
 		&i.MimeType,
 		&i.SizeBytes,

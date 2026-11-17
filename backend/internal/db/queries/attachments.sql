@@ -18,7 +18,7 @@ ORDER BY a.uploaded_at, a.id;
 
 -- name: GetAttachment :one
 -- Lampiran dari task yang dihapus ikut tersembunyi, sama dengan task-nya.
-SELECT a.id::text AS id, a.kind, a.original_name, a.mime_type, a.size_bytes, a.uploaded_at
+SELECT a.id::text AS id, a.kind, a.subtask_id, a.original_name, a.mime_type, a.size_bytes, a.uploaded_at
 FROM task_attachments a
 JOIN tasks t ON t.id = a.task_id
 WHERE a.id = @id::uuid AND a.task_id = @task_id AND NOT a.is_deleted AND NOT t.is_deleted;

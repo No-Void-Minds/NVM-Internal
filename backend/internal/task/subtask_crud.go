@@ -26,8 +26,9 @@ func subtaskWindowOpen(status Status) bool {
 }
 
 // lockForSubtask mengunci task dan memastikan pelaku boleh menyentuh sub task-nya sama sekali:
-// Manajer, atau Staf yang menjadi PIC task.
-func lockForSubtask(ctx context.Context, q *sqlc.Queries, actor Actor, taskID string) (sqlc.GetTaskForUpdateRow, error) {
+// Manajer, Staf yang menjadi PIC task, atau sejak revisi 11 orang luar yang ditugaskan di sub task itu
+// sendiri (subtaskID 0 berarti menambah sub task baru, dan itu tetap hanya untuk PIC task dan Manajer).
+func lockForSubtask(ctx context.Context, q *sqlc.Queries, actor Actor, taskID string, subtaskID int64) (sqlc.GetTaskForUpdateRow, error) {
 	cur, err := q.GetTaskForUpdate(ctx, taskID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return cur, ErrNotFound
@@ -39,6 +40,12 @@ func lockForSubtask(ctx context.Context, q *sqlc.Queries, actor Actor, taskID st
 	if err != nil {
 		return cur, err
 	}
+	if !ok && subtaskID != 0 {
+		ok, err = q.IsSubtaskAssignee(ctx, sqlc.IsSubtaskAssigneeParams{SubtaskID: subtaskID, UserID: actor.ID})
+		if err != nil {
+			return cur, err
+		}
+	}
 	if !ok {
 		return cur, ErrForbidden
 	}
@@ -48,16 +55,16 @@ func lockForSubtask(ctx context.Context, q *sqlc.Queries, actor Actor, taskID st
 	return cur, nil
 }
 
-// setSubtaskPIC memasang atau melepas PIC sub task. Kandidatnya dibatasi PIC task supaya pekerjaan tidak
-// bisa dilempar ke orang yang tidak dipilih Manajer di task ini.
+// setSubtaskPIC memasang atau melepas PIC sub task. Sejak revisi 11 kandidatnya semua akun aktif, bukan
+// hanya PIC task: pekerjaan sering perlu dititipkan ke orang divisi lain tanpa menjadikannya PIC task.
 func setSubtaskPIC(ctx context.Context, q *sqlc.Queries, actor Actor, taskID string, subtaskID int64, picID int64) error {
 	if picID != 0 {
-		ok, err := q.IsTaskAssignee(ctx, sqlc.IsTaskAssigneeParams{TaskID: taskID, UserID: picID})
+		rows, err := q.GetEligiblePICs(ctx, []int64{picID})
 		if err != nil {
 			return err
 		}
-		if !ok {
-			return apperr.Invalid("PIC sub task harus salah satu PIC task ini.")
+		if len(rows) == 0 {
+			return apperr.Invalid("PIC sub task harus akun aktif.")
 		}
 	}
 	if err := q.ClearSubtaskAssignees(ctx, subtaskID); err != nil {
@@ -120,7 +127,7 @@ func (s *Service) AddSubtask(ctx context.Context, actor Actor, taskID string, in
 	var id int64
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := sqlc.New(tx)
-		if _, err := lockForSubtask(ctx, q, actor, taskID); err != nil {
+		if _, err := lockForSubtask(ctx, q, actor, taskID, 0); err != nil {
 			return err
 		}
 		slot, err := q.SubtaskSlot(ctx, taskID)
@@ -184,7 +191,7 @@ func (s *Service) UpdateSubtask(ctx context.Context, actor Actor, taskID string,
 	}
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := sqlc.New(tx)
-		if _, err := lockForSubtask(ctx, q, actor, taskID); err != nil {
+		if _, err := lockForSubtask(ctx, q, actor, taskID, subtaskID); err != nil {
 			return err
 		}
 		st, err := editableSubtask(ctx, q, actor, taskID, subtaskID)
@@ -232,7 +239,7 @@ func (s *Service) UpdateSubtask(ctx context.Context, actor Actor, taskID string,
 func (s *Service) DeleteSubtask(ctx context.Context, actor Actor, taskID string, subtaskID int64) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := sqlc.New(tx)
-		if _, err := lockForSubtask(ctx, q, actor, taskID); err != nil {
+		if _, err := lockForSubtask(ctx, q, actor, taskID, subtaskID); err != nil {
 			return err
 		}
 		st, err := editableSubtask(ctx, q, actor, taskID, subtaskID)

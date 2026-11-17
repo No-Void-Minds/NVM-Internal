@@ -66,6 +66,16 @@ func canAttach(ctx context.Context, q *sqlc.Queries, actor Actor, id string, kin
 
 // CheckUpload dipanggil sebelum isi berkas dibaca, supaya unggahan yang pasti ditolak tidak sempat mengirim
 // 50 MB lewat jaringan dan tidak menyentuh disk.
+// canAttachSubtask menambahkan satu jalan masuk di atas canAttach: orang yang ditugaskan di sub task itu
+// boleh menaruh dan menghapus berkasnya walau dia bukan PIC task (revisi 11).
+func canAttachSubtask(ctx context.Context, q *sqlc.Queries, actor Actor, taskID string, kind AttachmentKind, subtaskID int64) (bool, error) {
+	ok, err := canAttach(ctx, q, actor, taskID, kind)
+	if err != nil || ok || subtaskID == 0 {
+		return ok, err
+	}
+	return q.IsSubtaskAssignee(ctx, sqlc.IsSubtaskAssigneeParams{SubtaskID: subtaskID, UserID: actor.ID})
+}
+
 func (a *Attachments) CheckUpload(ctx context.Context, actor Actor, taskID string, kind AttachmentKind) error {
 	q := sqlc.New(a.pool)
 	active, err := q.TaskIsActive(ctx, taskID)
@@ -132,7 +142,7 @@ func (a *Attachments) Upload(ctx context.Context, actor Actor, taskID string, ki
 		} else if err != nil {
 			return err
 		}
-		ok, err := canAttach(ctx, q, actor, taskID, kind)
+		ok, err := canAttachSubtask(ctx, q, actor, taskID, kind, subtaskID)
 		if err != nil {
 			return err
 		}
@@ -239,7 +249,7 @@ func (a *Attachments) Delete(ctx context.Context, actor Actor, taskID, attachmen
 		if err != nil {
 			return err
 		}
-		ok, err := canAttach(ctx, q, actor, taskID, AttachmentKind(row.Kind))
+		ok, err := canAttachSubtask(ctx, q, actor, taskID, AttachmentKind(row.Kind), row.SubtaskID.Int64)
 		if err != nil {
 			return err
 		}

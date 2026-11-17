@@ -25,6 +25,7 @@ import { formatDay, isOverdue, statusClass, statusLabel, type TaskStatus } from 
 import AttachmentSection from './AttachmentSection.vue'
 import UrgencyLabel from './UrgencyLabel.vue'
 import UserAvatar from './UserAvatar.vue'
+import { listPeople, type Person } from '../api/board'
 import { readyBlock } from '../utils/subtaskGate'
 
 // wide dipakai halaman penuh /task/:id; tanpa wide isinya satu kolom untuk panel samping.
@@ -70,6 +71,16 @@ const editRef = ref('')
 // diperbarui: satu sub task bisa berganti tautan hasil beberapa kali sampai disetujui.
 const resultLink = ref('')
 const savingLink = ref(false)
+// Calon PIC sub task adalah semua akun aktif, bukan hanya PIC task (revisi 11), jadi daftarnya diambil
+// dari /people. Sekali per panel: isinya jarang berubah dan dipakai semua baris sub task.
+const people = ref<Person[]>([])
+const picOptions = computed(() => {
+  const picked = task.value?.assignees ?? []
+  if (people.value.length === 0) return picked
+  // PIC task ditaruh di atas karena merekalah yang paling sering dipilih.
+  const ids = new Set(picked.map((p) => p.id))
+  return [...picked, ...people.value.filter((p) => !ids.has(p.id))]
+})
 // Hanya satu sub task terbuka sekaligus: isinya (deskripsi dan berkas) panjang, dan dua kartu terbuka
 // berdampingan membuat daftar sulit dibaca.
 const openSub = ref<number | null>(null)
@@ -113,7 +124,17 @@ watch(
     newDesc.value = ''
     newLink.value = ''
     openSub.value = null
-    if (id) void load()
+    if (id) {
+      void load()
+      if (people.value.length === 0) {
+        void listPeople()
+          .then((rows) => {
+            people.value = rows
+          })
+          // Gagal memuat daftar orang tidak boleh menghalangi detail: pilihan PIC jatuh ke PIC task saja.
+          .catch(() => {})
+      }
+    }
   },
   { immediate: true },
 )
@@ -601,7 +622,7 @@ const buttonSecondary =
                   <label :for="`sub-edit-pic-${s.id}`" class="text-sm text-ink-muted">Dikerjakan</label>
                   <select :id="`sub-edit-pic-${s.id}`" v-model.number="editPic" :class="picSelect">
                     <option :value="0">Belum ditugaskan</option>
-                    <option v-for="p in task.assignees" :key="p.id" :value="p.id">{{ picName(p) }}</option>
+                    <option v-for="p in picOptions" :key="p.id" :value="p.id">{{ picName(p) }}</option>
                   </select>
                   <button type="submit" :class="buttonSecondary" :disabled="!editTitle.trim()">Simpan</button>
                   <button type="button" :class="buttonSecondary" @click="editingSub = null">Batal</button>
@@ -787,7 +808,7 @@ const buttonSecondary =
               <label for="sub-new-pic" class="text-sm text-ink-muted">Dikerjakan</label>
               <select id="sub-new-pic" v-model.number="newPic" :class="picSelect">
                 <option :value="0">Belum ditugaskan</option>
-                <option v-for="p in task.assignees" :key="p.id" :value="p.id">{{ picName(p) }}</option>
+                <option v-for="p in picOptions" :key="p.id" :value="p.id">{{ picName(p) }}</option>
               </select>
               <button type="submit" :class="buttonSecondary" :disabled="addingSub || !newTitle.trim()">
                 {{ addingSub ? 'Menambah...' : 'Tambah' }}
