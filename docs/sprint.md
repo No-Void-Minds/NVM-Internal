@@ -61,6 +61,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 11i | PIC sub task dari semua akun | Sub task bisa dititipkan ke siapa pun, walau bukan PIC task |
 | 11j | Manajer membagi, bukan menerima | Sub task hanya bisa ditugaskan ke Staf (dibatalkan revisi 13) |
 | 11k | Manajer kembali boleh menjadi PIC sub task | Daftar "Dikerjakan" memuat Staf dan Manajer aktif |
+| 11l | Popover profil | Klik foto atau nama orang membuka kartu profil kecil |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -841,6 +842,32 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 
 **Hasil:** kode selesai 2026-11-17, `./scripts/check.sh` lolos. Tidak ada migrasi baru. Perlu restart backend.
 
+## Sprint 11l: Popover profil
+
+**Tujuan:** revisi 14 Manajer. Klik foto atau nama orang di tempat yang menampilkan orang, lalu muncul kartu profil kecil: foto atau inisial, nama, peran, divisi, dan jabatan, dengan satu aksi "Lihat task-nya di papan".
+
+- [x] S11l-01 `GET /api/people/:id` untuk semua pengguna yang login (grup `app`). Respons hanya id, nama, divisi, jabatan, peran, status aktif, dan URL foto. 404 untuk id yang tidak ada.
+- [x] S11l-02 Detail task mengirim `created_by_id` per sub task dan `actor_id` per riwayat; lampiran mengirim `uploaded_by_id`. Tambahan saja, field lama tetap.
+- [x] S11l-03 Komponen bersama `PersonChip` (pemicu) dan `PersonPopover` (satu instance di `App.vue`), dengan state buka di `usePersonPopover`.
+- [x] S11l-04 Pemicu dipasang di bulatan PIC kartu papan, panel dan halaman task (pemohon, PIC task, PIC dan pembuat sub task, pengunggah lampiran task, pelaku riwayat), kolom PIC Arsip, dan pelaku Audit Log.
+- [x] S11l-05 `scripts/e2e/uji13.mjs` punya bagian popover (`E2E_ONLY=popover`), dan pemeriksaan tombol 44 px membaca area klik `::after` pemicu profil.
+
+**Keputusan:**
+- Endpoint baru, bukan memperluas `/people`. `/people` adalah daftar calon PIC (Staf dan Manajer aktif, dengan username untuk filter papan), sedangkan kartu profil juga dibutuhkan untuk Admin dan akun nonaktif yang muncul di riwayat dan audit log. Kolom query dipilih satu per satu, jadi username, password, dan jejak login tidak pernah terbaca.
+- Filter PIC papan memakai username (S4-06), padahal kartu profil sengaja tanpa username. Tautan "Lihat task-nya di papan" mencari username lewat `/people` yang memang sudah dipakai filter itu. Akibatnya aksi hanya muncul untuk calon PIC: Admin tidak punya aksi ini karena memang tidak pernah menjadi PIC.
+- Popover memakai atribut `popover="manual"` dan di-teleport ke `<dialog>` terdekat dari pemicunya. Panel detail adalah modal dialog yang membuat semua di luarnya inert, jadi popover dari panel harus berada di dalam panel; top layer menaruhnya di atas panel. "manual" dipilih supaya klik luar diatur sendiri.
+- Klik di luar popover hanya menutup popover, dan klik itu ditelan: tidak menutup panel, tidak membuka kartu, tidak mengikuti tautan. Escape pertama menutup popover (keydown dibatalkan sehingga panel tidak menerima Escape yang sama), Escape kedua menutup panel.
+- Bulatan PIC di kartu papan tidak lagi bertumpuk. Area klik 44 px per bulatan 32 px butuh jarak 12 px supaya tidak ada bulatan yang tertutup area klik tetangganya. Ukuran bulatan tetap; area klik diperluas lewat `::after`, dan bulatan memakai `z-10` di atas lapisan klik judul. Menekan bulatan tidak memulai drag kartu (`draggable` dengan `dragstart` dibatalkan).
+- Di bawah 640 px kartu menjadi lembar dari bawah dengan scrim dan `env(safe-area-inset-bottom)`. Di atasnya kartu menempel di pemicu, rata kanan bila mepet kanan, dibuka ke atas bila mepet bawah, lalu dijepit 8 px dari tepi layar. Elemen top layer tidak menambah lebar halaman, jadi tidak ada gulir horizontal.
+- Fokus pindah ke tombol Tutup di dalam kartu saat dibuka, dan kembali ke pemicu saat ditutup lewat Tutup, Escape, atau klik luar. Fokus yang pindah ke luar (Tab) menutup popover tanpa menarik fokus kembali.
+- Data dimuat saat dibuka dan disimpan per id selama halaman terbuka. Yang gagal tidak disimpan, supaya "Coba lagi" benar-benar meminta ulang.
+- Animasi hanya fade dan geser 4 px selama 150 ms, mati di `prefers-reduced-motion`. Tidak ada warna atau radius baru.
+- Pembuat sub task tanpa akun tercatat dan pelaku riwayat "Sistem" tetap teks biasa, karena tidak ada orang untuk ditampilkan. Pencentang sub task ("Dicentang ...") tidak termasuk daftar pemicu revisi ini.
+
+**Selesai kalau:** `./scripts/check.sh` lolos, curl `GET /api/people/:id` sebagai Staf, Manajer, dan Admin membalas tanpa field terlarang dan 404 untuk id yang tidak ada, dan `E2E_ONLY=popover node uji13.mjs` lolos di 360 dan 1280 px.
+
+**Hasil:** kode selesai 2026-11-17, `./scripts/check.sh` lolos. Tidak ada migrasi. Perlu restart backend; curl dan e2e popover menunggu backend jalan.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -1008,9 +1035,10 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 11 | 2026-11-17 | PIC sub task boleh siapa saja yang akunnya aktif, bukan hanya PIC task. Yang membuat sub task tetap PIC task pilihan Manajer | Sprint 11i |
 | 12 | 2026-11-17 | Manajer tidak bisa ditugaskan di sub task. Dia tetap bisa membuat sub task dan menugaskannya ke orang lain | Sprint 11j |
 | 13 | 2026-11-17 | Revisi 12 dibatalkan. Manajer kembali boleh menjadi PIC sub task, dan tetap boleh membuat sub task serta menugaskan orang, sama seperti PIC task | Sprint 11k |
+| 14 | 2026-11-17 | Popover profil: klik foto atau nama orang membuka kartu kecil berisi foto, nama, divisi, jabatan, peran, dan tautan ke task-nya di papan | Sprint 11l |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat ketiga belas revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat keempat belas revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

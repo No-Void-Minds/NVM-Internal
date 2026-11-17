@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -81,6 +82,39 @@ func (s *Server) listPeople(c *gin.Context) {
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"people": out})
+}
+
+// personCard adalah isi kartu profil (revisi 14). Sengaja tanpa username dan data akun lain: endpoint ini
+// terbuka untuk semua pengguna yang login, termasuk Staf.
+type personCard struct {
+	ID           int64   `json:"id"`
+	Name         string  `json:"name"`
+	DivisionName string  `json:"division_name"`
+	JobTitle     *string `json:"job_title"`
+	Role         string  `json:"role"`
+	IsActive     bool    `json:"is_active"`
+	AvatarURL    *string `json:"avatar_url"`
+}
+
+func (s *Server) getPerson(c *gin.Context) {
+	id, ok := pathID(c)
+	if !ok {
+		return
+	}
+	p, err := s.accounts.PersonCard(c.Request.Context(), id)
+	if err != nil {
+		s.writeAccountError(c, err)
+		return
+	}
+	var avatar *string
+	if v := avatarID(p.AvatarID); v != nil {
+		u := fmt.Sprintf("/api/users/%d/avatar?v=%s", p.ID, *v)
+		avatar = &u
+	}
+	c.JSON(http.StatusOK, personCard{
+		ID: p.ID, Name: p.Name, DivisionName: p.DivisionName, JobTitle: textPtr(p.JobTitle),
+		Role: string(p.Role), IsActive: p.IsActive, AvatarURL: avatar,
+	})
 }
 
 // queryID membaca parameter angka opsional. Nilai yang bukan angka positif dibalas 400, bukan diabaikan,

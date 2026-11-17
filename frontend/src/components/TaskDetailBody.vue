@@ -24,6 +24,7 @@ import { describeTaskHistory, historyNote } from '../utils/taskHistory'
 import { formatDay, isOverdue, statusClass, statusLabel, type TaskStatus } from '../utils/task'
 import AttachmentSection from './AttachmentSection.vue'
 import UrgencyLabel from './UrgencyLabel.vue'
+import PersonChip from './PersonChip.vue'
 import UserAvatar from './UserAvatar.vue'
 import { listPeople, type Person } from '../api/board'
 import { readyBlock } from '../utils/subtaskGate'
@@ -533,10 +534,19 @@ const buttonSecondary =
         :class="wide ? 'lg:grid-cols-[auto_minmax(0,1fr)_auto_minmax(0,1fr)] lg:gap-x-6' : ''"
       >
         <dt class="text-ink-muted">Diminta oleh</dt>
-        <dd>{{ task.requested_by.name }}</dd>
+        <dd>
+          <PersonChip :user-id="task.requested_by.id" :name="task.requested_by.name">{{
+            task.requested_by.name
+          }}</PersonChip>
+        </dd>
         <dt class="text-ink-muted">PIC</dt>
         <dd>
-          {{ task.assignees.length ? task.assignees.map((a) => a.name).join(', ') : 'Belum ada PIC' }}
+          <ul v-if="task.assignees.length" class="flex flex-wrap gap-x-3 gap-y-1">
+            <li v-for="a in task.assignees" :key="a.id">
+              <PersonChip :user-id="a.id" :name="a.name">{{ a.name }}</PersonChip>
+            </li>
+          </ul>
+          <template v-else>Belum ada PIC</template>
         </dd>
         <dt class="text-ink-muted">Divisi</dt>
         <dd>{{ task.division.name }}</dd>
@@ -673,9 +683,11 @@ const buttonSecondary =
                 </div>
 
                 <div class="mt-1 ml-8 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-                  <span
+                  <PersonChip
                     v-if="s.assignees.length"
-                    class="inline-flex items-center gap-1.5 rounded-chip border border-line bg-surface py-0.5 pr-2 pl-0.5"
+                    :user-id="s.assignees[0].id"
+                    :name="s.assignees[0].name"
+                    class="gap-1.5 border border-line bg-surface py-0.5 pr-2 pl-0.5"
                   >
                     <UserAvatar
                       :user-id="s.assignees[0].id"
@@ -685,14 +697,20 @@ const buttonSecondary =
                       decorative
                     />
                     {{ picName(s.assignees[0]) }}
-                  </span>
+                  </PersonChip>
                   <span
                     v-else
                     class="rounded-chip border border-dashed border-line px-2 py-0.5 text-ink-muted"
                   >
                     Belum ditugaskan
                   </span>
-                  <span v-if="s.created_by" class="text-ink-muted">dari {{ s.created_by }}</span>
+                  <span v-if="s.created_by" class="text-ink-muted"
+                    >dari
+                    <PersonChip v-if="s.created_by_id" :user-id="s.created_by_id" :name="s.created_by">{{
+                      s.created_by
+                    }}</PersonChip
+                    ><template v-else>{{ s.created_by }}</template></span
+                  >
                   <span v-if="s.attachments.length" class="text-ink-muted">
                     {{ s.attachments.length }} berkas
                   </span>
@@ -946,7 +964,15 @@ const buttonSecondary =
           <ol class="mt-2 space-y-3 border-l border-line pl-3 text-sm">
             <li v-for="h in historyShown" :key="h.id">
               <p>
-                <span class="font-medium">{{ h.actor_name || 'Sistem' }}</span> {{ describeTaskHistory(h) }}
+                <PersonChip
+                  v-if="h.actor_id"
+                  :user-id="h.actor_id"
+                  :name="h.actor_name"
+                  class="font-medium"
+                  >{{ h.actor_name }}</PersonChip
+                >
+                <span v-else class="font-medium">{{ h.actor_name || 'Sistem' }}</span>
+                {{ describeTaskHistory(h) }}
               </p>
               <p v-if="historyNote(h)" class="mt-1 border-l-2 border-line pl-2">
                 Catatan: {{ historyNote(h) }}

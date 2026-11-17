@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PersonChip from '../components/PersonChip.vue'
 import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -158,10 +159,6 @@ function goPage(p: number) {
   void router.push({ query: toArchiveRouteQuery({ ...query.value, page: p > 1 ? p : undefined }) })
   // Fokus ke judul daftar supaya pengguna keyboard dan pembaca layar mulai dari awal halaman baru.
   resultsHeading.value?.focus()
-}
-
-function names(t: BoardTask): string {
-  return t.assignees.map((a) => a.name).join(', ') || 'Tanpa PIC'
 }
 
 function canReopen(t: BoardTask): boolean {
@@ -445,7 +442,14 @@ const buttonSecondary =
                   >
                 </div>
               </td>
-              <td class="py-3 px-4">{{ names(t) }}</td>
+              <td class="py-3 px-4">
+                <ul v-if="t.assignees.length" class="flex flex-wrap gap-x-3 gap-y-1">
+                  <li v-for="a in t.assignees" :key="a.id">
+                    <PersonChip :user-id="a.id" :name="a.name">{{ a.name }}</PersonChip>
+                  </li>
+                </ul>
+                <template v-else>Tanpa PIC</template>
+              </td>
               <td class="py-3 px-4">{{ t.division.name }}</td>
               <td class="py-3 px-4"><UrgencyLabel :urgency="t.urgency" /></td>
               <td class="py-3 px-4 whitespace-nowrap">
@@ -477,7 +481,14 @@ const buttonSecondary =
             </h3>
             <dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm">
               <dt class="text-ink-muted">PIC</dt>
-              <dd>{{ names(t) }}</dd>
+              <dd>
+                <ul v-if="t.assignees.length" class="flex flex-wrap gap-x-3 gap-y-1">
+                  <li v-for="a in t.assignees" :key="a.id">
+                    <PersonChip :user-id="a.id" :name="a.name">{{ a.name }}</PersonChip>
+                  </li>
+                </ul>
+                <template v-else>Tanpa PIC</template>
+              </dd>
               <dt class="text-ink-muted">Divisi</dt>
               <dd>{{ t.division.name }}</dd>
               <dt class="text-ink-muted">Selesai</dt>

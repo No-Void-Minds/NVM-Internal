@@ -86,7 +86,7 @@ func (q *Queries) InsertAttachment(ctx context.Context, arg InsertAttachmentPara
 
 const listTaskAttachments = `-- name: ListTaskAttachments :many
 SELECT a.id::text AS id, a.kind, a.subtask_id, a.original_name, a.mime_type, a.size_bytes, a.uploaded_at,
-       u.name AS uploaded_by_name
+       u.name AS uploaded_by_name, a.uploaded_by AS uploaded_by_id
 FROM task_attachments a
 JOIN users u ON u.id = a.uploaded_by
 WHERE a.task_id = $1 AND NOT a.is_deleted
@@ -102,6 +102,7 @@ type ListTaskAttachmentsRow struct {
 	SizeBytes      int64
 	UploadedAt     pgtype.Timestamptz
 	UploadedByName string
+	UploadedByID   int64
 }
 
 func (q *Queries) ListTaskAttachments(ctx context.Context, taskID string) ([]ListTaskAttachmentsRow, error) {
@@ -122,6 +123,7 @@ func (q *Queries) ListTaskAttachments(ctx context.Context, taskID string) ([]Lis
 			&i.SizeBytes,
 			&i.UploadedAt,
 			&i.UploadedByName,
+			&i.UploadedByID,
 		); err != nil {
 			return nil, err
 		}

@@ -10,7 +10,7 @@ RETURNING id::text;
 
 -- name: ListTaskAttachments :many
 SELECT a.id::text AS id, a.kind, a.subtask_id, a.original_name, a.mime_type, a.size_bytes, a.uploaded_at,
-       u.name AS uploaded_by_name
+       u.name AS uploaded_by_name, a.uploaded_by AS uploaded_by_id
 FROM task_attachments a
 JOIN users u ON u.id = a.uploaded_by
 WHERE a.task_id = @task_id AND NOT a.is_deleted

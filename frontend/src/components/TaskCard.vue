@@ -4,6 +4,7 @@ import type { BoardTask } from '../api/board'
 import { formatDay, formatMoment, isOverdue, statusLabel } from '../utils/task'
 import { readyBlock } from '../utils/subtaskGate'
 import UrgencyLabel from './UrgencyLabel.vue'
+import PersonChip from './PersonChip.vue'
 import UserAvatar from './UserAvatar.vue'
 
 const props = defineProps<{ task: BoardTask }>()
@@ -63,15 +64,13 @@ const percent = computed(() =>
     </div>
 
     <div class="mt-3 flex items-center justify-between gap-2 border-t border-line pt-2">
-      <ul class="flex -space-x-1.5">
-        <li
-          v-for="p in task.assignees"
-          :key="p.id"
-          :title="p.name"
-          class="rounded-full border-2 border-surface"
-        >
-          <UserAvatar :user-id="p.id" :name="p.name" :avatar-id="p.avatar_id" size="md" decorative />
-          <span class="sr-only">{{ p.name }}</span>
+      <!-- Bulatan tidak lagi bertumpuk: area klik 44 px tiap bulatan butuh jarak 12 px di antara bulatan 32 px,
+           supaya tidak ada bulatan yang tertutup area klik tetangganya (revisi 14). z-10 di atas lapisan judul. -->
+      <ul class="flex flex-wrap gap-3">
+        <li v-for="p in task.assignees" :key="p.id" :title="p.name">
+          <PersonChip :user-id="p.id" :name="p.name" class="z-10 rounded-full">
+            <UserAvatar :user-id="p.id" :name="p.name" :avatar-id="p.avatar_id" size="md" decorative />
+          </PersonChip>
         </li>
       </ul>
 

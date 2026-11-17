@@ -53,7 +53,7 @@ WHERE tl.task_id = ANY(@task_ids::text[])
 ORDER BY tl.task_id, lower(l.name);
 
 -- name: ListTaskHistory :many
-SELECT a.id, a.occurred_at, a.action, a.old_value, a.new_value, actor.name AS actor_name
+SELECT a.id, a.occurred_at, a.action, a.old_value, a.new_value, actor.name AS actor_name, a.user_id AS actor_id
 FROM audit_logs a
 LEFT JOIN users actor ON actor.id = a.user_id
 WHERE a.entity = 'task' AND a.entity_id = @task_id::text

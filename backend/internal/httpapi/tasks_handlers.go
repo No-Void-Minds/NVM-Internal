@@ -55,19 +55,21 @@ type taskSummary struct {
 }
 
 type subtaskItem struct {
-	ID             int64              `json:"id"`
-	Title          string             `json:"title"`
-	Description    string             `json:"description"`
-	ReferenceURL   string             `json:"reference_url"`
-	DeliverableURL string             `json:"deliverable_url"`
-	CreatedBy      string             `json:"created_by"`
-	Done           bool               `json:"done"`
-	DoneAt         *time.Time         `json:"done_at"`
-	DoneBy         string             `json:"done_by"`
-	CanCheck       bool               `json:"can_check"`
-	CanEdit        bool               `json:"can_edit"`
-	Assignees      []taskPerson       `json:"assignees"`
-	Attachments    []attachmentDetail `json:"attachments"`
+	ID             int64  `json:"id"`
+	Title          string `json:"title"`
+	Description    string `json:"description"`
+	ReferenceURL   string `json:"reference_url"`
+	DeliverableURL string `json:"deliverable_url"`
+	CreatedBy      string `json:"created_by"`
+	// ID orang dikirim supaya nama bisa membuka kartu profil (revisi 14). nil bila akunnya tidak tercatat.
+	CreatedByID *int64             `json:"created_by_id"`
+	Done        bool               `json:"done"`
+	DoneAt      *time.Time         `json:"done_at"`
+	DoneBy      string             `json:"done_by"`
+	CanCheck    bool               `json:"can_check"`
+	CanEdit     bool               `json:"can_edit"`
+	Assignees   []taskPerson       `json:"assignees"`
+	Attachments []attachmentDetail `json:"attachments"`
 }
 
 type historyItem struct {
@@ -75,6 +77,7 @@ type historyItem struct {
 	OccurredAt time.Time       `json:"occurred_at"`
 	Action     string          `json:"action"`
 	ActorName  string          `json:"actor_name"`
+	ActorID    *int64          `json:"actor_id"`
 	OldValue   json.RawMessage `json:"old_value"`
 	NewValue   json.RawMessage `json:"new_value"`
 }
@@ -168,6 +171,7 @@ func (s *Server) getTask(c *gin.Context) {
 			OccurredAt: h.OccurredAt.Time,
 			Action:     h.Action,
 			ActorName:  h.ActorName.String,
+			ActorID:    int8Ptr(h.ActorID),
 			OldValue:   rawJSON(h.OldValue),
 			NewValue:   rawJSON(h.NewValue),
 		})
@@ -185,6 +189,7 @@ func (s *Server) getTask(c *gin.Context) {
 			attachmentItem: attachmentItem{ID: a.ID, Kind: string(a.Kind), Name: a.OriginalName, MIME: a.MimeType, Size: a.SizeBytes},
 			UploadedAt:     a.UploadedAt.Time,
 			UploadedBy:     a.UploadedByName,
+			UploadedByID:   a.UploadedByID,
 		}
 		if a.SubtaskID.Valid {
 			subFiles[a.SubtaskID.Int64] = append(subFiles[a.SubtaskID.Int64], item)
@@ -204,8 +209,8 @@ func (s *Server) getTask(c *gin.Context) {
 		item := subtaskItem{
 			ID: st.ID, Title: st.Title, Description: st.Description,
 			ReferenceURL: st.ReferenceURL, DeliverableURL: st.DeliverableURL,
-			CreatedBy: st.CreatedByName,
-			Done:      st.DoneAt.Valid, DoneAt: timePtr(st.DoneAt), DoneBy: st.DoneBy,
+			CreatedBy: st.CreatedByName, CreatedByID: nonZero(st.CreatedBy),
+			Done: st.DoneAt.Valid, DoneAt: timePtr(st.DoneAt), DoneBy: st.DoneBy,
 			Assignees:   make([]taskPerson, 0, len(st.Assignees)),
 			Attachments: subFiles[st.ID],
 		}
@@ -329,4 +334,18 @@ func timePtr(t pgtype.Timestamptz) *time.Time {
 		return nil
 	}
 	return &t.Time
+}
+
+func int8Ptr(v pgtype.Int8) *int64 {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Int64
+}
+
+func nonZero(id int64) *int64 {
+	if id == 0 {
+		return nil
+	}
+	return &id
 }

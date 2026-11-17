@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PersonChip from './PersonChip.vue'
 import { computed, ref } from 'vue'
 import AttachmentPreview from './AttachmentPreview.vue'
 import BaseDialog from './BaseDialog.vue'
@@ -162,7 +163,9 @@ const buttonSecondary =
         <div class="min-w-0 flex-1">
           <p class="truncate text-sm font-medium" :title="a.name">{{ a.name }}</p>
           <p class="text-sm text-ink-muted">
-            {{ formatBytes(a.size_bytes) }} · {{ a.uploaded_by }}, {{ formatDateTime(a.uploaded_at) }}
+            {{ formatBytes(a.size_bytes) }} ·
+            <PersonChip :user-id="a.uploaded_by_id" :name="a.uploaded_by">{{ a.uploaded_by }}</PersonChip
+            >, {{ formatDateTime(a.uploaded_at) }}
           </p>
         </div>
         <button

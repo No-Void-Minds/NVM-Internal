@@ -80,6 +80,40 @@ func (q *Queries) GetOwnProfileForUpdate(ctx context.Context, id int64) (GetOwnP
 	return i, err
 }
 
+const getPersonCard = `-- name: GetPersonCard :one
+SELECT u.id, u.name, d.name AS division_name, u.job_title, u.role, u.is_active, u.avatar_id
+FROM users u
+JOIN divisions d ON d.id = u.division_id
+WHERE u.id = $1
+`
+
+type GetPersonCardRow struct {
+	ID           int64
+	Name         string
+	DivisionName string
+	JobTitle     pgtype.Text
+	Role         UserRole
+	IsActive     bool
+	AvatarID     pgtype.UUID
+}
+
+// Kartu profil (revisi 14) untuk semua pengguna yang login. Kolom dipilih satu per satu supaya username,
+// password, dan jejak login tidak pernah ikut terbaca.
+func (q *Queries) GetPersonCard(ctx context.Context, id int64) (GetPersonCardRow, error) {
+	row := q.db.QueryRow(ctx, getPersonCard, id)
+	var i GetPersonCardRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.DivisionName,
+		&i.JobTitle,
+		&i.Role,
+		&i.IsActive,
+		&i.AvatarID,
+	)
+	return i, err
+}
+
 const getUserAvatar = `-- name: GetUserAvatar :one
 SELECT avatar_id FROM users WHERE id = $1
 `

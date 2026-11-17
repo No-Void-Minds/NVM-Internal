@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
 import AppShell from './components/AppShell.vue'
+import PersonPopover from './components/PersonPopover.vue'
 
 const route = useRoute()
 const authLayout = computed(() => route.meta.layout === 'auth')
@@ -11,5 +12,6 @@ const authLayout = computed(() => route.meta.layout === 'auth')
   <RouterView v-if="authLayout" />
   <AppShell v-else>
     <RouterView />
+    <PersonPopover />
   </AppShell>
 </template>

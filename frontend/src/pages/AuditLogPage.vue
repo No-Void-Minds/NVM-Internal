@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PersonChip from '../components/PersonChip.vue'
 import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import UserAvatar from '../components/UserAvatar.vue'
@@ -199,17 +200,17 @@ const pagerButton =
           <tr v-for="e in entries" :key="e.id" class="border-b border-line align-top last:border-b-0">
             <td class="px-4 py-3 whitespace-nowrap text-ink-muted">{{ formatDateTime(e.occurred_at) }}</td>
             <td class="px-4 py-3">
-              <span class="flex items-center gap-2">
+              <PersonChip v-if="e.actor" :user-id="Number(e.actor.id)" :name="e.actor.name">
                 <UserAvatar
-                  v-if="e.actor"
                   :user-id="Number(e.actor.id)"
                   :name="e.actor.name"
                   :avatar-id="e.actor.avatar_id"
                   size="sm"
                   decorative
                 />
-                {{ actorName(e) }}
-              </span>
+                {{ e.actor.name }}
+              </PersonChip>
+              <template v-else>{{ actorName(e) }}</template>
             </td>
             <td class="px-4 py-3"><IdText :text="describeAudit(e, divisionName)" /></td>
             <td class="px-4 py-3 text-ink-muted">{{ e.ip || '-' }}</td>
@@ -220,16 +221,18 @@ const pagerButton =
       <ul class="mt-4 space-y-3 lg:hidden">
         <li v-for="e in entries" :key="e.id" class="rounded-card border border-line bg-surface p-4">
           <p class="text-sm text-ink-muted">{{ formatDateTime(e.occurred_at) }}</p>
-          <p class="mt-1 flex items-center gap-2 font-medium">
-            <UserAvatar
-              v-if="e.actor"
-              :user-id="Number(e.actor.id)"
-              :name="e.actor.name"
-              :avatar-id="e.actor.avatar_id"
-              size="sm"
-              decorative
-            />
-            {{ actorName(e) }}
+          <p class="mt-1 font-medium">
+            <PersonChip v-if="e.actor" :user-id="Number(e.actor.id)" :name="e.actor.name">
+              <UserAvatar
+                :user-id="Number(e.actor.id)"
+                :name="e.actor.name"
+                :avatar-id="e.actor.avatar_id"
+                size="sm"
+                decorative
+              />
+              {{ e.actor.name }}
+            </PersonChip>
+            <template v-else>{{ actorName(e) }}</template>
           </p>
           <p class="mt-1 break-words"><IdText :text="describeAudit(e, divisionName)" /></p>
           <p v-if="e.ip" class="mt-1 text-sm text-ink-muted">IP {{ e.ip }}</p>

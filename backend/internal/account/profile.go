@@ -218,3 +218,13 @@ func newUUID() (pgtype.UUID, error) {
 	b[8] = (b[8] & 0x3f) | 0x80
 	return pgtype.UUID{Bytes: b, Valid: true}, nil
 }
+
+// PersonCard mengambil isi kartu profil satu akun. Admin dan akun nonaktif ikut, karena mereka bisa muncul
+// sebagai pelaku di riwayat dan audit log.
+func (s *Service) PersonCard(ctx context.Context, id int64) (sqlc.GetPersonCardRow, error) {
+	p, err := sqlc.New(s.pool).GetPersonCard(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return p, ErrNotFound
+	}
+	return p, err
+}

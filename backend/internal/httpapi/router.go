@@ -120,6 +120,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	app.GET("/board", s.board)
 	app.GET("/archive", s.archive)
 	app.GET("/people", s.listPeople)
+	app.GET("/people/:id", s.getPerson)
 	app.GET("/tasks/:id", s.getTask)
 	app.POST("/tasks", requireRole(sqlc.UserRoleManager), s.createTask)
 	managerOnly := requireRole(sqlc.UserRoleManager)

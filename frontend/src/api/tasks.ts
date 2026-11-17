@@ -12,6 +12,7 @@ export type TaskSubtask = {
   reference_url: string
   deliverable_url: string
   created_by: string
+  created_by_id: number | null
   done: boolean
   done_at: string | null
   done_by: string
@@ -55,6 +56,7 @@ export type TaskHistoryItem = {
   occurred_at: string
   action: string
   actor_name: string
+  actor_id: number | null
   old_value: Record<string, unknown> | null
   new_value: Record<string, unknown> | null
 }

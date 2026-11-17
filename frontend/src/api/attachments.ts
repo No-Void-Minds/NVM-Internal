@@ -10,6 +10,7 @@ export type TaskAttachment = {
   size_bytes: number
   uploaded_at: string
   uploaded_by: string
+  uploaded_by_id: number
 }
 
 export type UploadHandle = { promise: Promise<TaskAttachment>; abort: () => void }

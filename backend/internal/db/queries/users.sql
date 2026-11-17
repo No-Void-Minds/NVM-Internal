@@ -71,3 +71,11 @@ WHERE id = @id;
 
 -- name: GetUserAvatar :one
 SELECT avatar_id FROM users WHERE id = @id;
+
+-- name: GetPersonCard :one
+-- Kartu profil (revisi 14) untuk semua pengguna yang login. Kolom dipilih satu per satu supaya username,
+-- password, dan jejak login tidak pernah ikut terbaca.
+SELECT u.id, u.name, d.name AS division_name, u.job_title, u.role, u.is_active, u.avatar_id
+FROM users u
+JOIN divisions d ON d.id = u.division_id
+WHERE u.id = @id;

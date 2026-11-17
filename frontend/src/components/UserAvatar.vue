@@ -8,21 +8,26 @@ const props = withDefaults(
     userId: number
     name: string
     avatarId?: string | null
+    // URL foto yang sudah jadi (kartu profil menerimanya dari server); dipakai bila avatarId tidak ada.
+    src?: string | null
     size?: 'sm' | 'md' | 'lg' | 'xl'
     // true bila nama sudah tertulis di sebelahnya, supaya pembaca layar tidak membacanya dua kali.
     decorative?: boolean
   }>(),
-  { avatarId: null, size: 'md', decorative: false },
+  { avatarId: null, src: null, size: 'md', decorative: false },
 )
 
 // Foto yang gagal dimuat (berkas hilang, jaringan putus) kembali ke inisial, bukan ikon gambar rusak.
 const failed = ref(false)
 watch(
-  () => props.avatarId,
+  () => [props.avatarId, props.src],
   () => (failed.value = false),
 )
 
-const src = computed(() => (props.avatarId && !failed.value ? avatarUrl(props.userId, props.avatarId) : null))
+const src = computed(() => {
+  if (failed.value) return null
+  return props.avatarId ? avatarUrl(props.userId, props.avatarId) : props.src
+})
 
 const sizeClass = {
   sm: 'size-7 text-xs',

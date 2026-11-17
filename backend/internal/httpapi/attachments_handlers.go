@@ -24,8 +24,9 @@ type attachmentItem struct {
 
 type attachmentDetail struct {
 	attachmentItem
-	UploadedAt time.Time `json:"uploaded_at"`
-	UploadedBy string    `json:"uploaded_by"`
+	UploadedAt   time.Time `json:"uploaded_at"`
+	UploadedBy   string    `json:"uploaded_by"`
+	UploadedByID int64     `json:"uploaded_by_id"`
 }
 
 // attachmentID membaca :attachmentId. ID yang bukan UUID diperlakukan sama dengan lampiran yang tidak ada.

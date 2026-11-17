@@ -488,7 +488,7 @@ func (q *Queries) ListTaskAssignees(ctx context.Context, taskIds []string) ([]Li
 }
 
 const listTaskHistory = `-- name: ListTaskHistory :many
-SELECT a.id, a.occurred_at, a.action, a.old_value, a.new_value, actor.name AS actor_name
+SELECT a.id, a.occurred_at, a.action, a.old_value, a.new_value, actor.name AS actor_name, a.user_id AS actor_id
 FROM audit_logs a
 LEFT JOIN users actor ON actor.id = a.user_id
 WHERE a.entity = 'task' AND a.entity_id = $1::text
@@ -502,6 +502,7 @@ type ListTaskHistoryRow struct {
 	OldValue   []byte
 	NewValue   []byte
 	ActorName  pgtype.Text
+	ActorID    pgtype.Int8
 }
 
 func (q *Queries) ListTaskHistory(ctx context.Context, taskID string) ([]ListTaskHistoryRow, error) {
@@ -520,6 +521,7 @@ func (q *Queries) ListTaskHistory(ctx context.Context, taskID string) ([]ListTas
 			&i.OldValue,
 			&i.NewValue,
 			&i.ActorName,
+			&i.ActorID,
 		); err != nil {
 			return nil, err
 		}
