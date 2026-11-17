@@ -681,9 +681,11 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 - Kejadian audit baru `task_pics_changed`. `subtask_assignees_changed` tidak dihasilkan lagi, tetapi teksnya dipertahankan di frontend untuk riwayat lama.
 - Task sekarang selalu punya PIC, jadi catatan Sprint 7 "task tanpa sub task berarti tanpa PIC" tidak berlaku lagi.
 
+- Pratinjau lampiran mengambil berkas sebagai blob, jadi CSP Nginx produksi perlu `blob:` di `img-src` dan `frame-src`. Ketahuan di produksi, bukan di dev: server Vite tidak memasang CSP, jadi pratinjau jalan di dev dan gambar gagal dimuat di `novoidminds.xyz`. Blob hanya bisa dibuat origin sendiri, dan iframe PDF tetap `sandbox="allow-scripts"` tanpa `allow-same-origin`.
+
 **Selesai kalau:** `./scripts/check.sh` lolos dan alurnya terbukti lewat curl: Manajer membuat task dengan PIC Staf tanpa sub task, Staf itu menambah sub task sendiri lalu mencentangnya, Staf lain ditolak, dan sub task buatan Manajer bisa dicentang PIC.
 
-**Hasil:** kode selesai 2026-11-17, `./scripts/check.sh` lolos. Migrasi `000008` belum dijalankan di dev maupun produksi. Uji curl dan uji browser menunggu Rifky.
+**Hasil:** kode selesai 2026-11-17, `./scripts/check.sh` lolos. Migrasi `000008` dijalankan di dev dan di produksi 2026-11-17, grants diulang (enam tabel, `task_assignees` masuk), image dibangun ulang, `/api/health` balas `ok`. Uji curl dan uji browser menunggu Rifky. Pratinjau lampiran gagal di produksi karena CSP, diperbaiki di hari yang sama dan perlu build frontend sekali lagi.
 
 ## Sprint 12: Persiapan deploy dan migrasi data
 
