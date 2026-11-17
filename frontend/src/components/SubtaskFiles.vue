@@ -1,0 +1,138 @@
+<script setup lang="ts">
+import { ref } from 'vue'
+import { ApiError } from '../api/client'
+import { attachmentUrl, deleteAttachment, uploadAttachment, type TaskAttachment } from '../api/attachments'
+import { acceptAttr, formatBytes, precheck } from '../utils/attachment'
+
+// Lampiran sub task sengaja lebih ringkas daripada AttachmentSection milik task induk: di dalam kartu
+// sub task tidak ada ruang untuk dropzone besar, dan isinya biasanya satu atau dua berkas.
+const props = defineProps<{
+  taskId: string
+  subtaskId: number
+  items: TaskAttachment[]
+  canManage: boolean
+}>()
+const emit = defineEmits<{ changed: [message: string] }>()
+
+const picker = ref<HTMLInputElement | null>(null)
+const busy = ref(false)
+const error = ref('')
+
+function messageOf(err: unknown): string {
+  return err instanceof ApiError ? err.message : 'Terjadi kesalahan yang tidak terduga. Coba lagi.'
+}
+
+async function onPick(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || busy.value) return
+  const bad = precheck(file)
+  if (bad) {
+    error.value = bad
+    return
+  }
+  busy.value = true
+  error.value = ''
+  try {
+    await uploadAttachment(props.taskId, 'deliverable', file, () => {}, props.subtaskId).promise
+    emit('changed', `${file.name} diunggah.`)
+  } catch (err) {
+    error.value = messageOf(err)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function remove(a: TaskAttachment) {
+  if (busy.value) return
+  busy.value = true
+  error.value = ''
+  try {
+    await deleteAttachment(props.taskId, a.id)
+    emit('changed', `${a.name} dihapus.`)
+  } catch (err) {
+    error.value = messageOf(err)
+  } finally {
+    busy.value = false
+  }
+}
+
+const iconButton =
+  'inline-flex size-11 shrink-0 items-center justify-center rounded-card text-ink-muted hover:bg-canvas hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark'
+</script>
+
+<template>
+  <div>
+    <ul v-if="items.length" class="space-y-1">
+      <li
+        v-for="a in items"
+        :key="a.id"
+        class="flex items-center gap-2 rounded-card border border-line bg-surface py-1 pr-1 pl-3"
+      >
+        <span class="min-w-0 flex-1 truncate text-sm" :title="a.name">{{ a.name }}</span>
+        <span class="shrink-0 text-sm text-ink-muted">{{ formatBytes(a.size_bytes) }}</span>
+        <a :href="attachmentUrl(taskId, a.id)" :class="iconButton" :aria-label="`Unduh ${a.name}`">
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            class="size-5"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.75"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M12 4v12M7 11l5 5 5-5M5 20h14" />
+          </svg>
+        </a>
+        <button
+          v-if="canManage"
+          type="button"
+          :class="iconButton"
+          class="hover:text-urgent"
+          :disabled="busy"
+          :aria-label="`Hapus ${a.name}`"
+          @click="remove(a)"
+        >
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            class="size-5"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.75"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12" />
+          </svg>
+        </button>
+      </li>
+    </ul>
+    <p v-else class="text-sm text-ink-muted">Belum ada berkas.</p>
+
+    <div v-if="canManage" class="mt-2">
+      <input
+        ref="picker"
+        type="file"
+        class="sr-only"
+        :accept="acceptAttr"
+        :disabled="busy"
+        @change="onPick"
+      />
+      <button
+        type="button"
+        class="inline-flex min-h-11 items-center rounded-card border border-line px-3 text-sm font-medium hover:bg-canvas disabled:opacity-60"
+        :disabled="busy"
+        @click="picker?.click()"
+      >
+        {{ busy ? 'Mengunggah...' : 'Tambah berkas' }}
+      </button>
+    </div>
+
+    <p v-if="error" role="alert" class="mt-2 rounded-card bg-danger-bg p-2 text-sm text-danger">
+      {{ error }}
+    </p>
+  </div>
+</template>

@@ -110,7 +110,7 @@ router.afterEach((to) => {
   document.title = to.meta.title ? `${to.meta.title} | NVM Internal` : 'NVM Internal'
 })
 
-// Sesi habis di tengah pemakaian (idle 30 menit, logout di perangkat lain, akun dinonaktifkan).
+// Sesi habis di tengah pemakaian (umur sesi 9 jam, logout di perangkat lain, akun dinonaktifkan).
 setUnauthorizedHandler(() => {
   const session = useSessionStore()
   if (!session.user) return

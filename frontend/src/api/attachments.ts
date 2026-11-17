@@ -17,15 +17,20 @@ export type UploadHandle = { promise: Promise<TaskAttachment>; abort: () => void
 type UploadBody = { attachment?: TaskAttachment; error?: { code?: string; message?: string } } | null
 
 // XMLHttpRequest dipakai karena fetch tidak bisa melaporkan progres unggahan (S5-07).
+// subtaskId berisi berarti berkasnya menempel di sub task itu, bukan di task induk (revisi 8).
 export function uploadAttachment(
   taskId: string,
   kind: AttachmentKind,
   file: File,
   onProgress: (fraction: number) => void,
+  subtaskId?: number,
 ): UploadHandle {
   const xhr = new XMLHttpRequest()
+  const url = subtaskId
+    ? `/api/tasks/${taskId}/subtasks/${subtaskId}/attachments`
+    : `/api/tasks/${taskId}/attachments?kind=${kind}`
   const promise = new Promise<TaskAttachment>((resolve, reject) => {
-    xhr.open('POST', `/api/tasks/${taskId}/attachments?kind=${kind}`)
+    xhr.open('POST', url)
     xhr.responseType = 'json'
     xhr.setRequestHeader('Accept', 'application/json')
     xhr.upload.onprogress = (e) => {

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import LoadingSkeleton from './LoadingSkeleton.vue'
+import SubtaskFiles from './SubtaskFiles.vue'
 import { computed, ref, watch } from 'vue'
 import BaseDialog from './BaseDialog.vue'
 import { ApiError } from '../api/client'
@@ -9,7 +10,7 @@ import {
   moveTask,
   addSubtask,
   deleteSubtask,
-  renameSubtask,
+  updateSubtask,
   setSubtaskDone,
   setTaskDeliverable,
   setTaskLabels,
@@ -51,12 +52,22 @@ const historyShown = computed(() =>
   historyAll.value ? (task.value?.history ?? []) : (task.value?.history ?? []).slice(0, historyLimit),
 )
 
-// Menyusun sub task di luar form Manajer (revisi 6): PIC menambah pekerjaannya sendiri, dan memperbaiki
-// atau menghapus yang ia buat. Hak per barisnya datang dari server lewat can_edit.
+// Menyusun sub task di luar form Manajer (revisi 7): PIC task membagi pekerjaan, termasuk ke PIC lain
+// di task yang sama. Hak per barisnya datang dari server lewat can_edit.
 const newTitle = ref('')
 const addingSub = ref(false)
 const editingSub = ref<number | null>(null)
 const editTitle = ref('')
+// 0 berarti belum ditugaskan. -1 hanya dipakai sebelum task termuat, supaya pilihan awal bisa diisi
+// sekali dengan nama sendiri tanpa menimpa pilihan yang sudah diubah pengguna.
+const newPic = ref(-1)
+const editPic = ref(0)
+const newDesc = ref('')
+const editDesc = ref('')
+const editLink = ref('')
+// Hanya satu sub task terbuka sekaligus: isinya (deskripsi dan berkas) panjang, dan dua kartu terbuka
+// berdampingan membuat daftar sulit dibaca.
+const openSub = ref<number | null>(null)
 
 // Dideklarasikan di atas karena watch taskId di bawah langsung berjalan (immediate) dan mengisinya.
 const editingLabels = ref(false)
@@ -69,6 +80,11 @@ async function load(quiet = false) {
   try {
     task.value = await getTask(props.taskId)
     loadState.value = 'ready'
+    // Sub task paling sering dibuat untuk diri sendiri, jadi itu pilihan awalnya kalau pelaku PIC task.
+    if (newPic.value === -1) {
+      const me = session.user?.id ?? 0
+      newPic.value = task.value.assignees.some((p) => p.id === me) ? me : 0
+    }
   } catch (err) {
     // Saat memuat ulang diam-diam, isi yang sudah tampil dipertahankan; galatnya cukup diberitahukan.
     if (quiet && task.value) {
@@ -88,6 +104,9 @@ watch(
     historyAll.value = false
     newTitle.value = ''
     editingSub.value = null
+    newPic.value = -1
+    newDesc.value = ''
+    openSub.value = null
     if (id) void load()
   },
   { immediate: true },
@@ -166,8 +185,9 @@ async function submitNewSubtask() {
   addingSub.value = true
   actionError.value = null
   try {
-    await addSubtask(t.id, title)
+    await addSubtask(t.id, title, newDesc.value.trim(), newPic.value === -1 ? 0 : newPic.value)
     newTitle.value = ''
+    newDesc.value = ''
     announce.value = `Sub task "${title}" ditambahkan.`
     await load(true)
   } catch (err) {
@@ -180,21 +200,48 @@ async function submitNewSubtask() {
 function startEdit(s: TaskSubtask) {
   editingSub.value = s.id
   editTitle.value = s.title
+  editDesc.value = s.description
+  editLink.value = s.deliverable_url
+  editPic.value = s.assignees[0]?.id ?? 0
   rowErrors.value = { ...rowErrors.value, [s.id]: '' }
+}
+
+// Berkas sub task memakai endpoint lampiran, jadi detailnya dimuat ulang diam-diam seperti aksi lain.
+async function onSubtaskFiles(message: string) {
+  announce.value = message
+  await load(true)
+}
+
+// Sub task yang jadi urusan pengguna ini: dikerjakan dia, atau dia yang menugaskannya ke orang lain.
+function isMine(s: TaskSubtask): boolean {
+  const me = session.user?.id ?? 0
+  return s.assignees.some((p) => p.id === me)
 }
 
 async function submitEdit(s: TaskSubtask) {
   const t = task.value
   const title = editTitle.value.trim()
   if (!t || !title) return
-  if (title === s.title) {
+  const desc = editDesc.value.trim()
+  const link = editLink.value.trim()
+  if (
+    title === s.title &&
+    desc === s.description &&
+    link === s.deliverable_url &&
+    editPic.value === (s.assignees[0]?.id ?? 0)
+  ) {
     editingSub.value = null
     return
   }
   try {
-    await renameSubtask(t.id, s.id, title)
+    await updateSubtask(t.id, s.id, {
+      title,
+      description: desc,
+      deliverable_url: link,
+      pic_id: editPic.value,
+    })
     editingSub.value = null
-    announce.value = `Nama sub task diubah menjadi "${title}".`
+    announce.value = `Sub task "${title}" disimpan.`
     await load(true)
   } catch (err) {
     rowErrors.value = { ...rowErrors.value, [s.id]: messageOf(err) }
@@ -332,6 +379,18 @@ async function confirmDelete() {
   if (ok) emit('close')
 }
 
+const picSelect =
+  'min-h-11 min-w-0 flex-1 rounded-card border border-line bg-surface px-3 text-sm sm:flex-none'
+const subtaskPercent = computed(() => {
+  const t = task.value
+  return t && t.subtask_total ? Math.round((t.subtask_done / t.subtask_total) * 100) : 0
+})
+
+// Nama di pilihan PIC: akun sendiri ditandai supaya tidak perlu mengingat nama sendiri di daftar.
+function picName(p: { id: number; name: string }): string {
+  return p.id === session.user?.id ? `${p.name} (kamu)` : p.name
+}
+
 const linkButton =
   'inline-flex min-h-11 items-center rounded-card px-2 text-sm font-medium hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark'
 const buttonPrimary =
@@ -354,9 +413,10 @@ const buttonSecondary =
     </button>
   </div>
 
-  <!-- min-h-full: tanpa itu, isi yang pendek membuat bar aksi sticky berhenti di tengah panel,
-       karena elemen sticky tidak bisa turun melewati ujung induknya. -->
-  <div v-else-if="task" class="min-h-full space-y-6">
+  <!-- flex + min-h-full + mt-auto di bar aksi: itu yang mendorong bar ke dasar panel saat isinya pendek.
+       sticky saja tidak cukup, karena sticky hanya menahan saat digulir, tidak memindahkan elemen.
+       gap dipakai, bukan space-y, karena space-y menulis margin-top ke tiap anak dan menimpa mt-auto. -->
+  <div v-else-if="task" class="flex min-h-full flex-col gap-6">
     <div>
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
         <span class="rounded-chip px-2 py-0.5 font-medium" :class="statusClass[task.status]">{{
@@ -427,36 +487,31 @@ const buttonSecondary =
             Sub task hanya bisa dicentang saat task berstatus On Progress.
           </p>
           <p v-else-if="readyReason" class="mt-1 text-sm text-ink-muted">
-            Semua sub task harus tercentang sebelum task bisa ditandai Ready. Yang bisa mencentang: pembuat
-            sub task itu, PIC task mana pun untuk sub task yang ditambahkan Manajer, dan Manajer kecuali untuk
-            sub task milik Manajer lain.
+            Dicentang oleh PIC sub task atau yang menugaskannya. Semua harus tercentang sebelum task bisa
+            Ready.
           </p>
           <p class="sr-only" role="status">{{ announce }}</p>
-          <ol v-if="task.subtasks.length" class="mt-2 divide-y divide-line rounded-card border border-line">
-            <li v-for="(s, i) in task.subtasks" :key="s.id" class="p-3">
-              <label
-                class="flex min-h-11 items-start gap-3 rounded-card has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-mark"
-                :class="s.can_check ? 'cursor-pointer' : 'cursor-default'"
-              >
-                <input
-                  type="checkbox"
-                  class="mt-0.5 size-5 shrink-0 accent-mark"
-                  :checked="s.done"
-                  :disabled="!s.can_check"
-                  :aria-busy="checking === s.id"
-                  @change="toggleSubtask(s, $event)"
-                />
-                <span class="min-w-0 text-sm font-medium break-words">
-                  <span class="text-ink-muted">{{ i + 1 }}.</span> {{ s.title }}
-                </span>
-              </label>
-              <div v-if="s.can_edit && editingSub !== s.id" class="mt-1 ml-8 flex gap-1">
-                <button type="button" :class="linkButton" @click="startEdit(s)">Ubah nama</button>
-                <button type="button" :class="linkButton" class="text-urgent" @click="removeSubtask(s)">
-                  Hapus
-                </button>
-              </div>
-              <form v-if="editingSub === s.id" class="mt-2 ml-8 flex gap-2" @submit.prevent="submitEdit(s)">
+          <div
+            v-if="task.subtask_total > 0"
+            class="mt-2 h-1.5 overflow-hidden rounded-[2px] border border-line bg-canvas"
+            aria-hidden="true"
+          >
+            <div
+              class="h-full bg-mark transition-[width] duration-200"
+              :style="{ width: `${subtaskPercent}%` }"
+            />
+          </div>
+
+          <ol v-if="task.subtasks.length" class="mt-3 space-y-2">
+            <!-- Garis tebal di tepi kiri menandai sub task yang dikerjakan pengguna ini, supaya pekerjaannya
+                 sendiri langsung ketemu di task yang sub task-nya banyak. -->
+            <li
+              v-for="(s, i) in task.subtasks"
+              :key="s.id"
+              class="rounded-card border border-line p-3"
+              :class="isMine(s) ? 'border-l-[3px] border-l-mark bg-canvas' : 'bg-surface'"
+            >
+              <form v-if="editingSub === s.id" class="space-y-2" @submit.prevent="submitEdit(s)">
                 <label :for="`sub-edit-${s.id}`" class="sr-only">Nama sub task {{ i + 1 }}</label>
                 <input
                   :id="`sub-edit-${s.id}`"
@@ -464,39 +519,164 @@ const buttonSecondary =
                   type="text"
                   maxlength="200"
                   autocomplete="off"
-                  class="min-h-11 min-w-0 flex-1 rounded-card border border-line bg-surface px-3 text-sm"
+                  class="min-h-11 w-full rounded-card border border-line bg-surface px-3 text-sm"
                 />
-                <button type="submit" :class="buttonSecondary" :disabled="!editTitle.trim()">Simpan</button>
-                <button type="button" :class="buttonSecondary" @click="editingSub = null">Batal</button>
+                <label :for="`sub-edit-desc-${s.id}`" class="sr-only">Deskripsi sub task {{ i + 1 }}</label>
+                <textarea
+                  :id="`sub-edit-desc-${s.id}`"
+                  v-model="editDesc"
+                  rows="3"
+                  maxlength="2000"
+                  placeholder="Deskripsi (opsional)"
+                  class="w-full rounded-card border border-line bg-surface p-3 text-sm"
+                ></textarea>
+                <label :for="`sub-edit-link-${s.id}`" class="sr-only"
+                  >Tautan hasil sub task {{ i + 1 }}</label
+                >
+                <input
+                  :id="`sub-edit-link-${s.id}`"
+                  v-model="editLink"
+                  type="url"
+                  maxlength="2000"
+                  inputmode="url"
+                  placeholder="Tautan hasil, misalnya Figma atau Drive (opsional)"
+                  class="min-h-11 w-full rounded-card border border-line bg-surface px-3 text-sm"
+                />
+                <div class="flex flex-wrap items-center gap-2">
+                  <label :for="`sub-edit-pic-${s.id}`" class="text-sm text-ink-muted">Dikerjakan</label>
+                  <select :id="`sub-edit-pic-${s.id}`" v-model.number="editPic" :class="picSelect">
+                    <option :value="0">Belum ditugaskan</option>
+                    <option v-for="p in task.assignees" :key="p.id" :value="p.id">{{ picName(p) }}</option>
+                  </select>
+                  <button type="submit" :class="buttonSecondary" :disabled="!editTitle.trim()">Simpan</button>
+                  <button type="button" :class="buttonSecondary" @click="editingSub = null">Batal</button>
+                </div>
               </form>
-              <p v-if="s.done" class="ml-8 text-sm text-ink-muted">
-                Dicentang oleh {{ s.done_by }}{{ s.done_at ? `, ${formatDateTime(s.done_at)}` : '' }}.
-              </p>
+
+              <template v-else>
+                <div class="flex items-start gap-2">
+                  <label
+                    class="flex min-h-11 min-w-0 flex-1 items-start gap-3 rounded-card has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-mark"
+                    :class="s.can_check ? 'cursor-pointer' : 'cursor-default'"
+                  >
+                    <input
+                      type="checkbox"
+                      class="mt-0.5 size-5 shrink-0 accent-mark"
+                      :checked="s.done"
+                      :disabled="!s.can_check"
+                      :aria-busy="checking === s.id"
+                      @change="toggleSubtask(s, $event)"
+                    />
+                    <span
+                      class="min-w-0 text-sm font-medium break-words"
+                      :class="s.done ? 'text-ink-muted' : ''"
+                    >
+                      <span class="text-ink-muted">{{ i + 1 }}.</span> {{ s.title }}
+                    </span>
+                  </label>
+                  <button
+                    type="button"
+                    :class="linkButton"
+                    class="shrink-0"
+                    :aria-expanded="openSub === s.id"
+                    :aria-controls="`sub-detail-${s.id}`"
+                    @click="openSub = openSub === s.id ? null : s.id"
+                  >
+                    {{ openSub === s.id ? 'Tutup' : 'Detail' }}
+                  </button>
+                </div>
+
+                <div class="mt-1 ml-8 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                  <span
+                    v-if="s.assignees.length"
+                    class="inline-flex items-center gap-1.5 rounded-chip border border-line bg-surface py-0.5 pr-2 pl-0.5"
+                  >
+                    <UserAvatar
+                      :user-id="s.assignees[0].id"
+                      :name="s.assignees[0].name"
+                      :avatar-id="s.assignees[0].avatar_id"
+                      size="sm"
+                      decorative
+                    />
+                    {{ picName(s.assignees[0]) }}
+                  </span>
+                  <span
+                    v-else
+                    class="rounded-chip border border-dashed border-line px-2 py-0.5 text-ink-muted"
+                  >
+                    Belum ditugaskan
+                  </span>
+                  <span v-if="s.created_by" class="text-ink-muted">dari {{ s.created_by }}</span>
+                  <span v-if="s.attachments.length" class="text-ink-muted">
+                    {{ s.attachments.length }} berkas
+                  </span>
+                  <span v-if="s.deliverable_url" class="text-ink-muted">1 tautan</span>
+                  <span v-if="s.done" class="text-ink-muted">
+                    Dicentang {{ s.done_by }}{{ s.done_at ? `, ${formatDateTime(s.done_at)}` : '' }}
+                  </span>
+                </div>
+
+                <div v-if="openSub === s.id" :id="`sub-detail-${s.id}`" class="mt-3 ml-8 space-y-3">
+                  <p v-if="s.description" class="text-sm whitespace-pre-line break-words">
+                    {{ s.description }}
+                  </p>
+                  <p v-else class="text-sm text-ink-muted">Belum ada deskripsi.</p>
+
+                  <a
+                    v-if="s.deliverable_url"
+                    :href="s.deliverable_url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="inline-flex min-h-11 max-w-full items-center gap-2 rounded-card border border-line bg-surface px-3 text-sm font-medium hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
+                  >
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      class="size-5 shrink-0"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.75"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
+                    </svg>
+                    <span class="truncate">{{ s.deliverable_url }}</span>
+                  </a>
+
+                  <SubtaskFiles
+                    :task-id="task.id"
+                    :subtask-id="s.id"
+                    :items="s.attachments"
+                    :can-manage="task.can.edit_deliverable"
+                    @changed="onSubtaskFiles"
+                  />
+
+                  <div v-if="s.can_edit" class="flex gap-1">
+                    <button type="button" :class="linkButton" @click="startEdit(s)">Ubah</button>
+                    <button type="button" :class="linkButton" class="text-urgent" @click="removeSubtask(s)">
+                      Hapus
+                    </button>
+                  </div>
+                </div>
+              </template>
+
               <p
                 v-if="rowErrors[s.id]"
                 role="alert"
-                class="mt-1 ml-8 rounded-card bg-danger-bg p-2 text-sm text-danger"
+                class="mt-2 rounded-card bg-danger-bg p-2 text-sm text-danger"
               >
                 {{ rowErrors[s.id] }}
               </p>
-              <p v-if="!s.assignees.length" class="mt-1 ml-8 text-sm text-ink-muted">
-                Ditambahkan Manajer, boleh dicentang PIC task mana pun.
-              </p>
-              <ul v-else class="mt-2 ml-8 flex flex-wrap gap-1">
-                <li
-                  v-for="p in s.assignees"
-                  :key="p.id"
-                  class="inline-flex items-center gap-1.5 rounded-chip border border-line bg-canvas py-0.5 pr-2 pl-0.5 text-sm"
-                >
-                  <UserAvatar :user-id="p.id" :name="p.name" :avatar-id="p.avatar_id" size="sm" decorative />
-                  {{ p.name }}<span v-if="p.id === session.user?.id" class="text-ink-muted"> (kamu)</span>
-                </li>
-              </ul>
             </li>
           </ol>
           <p v-else class="mt-2 text-sm text-ink-muted">Belum ada sub task.</p>
 
-          <form v-if="task.can.add_subtask" class="mt-3 flex gap-2" @submit.prevent="submitNewSubtask">
+          <form
+            v-if="task.can.add_subtask"
+            class="mt-3 space-y-2 rounded-card border border-dashed border-line p-3"
+            @submit.prevent="submitNewSubtask"
+          >
             <label for="sub-new" class="sr-only">Nama sub task baru</label>
             <input
               id="sub-new"
@@ -504,12 +684,28 @@ const buttonSecondary =
               type="text"
               maxlength="200"
               autocomplete="off"
-              placeholder="Sub task yang kamu kerjakan"
-              class="min-h-11 min-w-0 flex-1 rounded-card border border-line bg-surface px-3 text-sm"
+              placeholder="Pekerjaan yang perlu dilakukan"
+              class="min-h-11 w-full rounded-card border border-line bg-surface px-3 text-sm"
             />
-            <button type="submit" :class="buttonSecondary" :disabled="addingSub || !newTitle.trim()">
-              {{ addingSub ? 'Menambah...' : 'Tambah' }}
-            </button>
+            <label for="sub-new-desc" class="sr-only">Deskripsi sub task baru</label>
+            <textarea
+              id="sub-new-desc"
+              v-model="newDesc"
+              rows="2"
+              maxlength="2000"
+              placeholder="Deskripsi (opsional)"
+              class="w-full rounded-card border border-line bg-surface p-3 text-sm"
+            ></textarea>
+            <div class="flex flex-wrap items-center gap-2">
+              <label for="sub-new-pic" class="text-sm text-ink-muted">Dikerjakan</label>
+              <select id="sub-new-pic" v-model.number="newPic" :class="picSelect">
+                <option :value="0">Belum ditugaskan</option>
+                <option v-for="p in task.assignees" :key="p.id" :value="p.id">{{ picName(p) }}</option>
+              </select>
+              <button type="submit" :class="buttonSecondary" :disabled="addingSub || !newTitle.trim()">
+                {{ addingSub ? 'Menambah...' : 'Tambah' }}
+              </button>
+            </div>
           </form>
         </section>
 
@@ -662,11 +858,11 @@ const buttonSecondary =
          gulir mentok bar tidak berhenti menggantung di atas tepi layar. -->
     <div
       v-if="moves.length || task.can.edit || task.can.delete"
-      class="sticky z-10 border-t border-line bg-surface py-3"
+      class="sticky z-10 mt-auto border-t border-line bg-surface py-3"
       :class="
         wide
           ? '-mb-6 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] md:-mb-10 md:bottom-0'
-          : '-mx-5 -mb-4 bottom-0 px-5'
+          : '-mx-5 -mb-4 bottom-[-1rem] px-5'
       "
     >
       <div class="flex w-full flex-wrap justify-end gap-2">

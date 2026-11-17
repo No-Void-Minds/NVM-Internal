@@ -54,6 +54,9 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 11b | Identitas brand NVM | Monokrom NVM dengan aksen krem, mode terang dan gelap, D-DIN, logo resmi |
 | 11c | Satu kerangka tata letak | Top bar dan tepi kiri sama di semua halaman, kepala halaman dan toolbar filter bersama |
 | 11d | PIC task dan sub task mandiri | Manajer memilih PIC di task, PIC menyusun sendiri sub task-nya |
+| 11e | Sub task ditugaskan | PIC membagi sub task ke PIC task lain, satu sub task satu PIC |
+| 11f | Isi sub task dan aturan masuk | Sub task punya deskripsi dan lampiran sendiri; password 6, sesi 9 jam |
+| 11g | Tautan hasil sub task | Sub task punya tautan deliverable; pembuat sub task ikut boleh mencentang |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -687,6 +690,73 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 
 **Hasil:** kode selesai 2026-11-17, `./scripts/check.sh` lolos. Migrasi `000008` dijalankan di dev dan di produksi 2026-11-17, grants diulang (enam tabel, `task_assignees` masuk), image dibangun ulang, `/api/health` balas `ok`. Uji curl dan uji browser menunggu Rifky. Pratinjau lampiran sempat gagal di produksi karena CSP, diperbaiki dan dibangun ulang di hari yang sama; pratinjau gambar terbukti jalan di `novoidminds.xyz`.
 
+## Sprint 11e: Sub task ditugaskan ke PIC lain
+
+**Tujuan:** revisi 7 Manajer. Sub task bentuknya mirip task kecil di dalam task induk: punya nama dan punya satu PIC. PIC task mana pun boleh menyusun sub task dan menugaskannya ke PIC task yang lain, misalnya saat salah satu PIC bertindak sebagai supervisor yang membagi pekerjaan ke timnya.
+
+- [x] S11e-01 Migrasi `000009`: kolom `created_by` di `task_subtasks`. Sejak sekarang pembuat dan yang mengerjakan bisa orang berbeda, jadi keduanya disimpan terpisah. Data lama diisi dari `subtask_assignees.assigned_by`.
+- [x] S11e-02 `POST` dan `PUT /api/tasks/:id/subtasks` menerima `pic_id`. Kandidatnya hanya PIC task ini, divalidasi di backend. `pic_id` 0 berarti belum ditugaskan.
+- [x] S11e-03 Hak ubah nama dan hapus sub task: pembuatnya, PIC-nya, dan Manajer. Dipakai service dan dikirim ke frontend lewat `can_edit`.
+- [x] S11e-04 Manajer melepas seseorang dari PIC task: sub task yang ditugaskan ke dia ikut dilepas, jadi tidak ada sub task yang menunggu orang yang sudah tidak ada di task ini.
+- [x] S11e-05 Frontend: tiap sub task jadi satu kartu berisi centang, nama, dan PIC-nya. Form tambah dan form ubah punya pilihan PIC. Sub task yang dikerjakan pengguna ini ditandai garis di tepi kiri.
+
+**Keputusan:**
+- Satu sub task satu PIC. Kalau pekerjaannya butuh dua orang, dibuat dua sub task, supaya saat belum tercentang selalu jelas siapa yang ditunggu.
+- PIC sub task hanya boleh dipilih dari PIC task. Mau orang lain, Manajer menambahkannya dulu sebagai PIC task. Dengan begitu daftar PIC task tetap menjadi daftar lengkap siapa yang mengerjakan task itu, dan papan serta filter PIC tidak perlu membaca sub task.
+- Sub task boleh dibiarkan tanpa PIC, dan yang begitu boleh dicentang PIC task mana pun. Aturan ini dipertahankan dari revisi 6, karena sub task dari form Manajer memang tidak punya PIC.
+- Yang boleh mengubah nama dan menghapus sub task: pembuatnya, PIC-nya, dan Manajer. PIC boleh menghapus karena pekerjaan yang dibatalkan paling sering diketahui oleh yang mengerjakannya.
+- Form task milik Manajer tetap tanpa pilihan PIC per sub task. Sub task dari form berarti belum ditugaskan, dan penugasannya dilakukan di panel detail. Kalau pilihan PIC ikut masuk ke form, daftar sub task dari form akan menimpa penugasan yang sudah dibuat PIC.
+- Perubahan nama dan perubahan PIC dicatat sebagai satu kejadian `subtask_renamed`, dengan `pic_id` di nilai lama dan barunya. Teks riwayat memilih kalimatnya dari apa yang benar-benar berubah.
+
+**Selesai kalau:** `./scripts/check.sh` lolos dan alurnya terbukti di browser: Manajer memilih tiga PIC, PIC pertama membuat sub task untuk PIC kedua, PIC kedua mencentangnya, PIC ketiga tidak bisa mencentang sub task itu, dan sub task tanpa PIC bisa dicentang siapa pun di antara mereka.
+
+**Hasil:** kode selesai 2026-11-17, `./scripts/check.sh` lolos. Migrasi `000009` belum dijalankan di dev maupun produksi. Uji browser menunggu Rifky.
+
+## Sprint 11f: Isi sub task dan aturan masuk
+
+**Tujuan:** revisi 8 Manajer. Sub task perlu menunjukkan siapa yang membuatnya dan siapa yang mengerjakannya, serta menampung deskripsi dan berkasnya sendiri. Sekalian dua perubahan aturan masuk yang diminta Manajer: panjang minimal password dan umur sesi.
+
+- [x] S11f-01 Migrasi `000010`: kolom `description` di `task_subtasks` dan kolom `subtask_id` di `task_attachments` (dengan index parsial). `subtask_id` NULL berarti lampiran task induk.
+- [x] S11f-02 `POST` dan `PUT` sub task menerima `description` (maksimal 2000 karakter). Detail task mengirim `description` dan `created_by` per sub task.
+- [x] S11f-03 `POST /api/tasks/:id/subtasks/:subtaskId/attachments` untuk lampiran sub task. Berkas task dan berkas sub task dibaca dalam satu query, lalu dipilah dari `subtask_id`.
+- [x] S11f-04 Frontend: kartu sub task menampilkan centang, nama, PIC, dan pembuatnya dalam satu baris ringkas. Deskripsi dan berkas disembunyikan di balik tombol Detail, satu kartu terbuka sekaligus.
+- [x] S11f-05 Password minimal 6 karakter (sebelumnya 12), `auth.SessionMaxAge` 9 jam (sebelumnya 12), dan idle timeout dihapus sehingga umur sesi jadi satu-satunya batas. Panduan tim, runbook, dan job pembersih sesi ikut diperbarui.
+
+**Keputusan:**
+- Lampiran sub task menumpang tabel `task_attachments` dengan `kind` deliverable, bukan jenis baru. Batas ukuran, daftar tipe yang diizinkan, pembersih berkas yatim, dan hak akses sudah berlaku di tabel itu, jadi tidak ada aturan kedua yang bisa menyimpang.
+- Hak unggah dan hapus lampiran sub task sama dengan berkas deliverable task (PIC task dan Manajer), bukan hanya PIC sub task itu. Alasannya, berkas sering diunggah orang yang mereview atau membantu, dan pembatasan yang lebih ketat hanya memindahkan pekerjaan ke Manajer.
+- Menghapus sub task ikut menghapus baris lampirannya lewat `ON DELETE CASCADE`. Berkas di disk dibersihkan job berkas yatim (S12-07), jadi tidak ada berkas yang hilang di tengah transaksi.
+- Hanya satu sub task yang terbuka sekaligus di panel detail. Deskripsi dan daftar berkas membuat kartu tinggi, dan dua kartu terbuka berdampingan membuat daftar sulit dibaca.
+- Form task milik Manajer tetap hanya berisi nama sub task. Deskripsi, PIC, dan berkas diisi di panel detail, supaya daftar dari form tidak menimpa isi yang sudah ditambahkan PIC.
+- Password minimal 6 karakter atas permintaan Manajer. Ini lebih lemah dari sebelumnya untuk sistem yang publik di internet, jadi pengamannya bersandar pada kuncian akun setelah gagal berulang dan batas percobaan login per IP yang sudah ada. Dicatat di sini supaya Sprint 13 menguji kedua pengaman itu, bukan hanya panjang password.
+- Umur sesi 9 jam, kira-kira satu hari kerja, supaya tim tidak diminta login ulang di tengah hari.
+- Idle timeout 30 menit dihapus atas permintaan Manajer, jadi umur sesi itulah satu-satunya batas waktu. Konsekuensinya: perangkat yang ditinggal dalam keadaan login tetap bisa dipakai siapa pun sampai 9 jam, termasuk untuk membuka dash dan studio yang dijaga `/api/auth/verify`. `last_seen_at` tetap dicatat sebagai keterangan, tetapi tidak lagi memutus sesi. Pencabutan cepat tetap ada lewat logout, ganti password, reset password, dan menonaktifkan akun.
+
+**Selesai kalau:** `./scripts/check.sh` lolos dan terbukti di browser: PIC menambah sub task dengan deskripsi untuk PIC lain, PIC itu membuka Detail dan mengunggah berkas, berkasnya muncul di sub task itu dan tidak tercampur di lampiran task induk, dan password 6 karakter diterima saat ganti password.
+
+**Hasil:** kode selesai 2026-11-17, `./scripts/check.sh` lolos. Migrasi `000010` belum dijalankan di dev maupun produksi. Uji browser menunggu Rifky.
+
+## Sprint 11g: Tautan hasil sub task
+
+**Tujuan:** revisi 9 Manajer. Hasil kerja sering berupa tautan (Figma, Drive, Docs), bukan berkas yang diunggah, jadi sub task perlu tautan deliverable sendiri. Sekalian aturan centang diperlebar: yang membagi pekerjaan juga boleh menutupnya.
+
+- [x] S11g-01 Migrasi `000011`: kolom `deliverable_url` di `task_subtasks`. Aturan tautannya sama dengan deliverable task: hanya `http` dan `https` (`cleanURL`, NFR-SEC-06).
+- [x] S11g-02 `POST` dan `PUT` sub task menerima `deliverable_url`. Detail task mengirimkannya kembali per sub task.
+- [x] S11g-03 `canToggle` menerima pembuat sub task. Yang boleh mencentang sekarang: PIC sub task, pembuatnya, PIC task mana pun untuk sub task tanpa PIC, dan Manajer kecuali sub task itu dipegang Manajer lain.
+- [x] S11g-04 Frontend: tautan diisi lewat form Ubah sub task, ditampilkan sebagai tombol di Detail, dan baris ringkasnya menandai "1 tautan".
+- [x] S11g-05 Bar aksi panel detail menempel di dasar panel, baik saat isinya pendek maupun saat digulir sampai habis.
+
+**Keputusan:**
+- Tautan diisi di form Ubah, bukan lewat kotak isian terpisah seperti Deliverable task induk. Saat sub task baru dibuat hasilnya belum ada, dan satu form yang mengurus nama, deskripsi, tautan, dan PIC lebih sedikit tombolnya daripada dua jalur simpan.
+- Satu tautan per sub task. Kalau hasilnya lebih dari satu, tautannya diarahkan ke folder, atau berkasnya diunggah sebagai lampiran sub task.
+- Pembuat sub task boleh mencentang. Dia yang membagi pekerjaan itu, jadi dia yang paling tahu hasilnya sudah sesuai. Aturan Manajer lain (revisi 4) tidak berubah: Manajer tetap tidak bisa mencentang sub task yang dipegang Manajer lain.
+- Tautan dibuka di tab baru dengan `rel="noopener noreferrer"`, karena isinya alamat luar yang diketik pengguna.
+- Bar aksi panel detail: `sticky bottom-0` saja tidak pernah cukup, dan dua percobaan sebelumnya meleset karena ditebak dari tangkapan layar. Diukur langsung di browser dengan CSS build aplikasi, hasilnya dua sebab terpisah. Pertama, sticky hanya menahan elemen saat digulir dan tidak pernah mendorongnya ke dasar induk, jadi isi yang pendek membuat bar berhenti di tengah; obatnya induk `flex min-h-full flex-col` dengan `mt-auto` di bar. Kedua, sticky `bottom-0` menempel ke tepi dalam padding, bukan tepi area gulir, jadi bar berhenti 16 px di atas dasar karena `py-4` milik panel; obatnya `bottom-[-1rem]`. `gap-6` menggantikan `space-y-6` di pembungkusnya, karena `space-y` menulis `margin-top` ke tiap anak dan menimpa `mt-auto`.
+
+**Selesai kalau:** `./scripts/check.sh` lolos dan terbukti di browser: PIC mengisi tautan Figma di sub task miliknya, tautan muncul sebagai tombol di Detail dan terbuka di tab baru, tautan `javascript:` ditolak, dan pembuat sub task bisa mencentang sub task yang ia tugaskan ke orang lain.
+
+**Hasil:** kode selesai 2026-11-17, `./scripts/check.sh` lolos. Migrasi `000011` belum dijalankan di dev maupun produksi. Uji browser menunggu Rifky.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -701,7 +771,7 @@ Migrasi data:
 Operasional (hanya ditulis):
 - [x] S12-05 `Dockerfile` backend, `deploy/docker-compose.yml` (backend dan Nginx; PostgreSQL memakai container bersama di VM), dan `nginx.conf` dengan `client_max_body_size 51m` serta `proxy_set_header Host $host`.
 - [x] S12-06 Skrip backup harian (database dan `/srv/nvm-internal/storage`), penyalinan ke hard disk eksternal, PC IT, dan laptop IT (salinan laptop dienkripsi).
-- [x] S12-07 Pembersih berkas yatim (berkas di `attachments/` dan `avatars/` tanpa baris database) dan job harian penghapus audit log login yang lebih tua dari 1 tahun, serta baris `user_sessions` yang sudah kedaluwarsa (`last_seen_at` lebih dari 30 menit lalu atau `created_at` lebih dari 12 jam lalu; baris yang sudah dicabut lewat `token_version` ikut terhapus karena tidak lagi diperbarui).
+- [x] S12-07 Pembersih berkas yatim (berkas di `attachments/` dan `avatars/` tanpa baris database) dan job harian penghapus audit log login yang lebih tua dari 1 tahun, serta baris `user_sessions` yang sudah kedaluwarsa (`created_at` lebih dari `auth.SessionMaxAge` lalu, 9 jam sejak revisi 8; baris yang sudah dicabut lewat `token_version` ikut terhapus karena tidak lagi diperbarui).
 - [x] S12-08 Panduan satu halaman untuk tim (login, memindahkan task, sub task, unggah, profil) dan catatan operasional di README (backup, restore, update versi).
 - [x] S12-09 Role database terpisah seperti di compro dan doomsday: `nvm_internal_migrator` untuk DDL (dipakai `migrate`) dan `nvm_internal_app` untuk aplikasi. Hak DELETE hanya untuk tabel yang memang dihapus permanen oleh kode. Hasil audit query DELETE di `backend/internal/db/queries` (2026-11-16): `task_subtasks` (`DeleteSubtasks`), `subtask_assignees` (`RemoveSubtaskAssignees`, juga lewat `ON DELETE CASCADE`), dan `task_labels` (`DeleteTaskLabels`). Task dan lampiran memakai `is_deleted`, jadi tidak butuh DELETE. Penghapus audit log login di S12-07 akan butuh DELETE di `audit_logs`; tambahkan saat job itu ditulis. Tabel `user_sessions` (migrasi 000006): role aplikasi butuh SELECT, INSERT, UPDATE, dan DELETE. Pencabutan sesi tidak memakai DELETE (lewat UPDATE `users.token_version`); DELETE dipakai job pembersih sesi kedaluwarsa di S12-07, yang berjalan di dalam backend dengan role aplikasi. Jadi daftar tabel dengan DELETE menjadi empat: `task_subtasks`, `subtask_assignees`, `task_labels`, dan `user_sessions` (ditambah `audit_logs` saat job audit S12-07 ditulis). Audit ulang daftar ini bila ada query DELETE baru.
 - [x] S12-10 Binary backend dibangun statis (`CGO_ENABLED=0`) supaya jalan di image distroless. Di compro, binary yang tidak statis gagal jalan di server.
@@ -786,7 +856,7 @@ Revisi 5 (kode, dikerjakan 2026-11-16 di luar urutan karena dibutuhkan sebelum p
 - [ ] S13-07 Review hasil bersama, perbaiki temuan, commit.
 - [ ] S13-08 Uji yang tidak bisa otomatis: ponsel sungguhan (kamera atau galeri, Safari, tempel gambar), pembaca layar, cek keyboard saja.
 - [ ] S13-09 Audit visual dan aksesibilitas hasil Sprint 10, Sprint 11, dan tombol Dashboard (dipindah dari S11-07), dengan Playwright dan `VITE_DASHBOARD_URL` terisi: `document.documentElement.scrollWidth <= window.innerWidth` di 360, 768, 1280, dan 1920 px untuk Admin, Manajer, dan Staf di semua halaman (perhatikan top bar 768 px: tombol Dashboard menambah sekitar 60 px), Tab dan Escape di panel, dialog, dan menu Lainnya, emulasi `prefers-reduced-motion` (tidak ada transisi), kontras dihitung, galat console 0, dan screenshot untuk dibandingkan dengan versi sebelum Sprint 11 (commit `8b36389`).
-- [ ] S13-10 Test otomatis model sesi (revisi 5, migrasi 000006 dan 000007): tabel hanya menyimpan id acak dan waktu (tanpa token); idle 30 menit ditolak di server; batas mutlak 12 jam ditolak dari `exp` JWT dan dari `created_at`; cookie `Max-Age` 12 jam; verify tanpa `Set-Cookie` dan tidak merotasi token; `last_seen_at` hanya ditulis bila aktivitas terakhir lebih dari 60 detik lalu (verify beruntun tidak menulis); token tanpa `sid` atau dengan `sid` akun lain ditolak; pencabutan setelah logout (semua perangkat), ganti password (perangkat lain 401, perangkat yang mengganti 204), reset password, dan nonaktif; perubahan peran tidak memaksa login ulang. `scripts/uji-verify.sh` sudah mencakup sebagian lewat API.
+- [ ] S13-10 Test otomatis model sesi (revisi 5 dan 8, migrasi 000006 dan 000007): tabel hanya menyimpan id acak dan waktu (tanpa token); batas mutlak 9 jam ditolak dari `exp` JWT dan dari `created_at`; cookie `Max-Age` 9 jam; sesi yang lama tidak dipakai tetap sah selama belum 9 jam (idle timeout sudah dihapus); password 6 karakter diterima, 5 ditolak, dan kuncian akun setelah gagal berulang tetap jalan; verify tanpa `Set-Cookie` dan tidak merotasi token; `last_seen_at` hanya ditulis bila aktivitas terakhir lebih dari 60 detik lalu (verify beruntun tidak menulis); token tanpa `sid` atau dengan `sid` akun lain ditolak; pencabutan setelah logout (semua perangkat), ganti password (perangkat lain 401, perangkat yang mengganti 204), reset password, dan nonaktif; perubahan peran tidak memaksa login ulang. `scripts/uji-verify.sh` sudah mencakup sebagian lewat API.
 
 ---
 
@@ -847,13 +917,16 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 3 | 2026-11-09 | Sub task bisa dicentang oleh PIC-nya saat On Progress; Ready butuh semua sub task tercentang; task penuh bisa dibuka di tab baru; di form, Deskripsi menggantikan posisi Lampiran brief, dan Lampiran brief masuk ke Detail tambahan | Sprint 8 |
 | 4 | 2026-11-10 | Manajer boleh mencentang dan melepas centang sub task siapa pun, kecuali sub task yang dipegang Manajer lain | Sprint 8 |
 | 6 | 2026-11-17 | PIC kembali dipilih di task induk oleh Manajer. Sub task disusun sendiri oleh PIC yang mengerjakannya; Manajer juga boleh menambah sub task | Sprint 11d |
+| 7 | 2026-11-17 | Sub task bisa ditugaskan ke PIC task yang lain, bukan hanya ke diri sendiri. Satu sub task satu PIC, dan PIC itu yang mencentang | Sprint 11e |
+| 8 | 2026-11-17 | Sub task menampilkan pembuat dan PIC-nya, serta punya deskripsi dan lampiran sendiri. Password minimal 6 karakter dan sesi paling lama 9 jam | Sprint 11f |
+| 9 | 2026-11-17 | Sub task punya tautan deliverable sendiri, bukan hanya berkas. Yang boleh mencentang: PIC sub task, yang membuatnya, dan Manajer | Sprint 11g |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat keenam revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat kesembilan revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 
-- Umur mutlak sesi 12 jam sejak login (revisi 5): setelah itu pengguna login ulang walaupun terus aktif. Idle timeout tetap 30 menit. Sementara dipakai 12 jam (satu hari kerja).
+- Umur mutlak sesi 12 jam sejak login (revisi 5): setelah itu pengguna login ulang walaupun terus aktif. Idle timeout saat itu masih 30 menit. Keduanya diubah di revisi 8: umur sesi jadi 9 jam dan idle timeout dihapus.
 - Daftar label awal (nama dan warna) dan daftar pengguna awal (nama, username, peran, divisi).
 - Apakah tim masih memakai berkas .ppt lama. Kalau tidak, hapus dari daftar izin.
 - Konfirmasi kolom Completed di papan hanya 7 hari terakhir (AC-08 menyebut task Completed hilang dari papan aktif).

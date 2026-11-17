@@ -131,7 +131,7 @@ Karena `COOKIE_SECURE=true`, login lewat `http://127.0.0.1:8094` tidak bisa (bro
 
 ## 5. Akun Admin pertama
 
-`seed` membuat divisi Marketing dan Creative serta akun Admin dengan password sementara (wajib diganti saat login pertama, minimal 12 karakter). Aman dijalankan berulang: akun yang sudah ada tidak diubah.
+`seed` membuat divisi Marketing dan Creative serta akun Admin dengan password sementara (wajib diganti saat login pertama, minimal 6 karakter). Aman dijalankan berulang: akun yang sudah ada tidak diubah.
 
 Di produksi akun Admin pertama bernama `adminit`.
 
@@ -165,7 +165,7 @@ Keadaan setelah deploy 2026-11-17 (Zero Trust, Networks, Tunnels):
 ## 7. Cek setelah hidup
 
 1. Dari HP dengan **data seluler** (bukan Wi-Fi kantor), buka `https://novoidminds.xyz`, login sebagai `adminit`, ganti password sementara.
-2. DevTools, Application, Cookies: `nvm_session` punya Domain `.novoidminds.xyz`, Secure, HttpOnly, SameSite Lax, kedaluwarsa sekitar 12 jam.
+2. DevTools, Application, Cookies: `nvm_session` punya Domain `.novoidminds.xyz`, Secure, HttpOnly, SameSite Lax, kedaluwarsa sekitar 9 jam.
 3. Setelah login, buka `https://novoidminds.xyz/api/auth/verify`: tab Network menunjukkan 204 dan header `X-NVM-User: adminit`, tanpa `Set-Cookie`.
 4. Audit Log: baris "Masuk" dari HP mencatat IP seluler, bukan `172.30.94.1` atau `127.0.0.1`.
 5. IP dari tunnel, di VM:

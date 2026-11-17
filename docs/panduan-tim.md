@@ -4,8 +4,8 @@ Alamat: **https://novoidminds.xyz**. Bisa dibuka dari laptop dan HP, di kantor m
 
 ## Masuk
 
-- Masuk dengan username dan password dari Admin atau Manajer. Saat pertama masuk kamu wajib membuat password baru, minimal 12 karakter.
-- Sesi berakhir setelah 30 menit tidak dipakai, dan paling lama 12 jam sejak masuk. Setelah itu masuk lagi.
+- Masuk dengan username dan password dari Admin atau Manajer. Saat pertama masuk kamu wajib membuat password baru, minimal 6 karakter.
+- Sesi berakhir 9 jam setelah masuk, dipakai atau tidak. Setelah itu masuk lagi.
 - Lupa password atau akun terkunci: hubungi Admin atau Manajer. Akun dikunci sementara setelah 5 kali salah password.
 - Tombol **Keluar** mengakhiri sesi di semua perangkat sekaligus. Di HP, tombol ini ada di menu **Lainnya**.
 

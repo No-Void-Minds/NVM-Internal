@@ -15,6 +15,12 @@ const fieldName: Record<string, string> = {
 
 // describeTaskHistory menulis satu baris riwayat seperti di Stitch, mis. "memindahkan ke Ready".
 // Nama pelaku ditulis terpisah oleh komponen supaya bisa ditebalkan.
+// Sejak revisi 8 berkas bisa menempel di sub task, jadi riwayat perlu menyebut tempatnya.
+function attachmentWhere(v: Record<string, unknown>): string {
+  if (v.subtask_id) return 'lampiran sub task'
+  return v.kind === 'brief' ? 'lampiran brief' : 'berkas deliverable'
+}
+
 export function describeTaskHistory(h: TaskHistoryItem): string {
   const after = h.new_value ?? {}
   switch (h.action) {
@@ -35,20 +41,26 @@ export function describeTaskHistory(h: TaskHistoryItem): string {
     case 'task_deleted':
       return 'menghapus task'
     case 'attachment_added':
-      return `mengunggah ${after.kind === 'brief' ? 'lampiran brief' : 'berkas deliverable'} ${String(after.name ?? '')}`
+      return `mengunggah ${attachmentWhere(after)} ${String(after.name ?? '')}`
     case 'attachment_deleted': {
       const before = h.old_value ?? {}
-      return `menghapus ${before.kind === 'brief' ? 'lampiran brief' : 'berkas deliverable'} ${String(before.name ?? '')}`
+      return `menghapus ${attachmentWhere(before)} ${String(before.name ?? '')}`
     }
     case 'subtask_added':
       return `menambah sub task "${String(after.title ?? '')}"`
     case 'subtask_removed':
       return `menghapus sub task "${String((h.old_value ?? {}).title ?? '')}"`
-    case 'subtask_renamed':
-      return `mengganti nama sub task "${String((h.old_value ?? {}).title ?? '')}" menjadi "${String(after.title ?? '')}"`
+    // Satu kejadian untuk nama dan PIC sekalian (revisi 7), jadi teksnya mengikuti apa yang benar-benar berubah.
+    case 'subtask_renamed': {
+      const prev = h.old_value ?? {}
+      if (prev.title !== after.title) {
+        return `mengganti nama sub task "${String(prev.title ?? '')}" menjadi "${String(after.title ?? '')}"`
+      }
+      return `mengubah PIC sub task "${String(after.title ?? '')}"`
+    }
     case 'task_pics_changed':
       return 'mengubah PIC task'
-    // Sampai revisi 6 PIC menempel di sub task. Teksnya dipertahankan untuk riwayat lama.
+    // Kejadian lama dari sebelum revisi 7. Teksnya dipertahankan untuk riwayat yang sudah tercatat.
     case 'subtask_assignees_changed':
       return `mengubah PIC sub task "${String(after.title ?? '')}"`
     case 'subtask_checked':

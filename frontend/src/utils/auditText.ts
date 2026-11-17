@@ -116,11 +116,15 @@ export function describeAudit(e: AuditEntry, divisionName: (id: number) => strin
       return `Menambah sub task "${str(after.title)}" ke ${e.target?.id ?? ''}`
     case 'subtask_removed':
       return `Menghapus sub task "${str(before.title)}" dari ${e.target?.id ?? ''}`
+    // Satu kejadian untuk nama dan PIC sekalian (revisi 7), jadi teksnya mengikuti apa yang benar-benar berubah.
     case 'subtask_renamed':
-      return `Mengganti nama sub task "${str(before.title)}" menjadi "${str(after.title)}" di ${e.target?.id ?? ''}`
+      if (before.title !== after.title) {
+        return `Mengganti nama sub task "${str(before.title)}" menjadi "${str(after.title)}" di ${e.target?.id ?? ''}`
+      }
+      return `Mengubah PIC sub task "${str(after.title)}" di ${e.target?.id ?? ''}`
     case 'task_pics_changed':
       return `Mengubah PIC task ${e.target?.id ?? ''}`
-    // Sampai revisi 6 PIC menempel di sub task. Teksnya dipertahankan untuk riwayat lama.
+    // Kejadian lama dari sebelum revisi 7. Teksnya dipertahankan untuk riwayat yang sudah tercatat.
     case 'subtask_assignees_changed':
       return `Mengubah PIC sub task "${str(after.title)}" di ${e.target?.id ?? ''}`
     case 'subtask_checked':

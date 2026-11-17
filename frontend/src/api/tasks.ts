@@ -7,14 +7,18 @@ export type TaskLabel = { id: number; name: string; color: string; is_active: bo
 export type TaskSubtask = {
   id: number
   title: string
+  description: string
+  deliverable_url: string
+  created_by: string
   done: boolean
   done_at: string | null
   done_by: string
   // Dihitung backend dengan aturan yang sama dengan penolakan 403, jadi UI tidak menebak siapa yang boleh.
   can_check: boolean
-  // Boleh diubah nama atau dihapus: pembuatnya, atau Manajer, selama task masih Requested atau On Progress.
+  // Boleh diubah atau dihapus: pembuatnya, PIC-nya, dan Manajer, selama task masih Requested atau On Progress.
   can_edit: boolean
   assignees: TaskPerson[]
+  attachments: TaskAttachment[]
 }
 // id kosong berarti sub task baru; backend memakainya untuk membedakan sub task lama yang hanya diubah.
 export type SubtaskInput = { id?: number; title: string }
@@ -118,13 +122,16 @@ export function setSubtaskDone(taskId: string, subtaskId: number, done: boolean)
   return apiPut<void>(`/tasks/${taskId}/subtasks/${subtaskId}/done`, { done })
 }
 
-// Sub task di luar form Manajer: PIC task menyusun sendiri pekerjaannya (revisi 6).
-export function addSubtask(taskId: string, title: string) {
-  return apiPost<{ id: number }>(`/tasks/${taskId}/subtasks`, { title })
+// Sub task di luar form Manajer: PIC task menyusun pekerjaannya sendiri dan boleh menugaskannya
+// ke PIC task yang lain (revisi 7). picId 0 berarti belum ditugaskan.
+export function addSubtask(taskId: string, title: string, description: string, picId: number) {
+  return apiPost<{ id: number }>(`/tasks/${taskId}/subtasks`, { title, description, pic_id: picId })
 }
 
-export function renameSubtask(taskId: string, subtaskId: number, title: string) {
-  return apiPut<void>(`/tasks/${taskId}/subtasks/${subtaskId}`, { title })
+type SubtaskBody = { title: string; description: string; deliverable_url: string; pic_id: number }
+
+export function updateSubtask(taskId: string, subtaskId: number, body: SubtaskBody) {
+  return apiPut<void>(`/tasks/${taskId}/subtasks/${subtaskId}`, body)
 }
 
 export function deleteSubtask(taskId: string, subtaskId: number) {

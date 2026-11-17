@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Login ulang akun uji dev dan simpan cookie di /tmp. Dibutuhkan karena sesi berakhir
-# setelah 30 menit tanpa aktivitas, jadi cookie lama tidak lagi dikirim curl.
+# setelah 9 jam sejak login, jadi cookie lama tidak lagi diterima backend.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 set -a; source backend/.env; set +a
