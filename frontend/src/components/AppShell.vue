@@ -108,6 +108,11 @@ watch(
 // Satu sumber padding kiri dan kanan untuk top bar dan wadah konten (Sprint 11c): selebar layar dan tanpa
 // mx-auto, jadi tepi kiri judul halaman sejajar dengan logo dan posisi top bar tidak berubah antar halaman.
 const gutter = 'px-4 md:px-8'
+
+// Papan butuh seluruh lebar layar untuk empat kolom. Halaman lain ditengahkan dan dibatasi lebarnya,
+// karena tabel dan form yang direntang sampai 1920 px menyisakan ruang kosong besar di kanan.
+// Top bar tetap selebar layar di semua rute, jadi logo dan menu tidak pernah berpindah (Sprint 11c).
+const contentWidth = computed(() => (route.name === 'tasks' ? 'w-full' : 'mx-auto w-full max-w-6xl'))
 </script>
 
 <template>
@@ -195,7 +200,7 @@ const gutter = 'px-4 md:px-8'
     <main
       id="konten"
       tabindex="-1"
-      :class="gutter"
+      :class="[gutter, contentWidth]"
       class="pt-6 pb-[calc(5rem+env(safe-area-inset-bottom))] outline-none md:pb-10"
     >
       <slot />

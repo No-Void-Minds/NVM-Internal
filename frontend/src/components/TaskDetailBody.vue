@@ -67,6 +67,7 @@ watch(
   (id) => {
     actionError.value = null
     editingLabels.value = false
+    historyAll.value = false
     if (id) void load()
   },
   { immediate: true },
@@ -256,6 +257,14 @@ async function confirmDelete() {
   deleteOpen.value = false
   if (ok) emit('close')
 }
+
+// Riwayat task bisa puluhan baris dan mendorong isi lain jauh ke bawah; yang terbaru saja yang
+// ditampilkan sampai pengguna meminta sisanya.
+const historyLimit = 3
+const historyAll = ref(false)
+const historyShown = computed(() =>
+  historyAll.value ? (task.value?.history ?? []) : (task.value?.history ?? []).slice(0, historyLimit),
+)
 
 const buttonPrimary =
   'inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-on-accent hover:bg-accent-hover active:translate-y-px disabled:opacity-60'
@@ -515,7 +524,7 @@ const buttonSecondary =
         <section>
           <component :is="sectionTag" class="font-semibold">Riwayat</component>
           <ol class="mt-2 space-y-3 border-l border-line pl-3 text-sm">
-            <li v-for="h in task.history" :key="h.id">
+            <li v-for="h in historyShown" :key="h.id">
               <p>
                 <span class="font-medium">{{ h.actor_name || 'Sistem' }}</span> {{ describeTaskHistory(h) }}
               </p>
@@ -525,6 +534,19 @@ const buttonSecondary =
               <p class="text-ink-muted">{{ formatDateTime(h.occurred_at) }}</p>
             </li>
           </ol>
+          <button
+            v-if="task.history.length > historyLimit"
+            type="button"
+            class="mt-2 inline-flex min-h-11 items-center rounded-card px-3 text-sm font-medium text-ink-muted hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
+            :aria-expanded="historyAll"
+            @click="historyAll = !historyAll"
+          >
+            {{
+              historyAll
+                ? 'Tampilkan lebih sedikit'
+                : `Tampilkan ${task.history.length - historyLimit} riwayat lainnya`
+            }}
+          </button>
         </section>
       </div>
     </div>

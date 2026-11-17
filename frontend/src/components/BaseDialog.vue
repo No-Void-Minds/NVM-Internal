@@ -3,8 +3,15 @@ import { computed, onMounted, ref, useId, watch } from 'vue'
 
 const props = withDefaults(
   // tag: judul berupa kode (mis. ID task), ditampilkan sebagai label spesimen.
-  defineProps<{ open: boolean; title: string; variant?: 'modal' | 'panel'; tag?: boolean }>(),
-  { variant: 'modal', tag: false },
+  // wide: isi yang butuh ruang baca, mis. pratinjau gambar dan PDF.
+  defineProps<{
+    open: boolean
+    title: string
+    variant?: 'modal' | 'panel'
+    tag?: boolean
+    wide?: boolean
+  }>(),
+  { variant: 'modal', tag: false, wide: false },
 )
 const emit = defineEmits<{ close: [] }>()
 
@@ -31,7 +38,7 @@ function onCancel(e: Event) {
 const shape = computed(() =>
   props.variant === 'panel'
     ? 'dialog-panel m-0 ml-auto h-dvh max-h-dvh w-full max-w-md border-l border-line shadow-dialog open:flex open:flex-col'
-    : 'dialog-modal m-auto w-[calc(100%-2rem)] max-w-md rounded-card border border-line shadow-dialog',
+    : `dialog-modal m-auto w-[calc(100%-2rem)] ${props.wide ? 'max-w-3xl' : 'max-w-md'} rounded-card border border-line shadow-dialog`,
 )
 </script>
 

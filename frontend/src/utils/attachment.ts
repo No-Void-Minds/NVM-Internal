@@ -46,3 +46,7 @@ export function precheck(file: File): string | null {
 export function isImage(mime: string): boolean {
   return mime.startsWith('image/')
 }
+
+export function isPdf(mime: string): boolean {
+  return mime === 'application/pdf'
+}
