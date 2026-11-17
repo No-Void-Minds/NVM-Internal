@@ -2,7 +2,8 @@
 import { ref } from 'vue'
 import { ApiError } from '../api/client'
 import { attachmentUrl, deleteAttachment, uploadAttachment, type TaskAttachment } from '../api/attachments'
-import { acceptAttr, formatBytes, precheck } from '../utils/attachment'
+import AttachmentPreview from './AttachmentPreview.vue'
+import { acceptAttr, formatBytes, isImage, isPdf, precheck } from '../utils/attachment'
 
 // Lampiran sub task sengaja lebih ringkas daripada AttachmentSection milik task induk: di dalam kartu
 // sub task tidak ada ruang untuk dropzone besar, dan isinya biasanya satu atau dua berkas.
@@ -13,6 +14,12 @@ const props = defineProps<{
   canManage: boolean
 }>()
 const emit = defineEmits<{ changed: [message: string] }>()
+
+const preview = ref<TaskAttachment | null>(null)
+
+function canPreview(a: TaskAttachment): boolean {
+  return isImage(a.mime_type) || isPdf(a.mime_type)
+}
 
 const picker = ref<HTMLInputElement | null>(null)
 const busy = ref(false)
@@ -72,6 +79,27 @@ const iconButton =
       >
         <span class="min-w-0 flex-1 truncate text-sm" :title="a.name">{{ a.name }}</span>
         <span class="shrink-0 text-sm text-ink-muted">{{ formatBytes(a.size_bytes) }}</span>
+        <button
+          v-if="canPreview(a)"
+          type="button"
+          :class="iconButton"
+          :aria-label="`Pratinjau ${a.name}`"
+          @click="preview = a"
+        >
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            class="size-5"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.75"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        </button>
         <a :href="attachmentUrl(taskId, a.id)" :class="iconButton" :aria-label="`Unduh ${a.name}`">
           <svg
             aria-hidden="true"
@@ -134,5 +162,7 @@ const iconButton =
     <p v-if="error" role="alert" class="mt-2 rounded-card bg-danger-bg p-2 text-sm text-danger">
       {{ error }}
     </p>
+
+    <AttachmentPreview :task-id="taskId" :item="preview" @close="preview = null" />
   </div>
 </template>

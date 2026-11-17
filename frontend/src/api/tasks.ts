@@ -8,6 +8,8 @@ export type TaskSubtask = {
   id: number
   title: string
   description: string
+  // reference_url diisi yang menugaskan sebagai acuan, deliverable_url diisi yang mengerjakan sebagai hasil.
+  reference_url: string
   deliverable_url: string
   created_by: string
   done: boolean
@@ -124,11 +126,17 @@ export function setSubtaskDone(taskId: string, subtaskId: number, done: boolean)
 
 // Sub task di luar form Manajer: PIC task menyusun pekerjaannya sendiri dan boleh menugaskannya
 // ke PIC task yang lain (revisi 7). picId 0 berarti belum ditugaskan.
-export function addSubtask(taskId: string, title: string, description: string, picId: number) {
-  return apiPost<{ id: number }>(`/tasks/${taskId}/subtasks`, { title, description, pic_id: picId })
+export type SubtaskBody = {
+  title: string
+  description: string
+  reference_url: string
+  deliverable_url: string
+  pic_id: number
 }
 
-type SubtaskBody = { title: string; description: string; deliverable_url: string; pic_id: number }
+export function addSubtask(taskId: string, body: SubtaskBody) {
+  return apiPost<{ id: number }>(`/tasks/${taskId}/subtasks`, body)
+}
 
 export function updateSubtask(taskId: string, subtaskId: number, body: SubtaskBody) {
   return apiPut<void>(`/tasks/${taskId}/subtasks/${subtaskId}`, body)

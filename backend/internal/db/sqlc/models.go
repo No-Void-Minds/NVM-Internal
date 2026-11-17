@@ -278,6 +278,7 @@ type TaskSubtask struct {
 	CreatedBy      pgtype.Int8
 	Description    string
 	DeliverableUrl string
+	ReferenceUrl   string
 }
 
 type User struct {

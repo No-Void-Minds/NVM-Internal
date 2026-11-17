@@ -57,6 +57,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 11e | Sub task ditugaskan | PIC membagi sub task ke PIC task lain, satu sub task satu PIC |
 | 11f | Isi sub task dan aturan masuk | Sub task punya deskripsi dan lampiran sendiri; password 6, sesi 9 jam |
 | 11g | Tautan hasil sub task | Sub task punya tautan deliverable; pembuat sub task ikut boleh mencentang |
+| 11h | Acuan dan pratinjau sub task | Tautan acuan diisi saat membuat; berkas sub task bisa dipratinjau |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -757,6 +758,28 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 
 **Hasil:** kode selesai 2026-11-17, `./scripts/check.sh` lolos. Migrasi `000011` belum dijalankan di dev maupun produksi. Uji browser menunggu Rifky.
 
+## Sprint 11h: Acuan dan pratinjau sub task
+
+**Tujuan:** revisi 10 Manajer. Tautan perlu bisa diisi sejak sub task dibuat, bukan hanya lewat Ubah. Tautannya juga dua arah: yang menugaskan menaruh acuan, yang mengerjakan menaruh hasil. Berkas sub task dibuka di web seperti lampiran task, tidak harus diunduh dulu.
+
+- [x] S11h-01 Migrasi `000012`: kolom `reference_url` di `task_subtasks`. `deliverable_url` tetap untuk hasil.
+- [x] S11h-02 Isi sub task yang bisa ditulis pengguna dikumpulkan di satu struct `task.SubtaskFields`, dipakai Add dan Update, supaya menambah kolom tidak memanjangkan daftar parameter di tiap lapisan.
+- [x] S11h-03 Form tambah sub task punya isian tautan acuan. Form Ubah punya keduanya, acuan dan hasil.
+- [x] S11h-04 Detail sub task menampilkan tautan berlabel Acuan dan Hasil; baris ringkas menghitung jumlah tautan.
+- [x] S11h-05 Pratinjau gambar dan PDF dipindah ke komponen bersama `AttachmentPreview.vue`, dipakai lampiran task dan lampiran sub task.
+- [x] S11h-06 Tautan hasil punya kotak isian sendiri di Detail, tepat di atas daftar berkas, jadi tidak perlu masuk mode Ubah.
+
+**Keputusan:**
+- Dua kolom tautan, bukan satu yang dipakai bergantian. Kalau satu kolom, hasil yang dimasukkan PIC akan menimpa acuan dari yang menugaskan, dan acuannya hilang justru saat pekerjaan sedang diperiksa.
+- Form tambah hanya menawarkan tautan acuan. Saat sub task baru dibuat hasilnya belum ada, jadi isian hasil di situ hanya menambah kolom kosong yang harus dilewati.
+- Dua tautan, dua tempat mengisi. Acuan diisi di form tambah dan form Ubah, karena biasanya ditulis sekali saat pekerjaan dibagi. Tautan hasil diisi di kotak sendiri di Detail, mengikuti pola Deliverable task induk, karena itu yang paling sering diperbarui: satu sub task bisa berganti tautan hasil beberapa kali sampai disetujui, dan membuka form Ubah tiap kali hanya menambah langkah. Form Ubah mengirim ulang tautan hasil apa adanya supaya tidak terhapus.
+- Siapa yang boleh mengisi tautan mana tidak dibatasi per kolom: siapa pun yang boleh mengubah sub task (pembuat, PIC, Manajer) boleh mengisi keduanya. Labelnya yang memberi tahu maksudnya. Aturan per kolom akan menambah tiga cabang hak baru tanpa mencegah kesalahan yang berarti.
+- Pratinjau sub task memakai komponen yang sama dengan lampiran task, jadi aturan blob dan `sandbox` tanpa `allow-same-origin` hanya ditulis sekali. CSP produksi sudah mengizinkan `blob:` sejak revisi 8 dicatat di Sprint 11d.
+
+**Selesai kalau:** `./scripts/check.sh` lolos dan terbukti di browser: tautan acuan terisi langsung dari form tambah, Detail menampilkan Acuan dan Hasil terpisah, dan berkas gambar atau PDF di sub task terbuka lewat tombol mata tanpa diunduh.
+
+**Hasil:** kode selesai 2026-11-17, `./scripts/check.sh` lolos. Migrasi `000012` belum dijalankan di dev maupun produksi. Uji browser menunggu Rifky.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -920,9 +943,10 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 7 | 2026-11-17 | Sub task bisa ditugaskan ke PIC task yang lain, bukan hanya ke diri sendiri. Satu sub task satu PIC, dan PIC itu yang mencentang | Sprint 11e |
 | 8 | 2026-11-17 | Sub task menampilkan pembuat dan PIC-nya, serta punya deskripsi dan lampiran sendiri. Password minimal 6 karakter dan sesi paling lama 9 jam | Sprint 11f |
 | 9 | 2026-11-17 | Sub task punya tautan deliverable sendiri, bukan hanya berkas. Yang boleh mencentang: PIC sub task, yang membuatnya, dan Manajer | Sprint 11g |
+| 10 | 2026-11-17 | Tautan sudah bisa diisi saat sub task dibuat. Sub task punya dua tautan: acuan dari yang menugaskan dan hasil dari yang mengerjakan. Berkas sub task bisa dipratinjau di web | Sprint 11h |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat kesembilan revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat kesepuluh revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

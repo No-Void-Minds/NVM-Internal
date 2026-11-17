@@ -112,8 +112,8 @@ func (q *Queries) CountSubtasksByTask(ctx context.Context, taskIds []string) ([]
 }
 
 const createSubtask = `-- name: CreateSubtask :one
-INSERT INTO task_subtasks (task_id, title, description, deliverable_url, position, created_by)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO task_subtasks (task_id, title, description, reference_url, deliverable_url, position, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING id
 `
 
@@ -121,6 +121,7 @@ type CreateSubtaskParams struct {
 	TaskID         string
 	Title          string
 	Description    string
+	ReferenceUrl   string
 	DeliverableUrl string
 	Position       int32
 	CreatedBy      pgtype.Int8
@@ -131,6 +132,7 @@ func (q *Queries) CreateSubtask(ctx context.Context, arg CreateSubtaskParams) (i
 		arg.TaskID,
 		arg.Title,
 		arg.Description,
+		arg.ReferenceUrl,
 		arg.DeliverableUrl,
 		arg.Position,
 		arg.CreatedBy,
@@ -191,7 +193,8 @@ func (q *Queries) FirstPICDivision(ctx context.Context, taskID string) (int64, e
 }
 
 const getSubtask = `-- name: GetSubtask :one
-SELECT id, title, description, deliverable_url, done_at, created_by FROM task_subtasks WHERE id = $1 AND task_id = $2
+SELECT id, title, description, reference_url, deliverable_url, done_at, created_by
+FROM task_subtasks WHERE id = $1 AND task_id = $2
 `
 
 type GetSubtaskParams struct {
@@ -203,6 +206,7 @@ type GetSubtaskRow struct {
 	ID             int64
 	Title          string
 	Description    string
+	ReferenceUrl   string
 	DeliverableUrl string
 	DoneAt         pgtype.Timestamptz
 	CreatedBy      pgtype.Int8
@@ -215,6 +219,7 @@ func (q *Queries) GetSubtask(ctx context.Context, arg GetSubtaskParams) (GetSubt
 		&i.ID,
 		&i.Title,
 		&i.Description,
+		&i.ReferenceUrl,
 		&i.DeliverableUrl,
 		&i.DoneAt,
 		&i.CreatedBy,
@@ -281,7 +286,8 @@ func (q *Queries) ListSubtaskAssignees(ctx context.Context, subtaskIds []int64) 
 }
 
 const listSubtasks = `-- name: ListSubtasks :many
-SELECT st.id, st.task_id, st.title, st.description, st.deliverable_url, st.position, st.done_at, st.created_by,
+SELECT st.id, st.task_id, st.title, st.description, st.reference_url, st.deliverable_url,
+       st.position, st.done_at, st.created_by,
        u.name AS done_by_name, c.name AS created_by_name
 FROM task_subtasks st
 LEFT JOIN users u ON u.id = st.done_by
@@ -295,6 +301,7 @@ type ListSubtasksRow struct {
 	TaskID         string
 	Title          string
 	Description    string
+	ReferenceUrl   string
 	DeliverableUrl string
 	Position       int32
 	DoneAt         pgtype.Timestamptz
@@ -317,6 +324,7 @@ func (q *Queries) ListSubtasks(ctx context.Context, taskIds []string) ([]ListSub
 			&i.TaskID,
 			&i.Title,
 			&i.Description,
+			&i.ReferenceUrl,
 			&i.DeliverableUrl,
 			&i.Position,
 			&i.DoneAt,
@@ -382,13 +390,15 @@ func (q *Queries) RemoveSubtaskAssignees(ctx context.Context, arg RemoveSubtaskA
 }
 
 const renameSubtask = `-- name: RenameSubtask :exec
-UPDATE task_subtasks SET title = $1, description = $2, deliverable_url = $3
-WHERE id = $4 AND task_id = $5
+UPDATE task_subtasks
+SET title = $1, description = $2, reference_url = $3, deliverable_url = $4
+WHERE id = $5 AND task_id = $6
 `
 
 type RenameSubtaskParams struct {
 	Title          string
 	Description    string
+	ReferenceUrl   string
 	DeliverableUrl string
 	ID             int64
 	TaskID         string
@@ -399,6 +409,7 @@ func (q *Queries) RenameSubtask(ctx context.Context, arg RenameSubtaskParams) er
 	_, err := q.db.Exec(ctx, renameSubtask,
 		arg.Title,
 		arg.Description,
+		arg.ReferenceUrl,
 		arg.DeliverableUrl,
 		arg.ID,
 		arg.TaskID,

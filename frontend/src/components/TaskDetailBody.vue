@@ -64,7 +64,12 @@ const newPic = ref(-1)
 const editPic = ref(0)
 const newDesc = ref('')
 const editDesc = ref('')
-const editLink = ref('')
+const newLink = ref('')
+const editRef = ref('')
+// Tautan hasil diisi langsung di Detail, tanpa masuk mode Ubah, karena itu yang paling sering
+// diperbarui: satu sub task bisa berganti tautan hasil beberapa kali sampai disetujui.
+const resultLink = ref('')
+const savingLink = ref(false)
 // Hanya satu sub task terbuka sekaligus: isinya (deskripsi dan berkas) panjang, dan dua kartu terbuka
 // berdampingan membuat daftar sulit dibaca.
 const openSub = ref<number | null>(null)
@@ -106,6 +111,7 @@ watch(
     editingSub.value = null
     newPic.value = -1
     newDesc.value = ''
+    newLink.value = ''
     openSub.value = null
     if (id) void load()
   },
@@ -185,9 +191,16 @@ async function submitNewSubtask() {
   addingSub.value = true
   actionError.value = null
   try {
-    await addSubtask(t.id, title, newDesc.value.trim(), newPic.value === -1 ? 0 : newPic.value)
+    await addSubtask(t.id, {
+      title,
+      description: newDesc.value.trim(),
+      reference_url: newLink.value.trim(),
+      deliverable_url: '',
+      pic_id: newPic.value === -1 ? 0 : newPic.value,
+    })
     newTitle.value = ''
     newDesc.value = ''
+    newLink.value = ''
     announce.value = `Sub task "${title}" ditambahkan.`
     await load(true)
   } catch (err) {
@@ -201,7 +214,7 @@ function startEdit(s: TaskSubtask) {
   editingSub.value = s.id
   editTitle.value = s.title
   editDesc.value = s.description
-  editLink.value = s.deliverable_url
+  editRef.value = s.reference_url
   editPic.value = s.assignees[0]?.id ?? 0
   rowErrors.value = { ...rowErrors.value, [s.id]: '' }
 }
@@ -223,11 +236,11 @@ async function submitEdit(s: TaskSubtask) {
   const title = editTitle.value.trim()
   if (!t || !title) return
   const desc = editDesc.value.trim()
-  const link = editLink.value.trim()
+  const acuan = editRef.value.trim()
   if (
     title === s.title &&
     desc === s.description &&
-    link === s.deliverable_url &&
+    acuan === s.reference_url &&
     editPic.value === (s.assignees[0]?.id ?? 0)
   ) {
     editingSub.value = null
@@ -237,7 +250,9 @@ async function submitEdit(s: TaskSubtask) {
     await updateSubtask(t.id, s.id, {
       title,
       description: desc,
-      deliverable_url: link,
+      reference_url: acuan,
+      // Tautan hasil punya kotak isian sendiri di Detail; dikirim apa adanya supaya tidak terhapus.
+      deliverable_url: s.deliverable_url,
       pic_id: editPic.value,
     })
     editingSub.value = null
@@ -386,6 +401,48 @@ const subtaskPercent = computed(() => {
   return t && t.subtask_total ? Math.round((t.subtask_done / t.subtask_total) * 100) : 0
 })
 
+function toggleDetail(s: TaskSubtask) {
+  openSub.value = openSub.value === s.id ? null : s.id
+  resultLink.value = s.deliverable_url
+  rowErrors.value = { ...rowErrors.value, [s.id]: '' }
+}
+
+// Menyimpan tautan hasil saja; isi lain dikirim ulang apa adanya supaya tidak tertimpa kosong.
+async function saveResultLink(s: TaskSubtask) {
+  const t = task.value
+  const link = resultLink.value.trim()
+  if (!t || savingLink.value || link === s.deliverable_url) return
+  savingLink.value = true
+  rowErrors.value = { ...rowErrors.value, [s.id]: '' }
+  try {
+    await updateSubtask(t.id, s.id, {
+      title: s.title,
+      description: s.description,
+      reference_url: s.reference_url,
+      deliverable_url: link,
+      pic_id: s.assignees[0]?.id ?? 0,
+    })
+    announce.value = link ? 'Tautan hasil disimpan.' : 'Tautan hasil dihapus.'
+    await load(true)
+  } catch (err) {
+    rowErrors.value = { ...rowErrors.value, [s.id]: messageOf(err) }
+  } finally {
+    savingLink.value = false
+  }
+}
+
+// Dua tautan sub task: acuan dari yang menugaskan, hasil dari yang mengerjakan (revisi 10).
+function subtaskLinks(s: TaskSubtask): { label: string; url: string }[] {
+  const out: { label: string; url: string }[] = []
+  if (s.reference_url) out.push({ label: 'Acuan', url: s.reference_url })
+  if (s.deliverable_url) out.push({ label: 'Hasil', url: s.deliverable_url })
+  return out
+}
+
+function linkCount(s: TaskSubtask): number {
+  return subtaskLinks(s).length
+}
+
 // Nama di pilihan PIC: akun sendiri ditandai supaya tidak perlu mengingat nama sendiri di daftar.
 function picName(p: { id: number; name: string }): string {
   return p.id === session.user?.id ? `${p.name} (kamu)` : p.name
@@ -530,16 +587,14 @@ const buttonSecondary =
                   placeholder="Deskripsi (opsional)"
                   class="w-full rounded-card border border-line bg-surface p-3 text-sm"
                 ></textarea>
-                <label :for="`sub-edit-link-${s.id}`" class="sr-only"
-                  >Tautan hasil sub task {{ i + 1 }}</label
-                >
+                <label :for="`sub-edit-ref-${s.id}`" class="sr-only">Tautan acuan sub task {{ i + 1 }}</label>
                 <input
-                  :id="`sub-edit-link-${s.id}`"
-                  v-model="editLink"
+                  :id="`sub-edit-ref-${s.id}`"
+                  v-model="editRef"
                   type="url"
                   maxlength="2000"
                   inputmode="url"
-                  placeholder="Tautan hasil, misalnya Figma atau Drive (opsional)"
+                  placeholder="Tautan acuan dari yang menugaskan (opsional)"
                   class="min-h-11 w-full rounded-card border border-line bg-surface px-3 text-sm"
                 />
                 <div class="flex flex-wrap items-center gap-2">
@@ -580,7 +635,7 @@ const buttonSecondary =
                     class="shrink-0"
                     :aria-expanded="openSub === s.id"
                     :aria-controls="`sub-detail-${s.id}`"
-                    @click="openSub = openSub === s.id ? null : s.id"
+                    @click="toggleDetail(s)"
                   >
                     {{ openSub === s.id ? 'Tutup' : 'Detail' }}
                   </button>
@@ -610,7 +665,7 @@ const buttonSecondary =
                   <span v-if="s.attachments.length" class="text-ink-muted">
                     {{ s.attachments.length }} berkas
                   </span>
-                  <span v-if="s.deliverable_url" class="text-ink-muted">1 tautan</span>
+                  <span v-if="linkCount(s)" class="text-ink-muted">{{ linkCount(s) }} tautan</span>
                   <span v-if="s.done" class="text-ink-muted">
                     Dicentang {{ s.done_by }}{{ s.done_at ? `, ${formatDateTime(s.done_at)}` : '' }}
                   </span>
@@ -623,8 +678,9 @@ const buttonSecondary =
                   <p v-else class="text-sm text-ink-muted">Belum ada deskripsi.</p>
 
                   <a
-                    v-if="s.deliverable_url"
-                    :href="s.deliverable_url"
+                    v-for="l in subtaskLinks(s)"
+                    :key="l.url"
+                    :href="l.url"
                     target="_blank"
                     rel="noopener noreferrer"
                     class="inline-flex min-h-11 max-w-full items-center gap-2 rounded-card border border-line bg-surface px-3 text-sm font-medium hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
@@ -641,8 +697,29 @@ const buttonSecondary =
                     >
                       <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
                     </svg>
-                    <span class="truncate">{{ s.deliverable_url }}</span>
+                    <span class="shrink-0 text-ink-muted">{{ l.label }}</span>
+                    <span class="truncate">{{ l.url }}</span>
                   </a>
+
+                  <form
+                    v-if="s.can_edit"
+                    class="flex flex-wrap items-center gap-2"
+                    @submit.prevent="saveResultLink(s)"
+                  >
+                    <label :for="`sub-result-${s.id}`" class="sr-only">Tautan hasil sub task</label>
+                    <input
+                      :id="`sub-result-${s.id}`"
+                      v-model="resultLink"
+                      type="url"
+                      maxlength="2000"
+                      inputmode="url"
+                      placeholder="Tautan hasil, misalnya Figma atau Drive"
+                      class="min-h-11 min-w-0 flex-1 rounded-card border border-line bg-surface px-3 text-sm"
+                    />
+                    <button type="submit" :class="buttonSecondary" :disabled="savingLink">
+                      {{ savingLink ? 'Menyimpan...' : 'Simpan tautan' }}
+                    </button>
+                  </form>
 
                   <SubtaskFiles
                     :task-id="task.id"
@@ -696,6 +773,16 @@ const buttonSecondary =
               placeholder="Deskripsi (opsional)"
               class="w-full rounded-card border border-line bg-surface p-3 text-sm"
             ></textarea>
+            <label for="sub-new-link" class="sr-only">Tautan acuan sub task baru</label>
+            <input
+              id="sub-new-link"
+              v-model="newLink"
+              type="url"
+              maxlength="2000"
+              inputmode="url"
+              placeholder="Tautan acuan, misalnya brief atau contoh (opsional)"
+              class="min-h-11 w-full rounded-card border border-line bg-surface px-3 text-sm"
+            />
             <div class="flex flex-wrap items-center gap-2">
               <label for="sub-new-pic" class="text-sm text-ink-muted">Dikerjakan</label>
               <select id="sub-new-pic" v-model.number="newPic" :class="picSelect">

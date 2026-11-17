@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, ref } from 'vue'
+import AttachmentPreview from './AttachmentPreview.vue'
 import BaseDialog from './BaseDialog.vue'
 import { ApiError } from '../api/client'
 import {
@@ -88,43 +89,11 @@ function dismiss(key: number) {
   queue.value = queue.value.filter((q) => q.key !== key)
 }
 
-// Pratinjau hanya untuk gambar dan PDF. Berkasnya diambil sebagai blob, bukan dibuka lewat URL unduhan,
-// karena backend selalu mengirim Content-Disposition attachment (NFR-SEC-09 d) dan itu tidak diubah.
+// Pratinjau hanya untuk gambar dan PDF; isinya ditangani AttachmentPreview.
 function canPreview(a: TaskAttachment): boolean {
   return isImage(a.mime_type) || isPdf(a.mime_type)
 }
 const preview = ref<TaskAttachment | null>(null)
-const previewUrl = ref('')
-const previewLoading = ref(false)
-const previewError = ref<string | null>(null)
-
-function releasePreview() {
-  if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
-  previewUrl.value = ''
-}
-
-async function openPreview(a: TaskAttachment) {
-  releasePreview()
-  preview.value = a
-  previewError.value = null
-  previewLoading.value = true
-  try {
-    const res = await fetch(attachmentUrl(props.taskId, a.id), { credentials: 'same-origin' })
-    if (!res.ok) throw new Error(String(res.status))
-    previewUrl.value = URL.createObjectURL(await res.blob())
-  } catch {
-    previewError.value = 'Pratinjau gagal dimuat. Coba unduh berkasnya.'
-  } finally {
-    previewLoading.value = false
-  }
-}
-
-function closePreview() {
-  preview.value = null
-  releasePreview()
-}
-
-onBeforeUnmount(releasePreview)
 
 const toDelete = ref<TaskAttachment | null>(null)
 const deleting = ref(false)
@@ -201,7 +170,7 @@ const buttonSecondary =
           type="button"
           :class="iconButton"
           :aria-label="`Pratinjau ${a.name}`"
-          @click="openPreview(a)"
+          @click="preview = a"
         >
           <svg
             aria-hidden="true"
@@ -301,38 +270,7 @@ const buttonSecondary =
       </li>
     </ul>
 
-    <BaseDialog wide :open="preview !== null" :title="preview?.name ?? ''" @close="closePreview">
-      <p v-if="previewLoading" class="text-sm text-ink-muted">Memuat pratinjau...</p>
-      <p v-else-if="previewError" role="alert" class="rounded-card bg-danger-bg p-3 text-sm text-danger">
-        {{ previewError }}
-      </p>
-      <img
-        v-else-if="previewUrl && preview && isImage(preview.mime_type)"
-        :src="previewUrl"
-        :alt="`Pratinjau ${preview.name}`"
-        class="mx-auto max-h-[70vh] w-auto max-w-full rounded-card"
-      />
-      <!-- sandbox tanpa allow-same-origin: penampil PDF tetap jalan, tapi isi berkas tidak bisa
-           menyentuh sesi NVM, pengganti header CSP sandbox yang hilang saat blob dibuat. -->
-      <iframe
-        v-else-if="previewUrl && preview"
-        :src="previewUrl"
-        :title="`Pratinjau ${preview.name}`"
-        sandbox="allow-scripts"
-        class="h-[70vh] w-full rounded-card border border-line"
-      ></iframe>
-      <template #footer>
-        <a
-          v-if="preview"
-          :href="attachmentUrl(taskId, preview.id)"
-          :class="buttonSecondary"
-          :aria-label="`Unduh ${preview.name}`"
-        >
-          Unduh
-        </a>
-        <button type="button" :class="buttonSecondary" @click="closePreview">Tutup</button>
-      </template>
-    </BaseDialog>
+    <AttachmentPreview :task-id="taskId" :item="preview" @close="preview = null" />
 
     <BaseDialog :open="toDelete !== null" :title="`Hapus ${toDelete?.name ?? ''}?`" @close="toDelete = null">
       <p v-if="deleteError" role="alert" class="mb-3 rounded-card bg-danger-bg p-3 text-sm text-danger">

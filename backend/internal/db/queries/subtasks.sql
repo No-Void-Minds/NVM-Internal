@@ -1,5 +1,6 @@
 -- name: ListSubtasks :many
-SELECT st.id, st.task_id, st.title, st.description, st.deliverable_url, st.position, st.done_at, st.created_by,
+SELECT st.id, st.task_id, st.title, st.description, st.reference_url, st.deliverable_url,
+       st.position, st.done_at, st.created_by,
        u.name AS done_by_name, c.name AS created_by_name
 FROM task_subtasks st
 LEFT JOIN users u ON u.id = st.done_by
@@ -15,8 +16,8 @@ WHERE sa.subtask_id = ANY(@subtask_ids::bigint[])
 ORDER BY sa.subtask_id, sa.assigned_at, u.id;
 
 -- name: CreateSubtask :one
-INSERT INTO task_subtasks (task_id, title, description, deliverable_url, position, created_by)
-VALUES (@task_id, @title, @description, @deliverable_url, @position, @created_by)
+INSERT INTO task_subtasks (task_id, title, description, reference_url, deliverable_url, position, created_by)
+VALUES (@task_id, @title, @description, @reference_url, @deliverable_url, @position, @created_by)
 RETURNING id;
 
 -- name: UpdateSubtask :exec
@@ -47,7 +48,8 @@ ORDER BY tas.assigned_at, u.id
 LIMIT 1;
 
 -- name: GetSubtask :one
-SELECT id, title, description, deliverable_url, done_at, created_by FROM task_subtasks WHERE id = @id AND task_id = @task_id;
+SELECT id, title, description, reference_url, deliverable_url, done_at, created_by
+FROM task_subtasks WHERE id = @id AND task_id = @task_id;
 
 -- name: IsSubtaskAssignee :one
 SELECT EXISTS (SELECT 1 FROM subtask_assignees WHERE subtask_id = @subtask_id AND user_id = @user_id);
@@ -86,7 +88,8 @@ SELECT count(*)::int FROM subtask_assignees WHERE subtask_id = @subtask_id;
 
 -- name: RenameSubtask :exec
 -- Nama, deskripsi, dan tautan; urutan tidak ikut berubah saat PIC atau Manajer memperbaiki isinya.
-UPDATE task_subtasks SET title = @title, description = @description, deliverable_url = @deliverable_url
+UPDATE task_subtasks
+SET title = @title, description = @description, reference_url = @reference_url, deliverable_url = @deliverable_url
 WHERE id = @id AND task_id = @task_id;
 
 -- name: ClearSubtaskAssignees :exec

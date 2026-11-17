@@ -123,6 +123,7 @@ type SubtaskView struct {
 	ID             int64
 	Title          string
 	Description    string
+	ReferenceURL   string
 	DeliverableURL string
 	CreatedBy      int64
 	CreatedByName  string
@@ -141,7 +142,8 @@ func loadSubtaskViews(ctx context.Context, q *sqlc.Queries, taskID string) ([]Su
 	index := make(map[int64]int, len(rows))
 	for i, r := range rows {
 		out[i] = SubtaskView{
-			ID: r.ID, Title: r.Title, Description: r.Description, DeliverableURL: r.DeliverableUrl,
+			ID: r.ID, Title: r.Title, Description: r.Description,
+			ReferenceURL: r.ReferenceUrl, DeliverableURL: r.DeliverableUrl,
 			CreatedBy: r.CreatedBy.Int64, CreatedByName: r.CreatedByName.String,
 			DoneAt: r.DoneAt, DoneBy: r.DoneByName.String,
 			Assignees: []sqlc.ListSubtaskAssigneesRow{},

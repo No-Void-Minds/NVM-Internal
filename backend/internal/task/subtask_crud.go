@@ -72,17 +72,48 @@ func setSubtaskPIC(ctx context.Context, q *sqlc.Queries, actor Actor, taskID str
 }
 
 // AddSubtask menambah satu sub task di urutan paling bawah. picID 0 berarti belum ditugaskan.
-func (s *Service) AddSubtask(ctx context.Context, actor Actor, taskID, title, desc, link string, picID int64) (int64, error) {
-	clean, err := cleanSubtaskTitle(title, "ini")
-	if err != nil {
-		return 0, err
+// SubtaskFields adalah isi sub task yang bisa ditulis pengguna. Dikumpulkan dalam satu struct supaya
+// menambah kolom baru tidak memanjangkan daftar parameter di setiap lapisan.
+type SubtaskFields struct {
+	Title       string
+	Description string
+	// Reference diisi yang menugaskan (acuan kerja), Deliverable diisi yang mengerjakan (hasilnya).
+	Reference   string
+	Deliverable string
+	PICID       int64
+}
+
+type cleanSubtaskFields struct {
+	title       string
+	description string
+	reference   string
+	deliverable string
+}
+
+func cleanFieldsOf(in SubtaskFields) (cleanSubtaskFields, error) {
+	var out cleanSubtaskFields
+	var err error
+	if out.title, err = cleanSubtaskTitle(in.Title, "ini"); err != nil {
+		return out, err
 	}
-	cleanDesc, err := cleanSubtaskDesc(desc)
-	if err != nil {
-		return 0, err
+	if out.description, err = cleanSubtaskDesc(in.Description); err != nil {
+		return out, err
 	}
 	// Aturan tautannya sama dengan deliverable task: hanya http dan https (NFR-SEC-06).
-	cleanLink, err := cleanURL(link)
+	ref, err := cleanURL(in.Reference)
+	if err != nil {
+		return out, err
+	}
+	del, err := cleanURL(in.Deliverable)
+	if err != nil {
+		return out, err
+	}
+	out.reference, out.deliverable = ref.String, del.String
+	return out, nil
+}
+
+func (s *Service) AddSubtask(ctx context.Context, actor Actor, taskID string, in SubtaskFields) (int64, error) {
+	f, err := cleanFieldsOf(in)
 	if err != nil {
 		return 0, err
 	}
@@ -100,13 +131,14 @@ func (s *Service) AddSubtask(ctx context.Context, actor Actor, taskID, title, de
 			return apperr.Invalid("Satu task paling banyak punya 50 sub task.")
 		}
 		id, err = q.CreateSubtask(ctx, sqlc.CreateSubtaskParams{
-			TaskID: taskID, Title: clean, Description: cleanDesc, DeliverableUrl: cleanLink.String,
+			TaskID: taskID, Title: f.title, Description: f.description,
+			ReferenceUrl: f.reference, DeliverableUrl: f.deliverable,
 			Position: slot.NextPosition, CreatedBy: userRef(actor.ID),
 		})
 		if err != nil {
 			return err
 		}
-		if err := setSubtaskPIC(ctx, q, actor, taskID, id, picID); err != nil {
+		if err := setSubtaskPIC(ctx, q, actor, taskID, id, in.PICID); err != nil {
 			return err
 		}
 		// Versi task ikut naik supaya form Manajer yang sudah terbuka tidak menyimpan daftar sub task
@@ -115,7 +147,7 @@ func (s *Service) AddSubtask(ctx context.Context, actor Actor, taskID, title, de
 			return err
 		}
 		return audit.Change(ctx, q, actor.auditActor(), "subtask_added", "task", taskID, nil,
-			map[string]any{"id": id, "title": clean, "pic_id": picID})
+			map[string]any{"id": id, "title": f.title, "pic_id": in.PICID})
 	})
 	return id, err
 }
@@ -145,16 +177,8 @@ func editableSubtask(ctx context.Context, q *sqlc.Queries, actor Actor, taskID s
 
 // UpdateSubtask mengubah nama, deskripsi, dan PIC sub task tanpa menggeser urutannya.
 // picID 0 melepas PIC-nya.
-func (s *Service) UpdateSubtask(ctx context.Context, actor Actor, taskID string, subtaskID int64, title, desc, link string, picID int64) error {
-	clean, err := cleanSubtaskTitle(title, "ini")
-	if err != nil {
-		return err
-	}
-	cleanDesc, err := cleanSubtaskDesc(desc)
-	if err != nil {
-		return err
-	}
-	cleanLink, err := cleanURL(link)
+func (s *Service) UpdateSubtask(ctx context.Context, actor Actor, taskID string, subtaskID int64, in SubtaskFields) error {
+	f, err := cleanFieldsOf(in)
 	if err != nil {
 		return err
 	}
@@ -175,20 +199,21 @@ func (s *Service) UpdateSubtask(ctx context.Context, actor Actor, taskID string,
 		if len(oldPIC) > 0 {
 			oldPICID = oldPIC[0].ID
 		}
-		if st.Title == clean && st.Description == cleanDesc && st.DeliverableUrl == cleanLink.String &&
-			oldPICID == picID {
+		sameText := st.Title == f.title && st.Description == f.description &&
+			st.ReferenceUrl == f.reference && st.DeliverableUrl == f.deliverable
+		if sameText && oldPICID == in.PICID {
 			return nil
 		}
-		if st.Title != clean || st.Description != cleanDesc || st.DeliverableUrl != cleanLink.String {
+		if !sameText {
 			if err := q.RenameSubtask(ctx, sqlc.RenameSubtaskParams{
-				ID: subtaskID, TaskID: taskID, Title: clean, Description: cleanDesc,
-				DeliverableUrl: cleanLink.String,
+				ID: subtaskID, TaskID: taskID, Title: f.title, Description: f.description,
+				ReferenceUrl: f.reference, DeliverableUrl: f.deliverable,
 			}); err != nil {
 				return err
 			}
 		}
-		if oldPICID != picID {
-			if err := setSubtaskPIC(ctx, q, actor, taskID, subtaskID, picID); err != nil {
+		if oldPICID != in.PICID {
+			if err := setSubtaskPIC(ctx, q, actor, taskID, subtaskID, in.PICID); err != nil {
 				return err
 			}
 		}
@@ -199,7 +224,7 @@ func (s *Service) UpdateSubtask(ctx context.Context, actor Actor, taskID string,
 		// untuk satu kali simpan.
 		return audit.Change(ctx, q, actor.auditActor(), "subtask_renamed", "task", taskID,
 			map[string]any{"id": st.ID, "title": st.Title, "pic_id": oldPICID},
-			map[string]any{"id": st.ID, "title": clean, "pic_id": picID})
+			map[string]any{"id": st.ID, "title": f.title, "pic_id": in.PICID})
 	})
 }
 

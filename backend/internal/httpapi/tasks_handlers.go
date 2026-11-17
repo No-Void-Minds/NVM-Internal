@@ -58,6 +58,7 @@ type subtaskItem struct {
 	ID             int64              `json:"id"`
 	Title          string             `json:"title"`
 	Description    string             `json:"description"`
+	ReferenceURL   string             `json:"reference_url"`
 	DeliverableURL string             `json:"deliverable_url"`
 	CreatedBy      string             `json:"created_by"`
 	Done           bool               `json:"done"`
@@ -201,7 +202,8 @@ func (s *Server) getTask(c *gin.Context) {
 	}
 	for _, st := range d.Subtasks {
 		item := subtaskItem{
-			ID: st.ID, Title: st.Title, Description: st.Description, DeliverableURL: st.DeliverableURL,
+			ID: st.ID, Title: st.Title, Description: st.Description,
+			ReferenceURL: st.ReferenceURL, DeliverableURL: st.DeliverableURL,
 			CreatedBy: st.CreatedByName,
 			Done:      st.DoneAt.Valid, DoneAt: timePtr(st.DoneAt), DoneBy: st.DoneBy,
 			Assignees:   make([]taskPerson, 0, len(st.Assignees)),

@@ -10,13 +10,24 @@ import (
 	"nvm-internal/internal/task"
 )
 
-// PicID 0 berarti sub task belum ditugaskan ke siapa pun (revisi 7). Description dan DeliverableURL
-// boleh kosong (revisi 8 dan 9).
+// PicID 0 berarti sub task belum ditugaskan ke siapa pun (revisi 7). ReferenceURL diisi yang menugaskan
+// sebagai acuan, DeliverableURL diisi yang mengerjakan sebagai hasil (revisi 10). Semuanya boleh kosong.
 type subtaskTitleRequest struct {
 	Title          string `json:"title"`
 	Description    string `json:"description"`
+	ReferenceURL   string `json:"reference_url"`
 	DeliverableURL string `json:"deliverable_url"`
 	PicID          int64  `json:"pic_id"`
+}
+
+func (r subtaskTitleRequest) fields() task.SubtaskFields {
+	return task.SubtaskFields{
+		Title:       r.Title,
+		Description: r.Description,
+		Reference:   r.ReferenceURL,
+		Deliverable: r.DeliverableURL,
+		PICID:       r.PicID,
+	}
 }
 
 // subtaskPath membaca :id dan :subtaskId sekaligus; keduanya salah bentuk diperlakukan sebagai tidak ada.
@@ -57,7 +68,7 @@ func (s *Server) addSubtask(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, CodeBadRequest, "Isian tidak terbaca.")
 		return
 	}
-	sid, err := s.tasks.AddSubtask(c.Request.Context(), taskActor(c), id, req.Title, req.Description, req.DeliverableURL, req.PicID)
+	sid, err := s.tasks.AddSubtask(c.Request.Context(), taskActor(c), id, req.fields())
 	if err != nil {
 		s.writeSubtaskError(c, err)
 		return
@@ -75,7 +86,7 @@ func (s *Server) updateSubtask(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, CodeBadRequest, "Isian tidak terbaca.")
 		return
 	}
-	if err := s.tasks.UpdateSubtask(c.Request.Context(), taskActor(c), id, sid, req.Title, req.Description, req.DeliverableURL, req.PicID); err != nil {
+	if err := s.tasks.UpdateSubtask(c.Request.Context(), taskActor(c), id, sid, req.fields()); err != nil {
 		s.writeSubtaskError(c, err)
 		return
 	}
