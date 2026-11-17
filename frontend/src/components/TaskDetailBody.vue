@@ -74,13 +74,22 @@ const savingLink = ref(false)
 // Calon PIC sub task adalah semua akun aktif, bukan hanya PIC task (revisi 11), jadi daftarnya diambil
 // dari /people. Sekali per panel: isinya jarang berubah dan dipakai semua baris sub task.
 const people = ref<Person[]>([])
-const picOptions = computed(() => {
-  const picked = task.value?.assignees ?? []
-  if (people.value.length === 0) return picked
-  // PIC task ditaruh di atas karena merekalah yang paling sering dipilih.
-  const ids = new Set(picked.map((p) => p.id))
-  return [...picked, ...people.value.filter((p) => !ids.has(p.id))]
+type PicOption = { id: number; name: string }
+// Manajer tidak ikut: dia membagi pekerjaan di sub task, bukan menerimanya (revisi 12).
+// PIC task ditaruh di atas karena merekalah yang paling sering dipilih.
+const picOptions = computed<PicOption[]>(() => {
+  const staf = people.value.filter((p) => p.role === 'staff')
+  const picked = new Set((task.value?.assignees ?? []).map((p) => p.id))
+  return [...staf.filter((p) => picked.has(p.id)), ...staf.filter((p) => !picked.has(p.id))]
 })
+
+// PIC lama yang sekarang tidak memenuhi syarat, misalnya Manajer yang ditugaskan sebelum revisi 12,
+// tetap ditampilkan di barisnya sendiri supaya menyimpan perubahan lain tidak memaksa menggantinya.
+function picOptionsFor(s: TaskSubtask): PicOption[] {
+  const cur = s.assignees[0]
+  if (!cur || picOptions.value.some((p) => p.id === cur.id)) return picOptions.value
+  return [{ id: cur.id, name: cur.name }, ...picOptions.value]
+}
 // Hanya satu sub task terbuka sekaligus: isinya (deskripsi dan berkas) panjang, dan dua kartu terbuka
 // berdampingan membuat daftar sulit dibaca.
 const openSub = ref<number | null>(null)
@@ -622,7 +631,9 @@ const buttonSecondary =
                   <label :for="`sub-edit-pic-${s.id}`" class="text-sm text-ink-muted">Dikerjakan</label>
                   <select :id="`sub-edit-pic-${s.id}`" v-model.number="editPic" :class="picSelect">
                     <option :value="0">Belum ditugaskan</option>
-                    <option v-for="p in picOptions" :key="p.id" :value="p.id">{{ picName(p) }}</option>
+                    <option v-for="p in picOptionsFor(s)" :key="p.id" :value="p.id">
+                      {{ picName(p) }}
+                    </option>
                   </select>
                   <button type="submit" :class="buttonSecondary" :disabled="!editTitle.trim()">Simpan</button>
                   <button type="button" :class="buttonSecondary" @click="editingSub = null">Batal</button>

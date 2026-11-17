@@ -243,6 +243,19 @@ func (q *Queries) IsSubtaskAssignee(ctx context.Context, arg IsSubtaskAssigneePa
 	return exists, err
 }
 
+const isSubtaskPICEligible = `-- name: IsSubtaskPICEligible :one
+SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND is_active AND role = 'staff')
+`
+
+// Revisi 12: yang dikerjakan di sub task hanya Staf. Manajer membagi pekerjaan, bukan menerimanya,
+// jadi perannya tidak ikut daftar kandidat walau akunnya aktif.
+func (q *Queries) IsSubtaskPICEligible(ctx context.Context, userID int64) (bool, error) {
+	row := q.db.QueryRow(ctx, isSubtaskPICEligible, userID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const listSubtaskAssignees = `-- name: ListSubtaskAssignees :many
 SELECT sa.subtask_id, u.id, u.name, u.username, u.avatar_id
 FROM subtask_assignees sa

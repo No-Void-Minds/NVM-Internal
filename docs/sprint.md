@@ -59,6 +59,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 11g | Tautan hasil sub task | Sub task punya tautan deliverable; pembuat sub task ikut boleh mencentang |
 | 11h | Acuan dan pratinjau sub task | Tautan acuan diisi saat membuat; berkas sub task bisa dipratinjau |
 | 11i | PIC sub task dari semua akun | Sub task bisa dititipkan ke siapa pun, walau bukan PIC task |
+| 11j | Manajer membagi, bukan menerima | Sub task hanya bisa ditugaskan ke Staf |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -800,6 +801,23 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 
 **Hasil:** kode selesai 2026-11-17, `./scripts/check.sh` lolos. Tidak ada migrasi baru. Uji browser menunggu Rifky.
 
+## Sprint 11j: Manajer membagi, bukan menerima
+
+**Tujuan:** revisi 12 Manajer. Sub task adalah pekerjaan yang dibagikan, dan Manajer ada di sisi yang membagi. Jadi Manajer tidak bisa dipilih sebagai PIC sub task, tetapi tetap bisa membuat sub task dan menugaskannya ke orang lain.
+
+- [x] S11j-01 Query `IsSubtaskPICEligible`: kandidat PIC sub task adalah akun aktif berperan Staf saja. Dipakai `setSubtaskPIC`, jadi aturannya berlaku untuk form tambah maupun form Ubah.
+- [x] S11j-02 Frontend: pilihan "Dikerjakan" menyaring peran Manajer, dan PIC task yang berperan Staf tetap di urutan atas.
+
+**Keputusan:**
+- Yang berubah hanya sisi penerima. Manajer tetap boleh membuat sub task, menugaskannya, mengubah namanya, menghapusnya, dan mencentangnya (aturan revisi 4 tidak berubah). Yang hilang hanya kemampuan menjadi PIC sub task.
+- Akun Admin memang sudah di luar daftar sejak awal, karena Admin mengelola sistem dan tidak mengerjakan task.
+- Sub task lama yang terlanjur ditugaskan ke Manajer tidak diubah dan tidak ada migrasi untuk itu. Barisnya tetap sah, dan aturan baru hanya berlaku saat menyimpan. Di form Ubah, PIC lama yang sudah tidak memenuhi syarat tetap ditampilkan sebagai pilihan barisnya sendiri, supaya mengubah nama sub task tidak memaksa mengganti PIC-nya lebih dulu.
+- PIC task boleh tetap berisi Manajer. Revisi ini hanya tentang sub task, dan Manajer yang menjadi PIC task memang mengerjakan task itu di tingkat task.
+
+**Selesai kalau:** `./scripts/check.sh` lolos dan terbukti di browser: daftar "Dikerjakan" tidak memuat satu pun akun Manajer, Manajer masih bisa menambah sub task dan menugaskannya ke Staf, dan permintaan yang memaksa `pic_id` akun Manajer ditolak dengan pesan "Sub task hanya bisa ditugaskan ke akun Staf yang aktif."
+
+**Hasil:** kode selesai 2026-11-17, `./scripts/check.sh` lolos. Tidak ada migrasi baru. Uji browser menunggu Rifky.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -965,9 +983,10 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 9 | 2026-11-17 | Sub task punya tautan deliverable sendiri, bukan hanya berkas. Yang boleh mencentang: PIC sub task, yang membuatnya, dan Manajer | Sprint 11g |
 | 10 | 2026-11-17 | Tautan sudah bisa diisi saat sub task dibuat. Sub task punya dua tautan: acuan dari yang menugaskan dan hasil dari yang mengerjakan. Berkas sub task bisa dipratinjau di web | Sprint 11h |
 | 11 | 2026-11-17 | PIC sub task boleh siapa saja yang akunnya aktif, bukan hanya PIC task. Yang membuat sub task tetap PIC task pilihan Manajer | Sprint 11i |
+| 12 | 2026-11-17 | Manajer tidak bisa ditugaskan di sub task. Dia tetap bisa membuat sub task dan menugaskannya ke orang lain | Sprint 11j |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat kesebelas revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat kedua belas revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

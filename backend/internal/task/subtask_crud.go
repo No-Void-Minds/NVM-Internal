@@ -55,16 +55,17 @@ func lockForSubtask(ctx context.Context, q *sqlc.Queries, actor Actor, taskID st
 	return cur, nil
 }
 
-// setSubtaskPIC memasang atau melepas PIC sub task. Sejak revisi 11 kandidatnya semua akun aktif, bukan
-// hanya PIC task: pekerjaan sering perlu dititipkan ke orang divisi lain tanpa menjadikannya PIC task.
+// setSubtaskPIC memasang atau melepas PIC sub task. Sejak revisi 11 kandidatnya tidak lagi dibatasi PIC
+// task, karena pekerjaan sering dititipkan ke orang divisi lain. Sejak revisi 12 hanya Staf: Manajer
+// membagi pekerjaan di sub task, bukan menerimanya.
 func setSubtaskPIC(ctx context.Context, q *sqlc.Queries, actor Actor, taskID string, subtaskID int64, picID int64) error {
 	if picID != 0 {
-		rows, err := q.GetEligiblePICs(ctx, []int64{picID})
+		ok, err := q.IsSubtaskPICEligible(ctx, picID)
 		if err != nil {
 			return err
 		}
-		if len(rows) == 0 {
-			return apperr.Invalid("PIC sub task harus akun aktif.")
+		if !ok {
+			return apperr.Invalid("Sub task hanya bisa ditugaskan ke akun Staf yang aktif.")
 		}
 	}
 	if err := q.ClearSubtaskAssignees(ctx, subtaskID); err != nil {
