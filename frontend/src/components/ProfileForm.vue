@@ -157,7 +157,7 @@ const buttonSecondary =
       <div v-if="uploading" class="mt-2" role="status">
         <p class="text-sm">Mengunggah foto... {{ progress }}%</p>
         <progress
-          class="mt-1 h-2 w-full accent-accent"
+          class="mt-1 h-2 w-full accent-mark"
           max="100"
           :value="progress"
           aria-label="Progres unggah foto"
@@ -188,13 +188,13 @@ const buttonSecondary =
         <input
           id="profile-name"
           v-model="name"
-          @input="errors.name = undefined"
           type="text"
           autocomplete="name"
           maxlength="100"
           :aria-invalid="errors.name ? 'true' : undefined"
           :aria-describedby="errors.name ? 'profile-name-error' : undefined"
           :class="[inputClass, errors.name ? 'border-danger' : 'border-line']"
+          @input="errors.name = undefined"
         />
         <p v-if="errors.name" id="profile-name-error" class="mt-1 text-sm text-danger">{{ errors.name }}</p>
       </div>
@@ -204,13 +204,13 @@ const buttonSecondary =
         <input
           id="profile-job"
           v-model="jobTitle"
-          @input="errors.job_title = undefined"
           type="text"
           autocomplete="organization-title"
           maxlength="100"
           :aria-invalid="errors.job_title ? 'true' : undefined"
           :aria-describedby="errors.job_title ? 'profile-job-error' : 'profile-job-hint'"
           :class="[inputClass, errors.job_title ? 'border-danger' : 'border-line']"
+          @input="errors.job_title = undefined"
         />
         <p v-if="errors.job_title" id="profile-job-error" class="mt-1 text-sm text-danger">
           {{ errors.job_title }}
@@ -237,7 +237,7 @@ const buttonSecondary =
       <button
         type="submit"
         :disabled="saving"
-        class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white hover:bg-accent-hover active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
+        class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-on-accent hover:bg-accent-hover active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
       >
         {{ saving ? 'Menyimpan...' : 'Simpan profil' }}
       </button>

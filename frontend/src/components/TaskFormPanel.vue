@@ -234,7 +234,7 @@ async function submit() {
 
 const inputClass = 'mt-1 block min-h-11 w-full rounded-card border border-line bg-surface px-3'
 const optionClass =
-  'flex min-h-11 cursor-pointer items-center justify-center rounded-card border border-line px-3 text-sm font-medium hover:bg-canvas has-[:checked]:border-accent has-[:checked]:bg-progress-bg has-[:checked]:text-progress-fg has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent'
+  'flex min-h-11 cursor-pointer items-center justify-center rounded-card border border-line px-3 text-sm font-medium hover:bg-canvas has-[:checked]:border-mark has-[:checked]:bg-progress-bg has-[:checked]:text-progress-fg has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-mark'
 </script>
 
 <template>
@@ -318,7 +318,7 @@ const optionClass =
                 <span class="shrink-0 text-ink-muted">{{ formatBytes(f.size) }}</span>
                 <button
                   type="button"
-                  class="inline-flex size-11 shrink-0 items-center justify-center rounded-card hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                  class="inline-flex size-11 shrink-0 items-center justify-center rounded-card hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
                   :aria-label="`Batalkan ${f.name}`"
                   @click="removePending(i)"
                 >
@@ -344,12 +344,12 @@ const optionClass =
               <label
                 v-for="l in labelOptions"
                 :key="l.id"
-                class="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-chip border border-line px-3 text-sm has-[:checked]:border-accent has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent"
-                :style="{ backgroundColor: l.color }"
+                class="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-chip border border-line px-3 text-sm has-[:checked]:border-mark has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-mark"
+                :style="{ backgroundColor: l.color, color: 'var(--color-tag-ink)' }"
               >
                 <input
                   type="checkbox"
-                  class="size-4 accent-accent"
+                  class="size-4 accent-mark"
                   :checked="labelIds.includes(l.id)"
                   @change="toggleLabel(l.id)"
                 />
@@ -402,7 +402,7 @@ const optionClass =
         type="submit"
         form="task-form"
         :disabled="submitting"
-        class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white hover:bg-accent-hover active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
+        class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-on-accent hover:bg-accent-hover active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
       >
         {{ submitLabel }}
       </button>

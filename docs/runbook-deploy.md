@@ -15,10 +15,13 @@ Superuser `nvm_internal` hanya dipakai sekali di langkah 2, tidak pernah oleh ap
 
 ## 1. Folder dan repo
 
+`git clone` gagal kalau `/srv/nvm-internal` sudah ada dan berisi. Periksa isinya dulu; folder kosong dihapus dengan `rmdir` (yang menolak menghapus folder berisi, jadi aman). Folder berisi jangan dihapus sebelum jelas isinya apa.
+
 ```bash
-sudo mkdir -p /srv/nvm-internal
-sudo chown "$USER": /srv/nvm-internal
-git clone <URL repo NVM-Internal> /srv/nvm-internal
+ls -la /srv/nvm-internal 2>/dev/null
+sudo rmdir /srv/nvm-internal                    # hanya bila kosong
+sudo git clone https://github.com/No-Void-Minds/NVM-Internal /srv/nvm-internal
+sudo chown -R "$USER": /srv/nvm-internal
 cd /srv/nvm-internal
 
 # Berkas unggahan ditulis backend sebagai UID 65532 (0600 untuk berkas, 0750 untuk folder).
@@ -50,6 +53,13 @@ docker exec -it nvm-internal-postgres psql -U nvm_internal -d postgres -f /tmp/0
 docker exec nvm-internal-postgres rm /tmp/00-bootstrap.sql
 ```
 
+Baris terakhir keluaran skrip harus `public | nvm_internal_migrator`. Kalau pemiliknya lain, migrate nanti gagal "permission denied for schema public": template database di cluster ini hasil restore, jadi skema `public` di database baru tidak otomatis milik pemilik database. Perbaiki di dalam `nvm_internal_prod` (bukan di database `postgres`):
+
+```bash
+docker exec -it nvm-internal-postgres psql -U nvm_internal -d nvm_internal_prod \
+  -c 'ALTER SCHEMA public OWNER TO nvm_internal_migrator' -c 'REVOKE CREATE ON SCHEMA public FROM PUBLIC'
+```
+
 Isi `deploy/.env`:
 
 ```bash
@@ -62,6 +72,21 @@ Cek nama jaringan Postgres sama dengan `PG_NETWORK` (`nvm-internal_default`):
 
 ```bash
 docker inspect nvm-internal-postgres --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'
+```
+
+Cek isi `.env` sebelum langkah 3, tanpa mencetak secret. Panjang `JWT_SECRET` harus 64, dan password di URL disamarkan:
+
+```bash
+set -a; source deploy/.env; set +a
+echo "panjang JWT_SECRET: ${#JWT_SECRET}"                          # harus 64
+echo "$MIGRATOR_URL" | sed -E 's#(://[^:]+:)[^@]*@#\1****@#'      # user harus nvm_internal_migrator
+echo "$DATABASE_URL" | sed -E 's#(://[^:]+:)[^@]*@#\1****@#'      # user harus nvm_internal_app
+```
+
+**Setiap kali `deploy/.env` diubah:** source ulang (`set -a; source deploy/.env; set +a`) atau buka sesi SSH baru, lalu buat ulang container dengan `--force-recreate`. Variabel yang sudah di-export di shell mengalahkan isi `--env-file`, dan compose tidak membuat ulang container hanya karena isi env berubah.
+
+```bash
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --force-recreate
 ```
 
 ## 3. Migrasi (A7)
@@ -108,33 +133,40 @@ Karena `COOKIE_SECURE=true`, login lewat `http://127.0.0.1:8094` tidak bisa (bro
 
 `seed` membuat divisi Marketing dan Creative serta akun Admin dengan password sementara (wajib diganti saat login pertama, minimal 12 karakter). Aman dijalankan berulang: akun yang sudah ada tidak diubah.
 
+Di produksi akun Admin pertama bernama `adminit`.
+
 ```bash
-P="$(openssl rand -base64 18)"; echo "Password sementara admin: $P"
+P="$(openssl rand -base64 18)"; echo "Password sementara adminit: $P"
 docker compose --env-file deploy/.env -f deploy/docker-compose.yml run --rm \
-  --entrypoint /usr/local/bin/seed -e SEED_ADMIN_USERNAME=admin -e SEED_ADMIN_PASSWORD="$P" backend
+  --entrypoint /usr/local/bin/seed -e SEED_ADMIN_USERNAME=adminit -e SEED_ADMIN_PASSWORD="$P" backend
 unset P
 ```
 
 ## 6. Cloudflare
 
-**Tunnel.** Di Zero Trust, Networks, Tunnels, buka tunnel `nvm-server`, tambahkan public hostname:
+Keadaan setelah deploy 2026-11-17 (Zero Trust, Networks, Tunnels):
 
-- Hostname `novoidminds.xyz`, service `http://127.0.0.1:8094`. Tulis `127.0.0.1`, bukan `localhost`, karena port hanya terikat di IPv4.
+| Tunnel | Mesin | Route |
+|---|---|---|
+| `nvm-server` | VM 192.168.68.69 | `novoidminds.xyz` ke `http://127.0.0.1:8094` |
+| `nvm-tim-pc` | PC tim 192.168.68.68 | `dash.novoidminds.xyz` dan `studio.novoidminds.xyz` ke `http://127.0.0.1:8088` (Caddy, forward_auth ke `https://novoidminds.xyz/api/auth/verify`) |
+
+- Tulis `127.0.0.1`, bukan `localhost`, karena port hanya terikat di IPv4.
 - Jangan isi HTTP Host Header (Additional application settings, HTTP Settings). Backend membandingkan Origin dengan Host asli (S12-15).
 
-**HSTS.** SSL/TLS, Edge Certificates: aktifkan HSTS (mulai `max-age` 6 bulan, tanpa preload dulu) dan Always Use HTTPS.
+**HTTPS.** SSL/TLS, Edge Certificates: Always Use HTTPS menyala, HSTS `max-age` 6 bulan (tanpa preload).
 
-**Rate limit login (A10).** Security, WAF, Rate limiting rules, buat satu aturan:
+**Rate limit login (A10).** Security, WAF, Rate limiting rules, satu aturan (paket Free):
 
 - Ekspresi: `(http.host eq "novoidminds.xyz" and http.request.uri.path eq "/api/auth/login" and http.request.method eq "POST")`
-- Hitung per IP, 5 permintaan per 10 detik (atau setara di periode yang tersedia untuk paket akun), aksi Block selama periode terpanjang yang tersedia.
+- Per IP, 5 permintaan per 10 detik, aksi Block selama 10 detik (batas paket Free).
 - Aturan ini lapis luar. Di backend masih ada limiter per IP asli (10 percobaan, lalu 1 per 30 detik) dan kuncian akun setelah 5 kali gagal.
 
 ## 7. Cek setelah hidup
 
-1. Dari HP dengan **data seluler** (bukan Wi-Fi kantor), buka `https://novoidminds.xyz`, login sebagai `admin`, ganti password sementara.
+1. Dari HP dengan **data seluler** (bukan Wi-Fi kantor), buka `https://novoidminds.xyz`, login sebagai `adminit`, ganti password sementara.
 2. DevTools, Application, Cookies: `nvm_session` punya Domain `.novoidminds.xyz`, Secure, HttpOnly, SameSite Lax, kedaluwarsa sekitar 12 jam.
-3. Setelah login, buka `https://novoidminds.xyz/api/auth/verify`: tab Network menunjukkan 204 dan header `X-NVM-User: admin`, tanpa `Set-Cookie`.
+3. Setelah login, buka `https://novoidminds.xyz/api/auth/verify`: tab Network menunjukkan 204 dan header `X-NVM-User: adminit`, tanpa `Set-Cookie`.
 4. Audit Log: baris "Masuk" dari HP mencatat IP seluler, bukan `172.30.94.1` atau `127.0.0.1`.
 5. IP dari tunnel, di VM:
 

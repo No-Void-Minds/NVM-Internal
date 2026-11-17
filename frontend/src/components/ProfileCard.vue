@@ -20,7 +20,7 @@ const open = ref(false)
 const uid = useId()
 const order: TaskStatus[] = ['requested', 'on_progress', 'ready', 'completed']
 
-const focusRing = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent'
+const focusRing = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark'
 const buttonSecondary =
   'inline-flex min-h-11 items-center justify-center rounded-card border border-line bg-surface px-4 font-medium hover:bg-canvas active:translate-y-px'
 </script>
@@ -125,7 +125,7 @@ const buttonSecondary =
               <span class="rounded-chip px-2 py-0.5 text-sm font-medium" :class="statusClass[s]">
                 {{ statusLabel[s] }}
               </span>
-              <span class="font-medium tabular-nums">
+              <span class="font-medium font-mono">
                 {{ counts.counts[s] ?? 0 }}<span class="sr-only"> task, tampilkan di papan</span>
               </span>
             </button>

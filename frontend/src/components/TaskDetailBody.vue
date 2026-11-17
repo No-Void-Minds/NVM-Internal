@@ -258,7 +258,7 @@ async function confirmDelete() {
 }
 
 const buttonPrimary =
-  'inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white hover:bg-accent-hover active:translate-y-px disabled:opacity-60'
+  'inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-on-accent hover:bg-accent-hover active:translate-y-px disabled:opacity-60'
 const buttonSecondary =
   'inline-flex min-h-11 items-center rounded-card border border-line px-4 font-medium hover:bg-canvas active:translate-y-px disabled:opacity-60'
 </script>
@@ -355,12 +355,12 @@ const buttonSecondary =
           <ol v-if="task.subtasks.length" class="mt-2 divide-y divide-line rounded-card border border-line">
             <li v-for="(s, i) in task.subtasks" :key="s.id" class="p-3">
               <label
-                class="flex min-h-11 items-start gap-3 rounded-card has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent"
+                class="flex min-h-11 items-start gap-3 rounded-card has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-mark"
                 :class="s.can_check ? 'cursor-pointer' : 'cursor-default'"
               >
                 <input
                   type="checkbox"
-                  class="mt-0.5 size-5 shrink-0 accent-accent"
+                  class="mt-0.5 size-5 shrink-0 accent-mark"
                   :checked="s.done"
                   :disabled="!s.can_check"
                   :aria-busy="checking === s.id"
@@ -439,7 +439,7 @@ const buttonSecondary =
               :href="task.deliverable_url"
               target="_blank"
               rel="noopener noreferrer"
-              class="text-accent underline"
+              class="text-mark underline"
             >
               {{ task.deliverable_url }}
             </a>
@@ -474,7 +474,7 @@ const buttonSecondary =
               v-for="l in task.labels"
               :key="l.id"
               class="rounded-chip px-2 py-0.5 text-sm"
-              :style="{ backgroundColor: l.color }"
+              :style="{ backgroundColor: l.color, color: 'var(--color-tag-ink)' }"
             >
               {{ l.name }}{{ l.is_active ? '' : ' (nonaktif)' }}
             </span>
@@ -486,13 +486,13 @@ const buttonSecondary =
               <label
                 v-for="l in labelChoices"
                 :key="l.id"
-                class="inline-flex min-h-11 items-center gap-2 rounded-chip border border-line px-3 text-sm has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent"
+                class="inline-flex min-h-11 items-center gap-2 rounded-chip border border-line px-3 text-sm has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-mark"
                 :class="l.locked ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'"
-                :style="{ backgroundColor: l.color }"
+                :style="{ backgroundColor: l.color, color: 'var(--color-tag-ink)' }"
               >
                 <input
                   type="checkbox"
-                  class="size-4 accent-accent"
+                  class="size-4 accent-mark"
                   :checked="chosenLabels.includes(l.id)"
                   :disabled="l.locked"
                   @change="toggleLabel(l.id)"
@@ -606,7 +606,7 @@ const buttonSecondary =
         <button
           type="button"
           :disabled="busy"
-          class="inline-flex min-h-11 items-center rounded-card bg-urgent px-4 font-medium text-white active:translate-y-px disabled:opacity-60"
+          class="inline-flex min-h-11 items-center rounded-card bg-urgent px-4 font-medium text-on-urgent active:translate-y-px disabled:opacity-60"
           @click="confirmDelete"
         >
           Hapus task

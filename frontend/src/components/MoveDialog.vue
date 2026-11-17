@@ -86,14 +86,14 @@ const buttonSecondary =
           <label
             v-for="to in task.move_to"
             :key="to"
-            class="flex min-h-11 cursor-pointer items-start gap-3 rounded-card border border-line p-3 has-[:checked]:border-accent has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent"
+            class="flex min-h-11 cursor-pointer items-start gap-3 rounded-card border border-line p-3 has-[:checked]:border-mark has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-mark"
           >
             <input
               v-model="target"
               type="radio"
               name="move-target"
               :value="to"
-              class="mt-1 size-4 accent-accent"
+              class="mt-1 size-4 accent-mark"
             />
             <span>
               <span class="block font-medium">{{ statusLabel[to] }}</span>
@@ -125,7 +125,7 @@ const buttonSecondary =
         type="submit"
         form="move-form"
         :disabled="busy"
-        class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white hover:bg-accent-hover active:translate-y-px disabled:opacity-60"
+        class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-on-accent hover:bg-accent-hover active:translate-y-px disabled:opacity-60"
       >
         {{ busy ? 'Memindahkan...' : isRevision ? 'Kembalikan ke On Progress' : 'Pindahkan' }}
       </button>

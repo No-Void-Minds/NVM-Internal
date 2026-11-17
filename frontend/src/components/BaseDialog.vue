@@ -40,7 +40,7 @@ const shape = computed(() =>
     ref="el"
     :aria-labelledby="titleId"
     :class="shape"
-    class="bg-surface p-0 text-ink backdrop:bg-ink/45"
+    class="bg-surface p-0 text-ink backdrop:bg-scrim"
     @cancel="onCancel"
   >
     <div class="flex items-center justify-between gap-4 border-b border-line px-5 py-3">

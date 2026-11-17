@@ -30,8 +30,8 @@ function onDrop(e: DragEvent) {
   <!-- label membungkus input supaya area ini bisa diklik, diketuk, dan dibuka dengan Tab lalu Enter.
        Di ponsel, accept yang memuat MIME gambar membuat pemilih berkas menawarkan kamera dan galeri. -->
   <label
-    class="flex min-h-24 cursor-pointer flex-col items-center justify-center gap-1 rounded-card border border-dashed p-4 text-center text-sm has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent"
-    :class="dragOver ? 'border-accent bg-surface' : 'border-line'"
+    class="flex min-h-24 cursor-pointer flex-col items-center justify-center gap-1 rounded-card border border-dashed p-4 text-center text-sm has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-mark"
+    :class="dragOver ? 'border-mark bg-surface' : 'border-line'"
     @dragover.prevent="dragOver = true"
     @dragleave="onDragLeave"
     @drop.prevent="onDrop"
@@ -50,9 +50,7 @@ function onDrop(e: DragEvent) {
       <path d="m7 10 5-5 5 5" />
       <path d="M5 20h14" />
     </svg>
-    <span
-      >Tarik berkas ke sini atau <span class="font-medium text-accent underline">pilih berkas</span>.</span
-    >
+    <span>Tarik berkas ke sini atau <span class="font-medium text-mark underline">pilih berkas</span>.</span>
     <span class="text-ink-muted">{{ allowedText }}</span>
     <input type="file" multiple :accept="acceptAttr" class="sr-only" @change="onPick" />
   </label>

@@ -59,7 +59,7 @@ function onEscape(e: KeyboardEvent) {
   toggleEl.value?.focus()
 }
 
-const focusRing = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent'
+const focusRing = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark'
 </script>
 
 <template>
@@ -134,7 +134,7 @@ const focusRing = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-
           <label class="flex min-h-11 cursor-pointer items-center gap-3 px-3 hover:bg-canvas">
             <input
               type="checkbox"
-              class="size-5 accent-accent"
+              class="size-5 accent-mark"
               :checked="picked.includes(u.id)"
               @change="toggle(u.id)"
             />

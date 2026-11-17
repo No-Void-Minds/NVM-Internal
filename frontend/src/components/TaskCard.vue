@@ -24,7 +24,7 @@ const percent = computed(() =>
   <!-- Judul adalah tombol yang membentang ke seluruh kartu (after:inset-0), sehingga di langkah 4 tombol
        Pindahkan bisa ditaruh di dalam kartu tanpa menjadi tombol di dalam tombol. -->
   <article
-    class="relative rounded-card border border-line bg-surface p-4 transition-colors duration-150 hover:border-ink has-[h3_button:focus-visible]:outline-2 has-[h3_button:focus-visible]:outline-offset-2 has-[h3_button:focus-visible]:outline-accent"
+    class="relative rounded-card border border-line bg-surface p-4 transition-colors duration-150 hover:border-ink has-[h3_button:focus-visible]:outline-2 has-[h3_button:focus-visible]:outline-offset-2 has-[h3_button:focus-visible]:outline-mark"
   >
     <div class="flex items-center justify-between gap-2 text-sm">
       <span class="specimen-tag">{{ task.id }}</span>
@@ -46,7 +46,7 @@ const percent = computed(() =>
         v-for="l in task.labels"
         :key="l.id"
         class="rounded-chip px-2 py-0.5 text-sm"
-        :style="{ backgroundColor: l.color }"
+        :style="{ backgroundColor: l.color, color: 'var(--color-tag-ink)' }"
       >
         {{ l.name }}
       </span>
@@ -54,11 +54,11 @@ const percent = computed(() =>
 
     <div v-if="task.subtask_total > 0" class="mt-2">
       <p class="text-sm text-ink-muted">
-        <span class="tabular-nums">{{ task.subtask_done }}/{{ task.subtask_total }}</span> sub task tercentang
+        <span class="font-mono">{{ task.subtask_done }}/{{ task.subtask_total }}</span> sub task tercentang
       </p>
       <!-- Dekoratif: angka di atasnya yang dibaca pembaca layar. -->
       <div class="mt-1 h-1.5 overflow-hidden rounded-[2px] border border-line bg-canvas" aria-hidden="true">
-        <div class="h-full bg-accent transition-[width] duration-200" :style="{ width: `${percent}%` }" />
+        <div class="h-full bg-mark transition-[width] duration-200" :style="{ width: `${percent}%` }" />
       </div>
     </div>
 
@@ -105,7 +105,7 @@ const percent = computed(() =>
     <button
       v-if="task.move_to.length"
       type="button"
-      class="relative z-10 mt-2 inline-flex min-h-11 w-full items-center justify-center rounded-card border border-line text-sm font-medium hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent active:translate-y-px"
+      class="relative z-10 mt-2 inline-flex min-h-11 w-full items-center justify-center rounded-card border border-line text-sm font-medium hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark active:translate-y-px"
       @click="blocked ? $emit('open', task.id) : $emit('move', task)"
     >
       {{ blocked ? 'Lihat sub task' : moveLabel }}<span class="sr-only"> {{ task.id }}</span>

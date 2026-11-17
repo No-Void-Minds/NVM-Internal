@@ -193,7 +193,7 @@ async function onSaved(id: string, message: string, partial: boolean) {
 
 const selectClass = 'mt-1 block min-h-11 w-full min-w-0 rounded-card border border-line bg-surface px-3'
 const scopeButton =
-  'inline-flex min-h-11 items-center px-4 font-medium first:rounded-l-card last:rounded-r-card aria-pressed:bg-accent aria-pressed:text-white'
+  'inline-flex min-h-11 items-center px-4 font-medium first:rounded-l-card last:rounded-r-card aria-pressed:bg-accent aria-pressed:text-on-accent aria-pressed:outline aria-pressed:outline-1 aria-pressed:-outline-offset-1 aria-pressed:outline-mark'
 const buttonSecondary =
   'inline-flex min-h-11 items-center rounded-card border border-line bg-surface px-4 font-medium hover:bg-canvas active:translate-y-px disabled:opacity-60'
 </script>
@@ -419,7 +419,7 @@ const buttonSecondary =
               <td class="min-w-0 py-1 px-4">
                 <button
                   type="button"
-                  class="min-h-11 rounded-card text-left font-medium break-words hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                  class="min-h-11 rounded-card text-left font-medium break-words hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
                   @click="detailId = t.id"
                 >
                   {{ t.title }}
@@ -429,7 +429,7 @@ const buttonSecondary =
                     v-for="l in t.labels"
                     :key="l.id"
                     class="rounded-chip px-2 py-0.5"
-                    :style="{ backgroundColor: l.color }"
+                    :style="{ backgroundColor: l.color, color: 'var(--color-tag-ink)' }"
                     >{{ l.name }}</span
                   >
                 </div>
@@ -458,7 +458,7 @@ const buttonSecondary =
             <h3 class="font-medium">
               <button
                 type="button"
-                class="min-h-11 rounded-card text-left break-words focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                class="min-h-11 rounded-card text-left break-words focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
                 @click="detailId = t.id"
               >
                 {{ t.title }}

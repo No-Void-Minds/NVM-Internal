@@ -147,7 +147,7 @@ const buttonSecondary =
       </div>
       <button
         type="button"
-        class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white hover:bg-accent-hover active:translate-y-px"
+        class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-on-accent hover:bg-accent-hover active:translate-y-px"
         @click="openForm(null)"
       >
         Tambah divisi
@@ -240,7 +240,7 @@ const buttonSecondary =
           type="submit"
           form="division-form"
           :disabled="saving"
-          class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white hover:bg-accent-hover active:translate-y-px disabled:opacity-60"
+          class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-on-accent hover:bg-accent-hover active:translate-y-px disabled:opacity-60"
         >
           {{ saving ? 'Menyimpan...' : 'Simpan' }}
         </button>
@@ -264,7 +264,7 @@ const buttonSecondary =
         <button
           type="button"
           :disabled="deactivating"
-          class="inline-flex min-h-11 items-center rounded-card bg-urgent px-4 font-medium text-white active:translate-y-px disabled:opacity-60"
+          class="inline-flex min-h-11 items-center rounded-card bg-urgent px-4 font-medium text-on-urgent active:translate-y-px disabled:opacity-60"
           @click="submitDeactivate"
         >
           {{ deactivating ? 'Memproses...' : 'Nonaktifkan' }}

@@ -65,7 +65,7 @@ function move(i: number, delta: -1 | 1) {
 }
 
 const iconButton =
-  'inline-flex size-11 items-center justify-center rounded-card hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40'
+  'inline-flex size-11 items-center justify-center rounded-card hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40'
 </script>
 
 <template>
@@ -181,7 +181,7 @@ const iconButton =
       id="subtask-add"
       type="button"
       :disabled="rows.length >= maxSubtasks"
-      class="mt-3 inline-flex min-h-11 items-center gap-2 rounded-card border border-line px-4 text-sm font-medium hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
+      class="mt-3 inline-flex min-h-11 items-center gap-2 rounded-card border border-line px-4 text-sm font-medium hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
       @click="addAfter(rows.length - 1)"
     >
       <svg

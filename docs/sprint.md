@@ -51,6 +51,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 9 | Arsip dan pencarian | Arsip dengan pencarian, filter, urut, pagination |
 | 10 | Profil pengguna | Foto, jabatan, kartu profil di papan, ubah profil |
 | 11 | Poles UI/UX | Papan dan semua halaman dipoles, konsisten |
+| 11b | Identitas brand NVM | Monokrom NVM dengan aksen krem, mode terang dan gelap, D-DIN, logo resmi |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -598,6 +599,37 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 
 ---
 
+## Sprint 11b: Identitas brand NVM
+
+**Tujuan:** menyelesaikan revisi 2 (bagian tampilan) yang belum benar di Sprint 11: task tracker memakai identitas NVM, monokrom dengan satu aksen krem, mode terang dan gelap. Tidak ada fitur baru dan tidak ada perubahan backend.
+
+- [x] S11b-01 Token warna kedua mode, font D-DIN dan JetBrains Mono, favicon, logo resmi, tombol mode gelap.
+- [x] S11b-02 Login dan papan (dilihat Rifky di kedua mode, 2026-11-17).
+- [x] S11b-03 Sisa halaman dan komponen mengikuti token kedua mode: panel detail, halaman task penuh, form task, dialog, Arsip, Pengguna, Pengaturan, Audit Log, Profil, Status, 404, navigasi, state memuat, kosong, dan galat.
+- [x] S11b-04 `docs/DESIGN.md` ditulis ulang (menggantikan versi Stitch).
+
+**Keputusan:**
+- Dial ENERGY 2, RHYTHM 2, MOTION 2, dengan alasan yang sama dengan Sprint 11: aplikasi kerja yang dibaca berjam-jam, papan butuh struktur seragam, animasi hanya untuk umpan balik.
+- Mode terang bawaan, mode gelap lewat tombol (top bar desktop, menu Lainnya ponsel), mengikuti `prefers-color-scheme` saat belum dipilih, disimpan di `localStorage` (`nvm-tema`, dengan try/catch). `public/tema.js` dimuat sinkron di `<head>` supaya tidak ada kilatan terang; CSP `script-src 'self'` mengizinkannya. Perubahan setelan sistem setelah halaman terbuka belum diikuti langsung (berlaku saat dimuat ulang).
+- Warna gelap dari tema Shopify NVM. Kanvas terang `#f3f2ee` diambil dari latar ikon NVM. Nilai lengkap di `docs/DESIGN.md`.
+- Tombol utama: tinta dengan teks krem di mode terang, krem dengan teks tinta di mode gelap, lewat token `accent` dan `on-accent` yang berganti per mode, jadi satu kelas berlaku di kedua mode. Label ID dan chip label memakai `tag` dan `tag-ink` yang tetap (krem dan tinta) di kedua mode. Chip label pastel selalu bertulisan tinta (kontras terendah 12.51).
+- Token `mark` (tinta di terang, krem di gelap) untuk cincin fokus, garis terpilih, teks aktif, dan isi bar kemajuan, karena krem tidak terlihat di latar terang. `scrim` (hitam 55%) untuk latar dialog di kedua mode. `on-urgent` untuk teks tombol hapus.
+- Logo: tidak ada logo resmi terpisah untuk latar terang dan gelap, dan tidak ada SVG. Dipakai `brand/nvm-logo.png` dari compro (putih di atas transparan) sebagai mask CSS yang diisi warna `ink`, cara yang sama dengan `BrandLogo.vue` compro. Di top bar lebar `md`, kata "Internal" hanya untuk pembaca layar supaya top bar tujuh item tetap muat.
+- Font: D-DIN 400 dan 700 dari `/fonts` (`font-display: swap`, `OFL.txt` ikut tersaji); JetBrains Mono 400 dan 500 lewat `@fontsource` untuk ID, kode, dan angka hitungan. Paket IBM Plex dihapus. Tanggal dengan nama bulan tetap D-DIN (bukan angka tabular murni).
+- Radius 4px (kartu, isian, tombol, dialog) dan 2px (chip); bulat hanya avatar. Bayangan hanya menu, dialog, dan drag, lebih pekat di mode gelap.
+- Kerangka memuat memakai `line` 25% (sebelumnya krem, menyilaukan di mode gelap).
+- Nginx: CSP tidak lagi butuh `data:` (favicon kosong diganti favicon asli); `/fonts/` di-cache 30 hari karena nama berkas tanpa hash.
+- Kontras (terang / gelap), semua lolos AA: teks di kanvas 15.23 / 16.66, di surface 17.06 / 16.05; teks redup 5.73 sampai 6.42; teks tombol utama 13.31 / 13.31, hover 10.16 / 14.99; label ID 13.31; penanda di surface 17.06 / 14.97; garis isian 3.45 sampai 4.05; urgent 6.18 sampai 9.14; high 5.67 sampai 10.67; danger 6.81 sampai 9.56; chip status 7.21 sampai 10.25.
+
+**Hasil:** kode selesai 2026-11-17, `./scripts/check.sh` lolos, build memuat D-DIN, JetBrains Mono, logo, favicon, dan `tema.js`. Menunggu lihat Rifky di kedua mode dan di lebar ponsel (login dan papan sudah dilihat). Audit browser otomatis (lebar, Tab, Escape, reduced motion, console) tetap di S13-09.
+
+**Retro:**
+- Macet: (isi sendiri)
+- Lancar: (isi sendiri)
+- Diubah untuk sprint berikutnya: (isi sendiri)
+
+---
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -706,19 +738,22 @@ Revisi 5 (kode, dikerjakan 2026-11-16 di luar urutan karena dibutuhkan sebelum p
 **Tujuan:** tim memakai sistem ini, bukan Excel.
 
 Deploy (dijalankan Rifky di VM):
-- [ ] S14-01 Deploy ke VM `nvm-server` 192.168.68.69 di `/srv/nvm-internal`. Cek dulu lokasi disk data untuk `STORAGE_DIR` di VM baru; mount hard disk baru ke `/srv/nvm-internal/storage` bila sudah ada.
-- [ ] S14-02 Jalankan `docker-compose.prod.yml`; VM menyala otomatis saat Windows menyala; container `restart: unless-stopped`.
+- [x] S14-01 Deploy ke VM `nvm-server` 192.168.68.69 di `/srv/nvm-internal`. Cek dulu lokasi disk data untuk `STORAGE_DIR` di VM baru; mount hard disk baru ke `/srv/nvm-internal/storage` bila sudah ada.
+- [x] S14-02 Jalankan `deploy/docker-compose.yml`; container `restart: unless-stopped`. Uji VM dan container menyala sendiri setelah Windows restart dipindah ke S14-18.
 - [ ] S14-03 Port database tidak dibuka keluar VM; firewall hanya izinkan port 80 dari subnet kantor. Pengikatan port Postgres, Redis, dan RabbitMQ ke 127.0.0.1 masih tertunda sejak Oktober: cek keadaannya di VM baru dan selesaikan sebelum go-live. Sejak revisi 5 akses publik lewat Cloudflare Tunnel (koneksi keluar dari VM), jadi tidak ada port masuk yang perlu dibuka untuk publik; tinjau ulang aturan port 80 subnet kantor saat pemasangan.
-- [ ] S14-04 Backup harian berjalan, dan uji restore pertama ke database kosong dicatat waktunya (target di bawah 4 jam).
+- [x] S14-04 Backup harian berjalan, dan uji restore pertama ke database kosong dicatat waktunya (target di bawah 4 jam).
 - [ ] S14-05 Diagnosa jaringan PC tim 192.168.68.68, host Hyper-V untuk VM baru (`Get-NetAdapter`, `Get-VMSwitch`, ping ke gateway), dan catat hasilnya.
 - [ ] S14-10 Aktifkan GitHub secret scanning, push protection, dan Dependabot untuk repo ini, lalu pilah peringatannya menjadi runtime dan dev-only (seperti di compro).
-- [ ] S14-11 HTTPS, lalu `COOKIE_SECURE=true` dan `COOKIE_DOMAIN=novoidminds.xyz` (dipindah dari "Setelah go-live" karena revisi 5 membuat sistem publik).
-- [ ] S14-12 `novoidminds.xyz` sebagai public hostname di tunnel `nvm-server`.
-- [ ] S14-13 Tunnel baru di PC tim 192.168.68.68 untuk `dash.novoidminds.xyz` (NVM Launcher) dan `studio.novoidminds.xyz` (Remotion Studio), keduanya lewat Caddy dengan forward_auth ke `https://novoidminds.xyz/api/auth/verify`. Saat 401 atau 403, arahkan ke `https://novoidminds.xyz/?kembali=<URL asli>`. Isi `VITE_DASHBOARD_URL` dan `VITE_ALLOWED_RETURN_HOSTS` saat build frontend produksi.
-- [ ] S14-14 Caddy dan NVM Launcher menyala otomatis di PC tim.
-- [ ] S14-15 Rate limit Cloudflare untuk `POST /api/auth/login`, di atas limiter per IP di backend (backend hanya melihat IP Cloudflare atau proxy, kecuali header IP asli dipercaya).
+- [x] S14-11 HTTPS, lalu `COOKIE_SECURE=true` dan `COOKIE_DOMAIN=novoidminds.xyz` (dipindah dari "Setelah go-live" karena revisi 5 membuat sistem publik).
+- [x] S14-12 `novoidminds.xyz` sebagai public hostname di tunnel `nvm-server`.
+- [x] S14-13 Tunnel baru di PC tim 192.168.68.68 untuk `dash.novoidminds.xyz` (NVM Launcher) dan `studio.novoidminds.xyz` (Remotion Studio), keduanya lewat Caddy dengan forward_auth ke `https://novoidminds.xyz/api/auth/verify`. Saat 401 atau 403, arahkan ke `https://novoidminds.xyz/?kembali=<URL asli>`. Isi `VITE_DASHBOARD_URL` dan `VITE_ALLOWED_RETURN_HOSTS` saat build frontend produksi.
+- [x] S14-14 Caddy dan NVM Launcher menyala otomatis di PC tim.
+- [x] S14-15 Rate limit Cloudflare untuk `POST /api/auth/login`, di atas limiter per IP di backend (backend hanya melihat IP Cloudflare atau proxy, kecuali header IP asli dipercaya).
 - [ ] S14-16 Password awal akun tim kuat (bukan pola mudah ditebak), karena halaman login sekarang terbuka ke internet.
 - [ ] S14-17 Perbarui SRS: sistem tidak lagi LAN-only (revisi 5).
+- [ ] S14-18 Uji restart Windows di PC tim 192.168.68.68: VM `nvm-server`, container NVM-Internal, compro, doomsday, Postgres, tunnel `nvm-server` dan `nvm-tim-pc`, Caddy, dan NVM Launcher menyala sendiri tanpa login manual, lalu `https://novoidminds.xyz` dan `https://dash.novoidminds.xyz` terbuka.
+- [ ] S14-19 Salinan backup ke luar VM: hard disk eksternal, PC IT, dan laptop (terenkripsi), sesuai runbook bagian 8. Tentukan jadwal dan siapa yang menjalankan.
+- [ ] S14-20 Ulangi uji restore setelah ada data sungguhan (akun tim, task, lampiran, foto), catat waktunya. Uji pertama 3 detik dengan data hampir kosong.
 
 UAT:
 - [ ] S14-06 Checklist AC-01 sampai AC-15 bersama Manajer, hasil PASS atau FAIL.
@@ -727,6 +762,22 @@ UAT:
 - [ ] S14-09 Buat akun semua anggota tim, bagikan username dan password awal secara langsung.
 
 **Selesai kalau:** semua AC PASS dan tim sudah memakai sistem minimal satu minggu tanpa kembali ke Excel.
+
+**Hasil (deploy 2026-11-17):** NVM-Internal jalan di VM `nvm-server` 192.168.68.69 (`/srv/nvm-internal`) dan terbuka di `https://novoidminds.xyz`. Selesai:
+- Deploy, migrasi sampai `000007`, dan akun Admin pertama `adminit`.
+- Tunnel `nvm-server` dengan route `novoidminds.xyz` ke `127.0.0.1:8094`.
+- HTTPS (Always Use HTTPS, HSTS 6 bulan) dan cookie Secure dengan Domain `novoidminds.xyz`.
+- Rate limit Cloudflare untuk `POST /api/auth/login`: 5 per 10 detik, blok 10 detik (paket Free).
+- Tunnel `nvm-tim-pc` di PC tim dengan route `dash.novoidminds.xyz` dan `studio.novoidminds.xyz` ke Caddy di `127.0.0.1:8088`. Caddy dan NVM Launcher menyala otomatis.
+- Backup harian. Uji restore pertama selesai dalam 3 detik dengan data hampir kosong; diulang setelah ada data sungguhan (S14-20).
+
+Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM (S14-19), uji restore ulang (S14-20), port database dan firewall (S14-03), diagnosa jaringan (S14-05), GitHub secret scanning dan Dependabot (S14-10), akun tim dengan password awal kuat (S14-09, S14-16), SRS (S14-17), impor Excel menunggu pemetaan dan keputusan Manajer (S14-08, butir "Butuh dari Manajer" Sprint 12), UAT (S14-06, S14-07), dan seluruh Sprint 13.
+
+**Catatan deploy (sudah dimasukkan ke `docs/runbook-deploy.md`):**
+- Migrate gagal "permission denied for schema public": template database di cluster ini hasil restore, jadi skema `public` di database baru tidak otomatis milik pemilik database. `00-bootstrap.sql` menjalankan `ALTER SCHEMA public OWNER TO nvm_internal_migrator` dan `REVOKE CREATE ON SCHEMA public FROM PUBLIC` di dalam `nvm_internal_prod`, lalu mencetak pemilik skema sebagai bukti.
+- Variabel yang sudah di-export di shell mengalahkan `--env-file`, dan compose tidak membuat ulang container hanya karena isi env berubah. Setelah `deploy/.env` diubah: source ulang atau buka sesi SSH baru, lalu `up -d --force-recreate`.
+- Sebelum migrasi: cek panjang `JWT_SECRET` (64) dan user di `MIGRATOR_URL` dan `DATABASE_URL` dengan password disamarkan.
+- `git clone` gagal bila `/srv/nvm-internal` sudah ada; periksa isinya dulu, folder kosong dihapus dengan `rmdir`.
 
 ---
 

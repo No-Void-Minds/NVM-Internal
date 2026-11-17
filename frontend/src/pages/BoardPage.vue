@@ -248,8 +248,8 @@ function columnDragClass(status: TaskStatus): string {
   if (!canDrop(status))
     return dropTarget.value === status ? 'border-danger bg-danger-bg' : 'border-line opacity-60'
   return dropTarget.value === status
-    ? 'border-accent bg-surface outline-2 outline-accent'
-    : 'border-dashed border-accent'
+    ? 'border-mark bg-surface outline-2 outline-mark'
+    : 'border-dashed border-mark'
 }
 
 function onDragOver(e: DragEvent, status: TaskStatus) {
@@ -342,7 +342,7 @@ async function onChanged(message: string) {
 
 const selectClass = 'mt-1 block min-h-11 w-full min-w-0 rounded-card border border-line bg-surface px-3'
 const scopeButton =
-  'inline-flex min-h-11 items-center px-4 font-medium first:rounded-l-card last:rounded-r-card aria-pressed:bg-accent aria-pressed:text-white'
+  'inline-flex min-h-11 items-center px-4 font-medium first:rounded-l-card last:rounded-r-card aria-pressed:bg-accent aria-pressed:text-on-accent aria-pressed:outline aria-pressed:outline-1 aria-pressed:-outline-offset-1 aria-pressed:outline-mark'
 const buttonSecondary =
   'inline-flex min-h-11 items-center rounded-card border border-line bg-surface px-4 font-medium hover:bg-canvas active:translate-y-px'
 </script>
@@ -368,7 +368,7 @@ const buttonSecondary =
           <button
             v-if="isManager"
             type="button"
-            class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white hover:bg-accent-hover active:translate-y-px"
+            class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-on-accent hover:bg-accent-hover active:translate-y-px"
             @click="openCreate"
           >
             Buat task
@@ -417,7 +417,7 @@ const buttonSecondary =
           <RouterLink
             v-if="query.q"
             :to="{ name: 'archive', query: { q: query.q } }"
-            class="inline-flex min-h-11 items-center rounded-card text-sm font-medium text-accent underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            class="inline-flex min-h-11 items-center rounded-card text-sm font-medium text-mark underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
           >
             Cari "{{ query.q }}" juga di Arsip
           </RouterLink>
@@ -559,11 +559,11 @@ const buttonSecondary =
                 :key="col.status"
                 type="button"
                 :aria-pressed="activeColumn === col.status"
-                class="flex min-h-11 min-w-0 flex-col items-center justify-center rounded-card border border-line bg-surface px-1 py-1 text-xs font-medium aria-pressed:border-accent aria-pressed:bg-accent aria-pressed:text-white"
+                class="flex min-h-11 min-w-0 flex-col items-center justify-center rounded-card border border-line bg-surface px-1 py-1 text-xs font-medium aria-pressed:border-mark aria-pressed:bg-accent aria-pressed:text-on-accent aria-pressed:outline aria-pressed:outline-1 aria-pressed:-outline-offset-1 aria-pressed:outline-mark"
                 @click="chooseColumn(col.status)"
               >
                 <span>{{ statusLabel[col.status] }}</span>
-                <span class="tabular-nums">{{ col.count }}<span class="sr-only"> task</span></span>
+                <span class="font-mono">{{ col.count }}<span class="sr-only"> task</span></span>
               </button>
             </div>
 
@@ -582,16 +582,14 @@ const buttonSecondary =
                   <span class="rounded-chip px-2 py-0.5 text-sm font-medium" :class="statusClass[col.status]">
                     {{ statusLabel[col.status] }}
                   </span>
-                  <span
-                    class="rounded-chip border border-line bg-surface px-2 text-sm font-medium tabular-nums"
-                  >
+                  <span class="rounded-chip border border-line bg-surface px-2 text-sm font-medium font-mono">
                     {{ col.count }}<span class="sr-only"> task</span>
                   </span>
                 </h2>
                 <p
                   v-if="dragging && dragging.status !== col.status"
                   class="px-1 pb-2 text-sm font-medium"
-                  :class="canDrop(col.status) ? 'text-accent' : 'text-ink-muted'"
+                  :class="canDrop(col.status) ? 'text-mark' : 'text-ink-muted'"
                 >
                   {{
                     canDrop(col.status) ? 'Lepas di sini untuk memindahkan' : 'Tidak bisa dipindah ke sini'

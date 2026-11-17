@@ -2,6 +2,8 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import UserAvatar from './UserAvatar.vue'
+import ThemeToggle from './ThemeToggle.vue'
+import BrandLogo from './BrandLogo.vue'
 import { useSessionStore } from '../stores/session'
 import { useLogout } from '../composables/useLogout'
 import { roleLabel, type Role } from '../utils/roles'
@@ -118,7 +120,13 @@ const container = computed(() => (route.meta.wide ? 'max-w-[120rem]' : 'max-w-6x
 
     <header class="border-b border-line bg-surface">
       <div class="mx-auto flex h-14 items-center gap-4 px-4 md:px-8 lg:gap-6" :class="container">
-        <span class="shrink-0 font-semibold whitespace-nowrap">NVM Internal</span>
+        <!-- Logo resmi NVM diikuti "Internal". Di lebar md kata itu hanya untuk pembaca layar, karena tujuh item navigasi
+             Manajer dan Admin tidak muat bersama teksnya. -->
+        <span class="flex shrink-0 items-center gap-2">
+          <BrandLogo class="h-5" />
+          <span class="sr-only">NVM </span>
+          <span class="font-bold whitespace-nowrap max-lg:sr-only max-md:not-sr-only">Internal</span>
+        </span>
         <nav aria-label="Navigasi utama" class="hidden md:flex md:gap-1">
           <RouterLink
             v-for="item in visibleNav"
@@ -154,6 +162,7 @@ const container = computed(() => (route.meta.wide ? 'max-w-[120rem]' : 'max-w-6x
             <!-- Di lebar md hanya ikon, supaya top bar tujuh item tetap muat; nama aksesibel dari aria-label. -->
             <span class="hidden lg:inline">Dashboard</span>
           </a>
+          <ThemeToggle variant="icon" />
           <UserAvatar
             :user-id="session.user.id"
             :name="session.user.name"
@@ -206,7 +215,7 @@ const container = computed(() => (route.meta.wide ? 'max-w-[120rem]' : 'max-w-6x
           <RouterLink
             :to="item.to"
             :aria-current="isCurrent(item.to)"
-            class="flex min-h-14 flex-col items-center justify-center gap-1 text-xs text-ink-muted active:bg-canvas aria-[current=page]:font-medium aria-[current=page]:text-accent"
+            class="flex min-h-14 flex-col items-center justify-center gap-1 text-xs text-ink-muted active:bg-canvas aria-[current=page]:font-medium aria-[current=page]:text-mark"
           >
             <svg
               aria-hidden="true"
@@ -228,7 +237,7 @@ const container = computed(() => (route.meta.wide ? 'max-w-[120rem]' : 'max-w-6x
             ref="moreToggle"
             type="button"
             class="flex min-h-14 w-full flex-col items-center justify-center gap-1 text-xs active:bg-canvas"
-            :class="moreCurrent || moreOpen ? 'font-medium text-accent' : 'text-ink-muted'"
+            :class="moreCurrent || moreOpen ? 'font-medium text-mark' : 'text-ink-muted'"
             :aria-expanded="moreOpen"
             aria-controls="menu-lainnya"
             @click="toggleMore"
@@ -258,7 +267,7 @@ const container = computed(() => (route.meta.wide ? 'max-w-[120rem]' : 'max-w-6x
                   <RouterLink
                     :to="item.to"
                     :aria-current="isCurrent(item.to)"
-                    class="flex min-h-11 items-center gap-3 px-4 text-ink hover:bg-canvas aria-[current=page]:font-medium aria-[current=page]:text-accent"
+                    class="flex min-h-11 items-center gap-3 px-4 text-ink hover:bg-canvas aria-[current=page]:font-medium aria-[current=page]:text-mark"
                   >
                     <svg
                       aria-hidden="true"
@@ -296,6 +305,7 @@ const container = computed(() => (route.meta.wide ? 'max-w-[120rem]' : 'max-w-6x
                 </svg>
                 Dashboard<span class="sr-only"> (buka di tab baru)</span>
               </a>
+              <ThemeToggle variant="row" />
               <div v-if="session.user" class="mt-1 border-t border-line pt-1">
                 <p class="truncate px-4 pt-1 text-sm text-ink-muted">
                   {{ session.user.name }}, {{ roleLabel(session.user.role) }}

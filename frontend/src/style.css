@@ -1,40 +1,72 @@
 @import 'tailwindcss';
 
-/* Nilai dari DESIGN.md; kontras teks dan elemen non-teks sudah dihitung lolos WCAG AA. */
+/* D-DIN dari /fonts (lisensi SIL OFL di /fonts/OFL.txt). Hanya 400 dan 700 yang ada: font-medium (500) memakai 400
+   dan font-semibold (600) memakai 700, tanpa tebal tiruan dari browser. */
+@font-face {
+  font-family: 'D-DIN';
+  src: url('/fonts/D-DIN.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'D-DIN';
+  src: url('/fonts/D-DIN-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Identitas NVM (docs/DESIGN.md, Sprint 11b): monokrom dengan satu aksen krem hangtag. Nilai di sini mode terang
+   (bawaan); mode gelap menimpanya di :root[data-theme='gelap'] di bawah. Kontras semua pasangan dihitung lolos AA
+   di kedua mode (tabel di Keputusan Sprint 11b). */
 @theme {
-  --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --font-sans: 'D-DIN', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 
-  --color-canvas: #f4f1ea;
+  /* Kanvas terang sama dengan latar ikon NVM (apple-touch-icon), supaya logo menyatu dengan halaman. */
+  --color-canvas: #f3f2ee;
   --color-surface: #ffffff;
-  --color-ink: #1f1d1a;
-  --color-ink-muted: #635c52;
-  --color-line: #8f8678;
-  --color-accent: #3f5a3a;
+  --color-ink: #1a1c20;
+  --color-ink-muted: #5a5f68;
+  --color-line: #7d828b;
 
-  --color-requested-bg: #e6e1d7;
-  --color-requested-fg: #4a443b;
-  --color-progress-bg: #e3e8da;
-  --color-progress-fg: #3d4f2c;
-  --color-ready-bg: #f1e3c8;
-  --color-ready-fg: #6b4a12;
-  --color-completed-bg: #dde5e3;
-  --color-completed-fg: #2f4a45;
+  /* Tombol utama dan pilihan aktif: tinta dengan teks krem di mode terang, krem dengan teks tinta di mode gelap,
+     jadi satu kelas (bg-accent text-on-accent) berlaku di kedua mode. */
+  --color-accent: #1a1c20;
+  --color-accent-hover: #2e3138;
+  --color-on-accent: #e8e3d5;
+  /* Penanda (cincin fokus, garis terpilih, teks aktif, isi bar kemajuan). Krem tidak terlihat di latar terang,
+     jadi di mode terang penanda memakai tinta, di mode gelap krem. */
+  --color-mark: #1a1c20;
+  /* Label ID (hangtag) dan chip label pastel: selalu bidang terang dengan teks tinta, di kedua mode. */
+  --color-tag: #e8e3d5;
+  --color-tag-ink: #1a1c20;
+  --color-tag-line: #8f887a;
+  /* Lapisan di belakang dialog; tetap gelap di kedua mode. */
+  --color-scrim: rgb(0 0 0 / 0.55);
 
-  --color-urgent: #9c3a22;
-  --color-high: #8a5a12;
+  /* Status dan urgency diredam supaya serasi dengan monokrom; selalu disertai teks. */
+  --color-requested-bg: #ebe9e3;
+  --color-requested-fg: #3d4048;
+  --color-progress-bg: #e4e9e3;
+  --color-progress-fg: #2f4433;
+  --color-ready-bg: #efe7d6;
+  --color-ready-fg: #5b4720;
+  --color-completed-bg: #e2e6e9;
+  --color-completed-fg: #2c3a44;
 
-  --color-danger-bg: #f6e3dd;
-  --color-danger: #7a2d1a;
+  --color-urgent: #9b3a2a;
+  --color-on-urgent: #ffffff;
+  --color-high: #7a5a1c;
 
-  --color-accent-hover: #334a2e;
-  /* Latar label spesimen (ID task) dari DESIGN.md, nilainya sama dengan chip Requested. */
-  --color-tag: #e6e1d7;
+  --color-danger: #8c2f22;
+  --color-danger-bg: #f6e6e2;
 
-  --radius-card: 6px;
-  --radius-chip: 4px;
+  --radius-card: 4px;
+  --radius-chip: 2px;
 
-  /* Skala tipografi DESIGN.md: body 15px, caption 13px. text-xs dinaikkan ke 13px karena DESIGN.md tidak memakai teks di bawah itu. */
+  /* Skala: body 15px, teks terkecil 13px. */
   --text-xs: 0.8125rem;
   --text-xs--line-height: 1.125rem;
   --text-sm: 0.875rem;
@@ -46,16 +78,50 @@
   --text-2xl: 1.5rem;
   --text-2xl--line-height: 2rem;
 
-  /* Bayangan hanya untuk lapisan yang menutupi isi lain (DESIGN.md, Elevation). */
-  --shadow-menu: 0 4px 12px rgb(31 29 26 / 0.08);
-  --shadow-dialog: 0 12px 32px rgb(31 29 26 / 0.14);
-  --shadow-drag: 0 8px 20px rgb(31 29 26 / 0.12);
+  /* Bayangan hanya untuk lapisan yang menutupi isi lain: menu, dialog, dan kartu yang sedang di-drag. */
+  --shadow-menu: 0 4px 12px rgb(0 0 0 / 0.1);
+  --shadow-dialog: 0 12px 32px rgb(0 0 0 / 0.18);
+  --shadow-drag: 0 8px 20px rgb(0 0 0 / 0.16);
 }
 
-/* Motif identitas "label spesimen": ID task dan kode lain, sama di kartu, panel, Arsip, dan Audit Log. */
+/* Mode gelap: warna dari tema Shopify NVM. data-theme dipasang /tema.js sebelum halaman digambar. */
+:root[data-theme='gelap'] {
+  color-scheme: dark;
+  --color-accent: #e8e3d5;
+  --color-on-accent: #1a1c20;
+  --color-canvas: #08090b;
+  --color-surface: #0d0f12;
+  --color-ink: #e8ebef;
+  --color-ink-muted: #8a909a;
+  --color-line: #6b717b;
+  --color-accent-hover: #f4f0e6;
+  --color-mark: #e8e3d5;
+  --color-requested-bg: #1b1e23;
+  --color-requested-fg: #c6cbd3;
+  --color-progress-bg: #16211a;
+  --color-progress-fg: #a7c8ad;
+  --color-ready-bg: #251f14;
+  --color-ready-fg: #dcc59a;
+  --color-completed-bg: #151d23;
+  --color-completed-fg: #a8bdcc;
+  --color-urgent: #ef9a86;
+  --color-on-urgent: #1a1c20;
+  --color-high: #dcb978;
+  --color-danger: #f0a497;
+  --color-danger-bg: #2a1411;
+  --shadow-menu: 0 4px 12px rgb(0 0 0 / 0.5);
+  --shadow-dialog: 0 12px 32px rgb(0 0 0 / 0.6);
+  --shadow-drag: 0 8px 20px rgb(0 0 0 / 0.55);
+}
+
+:root {
+  color-scheme: light;
+}
+
+/* Motif identitas: ID task sebagai label hangtag, sama di kartu, panel, halaman task, Arsip, dan Audit Log. */
 @utility specimen-tag {
   display: inline-block;
-  border: 1px solid var(--color-line);
+  border: 1px solid var(--color-tag-line);
   border-radius: var(--radius-chip);
   background-color: var(--color-tag);
   padding: 1px 6px;
@@ -63,8 +129,7 @@
   font-size: 0.8125rem;
   font-weight: 500;
   line-height: 1.125rem;
-  letter-spacing: 0.02em;
-  color: var(--color-ink);
+  color: var(--color-tag-ink);
   white-space: nowrap;
 }
 
@@ -78,16 +143,11 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  h1 {
-    letter-spacing: -0.01em;
-  }
-
   :focus-visible {
-    outline: 2px solid var(--color-accent);
+    outline: 2px solid var(--color-mark);
     outline-offset: 2px;
   }
 }
-
 /* Kartu yang masuk kolom (setelah dipindah) dan bergeser posisinya: umpan balik singkat, bukan dekorasi. */
 .card-enter-active,
 .card-move {
@@ -136,12 +196,12 @@
   transform: translateY(-4px);
 }
 
-/* DESIGN.md: garis isian ikut berubah olive saat fokus, selain cincin fokus. Di luar @layer supaya menang
-   atas kelas utilitas border-line yang dipasang di setiap isian. */
+/* Garis isian ikut berubah ke warna penanda saat fokus, selain cincin fokus. Di luar @layer supaya menang atas
+   kelas utilitas border-line yang dipasang di setiap isian. */
 input:focus-visible:not([aria-invalid='true']),
 select:focus-visible:not([aria-invalid='true']),
 textarea:focus-visible:not([aria-invalid='true']) {
-  border-color: var(--color-accent);
+  border-color: var(--color-mark);
 }
 
 /* Notifikasi muncul singkat supaya hasil aksi terlihat; pesan baru (key berganti) ikut ditandai. */

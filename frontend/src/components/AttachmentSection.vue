@@ -114,7 +114,7 @@ async function confirmDelete() {
 }
 
 const iconButton =
-  'inline-flex size-11 shrink-0 items-center justify-center rounded-card hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent active:translate-y-px'
+  'inline-flex size-11 shrink-0 items-center justify-center rounded-card hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark active:translate-y-px'
 const buttonSecondary =
   'inline-flex min-h-11 items-center rounded-card border border-line px-4 font-medium hover:bg-canvas active:translate-y-px disabled:opacity-60'
 </script>
@@ -228,7 +228,7 @@ const buttonSecondary =
         <p v-if="q.status === 'failed'" role="alert" class="mt-1 text-danger">{{ q.error }}</p>
         <template v-else>
           <progress
-            class="mt-2 h-2 w-full accent-accent"
+            class="mt-2 h-2 w-full accent-mark"
             :value="q.progress"
             max="1"
             :aria-label="`Progres unggah ${q.file.name}`"
@@ -255,7 +255,7 @@ const buttonSecondary =
         <button
           type="button"
           :disabled="deleting"
-          class="inline-flex min-h-11 items-center rounded-card bg-urgent px-4 font-medium text-white active:translate-y-px disabled:opacity-60"
+          class="inline-flex min-h-11 items-center rounded-card bg-urgent px-4 font-medium text-on-urgent active:translate-y-px disabled:opacity-60"
           @click="confirmDelete"
         >
           {{ deleting ? 'Menghapus...' : 'Hapus berkas' }}

@@ -144,7 +144,7 @@ const buttonSecondary =
       </div>
       <button
         type="button"
-        class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white hover:bg-accent-hover active:translate-y-px"
+        class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-on-accent hover:bg-accent-hover active:translate-y-px"
         @click="openForm(null)"
       >
         Tambah label
@@ -198,7 +198,7 @@ const buttonSecondary =
         <div class="min-w-0 flex-1">
           <span
             class="inline-block rounded-chip px-2 py-0.5 font-medium"
-            :style="{ backgroundColor: l.color }"
+            :style="{ backgroundColor: l.color, color: 'var(--color-tag-ink)' }"
           >
             {{ l.name }}
           </span>
@@ -241,13 +241,13 @@ const buttonSecondary =
             <label
               v-for="c in palette"
               :key="c"
-              class="flex min-h-11 cursor-pointer items-center gap-2 rounded-card border border-line px-2 text-sm has-[:checked]:border-accent has-[:checked]:font-medium has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent"
+              class="flex min-h-11 cursor-pointer items-center gap-2 rounded-card border border-line px-2 text-sm has-[:checked]:border-mark has-[:checked]:font-medium has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-mark"
             >
               <input v-model="color" type="radio" name="label-color" :value="c" class="sr-only" />
               <span
                 aria-hidden="true"
                 class="size-5 shrink-0 rounded-chip border border-line"
-                :style="{ backgroundColor: c }"
+                :style="{ backgroundColor: c, color: 'var(--color-tag-ink)' }"
               />
               {{ colorName[c] ?? c }}
             </label>
@@ -274,7 +274,10 @@ const buttonSecondary =
 
         <p class="text-sm">
           Pratinjau:
-          <span class="ml-1 rounded-chip px-2 py-0.5 font-medium" :style="{ backgroundColor: color }">
+          <span
+            class="ml-1 rounded-chip px-2 py-0.5 font-medium"
+            :style="{ backgroundColor: color, color: 'var(--color-tag-ink)' }"
+          >
             {{ name.trim() || 'Nama label' }}
           </span>
         </p>
@@ -285,7 +288,7 @@ const buttonSecondary =
           type="submit"
           form="label-form"
           :disabled="saving"
-          class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-white hover:bg-accent-hover active:translate-y-px disabled:opacity-60"
+          class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-on-accent hover:bg-accent-hover active:translate-y-px disabled:opacity-60"
         >
           {{ saving ? 'Menyimpan...' : 'Simpan' }}
         </button>
