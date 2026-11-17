@@ -354,7 +354,9 @@ const buttonSecondary =
     </button>
   </div>
 
-  <div v-else-if="task" class="space-y-6">
+  <!-- min-h-full: tanpa itu, isi yang pendek membuat bar aksi sticky berhenti di tengah panel,
+       karena elemen sticky tidak bisa turun melewati ujung induknya. -->
+  <div v-else-if="task" class="min-h-full space-y-6">
     <div>
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
         <span class="rounded-chip px-2 py-0.5 font-medium" :class="statusClass[task.status]">{{
@@ -655,12 +657,16 @@ const buttonSecondary =
       </div>
     </div>
 
-    <!-- Bar aksi menempel di bawah area gulir. Di halaman penuh ia naik di atas navigasi bawah ponsel. -->
+    <!-- Bar aksi menempel di bawah area gulir. Di halaman penuh ia naik di atas navigasi bawah ponsel,
+         dan margin bawahnya menutup padding bawah <main> (pb-20 ponsel, pb-10 desktop) supaya saat
+         gulir mentok bar tidak berhenti menggantung di atas tepi layar. -->
     <div
       v-if="moves.length || task.can.edit || task.can.delete"
       class="sticky z-10 border-t border-line bg-surface py-3"
       :class="
-        wide ? 'bottom-[calc(3.5rem+env(safe-area-inset-bottom))] md:bottom-0' : '-mx-5 -mb-4 bottom-0 px-5'
+        wide
+          ? '-mb-6 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] md:-mb-10 md:bottom-0'
+          : '-mx-5 -mb-4 bottom-0 px-5'
       "
     >
       <div class="flex w-full flex-wrap justify-end gap-2">

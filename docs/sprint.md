@@ -685,7 +685,7 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 
 **Selesai kalau:** `./scripts/check.sh` lolos dan alurnya terbukti lewat curl: Manajer membuat task dengan PIC Staf tanpa sub task, Staf itu menambah sub task sendiri lalu mencentangnya, Staf lain ditolak, dan sub task buatan Manajer bisa dicentang PIC.
 
-**Hasil:** kode selesai 2026-11-17, `./scripts/check.sh` lolos. Migrasi `000008` dijalankan di dev dan di produksi 2026-11-17, grants diulang (enam tabel, `task_assignees` masuk), image dibangun ulang, `/api/health` balas `ok`. Uji curl dan uji browser menunggu Rifky. Pratinjau lampiran gagal di produksi karena CSP, diperbaiki di hari yang sama dan perlu build frontend sekali lagi.
+**Hasil:** kode selesai 2026-11-17, `./scripts/check.sh` lolos. Migrasi `000008` dijalankan di dev dan di produksi 2026-11-17, grants diulang (enam tabel, `task_assignees` masuk), image dibangun ulang, `/api/health` balas `ok`. Uji curl dan uji browser menunggu Rifky. Pratinjau lampiran sempat gagal di produksi karena CSP, diperbaiki dan dibangun ulang di hari yang sama; pratinjau gambar terbukti jalan di `novoidminds.xyz`.
 
 ## Sprint 12: Persiapan deploy dan migrasi data
 
