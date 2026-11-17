@@ -12,8 +12,8 @@ import (
 	"nvm-internal/internal/db/sqlc"
 )
 
-// Sama dengan account.minPasswordLen (12 sejak revisi 5), juga untuk password yang diganti sendiri.
-const minPasswordLen = 12
+// Sama dengan account.minPasswordLen (6 sejak revisi 8), juga untuk password yang diganti sendiri.
+const minPasswordLen = 6
 
 type changePasswordRequest struct {
 	CurrentPassword string `json:"current_password"`
@@ -35,7 +35,7 @@ func (s *Server) changePassword(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, CodeBadRequest, "Password lama dan password baru wajib diisi.")
 		return
 	case utf8.RuneCountInString(req.NewPassword) < minPasswordLen:
-		writeError(c, http.StatusBadRequest, CodeBadRequest, "Password baru minimal 12 karakter.")
+		writeError(c, http.StatusBadRequest, CodeBadRequest, "Password baru minimal 6 karakter.")
 		return
 	case len(req.NewPassword) > maxPasswordLen:
 		writeError(c, http.StatusBadRequest, CodeBadRequest, "Password baru terlalu panjang, maksimal 72 karakter.")

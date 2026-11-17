@@ -47,12 +47,12 @@ func Run(ctx context.Context, pool *pgxpool.Pool, store *storage.Store, now time
 	q := sqlc.New(pool)
 	ts := func(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
 
-	idleBefore, ageBefore := ts(now.Add(-auth.IdleTimeout)), ts(now.Add(-auth.SessionMaxAge))
+	ageBefore := ts(now.Add(-auth.SessionMaxAge))
 	var err error
 	if dryRun {
-		r.ExpiredSessions, err = q.CountExpiredSessions(ctx, sqlc.CountExpiredSessionsParams{IdleBefore: idleBefore, AgeBefore: ageBefore})
+		r.ExpiredSessions, err = q.CountExpiredSessions(ctx, ageBefore)
 	} else {
-		r.ExpiredSessions, err = q.DeleteExpiredSessions(ctx, sqlc.DeleteExpiredSessionsParams{IdleBefore: idleBefore, AgeBefore: ageBefore})
+		r.ExpiredSessions, err = q.DeleteExpiredSessions(ctx, ageBefore)
 	}
 	if err != nil {
 		return r, fmt.Errorf("sesi kedaluwarsa: %w", err)

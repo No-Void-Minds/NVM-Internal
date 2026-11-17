@@ -60,7 +60,7 @@ func (s *Service) SetSubtaskDone(ctx context.Context, actor Actor, taskID string
 			}
 			otherManager = len(others) > 0
 		}
-		if !canToggle(actor, isOwner, owners == 0, isTaskPIC, otherManager) {
+		if !canToggle(actor, isOwner, st.CreatedBy.Int64 == actor.ID, owners == 0, isTaskPIC, otherManager) {
 			return ErrNotSubtaskPIC
 		}
 		if Status(cur.Status) != OnProgress {
@@ -90,11 +90,12 @@ func (s *Service) SetSubtaskDone(ctx context.Context, actor Actor, taskID string
 }
 
 // canToggle adalah satu-satunya aturan siapa yang boleh mencentang. Dipakai SetSubtaskDone dan CheckableSubtasks.
-// Pemilik sub task selalu boleh. Sub task tanpa pemilik (dibuat Manajer lewat form task) boleh dicentang
-// PIC task mana pun, kalau tidak, pekerjaan titipan Manajer tidak bisa diselesaikan siapa pun dan task
-// tertahan sebelum Ready. Manajer boleh, kecuali sub task itu milik Manajer lain.
-func canToggle(actor Actor, isOwner, ownerless, isTaskPIC, otherManagerPIC bool) bool {
-	if isOwner {
+// PIC sub task selalu boleh, begitu juga yang membuatnya: dia yang membagi pekerjaan itu, jadi dia yang
+// paling tahu pekerjaannya sudah beres (revisi 9). Sub task tanpa PIC boleh dicentang PIC task mana pun,
+// kalau tidak, pekerjaan titipan Manajer tidak bisa diselesaikan siapa pun dan task tertahan sebelum Ready.
+// Manajer boleh, kecuali sub task itu dipegang Manajer lain.
+func canToggle(actor Actor, isOwner, isCreator, ownerless, isTaskPIC, otherManagerPIC bool) bool {
+	if isOwner || isCreator {
 		return true
 	}
 	if ownerless && isTaskPIC {
@@ -128,7 +129,7 @@ func (s *Service) CheckableSubtasks(ctx context.Context, actor Actor, status Sta
 	}
 	for _, st := range subs {
 		isOwner := slices.ContainsFunc(st.Assignees, func(a sqlc.ListSubtaskAssigneesRow) bool { return a.ID == actor.ID })
-		out[st.ID] = canToggle(actor, isOwner, len(st.Assignees) == 0, isTaskPIC, otherManager[st.ID])
+		out[st.ID] = canToggle(actor, isOwner, st.CreatedBy == actor.ID, len(st.Assignees) == 0, isTaskPIC, otherManager[st.ID])
 	}
 	return out, nil
 }

@@ -15,6 +15,7 @@ import (
 const (
 	maxSubtasks     = 50
 	maxSubtaskTitle = 200
+	maxSubtaskDesc  = 2000
 )
 
 // SubtaskInput adalah satu baris sub task dari form Manajer. ID 0 berarti sub task baru.
@@ -28,6 +29,15 @@ type SubtaskInput struct {
 type subtaskSnapshot struct {
 	ID    int64  `json:"id"`
 	Title string `json:"title"`
+}
+
+// cleanSubtaskDesc memakai batas yang sama dengan deskripsi task, supaya satu halaman cukup membacanya.
+func cleanSubtaskDesc(desc string) (string, error) {
+	d := strings.TrimSpace(desc)
+	if utf8.RuneCountInString(d) > maxSubtaskDesc {
+		return "", apperr.Invalid(fmt.Sprintf("Deskripsi sub task maksimal %d karakter.", maxSubtaskDesc))
+	}
+	return d, nil
 }
 
 // cleanSubtaskTitle dipakai form Manajer dan penambahan sub task oleh PIC, supaya aturan namanya satu.
@@ -64,6 +74,12 @@ func cleanSubtasks(in []SubtaskInput) ([]SubtaskInput, error) {
 	return out, nil
 }
 
+// userRef membungkus id akun untuk kolom yang boleh kosong. Nol berarti tidak diketahui, yang terjadi
+// pada sub task buatan sebelum revisi 7.
+func userRef(id int64) pgtype.Int8 {
+	return pgtype.Int8{Int64: id, Valid: id != 0}
+}
+
 // without mengembalikan isi a yang tidak ada di b.
 func without(a, b []int64) []int64 {
 	var out []int64
@@ -75,10 +91,12 @@ func without(a, b []int64) []int64 {
 	return out
 }
 
-func insertSubtasks(ctx context.Context, q *sqlc.Queries, taskID string, subs []SubtaskInput) ([]subtaskSnapshot, error) {
+func insertSubtasks(ctx context.Context, q *sqlc.Queries, taskID string, creatorID int64, subs []SubtaskInput) ([]subtaskSnapshot, error) {
 	snaps := make([]subtaskSnapshot, 0, len(subs))
 	for i, s := range subs {
-		id, err := q.CreateSubtask(ctx, sqlc.CreateSubtaskParams{TaskID: taskID, Title: s.Title, Position: int32(i)})
+		id, err := q.CreateSubtask(ctx, sqlc.CreateSubtaskParams{
+			TaskID: taskID, Title: s.Title, Position: int32(i), CreatedBy: userRef(creatorID),
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -102,11 +120,15 @@ func loadSubtasks(ctx context.Context, q *sqlc.Queries, taskID string) ([]subtas
 
 // SubtaskView adalah sub task untuk ditampilkan: nama dan siapa saja PIC-nya.
 type SubtaskView struct {
-	ID        int64
-	Title     string
-	DoneAt    pgtype.Timestamptz
-	DoneBy    string
-	Assignees []sqlc.ListSubtaskAssigneesRow
+	ID             int64
+	Title          string
+	Description    string
+	DeliverableURL string
+	CreatedBy      int64
+	CreatedByName  string
+	DoneAt         pgtype.Timestamptz
+	DoneBy         string
+	Assignees      []sqlc.ListSubtaskAssigneesRow
 }
 
 func loadSubtaskViews(ctx context.Context, q *sqlc.Queries, taskID string) ([]SubtaskView, error) {
@@ -119,7 +141,9 @@ func loadSubtaskViews(ctx context.Context, q *sqlc.Queries, taskID string) ([]Su
 	index := make(map[int64]int, len(rows))
 	for i, r := range rows {
 		out[i] = SubtaskView{
-			ID: r.ID, Title: r.Title, DoneAt: r.DoneAt, DoneBy: r.DoneByName.String,
+			ID: r.ID, Title: r.Title, Description: r.Description, DeliverableURL: r.DeliverableUrl,
+			CreatedBy: r.CreatedBy.Int64, CreatedByName: r.CreatedByName.String,
+			DoneAt: r.DoneAt, DoneBy: r.DoneByName.String,
 			Assignees: []sqlc.ListSubtaskAssigneesRow{},
 		}
 		ids[i] = r.ID
@@ -156,7 +180,7 @@ func subtasksChanged(cur []subtaskSnapshot, in []SubtaskInput) bool {
 // syncSubtasks menyamakan database dengan daftar dari form Manajer. Sub task yang ID-nya tidak ikut
 // terkirim dihapus, ID 0 dibuat baru, sisanya diperbarui. Pemilik sub task tidak disentuh di sini. Keunikan posisi baru dicek saat commit (constraint DEFERRABLE),
 // jadi urutan penulisan di sini tidak bisa bentrok.
-func syncSubtasks(ctx context.Context, q *sqlc.Queries, taskID string, cur []subtaskSnapshot, in []SubtaskInput) ([]subtaskSnapshot, error) {
+func syncSubtasks(ctx context.Context, q *sqlc.Queries, taskID string, creatorID int64, cur []subtaskSnapshot, in []SubtaskInput) ([]subtaskSnapshot, error) {
 	existing := make(map[int64]subtaskSnapshot, len(cur))
 	for _, c := range cur {
 		existing[c.ID] = c
@@ -188,7 +212,9 @@ func syncSubtasks(ctx context.Context, q *sqlc.Queries, taskID string, cur []sub
 		id := s.ID
 		if id == 0 {
 			var err error
-			id, err = q.CreateSubtask(ctx, sqlc.CreateSubtaskParams{TaskID: taskID, Title: s.Title, Position: int32(i)})
+			id, err = q.CreateSubtask(ctx, sqlc.CreateSubtaskParams{
+				TaskID: taskID, Title: s.Title, Position: int32(i), CreatedBy: userRef(creatorID),
+			})
 			if err != nil {
 				return nil, err
 			}

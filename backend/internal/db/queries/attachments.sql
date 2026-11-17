@@ -3,12 +3,13 @@ SELECT EXISTS (SELECT 1 FROM tasks WHERE id = @id AND NOT is_deleted);
 
 -- name: InsertAttachment :one
 -- id dikembalikan sebagai teks karena langsung dipakai sebagai nama berkas di disk.
-INSERT INTO task_attachments (task_id, kind, original_name, mime_type, size_bytes, checksum, uploaded_by)
-VALUES (@task_id, @kind, @original_name, @mime_type, @size_bytes, @checksum, @uploaded_by)
+-- subtask_id NULL berarti lampiran task induk, berisi berarti lampiran sub task itu (revisi 8).
+INSERT INTO task_attachments (task_id, subtask_id, kind, original_name, mime_type, size_bytes, checksum, uploaded_by)
+VALUES (@task_id, @subtask_id, @kind, @original_name, @mime_type, @size_bytes, @checksum, @uploaded_by)
 RETURNING id::text;
 
 -- name: ListTaskAttachments :many
-SELECT a.id::text AS id, a.kind, a.original_name, a.mime_type, a.size_bytes, a.uploaded_at,
+SELECT a.id::text AS id, a.kind, a.subtask_id, a.original_name, a.mime_type, a.size_bytes, a.uploaded_at,
        u.name AS uploaded_by_name
 FROM task_attachments a
 JOIN users u ON u.id = a.uploaded_by

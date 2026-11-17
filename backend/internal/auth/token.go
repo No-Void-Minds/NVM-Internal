@@ -8,13 +8,10 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-const (
-	// IdleTimeout ditegakkan di server dari user_sessions.last_seen_at (FR-AUTH-05, NFR-SEC-02).
-	IdleTimeout = 30 * time.Minute
-	// SessionMaxAge adalah umur mutlak token dan cookie sejak login. Harus lebih panjang dari IdleTimeout, supaya
-	// cookie tidak kedaluwarsa duluan saat sesi diperpanjang tanpa cookie baru (verify untuk dashboard, revisi 5).
-	SessionMaxAge = 12 * time.Hour
-)
+// SessionMaxAge adalah umur mutlak token, cookie, dan baris sesi sejak login. Sejak revisi 8 ini satu-satunya
+// batas waktu sesi: idle timeout 30 menit dihapus atas permintaan Manajer, jadi sesi yang ditinggalkan tetap
+// hidup sampai 9 jam. last_seen_at masih dicatat, tetapi hanya sebagai keterangan, bukan penentu.
+const SessionMaxAge = 9 * time.Hour
 
 var ErrInvalidToken = errors.New("token tidak valid")
 

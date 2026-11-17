@@ -55,14 +55,18 @@ type taskSummary struct {
 }
 
 type subtaskItem struct {
-	ID        int64        `json:"id"`
-	Title     string       `json:"title"`
-	Done      bool         `json:"done"`
-	DoneAt    *time.Time   `json:"done_at"`
-	DoneBy    string       `json:"done_by"`
-	CanCheck  bool         `json:"can_check"`
-	CanEdit   bool         `json:"can_edit"`
-	Assignees []taskPerson `json:"assignees"`
+	ID             int64              `json:"id"`
+	Title          string             `json:"title"`
+	Description    string             `json:"description"`
+	DeliverableURL string             `json:"deliverable_url"`
+	CreatedBy      string             `json:"created_by"`
+	Done           bool               `json:"done"`
+	DoneAt         *time.Time         `json:"done_at"`
+	DoneBy         string             `json:"done_by"`
+	CanCheck       bool               `json:"can_check"`
+	CanEdit        bool               `json:"can_edit"`
+	Assignees      []taskPerson       `json:"assignees"`
+	Attachments    []attachmentDetail `json:"attachments"`
 }
 
 type historyItem struct {
@@ -172,13 +176,20 @@ func (s *Server) getTask(c *gin.Context) {
 		s.internalError(c, err)
 		return
 	}
+	// Satu query untuk semua berkas task ini, lalu dipilah: yang punya subtask_id menempel di sub task-nya.
 	out.Attachments = make([]attachmentDetail, 0, len(files))
+	subFiles := map[int64][]attachmentDetail{}
 	for _, a := range files {
-		out.Attachments = append(out.Attachments, attachmentDetail{
+		item := attachmentDetail{
 			attachmentItem: attachmentItem{ID: a.ID, Kind: string(a.Kind), Name: a.OriginalName, MIME: a.MimeType, Size: a.SizeBytes},
 			UploadedAt:     a.UploadedAt.Time,
 			UploadedBy:     a.UploadedByName,
-		})
+		}
+		if a.SubtaskID.Valid {
+			subFiles[a.SubtaskID.Int64] = append(subFiles[a.SubtaskID.Int64], item)
+			continue
+		}
+		out.Attachments = append(out.Attachments, item)
 	}
 	out.Subtasks = make([]subtaskItem, 0, len(d.Subtasks))
 	doneCount := 0
@@ -190,12 +201,18 @@ func (s *Server) getTask(c *gin.Context) {
 	}
 	for _, st := range d.Subtasks {
 		item := subtaskItem{
-			ID: st.ID, Title: st.Title, Done: st.DoneAt.Valid, DoneAt: timePtr(st.DoneAt), DoneBy: st.DoneBy,
-			Assignees: make([]taskPerson, 0, len(st.Assignees)),
+			ID: st.ID, Title: st.Title, Description: st.Description, DeliverableURL: st.DeliverableURL,
+			CreatedBy: st.CreatedByName,
+			Done:      st.DoneAt.Valid, DoneAt: timePtr(st.DoneAt), DoneBy: st.DoneBy,
+			Assignees:   make([]taskPerson, 0, len(st.Assignees)),
+			Attachments: subFiles[st.ID],
+		}
+		if item.Attachments == nil {
+			item.Attachments = []attachmentDetail{}
 		}
 		// can_check berasal dari aturan yang sama dengan SetSubtaskDone, supaya UI tidak menebak.
 		item.CanCheck = checkable[st.ID]
-		item.CanEdit = out.Can.AddSubtask && (actor.Role == task.RoleManager || ownsSubtask(actor.ID, st))
+		item.CanEdit = out.Can.AddSubtask && (actor.Role == task.RoleManager || mySubtask(actor.ID, st))
 		for _, a := range st.Assignees {
 			item.Assignees = append(item.Assignees, taskPerson{ID: a.ID, Name: a.Name, Username: a.Username, AvatarID: avatarID(a.AvatarID)})
 		}
@@ -274,8 +291,12 @@ func labelsOf(rows []sqlc.ListTaskLabelsRow) []taskLabel {
 	return out
 }
 
-// ownsSubtask: pemilik sub task adalah satu-satunya PIC yang terpasang padanya, yaitu yang membuatnya.
-func ownsSubtask(userID int64, st task.SubtaskView) bool {
+// mySubtask: sub task ini urusan orang ini, entah karena dia yang membuatnya atau dia yang ditugaskan
+// mengerjakannya. Aturan yang sama dipakai backend di editableSubtask.
+func mySubtask(userID int64, st task.SubtaskView) bool {
+	if st.CreatedBy == userID {
+		return true
+	}
 	for _, a := range st.Assignees {
 		if a.ID == userID {
 			return true

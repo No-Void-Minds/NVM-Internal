@@ -48,13 +48,14 @@ func (q *Queries) GetAttachment(ctx context.Context, arg GetAttachmentParams) (G
 }
 
 const insertAttachment = `-- name: InsertAttachment :one
-INSERT INTO task_attachments (task_id, kind, original_name, mime_type, size_bytes, checksum, uploaded_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO task_attachments (task_id, subtask_id, kind, original_name, mime_type, size_bytes, checksum, uploaded_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING id::text
 `
 
 type InsertAttachmentParams struct {
 	TaskID       string
+	SubtaskID    pgtype.Int8
 	Kind         AttachmentKind
 	OriginalName string
 	MimeType     string
@@ -64,9 +65,11 @@ type InsertAttachmentParams struct {
 }
 
 // id dikembalikan sebagai teks karena langsung dipakai sebagai nama berkas di disk.
+// subtask_id NULL berarti lampiran task induk, berisi berarti lampiran sub task itu (revisi 8).
 func (q *Queries) InsertAttachment(ctx context.Context, arg InsertAttachmentParams) (string, error) {
 	row := q.db.QueryRow(ctx, insertAttachment,
 		arg.TaskID,
+		arg.SubtaskID,
 		arg.Kind,
 		arg.OriginalName,
 		arg.MimeType,
@@ -80,7 +83,7 @@ func (q *Queries) InsertAttachment(ctx context.Context, arg InsertAttachmentPara
 }
 
 const listTaskAttachments = `-- name: ListTaskAttachments :many
-SELECT a.id::text AS id, a.kind, a.original_name, a.mime_type, a.size_bytes, a.uploaded_at,
+SELECT a.id::text AS id, a.kind, a.subtask_id, a.original_name, a.mime_type, a.size_bytes, a.uploaded_at,
        u.name AS uploaded_by_name
 FROM task_attachments a
 JOIN users u ON u.id = a.uploaded_by
@@ -91,6 +94,7 @@ ORDER BY a.uploaded_at, a.id
 type ListTaskAttachmentsRow struct {
 	ID             string
 	Kind           AttachmentKind
+	SubtaskID      pgtype.Int8
 	OriginalName   string
 	MimeType       string
 	SizeBytes      int64
@@ -110,6 +114,7 @@ func (q *Queries) ListTaskAttachments(ctx context.Context, taskID string) ([]Lis
 		if err := rows.Scan(
 			&i.ID,
 			&i.Kind,
+			&i.SubtaskID,
 			&i.OriginalName,
 			&i.MimeType,
 			&i.SizeBytes,

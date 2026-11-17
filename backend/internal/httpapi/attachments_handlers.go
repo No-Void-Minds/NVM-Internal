@@ -102,6 +102,20 @@ func (s *Server) uploadAttachment(c *gin.Context) {
 		s.writeTaskError(c, err)
 		return
 	}
+	s.receiveUpload(c, id, kind, 0)
+}
+
+// uploadSubtaskAttachment menempelkan berkas ke satu sub task. Jenisnya selalu deliverable: isinya hasil
+// kerja, dan haknya sama dengan berkas deliverable task (PIC task dan Manajer).
+func (s *Server) uploadSubtaskAttachment(c *gin.Context) {
+	id, sid, ok := subtaskPath(c)
+	if !ok {
+		return
+	}
+	s.receiveUpload(c, id, task.KindDeliverable, sid)
+}
+
+func (s *Server) receiveUpload(c *gin.Context, id string, kind task.AttachmentKind, subtaskID int64) {
 	actor := taskActor(c)
 	if err := s.attachments.CheckUpload(c.Request.Context(), actor, id, kind); err != nil {
 		s.writeAttachmentError(c, err)
@@ -123,7 +137,7 @@ func (s *Server) uploadAttachment(c *gin.Context) {
 	}
 	defer func() { _ = part.Close() }()
 
-	saved, err := s.attachments.Upload(c.Request.Context(), actor, id, kind, part.FileName(), part)
+	saved, err := s.attachments.Upload(c.Request.Context(), actor, id, kind, subtaskID, part.FileName(), part)
 	if err != nil {
 		s.writeAttachmentError(c, err)
 		return

@@ -11,11 +11,11 @@ import (
 	"nvm-internal/internal/db/sqlc"
 )
 
-// Revisi 6: Manajer membuat task dan memilih PIC, lalu PIC menyusun sendiri sub task yang ia kerjakan.
-// Manajer tetap boleh menambah sub task. Sub task yang dibuat PIC langsung menjadi miliknya, supaya
-// aturan centang yang lama (pemilik sub task yang mencentang) tetap berlaku tanpa aturan baru.
+// Revisi 7: Manajer memilih PIC task, lalu PIC mana pun boleh menyusun sub task dan menugaskannya ke
+// PIC task yang lain (mis. supervisor membagi pekerjaan ke timnya). Satu sub task satu PIC, dan yang
+// mencentang adalah PIC sub task itu. Sub task yang belum ditugaskan boleh dicentang PIC task mana pun.
 
-// ErrSubtaskLocked dipakai saat sub task tidak boleh diubah karena status task atau karena bukan miliknya.
+// ErrSubtaskLocked dipakai saat sub task tidak boleh diubah karena bukan urusan pelaku.
 var ErrSubtaskLocked = errors.New("sub task tidak bisa diubah")
 
 // subtaskWindow: menambah dan mengubah sub task hanya saat task masih disiapkan atau sedang dikerjakan.
@@ -48,10 +48,41 @@ func lockForSubtask(ctx context.Context, q *sqlc.Queries, actor Actor, taskID st
 	return cur, nil
 }
 
-// AddSubtask menambah satu sub task di urutan paling bawah. Pelaku menjadi pemiliknya, termasuk kalau
-// pelakunya Manajer yang juga PIC task ini.
-func (s *Service) AddSubtask(ctx context.Context, actor Actor, taskID, title string) (int64, error) {
+// setSubtaskPIC memasang atau melepas PIC sub task. Kandidatnya dibatasi PIC task supaya pekerjaan tidak
+// bisa dilempar ke orang yang tidak dipilih Manajer di task ini.
+func setSubtaskPIC(ctx context.Context, q *sqlc.Queries, actor Actor, taskID string, subtaskID int64, picID int64) error {
+	if picID != 0 {
+		ok, err := q.IsTaskAssignee(ctx, sqlc.IsTaskAssigneeParams{TaskID: taskID, UserID: picID})
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return apperr.Invalid("PIC sub task harus salah satu PIC task ini.")
+		}
+	}
+	if err := q.ClearSubtaskAssignees(ctx, subtaskID); err != nil {
+		return err
+	}
+	if picID == 0 {
+		return nil
+	}
+	return q.AddSubtaskAssignee(ctx, sqlc.AddSubtaskAssigneeParams{
+		SubtaskID: subtaskID, UserID: picID, AssignedBy: actor.ID,
+	})
+}
+
+// AddSubtask menambah satu sub task di urutan paling bawah. picID 0 berarti belum ditugaskan.
+func (s *Service) AddSubtask(ctx context.Context, actor Actor, taskID, title, desc, link string, picID int64) (int64, error) {
 	clean, err := cleanSubtaskTitle(title, "ini")
+	if err != nil {
+		return 0, err
+	}
+	cleanDesc, err := cleanSubtaskDesc(desc)
+	if err != nil {
+		return 0, err
+	}
+	// Aturan tautannya sama dengan deliverable task: hanya http dan https (NFR-SEC-06).
+	cleanLink, err := cleanURL(link)
 	if err != nil {
 		return 0, err
 	}
@@ -68,13 +99,14 @@ func (s *Service) AddSubtask(ctx context.Context, actor Actor, taskID, title str
 		if int(slot.Total) >= maxSubtasks {
 			return apperr.Invalid("Satu task paling banyak punya 50 sub task.")
 		}
-		id, err = q.CreateSubtask(ctx, sqlc.CreateSubtaskParams{TaskID: taskID, Title: clean, Position: slot.NextPosition})
+		id, err = q.CreateSubtask(ctx, sqlc.CreateSubtaskParams{
+			TaskID: taskID, Title: clean, Description: cleanDesc, DeliverableUrl: cleanLink.String,
+			Position: slot.NextPosition, CreatedBy: userRef(actor.ID),
+		})
 		if err != nil {
 			return err
 		}
-		if err := q.AddSubtaskAssignee(ctx, sqlc.AddSubtaskAssigneeParams{
-			SubtaskID: id, UserID: actor.ID, AssignedBy: actor.ID,
-		}); err != nil {
+		if err := setSubtaskPIC(ctx, q, actor, taskID, id, picID); err != nil {
 			return err
 		}
 		// Versi task ikut naik supaya form Manajer yang sudah terbuka tidak menyimpan daftar sub task
@@ -83,13 +115,14 @@ func (s *Service) AddSubtask(ctx context.Context, actor Actor, taskID, title str
 			return err
 		}
 		return audit.Change(ctx, q, actor.auditActor(), "subtask_added", "task", taskID, nil,
-			map[string]any{"id": id, "title": clean})
+			map[string]any{"id": id, "title": clean, "pic_id": picID})
 	})
 	return id, err
 }
 
-// ownSubtask memastikan sub task ada di task ini dan boleh diubah pelaku: pemiliknya, atau Manajer.
-func ownSubtask(ctx context.Context, q *sqlc.Queries, actor Actor, taskID string, subtaskID int64) (sqlc.GetSubtaskRow, error) {
+// editableSubtask memastikan sub task ada di task ini dan boleh diubah pelaku: Manajer, yang membuatnya,
+// atau PIC yang ditugaskan mengerjakannya.
+func editableSubtask(ctx context.Context, q *sqlc.Queries, actor Actor, taskID string, subtaskID int64) (sqlc.GetSubtaskRow, error) {
 	st, err := q.GetSubtask(ctx, sqlc.GetSubtaskParams{ID: subtaskID, TaskID: taskID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return st, ErrSubtaskNotFound
@@ -97,22 +130,31 @@ func ownSubtask(ctx context.Context, q *sqlc.Queries, actor Actor, taskID string
 	if err != nil {
 		return st, err
 	}
-	if isManager(actor) {
+	if isManager(actor) || st.CreatedBy.Int64 == actor.ID {
 		return st, nil
 	}
-	owner, err := q.IsSubtaskAssignee(ctx, sqlc.IsSubtaskAssigneeParams{SubtaskID: subtaskID, UserID: actor.ID})
+	pic, err := q.IsSubtaskAssignee(ctx, sqlc.IsSubtaskAssigneeParams{SubtaskID: subtaskID, UserID: actor.ID})
 	if err != nil {
 		return st, err
 	}
-	if !owner {
+	if !pic {
 		return st, ErrSubtaskLocked
 	}
 	return st, nil
 }
 
-// RenameSubtask mengubah nama sub task tanpa menggeser urutannya.
-func (s *Service) RenameSubtask(ctx context.Context, actor Actor, taskID string, subtaskID int64, title string) error {
+// UpdateSubtask mengubah nama, deskripsi, dan PIC sub task tanpa menggeser urutannya.
+// picID 0 melepas PIC-nya.
+func (s *Service) UpdateSubtask(ctx context.Context, actor Actor, taskID string, subtaskID int64, title, desc, link string, picID int64) error {
 	clean, err := cleanSubtaskTitle(title, "ini")
+	if err != nil {
+		return err
+	}
+	cleanDesc, err := cleanSubtaskDesc(desc)
+	if err != nil {
+		return err
+	}
+	cleanLink, err := cleanURL(link)
 	if err != nil {
 		return err
 	}
@@ -121,21 +163,43 @@ func (s *Service) RenameSubtask(ctx context.Context, actor Actor, taskID string,
 		if _, err := lockForSubtask(ctx, q, actor, taskID); err != nil {
 			return err
 		}
-		st, err := ownSubtask(ctx, q, actor, taskID, subtaskID)
+		st, err := editableSubtask(ctx, q, actor, taskID, subtaskID)
 		if err != nil {
 			return err
 		}
-		if st.Title == clean {
+		oldPIC, err := q.ListSubtaskAssignees(ctx, []int64{subtaskID})
+		if err != nil {
+			return err
+		}
+		var oldPICID int64
+		if len(oldPIC) > 0 {
+			oldPICID = oldPIC[0].ID
+		}
+		if st.Title == clean && st.Description == cleanDesc && st.DeliverableUrl == cleanLink.String &&
+			oldPICID == picID {
 			return nil
 		}
-		if err := q.RenameSubtask(ctx, sqlc.RenameSubtaskParams{ID: subtaskID, TaskID: taskID, Title: clean}); err != nil {
-			return err
+		if st.Title != clean || st.Description != cleanDesc || st.DeliverableUrl != cleanLink.String {
+			if err := q.RenameSubtask(ctx, sqlc.RenameSubtaskParams{
+				ID: subtaskID, TaskID: taskID, Title: clean, Description: cleanDesc,
+				DeliverableUrl: cleanLink.String,
+			}); err != nil {
+				return err
+			}
+		}
+		if oldPICID != picID {
+			if err := setSubtaskPIC(ctx, q, actor, taskID, subtaskID, picID); err != nil {
+				return err
+			}
 		}
 		if _, err := q.BumpTaskVersion(ctx, taskID); err != nil {
 			return err
 		}
+		// Satu kejadian audit untuk nama dan PIC sekalian, supaya riwayat tidak terbelah dua
+		// untuk satu kali simpan.
 		return audit.Change(ctx, q, actor.auditActor(), "subtask_renamed", "task", taskID,
-			map[string]any{"id": st.ID, "title": st.Title}, map[string]any{"id": st.ID, "title": clean})
+			map[string]any{"id": st.ID, "title": st.Title, "pic_id": oldPICID},
+			map[string]any{"id": st.ID, "title": clean, "pic_id": picID})
 	})
 }
 
@@ -146,7 +210,7 @@ func (s *Service) DeleteSubtask(ctx context.Context, actor Actor, taskID string,
 		if _, err := lockForSubtask(ctx, q, actor, taskID); err != nil {
 			return err
 		}
-		st, err := ownSubtask(ctx, q, actor, taskID, subtaskID)
+		st, err := editableSubtask(ctx, q, actor, taskID, subtaskID)
 		if err != nil {
 			return err
 		}

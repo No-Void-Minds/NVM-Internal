@@ -106,7 +106,7 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (stri
 		if err := addTaskPICs(ctx, q, actor.ID, id, picIDs); err != nil {
 			return err
 		}
-		snaps, err := insertSubtasks(ctx, q, id, subs)
+		snaps, err := insertSubtasks(ctx, q, id, actor.ID, subs)
 		if err != nil {
 			return err
 		}

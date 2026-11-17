@@ -1,7 +1,9 @@
 -- name: ListSubtasks :many
-SELECT st.id, st.task_id, st.title, st.position, st.done_at, u.name AS done_by_name
+SELECT st.id, st.task_id, st.title, st.description, st.deliverable_url, st.position, st.done_at, st.created_by,
+       u.name AS done_by_name, c.name AS created_by_name
 FROM task_subtasks st
 LEFT JOIN users u ON u.id = st.done_by
+LEFT JOIN users c ON c.id = st.created_by
 WHERE st.task_id = ANY(@task_ids::text[])
 ORDER BY st.task_id, st.position;
 
@@ -13,8 +15,8 @@ WHERE sa.subtask_id = ANY(@subtask_ids::bigint[])
 ORDER BY sa.subtask_id, sa.assigned_at, u.id;
 
 -- name: CreateSubtask :one
-INSERT INTO task_subtasks (task_id, title, position)
-VALUES (@task_id, @title, @position)
+INSERT INTO task_subtasks (task_id, title, description, deliverable_url, position, created_by)
+VALUES (@task_id, @title, @description, @deliverable_url, @position, @created_by)
 RETURNING id;
 
 -- name: UpdateSubtask :exec
@@ -27,7 +29,8 @@ WHERE id = @id AND task_id = @task_id;
 DELETE FROM task_subtasks WHERE task_id = @task_id AND id = ANY(@ids::bigint[]);
 
 -- name: AddSubtaskAssignee :exec
--- Sejak revisi 6 isinya satu orang: pemilik sub task, yaitu PIC yang membuatnya. Sub task buatan Manajer tidak punya baris di sini.
+-- Sejak revisi 7 isinya satu orang: PIC yang ditugaskan mengerjakan sub task ini, dipilih dari PIC task.
+-- Sub task yang belum ditugaskan tidak punya baris di sini.
 INSERT INTO subtask_assignees (subtask_id, user_id, assigned_by, assigned_at)
 VALUES (@subtask_id, @user_id, @assigned_by, clock_timestamp());
 
@@ -44,7 +47,7 @@ ORDER BY tas.assigned_at, u.id
 LIMIT 1;
 
 -- name: GetSubtask :one
-SELECT id, title, done_at FROM task_subtasks WHERE id = @id AND task_id = @task_id;
+SELECT id, title, description, deliverable_url, done_at, created_by FROM task_subtasks WHERE id = @id AND task_id = @task_id;
 
 -- name: IsSubtaskAssignee :one
 SELECT EXISTS (SELECT 1 FROM subtask_assignees WHERE subtask_id = @subtask_id AND user_id = @user_id);
@@ -82,5 +85,17 @@ FROM task_subtasks WHERE task_id = @task_id;
 SELECT count(*)::int FROM subtask_assignees WHERE subtask_id = @subtask_id;
 
 -- name: RenameSubtask :exec
--- Hanya nama; urutan tidak ikut berubah saat PIC atau Manajer memperbaiki tulisan.
-UPDATE task_subtasks SET title = @title WHERE id = @id AND task_id = @task_id;
+-- Nama, deskripsi, dan tautan; urutan tidak ikut berubah saat PIC atau Manajer memperbaiki isinya.
+UPDATE task_subtasks SET title = @title, description = @description, deliverable_url = @deliverable_url
+WHERE id = @id AND task_id = @task_id;
+
+-- name: ClearSubtaskAssignees :exec
+-- Dipakai saat PIC sub task diganti: barisnya diganti utuh, bukan ditambah, karena satu sub task satu PIC.
+DELETE FROM subtask_assignees WHERE subtask_id = @subtask_id;
+
+-- name: DropSubtaskAssigneesOfUsers :exec
+-- Dipakai saat Manajer melepas seseorang dari PIC task: sub task yang ditugaskan ke dia ikut dilepas,
+-- supaya tidak ada sub task yang dipegang orang yang sudah tidak ada di task ini.
+DELETE FROM subtask_assignees sa
+USING task_subtasks st
+WHERE sa.subtask_id = st.id AND st.task_id = @task_id AND sa.user_id = ANY(@user_ids::bigint[]);

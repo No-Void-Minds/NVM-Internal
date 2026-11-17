@@ -64,9 +64,9 @@ func (s *Server) requireSession() gin.HandlerFunc {
 // jadi tanpa batas ini satu halaman dashboard bisa menulis puluhan kali ke database.
 const sessionTouchEvery = 60 * time.Second
 
-// touchSession menegakkan idle timeout di server (FR-AUTH-05) dan mencatat aktivitas. Cookie tidak diterbitkan
-// ulang di sini, sehingga verify untuk Caddy (yang tidak meneruskan Set-Cookie) tetap memperpanjang sesi, dan
-// token tidak berganti di setiap request.
+// touchSession memastikan baris sesinya masih ada dan belum melewati umur mutlak, lalu mencatat aktivitas
+// terakhir. Cookie tidak diterbitkan ulang di sini, sehingga verify untuk Caddy (yang tidak meneruskan
+// Set-Cookie) tidak membuat token berganti di setiap request.
 func (s *Server) touchSession(c *gin.Context, userID int64, sid string, now time.Time) (bool, error) {
 	var id pgtype.UUID
 	if err := id.Scan(sid); err != nil || !id.Valid {
@@ -82,10 +82,10 @@ func (s *Server) touchSession(c *gin.Context, userID int64, sid string, now time
 	}
 	// Batas mutlak juga dicek dari database, bukan hanya dari exp di JWT, supaya tetap berlaku bila umur token
 	// di kode suatu saat diubah tanpa mengubah aturan sesi.
-	idle := now.Sub(row.LastSeenAt.Time)
-	if idle > auth.IdleTimeout || now.Sub(row.CreatedAt.Time) > auth.SessionMaxAge {
+	if now.Sub(row.CreatedAt.Time) > auth.SessionMaxAge {
 		return false, nil
 	}
+	idle := now.Sub(row.LastSeenAt.Time)
 	if idle >= sessionTouchEvery {
 		err = q.TouchUserSession(c.Request.Context(), sqlc.TouchUserSessionParams{
 			ID: id, Now: pgtype.Timestamptz{Time: now, Valid: true},

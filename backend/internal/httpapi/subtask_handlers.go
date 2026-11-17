@@ -10,8 +10,13 @@ import (
 	"nvm-internal/internal/task"
 )
 
+// PicID 0 berarti sub task belum ditugaskan ke siapa pun (revisi 7). Description dan DeliverableURL
+// boleh kosong (revisi 8 dan 9).
 type subtaskTitleRequest struct {
-	Title string `json:"title"`
+	Title          string `json:"title"`
+	Description    string `json:"description"`
+	DeliverableURL string `json:"deliverable_url"`
+	PicID          int64  `json:"pic_id"`
 }
 
 // subtaskPath membaca :id dan :subtaskId sekaligus; keduanya salah bentuk diperlakukan sebagai tidak ada.
@@ -34,7 +39,7 @@ func (s *Server) writeSubtaskError(c *gin.Context, err error) {
 	case errors.Is(err, task.ErrSubtaskNotFound):
 		writeError(c, http.StatusNotFound, CodeNotFound, "Sub task tidak ditemukan.")
 	case errors.Is(err, task.ErrSubtaskLocked):
-		writeError(c, http.StatusForbidden, CodeForbidden, "Sub task ini dibuat orang lain. Hanya pembuatnya atau Manajer yang bisa mengubahnya.")
+		writeError(c, http.StatusForbidden, CodeForbidden, "Sub task ini urusan orang lain. Yang bisa mengubahnya: pembuatnya, PIC-nya, dan Manajer.")
 	case errors.Is(err, task.ErrForbidden):
 		writeError(c, http.StatusForbidden, CodeForbidden, "Hanya PIC task ini atau Manajer yang bisa menyusun sub task.")
 	default:
@@ -52,7 +57,7 @@ func (s *Server) addSubtask(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, CodeBadRequest, "Isian tidak terbaca.")
 		return
 	}
-	sid, err := s.tasks.AddSubtask(c.Request.Context(), taskActor(c), id, req.Title)
+	sid, err := s.tasks.AddSubtask(c.Request.Context(), taskActor(c), id, req.Title, req.Description, req.DeliverableURL, req.PicID)
 	if err != nil {
 		s.writeSubtaskError(c, err)
 		return
@@ -60,7 +65,7 @@ func (s *Server) addSubtask(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"id": sid})
 }
 
-func (s *Server) renameSubtask(c *gin.Context) {
+func (s *Server) updateSubtask(c *gin.Context) {
 	id, sid, ok := subtaskPath(c)
 	if !ok {
 		return
@@ -70,7 +75,7 @@ func (s *Server) renameSubtask(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, CodeBadRequest, "Isian tidak terbaca.")
 		return
 	}
-	if err := s.tasks.RenameSubtask(c.Request.Context(), taskActor(c), id, sid, req.Title); err != nil {
+	if err := s.tasks.UpdateSubtask(c.Request.Context(), taskActor(c), id, sid, req.Title, req.Description, req.DeliverableURL, req.PicID); err != nil {
 		s.writeSubtaskError(c, err)
 		return
 	}

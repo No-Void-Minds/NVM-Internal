@@ -103,6 +103,13 @@ func (s *Service) Update(ctx context.Context, actor Actor, id string, in UpdateI
 				if err := q.RemoveTaskAssignees(ctx, sqlc.RemoveTaskAssigneesParams{TaskID: id, UserIds: removed}); err != nil {
 					return err
 				}
+				// Sub task yang ditugaskan ke orang yang baru dilepas ikut dilepas, supaya tidak ada
+				// sub task yang menunggu orang yang sudah tidak ada di task ini (revisi 7).
+				if err := q.DropSubtaskAssigneesOfUsers(ctx, sqlc.DropSubtaskAssigneesOfUsersParams{
+					TaskID: id, UserIds: removed,
+				}); err != nil {
+					return err
+				}
 			}
 			if err := addTaskPICs(ctx, q, actor.ID, id, without(picIDs, oldPICs)); err != nil {
 				return err
@@ -116,7 +123,7 @@ func (s *Service) Update(ctx context.Context, actor Actor, id string, in UpdateI
 		subChanged := subtasksChanged(oldSubs, subs)
 		var newSubs []subtaskSnapshot
 		if subChanged {
-			if newSubs, err = syncSubtasks(ctx, q, id, oldSubs, subs); err != nil {
+			if newSubs, err = syncSubtasks(ctx, q, id, actor.ID, oldSubs, subs); err != nil {
 				return err
 			}
 		}

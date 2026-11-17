@@ -12,16 +12,11 @@ import (
 )
 
 const countExpiredSessions = `-- name: CountExpiredSessions :one
-SELECT count(*) FROM user_sessions WHERE last_seen_at < $1 OR created_at < $2
+SELECT count(*) FROM user_sessions WHERE created_at < $1
 `
 
-type CountExpiredSessionsParams struct {
-	IdleBefore pgtype.Timestamptz
-	AgeBefore  pgtype.Timestamptz
-}
-
-func (q *Queries) CountExpiredSessions(ctx context.Context, arg CountExpiredSessionsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countExpiredSessions, arg.IdleBefore, arg.AgeBefore)
+func (q *Queries) CountExpiredSessions(ctx context.Context, ageBefore pgtype.Timestamptz) (int64, error) {
+	row := q.db.QueryRow(ctx, countExpiredSessions, ageBefore)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -44,17 +39,13 @@ func (q *Queries) CountOldAuditLogs(ctx context.Context, arg CountOldAuditLogsPa
 }
 
 const deleteExpiredSessions = `-- name: DeleteExpiredSessions :execrows
-DELETE FROM user_sessions WHERE last_seen_at < $1 OR created_at < $2
+DELETE FROM user_sessions WHERE created_at < $1
 `
 
-type DeleteExpiredSessionsParams struct {
-	IdleBefore pgtype.Timestamptz
-	AgeBefore  pgtype.Timestamptz
-}
-
-// Sesi yang sudah melewati idle atau umur mutlak tidak bisa dipakai lagi (touchSession menolaknya), jadi aman dihapus.
-func (q *Queries) DeleteExpiredSessions(ctx context.Context, arg DeleteExpiredSessionsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteExpiredSessions, arg.IdleBefore, arg.AgeBefore)
+// Sesi yang sudah melewati umur mutlak tidak bisa dipakai lagi (touchSession menolaknya), jadi aman dihapus.
+// Sejak revisi 8 tidak ada lagi batas idle, jadi last_seen_at tidak ikut menentukan.
+func (q *Queries) DeleteExpiredSessions(ctx context.Context, ageBefore pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredSessions, ageBefore)
 	if err != nil {
 		return 0, err
 	}

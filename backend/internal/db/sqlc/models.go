@@ -258,6 +258,7 @@ type TaskAttachment struct {
 	UploadedBy   int64
 	UploadedAt   pgtype.Timestamptz
 	IsDeleted    bool
+	SubtaskID    pgtype.Int8
 }
 
 type TaskLabel struct {
@@ -266,14 +267,17 @@ type TaskLabel struct {
 }
 
 type TaskSubtask struct {
-	ID        int64
-	TaskID    string
-	Title     string
-	Position  int32
-	CreatedAt pgtype.Timestamptz
-	UpdatedAt pgtype.Timestamptz
-	DoneAt    pgtype.Timestamptz
-	DoneBy    pgtype.Int8
+	ID             int64
+	TaskID         string
+	Title          string
+	Position       int32
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
+	DoneAt         pgtype.Timestamptz
+	DoneBy         pgtype.Int8
+	CreatedBy      pgtype.Int8
+	Description    string
+	DeliverableUrl string
 }
 
 type User struct {

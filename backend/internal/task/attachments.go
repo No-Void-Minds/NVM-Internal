@@ -87,7 +87,9 @@ func (a *Attachments) CheckUpload(ctx context.Context, actor Actor, taskID strin
 
 // Upload menyimpan satu berkas: ditulis dulu ke tmp/ sambil dihitung SHA-256-nya, diperiksa tipenya, lalu
 // dipindah ke attachments/ di dalam transaksi yang sama dengan baris database dan audit-nya.
-func (a *Attachments) Upload(ctx context.Context, actor Actor, taskID string, kind AttachmentKind, originalName string, r io.Reader) (SavedAttachment, error) {
+// subtaskID 0 berarti lampiran task induk. Kalau diisi, berkasnya menempel di sub task itu (revisi 8)
+// dan memakai hak yang sama dengan berkas deliverable: PIC task dan Manajer.
+func (a *Attachments) Upload(ctx context.Context, actor Actor, taskID string, kind AttachmentKind, subtaskID int64, originalName string, r io.Reader) (SavedAttachment, error) {
 	if err := a.CheckUpload(ctx, actor, taskID, kind); err != nil {
 		return SavedAttachment{}, err
 	}
@@ -137,8 +139,17 @@ func (a *Attachments) Upload(ctx context.Context, actor Actor, taskID string, ki
 		if !ok {
 			return ErrForbidden
 		}
+		if subtaskID != 0 {
+			// Dicek di dalam transaksi: sub task bisa dihapus selama berkasnya diunggah.
+			if _, err := q.GetSubtask(ctx, sqlc.GetSubtaskParams{ID: subtaskID, TaskID: taskID}); errors.Is(err, pgx.ErrNoRows) {
+				return ErrSubtaskNotFound
+			} else if err != nil {
+				return err
+			}
+		}
 		id, err := q.InsertAttachment(ctx, sqlc.InsertAttachmentParams{
 			TaskID:       taskID,
+			SubtaskID:    userRef(subtaskID),
 			Kind:         sqlc.AttachmentKind(kind),
 			OriginalName: name,
 			MimeType:     mime,
@@ -151,7 +162,7 @@ func (a *Attachments) Upload(ctx context.Context, actor Actor, taskID string, ki
 		}
 		saved.ID = id
 		if err := audit.Change(ctx, q, actor.auditActor(), "attachment_added", "task", taskID, nil, map[string]any{
-			"attachment_id": id, "kind": kind, "name": name, "size_bytes": n,
+			"attachment_id": id, "kind": kind, "name": name, "size_bytes": n, "subtask_id": subtaskID,
 		}); err != nil {
 			return err
 		}
