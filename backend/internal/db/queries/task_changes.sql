@@ -5,21 +5,19 @@ WHERE id = @id AND NOT is_deleted
 FOR UPDATE;
 
 -- name: IsTaskAssignee :one
--- Nama dan parameternya dipertahankan supaya pemanggil tidak berubah: PIC task berarti PIC di salah satu sub task-nya.
-SELECT EXISTS (
-  SELECT 1 FROM task_subtasks st
-  JOIN subtask_assignees sa ON sa.subtask_id = st.id
-  WHERE st.task_id = @task_id AND sa.user_id = @user_id
-);
+SELECT EXISTS (SELECT 1 FROM task_assignees WHERE task_id = @task_id AND user_id = @user_id);
 
 -- name: ListAssigneeIDs :many
--- Satu baris per orang walaupun ia PIC di beberapa sub task. Urutannya sama dengan ListTaskAssignees.
-SELECT sa.user_id
-FROM task_subtasks st
-JOIN subtask_assignees sa ON sa.subtask_id = st.id
-WHERE st.task_id = @task_id
-GROUP BY sa.user_id
-ORDER BY min(st.position), min(sa.assigned_at), sa.user_id;
+-- Urutannya sama dengan ListTaskAssignees, supaya PIC pertama (penentu divisi) di baris pertama.
+SELECT user_id FROM task_assignees WHERE task_id = @task_id ORDER BY assigned_at, user_id;
+
+-- name: AddTaskAssignee :exec
+-- clock_timestamp, bukan now(), supaya urutan PIC dalam satu transaksi tetap terbaca.
+INSERT INTO task_assignees (task_id, user_id, assigned_by, assigned_at)
+VALUES (@task_id, @user_id, @assigned_by, clock_timestamp());
+
+-- name: RemoveTaskAssignees :exec
+DELETE FROM task_assignees WHERE task_id = @task_id AND user_id = ANY(@user_ids::bigint[]);
 
 -- name: ListTaskLabelScopes :many
 SELECT tl.label_id, l.division_id

@@ -53,6 +53,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 11 | Poles UI/UX | Papan dan semua halaman dipoles, konsisten |
 | 11b | Identitas brand NVM | Monokrom NVM dengan aksen krem, mode terang dan gelap, D-DIN, logo resmi |
 | 11c | Satu kerangka tata letak | Top bar dan tepi kiri sama di semua halaman, kepala halaman dan toolbar filter bersama |
+| 11d | PIC task dan sub task mandiri | Manajer memilih PIC di task, PIC menyusun sendiri sub task-nya |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -660,6 +661,30 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 
 ---
 
+## Sprint 11d: PIC task dan sub task mandiri
+
+**Tujuan:** revisi 6 Manajer. Manajer membuat task dan menentukan siapa PIC-nya. PIC lalu menyusun sendiri sub task yang ia kerjakan, dan Manajer boleh ikut menambah sub task. Ini membalik sebagian Sprint 7, yang memindahkan PIC dari task ke sub task.
+
+- [x] S11d-01 Migrasi `000008`: tabel `task_assignees` kembali, diisi dari PIC sub task yang sudah ada supaya task lama tidak kehilangan pemiliknya. `down` membuang tabelnya.
+- [x] S11d-02 Semua pembacaan PIC task (papan, Arsip, "Task saya", filter PIC, pencarian nama, divisi task) membaca `task_assignees`, bukan lagi gabungan PIC sub task.
+- [x] S11d-03 Buat dan Ubah task: Manajer wajib memilih minimal satu PIC task. Pemilih PIC per sub task dihapus dari form.
+- [x] S11d-04 `POST`, `PUT`, dan `DELETE /api/tasks/:id/subtasks` untuk PIC task dan Manajer.
+- [x] S11d-05 Frontend: pemilih PIC pindah ke bagian atas form task; panel detail punya tambah sub task, ubah nama, dan hapus sesuai `can.add_subtask` dan `can_edit` dari server.
+
+**Keputusan:**
+- PIC hanya ada di task induk. Sub task tidak punya pemilih PIC. Baris di `subtask_assignees` sekarang berarti pemilik sub task, yaitu orang yang membuatnya, dan isinya paling banyak satu orang. Tabelnya dipertahankan supaya aturan centang yang lama tidak perlu ditulis ulang.
+- Sub task yang dibuat lewat form Manajer tidak punya pemilik. Sub task seperti itu boleh dicentang PIC task mana pun, kalau tidak, pekerjaan titipan Manajer tidak bisa diselesaikan siapa pun dan task tertahan sebelum Ready.
+- Yang boleh mengubah nama dan menghapus sub task: pembuatnya, dan Manajer. PIC lain di task yang sama tidak bisa menghapus pekerjaan orang.
+- Menambah, mengubah nama, dan menghapus sub task hanya saat task berstatus Requested atau On Progress. Ditutup mulai Ready supaya pekerjaan tidak bertambah saat Manajer mereview, dan supaya syarat "semua sub task tercentang" tidak bisa digoyang setelah task lolos.
+- Ketiga aksi itu menaikkan `version` task. Wajib, karena daftar sub task dari form Manajer menggantikan daftar lama secara utuh: tanpa kenaikan versi, form yang sudah terbuka akan menghapus sub task yang baru ditambahkan PIC.
+- Divisi task mengikuti PIC task pertama, sesuai urutan pemasangan (`clock_timestamp`). Aturan "divisi mengikuti PIC pertama dari sub task pertama" (S7-06) tidak berlaku lagi.
+- Kejadian audit baru `task_pics_changed`. `subtask_assignees_changed` tidak dihasilkan lagi, tetapi teksnya dipertahankan di frontend untuk riwayat lama.
+- Task sekarang selalu punya PIC, jadi catatan Sprint 7 "task tanpa sub task berarti tanpa PIC" tidak berlaku lagi.
+
+**Selesai kalau:** `./scripts/check.sh` lolos dan alurnya terbukti lewat curl: Manajer membuat task dengan PIC Staf tanpa sub task, Staf itu menambah sub task sendiri lalu mencentangnya, Staf lain ditolak, dan sub task buatan Manajer bisa dicentang PIC.
+
+**Hasil:** kode selesai 2026-11-17, `./scripts/check.sh` lolos. Migrasi `000008` belum dijalankan di dev maupun produksi. Uji curl dan uji browser menunggu Rifky.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -819,9 +844,10 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 2 | 2026-11-09 | Area kiri papan diisi kartu profil (foto, nama, jabatan, divisi, bisa diubah); poles UI/UX papan dan semua halaman | Sprint 10 dan 11 |
 | 3 | 2026-11-09 | Sub task bisa dicentang oleh PIC-nya saat On Progress; Ready butuh semua sub task tercentang; task penuh bisa dibuka di tab baru; di form, Deskripsi menggantikan posisi Lampiran brief, dan Lampiran brief masuk ke Detail tambahan | Sprint 8 |
 | 4 | 2026-11-10 | Manajer boleh mencentang dan melepas centang sub task siapa pun, kecuali sub task yang dipegang Manajer lain | Sprint 8 |
+| 6 | 2026-11-17 | PIC kembali dipilih di task induk oleh Manajer. Sub task disusun sendiri oleh PIC yang mengerjakannya; Manajer juga boleh menambah sub task | Sprint 11d |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat kelima revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat keenam revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 
@@ -829,10 +855,9 @@ SRS v1.0 belum memuat kelima revisi (revisi 5 di S14-17). SRS diperbarui sebelum
 - Daftar label awal (nama dan warna) dan daftar pengguna awal (nama, username, peran, divisi).
 - Apakah tim masih memakai berkas .ppt lama. Kalau tidak, hapus dari daftar izin.
 - Konfirmasi kolom Completed di papan hanya 7 hari terakhir (AC-08 menyebut task Completed hilang dari papan aktif).
-- Task tanpa sub task berarti tanpa PIC, hanya Manajer yang memindahkan: setuju?
 - Jabatan diisi sendiri oleh tiap orang atau hanya pengelola.
-- Sub task yang sudah dicentang lalu PIC-nya diganti Manajer saat ini tetap tercentang atas nama orang lama. Dibiarkan, atau centangnya dilepas otomatis saat PIC diganti?
-- Aturan centang: Manajer boleh mencentang sub task siapa pun kecuali yang dipegang Manajer lain. Bagaimana dengan sub task tanpa PIC (sekarang boleh) dan sub task dengan PIC campuran Staf dan Manajer lain (sekarang ditolak)?
+- Aturan centang: Manajer boleh mencentang sub task siapa pun kecuali yang dipegang Manajer lain. Sejak revisi 6 sub task tanpa pemilik (buatan Manajer) juga boleh dicentang PIC task mana pun. Setuju?
+- Revisi 6: apakah PIC boleh menandai task Ready tanpa membuat sub task sama sekali? Sekarang boleh, karena syarat Ready hanya "tidak ada sub task yang belum tercentang".
 
 ## Setelah go-live (belum dijadwalkan)
 

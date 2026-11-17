@@ -34,9 +34,8 @@ type taskLabel struct {
 }
 
 type subtaskRequest struct {
-	ID     int64   `json:"id"`
-	Title  string  `json:"title"`
-	PICIDs []int64 `json:"pic_ids"`
+	ID    int64  `json:"id"`
+	Title string `json:"title"`
 }
 
 type taskSummary struct {
@@ -62,6 +61,7 @@ type subtaskItem struct {
 	DoneAt    *time.Time   `json:"done_at"`
 	DoneBy    string       `json:"done_by"`
 	CanCheck  bool         `json:"can_check"`
+	CanEdit   bool         `json:"can_edit"`
 	Assignees []taskPerson `json:"assignees"`
 }
 
@@ -91,6 +91,7 @@ type createTaskRequest struct {
 	Title          string           `json:"title"`
 	Description    string           `json:"description"`
 	Urgency        string           `json:"urgency"`
+	PICIDs         []int64          `json:"pic_ids"`
 	Subtasks       []subtaskRequest `json:"subtasks"`
 	LabelIDs       []int64          `json:"label_ids"`
 	StartDate      string           `json:"start_date"`
@@ -108,6 +109,7 @@ func (s *Server) createTask(c *gin.Context) {
 		Title:          req.Title,
 		Description:    req.Description,
 		Urgency:        req.Urgency,
+		PICIDs:         req.PICIDs,
 		Subtasks:       subtaskInputs(req.Subtasks),
 		LabelIDs:       req.LabelIDs,
 		StartDate:      req.StartDate,
@@ -180,7 +182,8 @@ func (s *Server) getTask(c *gin.Context) {
 	}
 	out.Subtasks = make([]subtaskItem, 0, len(d.Subtasks))
 	doneCount := 0
-	checkable, err := s.tasks.CheckableSubtasks(c.Request.Context(), actor, task.Status(t.Status), d.Subtasks)
+	isPIC := d.IsPIC(actor.ID)
+	checkable, err := s.tasks.CheckableSubtasks(c.Request.Context(), actor, task.Status(t.Status), isPIC, d.Subtasks)
 	if err != nil {
 		s.writeTaskError(c, err)
 		return
@@ -192,6 +195,7 @@ func (s *Server) getTask(c *gin.Context) {
 		}
 		// can_check berasal dari aturan yang sama dengan SetSubtaskDone, supaya UI tidak menebak.
 		item.CanCheck = checkable[st.ID]
+		item.CanEdit = out.Can.AddSubtask && (actor.Role == task.RoleManager || ownsSubtask(actor.ID, st))
 		for _, a := range st.Assignees {
 			item.Assignees = append(item.Assignees, taskPerson{ID: a.ID, Name: a.Name, Username: a.Username, AvatarID: avatarID(a.AvatarID)})
 		}
@@ -270,10 +274,20 @@ func labelsOf(rows []sqlc.ListTaskLabelsRow) []taskLabel {
 	return out
 }
 
+// ownsSubtask: pemilik sub task adalah satu-satunya PIC yang terpasang padanya, yaitu yang membuatnya.
+func ownsSubtask(userID int64, st task.SubtaskView) bool {
+	for _, a := range st.Assignees {
+		if a.ID == userID {
+			return true
+		}
+	}
+	return false
+}
+
 func subtaskInputs(reqs []subtaskRequest) []task.SubtaskInput {
 	out := make([]task.SubtaskInput, 0, len(reqs))
 	for _, r := range reqs {
-		out = append(out, task.SubtaskInput{ID: r.ID, Title: r.Title, PICIDs: r.PICIDs})
+		out = append(out, task.SubtaskInput{ID: r.ID, Title: r.Title})
 	}
 	return out
 }

@@ -1,10 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref } from 'vue'
-import PicPicker from './PicPicker.vue'
-import type { UserItem } from '../api/users'
 import { emptyDraft, maxSubtasks, type SubtaskDraft } from '../utils/subtask'
 
-defineProps<{ candidates: UserItem[]; names: Map<number, string> }>()
 const rows = defineModel<SubtaskDraft[]>({ required: true })
 // Pembaca layar tidak melihat baris berpindah tempat, jadi setiap perubahan urutan atau hapus diumumkan.
 const announce = ref('')
@@ -24,10 +21,6 @@ function addAfter(index: number) {
 
 function setTitle(i: number, title: string) {
   rows.value = rows.value.map((r, k) => (k === i ? { ...r, title } : r))
-}
-
-function setPics(i: number, picIds: number[]) {
-  rows.value = rows.value.map((r, k) => (k === i ? { ...r, picIds } : r))
 }
 
 // Enter di nama sub task membuat baris berikutnya, bukan menyimpan form. Baris kosong diabaikan.
@@ -96,16 +89,6 @@ const iconButton =
               @keydown.enter.prevent="onEnter(i)"
             />
           </div>
-        </div>
-
-        <div class="mt-2 pl-8">
-          <PicPicker
-            :model-value="r.picIds"
-            :candidates="candidates"
-            :names="names"
-            :subject="`sub task ${i + 1}`"
-            @update:model-value="setPics(i, $event)"
-          />
         </div>
 
         <div class="mt-2 flex justify-end gap-1 border-t border-line pt-2">

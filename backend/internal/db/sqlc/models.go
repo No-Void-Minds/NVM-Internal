@@ -240,6 +240,13 @@ type Task struct {
 	UpdatedAt      pgtype.Timestamptz
 }
 
+type TaskAssignee struct {
+	TaskID     string
+	UserID     int64
+	AssignedBy int64
+	AssignedAt pgtype.Timestamptz
+}
+
 type TaskAttachment struct {
 	ID           pgtype.UUID
 	TaskID       string

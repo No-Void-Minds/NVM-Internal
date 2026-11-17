@@ -40,6 +40,7 @@ type CreateInput struct {
 	Title          string
 	Description    string
 	Urgency        string
+	PICIDs         []int64
 	Subtasks       []SubtaskInput
 	LabelIDs       []int64
 	StartDate      string
@@ -55,8 +56,8 @@ func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool}
 }
 
-// Create membuat task baru berstatus Requested. Hanya Manajer (BR-01). Sub task opsional. Divisi task mengikuti
-// PIC pertama, atau divisi pembuat kalau belum ada PIC, karena division_id wajib terisi.
+// Create membuat task baru berstatus Requested. Hanya Manajer (BR-01). Sejak revisi 6 Manajer wajib memilih
+// PIC task, dan sub task boleh dikosongkan karena PIC yang akan mengisinya sendiri. Divisi task mengikuti PIC pertama.
 func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (string, error) {
 	if actor.Role != RoleManager {
 		return "", ErrForbidden
@@ -65,7 +66,11 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (stri
 	if err != nil {
 		return "", err
 	}
-	subs, picIDs, err := cleanSubtasks(in.Subtasks)
+	picIDs := uniqueIDs(in.PICIDs)
+	if len(picIDs) == 0 {
+		return "", apperr.Invalid("Pilih minimal satu PIC task.")
+	}
+	subs, err := cleanSubtasks(in.Subtasks)
 	if err != nil {
 		return "", err
 	}
@@ -83,10 +88,7 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (stri
 			return err
 		}
 
-		division := actor.DivisionID
-		if first, ok := firstPIC(subs); ok {
-			division = divisionOf[first]
-		}
+		division := divisionOf[picIDs[0]]
 
 		id, err = q.CreateTask(ctx, sqlc.CreateTaskParams{
 			Title:          f.title,
@@ -101,7 +103,10 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (stri
 		if err != nil {
 			return err
 		}
-		snaps, err := insertSubtasks(ctx, q, actor.ID, id, subs)
+		if err := addTaskPICs(ctx, q, actor.ID, id, picIDs); err != nil {
+			return err
+		}
+		snaps, err := insertSubtasks(ctx, q, id, subs)
 		if err != nil {
 			return err
 		}
@@ -111,7 +116,7 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (stri
 			}
 		}
 		return audit.Change(ctx, q, actor.auditActor(), "task_created", "task", id, nil, map[string]any{
-			"title": f.title, "urgency": f.urgency, "subtasks": snaps, "label_ids": labels,
+			"title": f.title, "urgency": f.urgency, "pic_ids": picIDs, "subtasks": snaps, "label_ids": labels,
 		})
 	})
 	return id, err
@@ -220,6 +225,17 @@ func attachPeopleAndLabels(ctx context.Context, q *sqlc.Queries, rows []sqlc.Lis
 		byTask[c.TaskID].SubtaskDone = int(c.Done)
 	}
 	return out, nil
+}
+
+// addTaskPICs memasang PIC satu per satu supaya urutan pemasangan (clock_timestamp) mengikuti urutan pilihan
+// Manajer: PIC pertama menentukan divisi task.
+func addTaskPICs(ctx context.Context, q *sqlc.Queries, actorID int64, taskID string, ids []int64) error {
+	for _, uid := range ids {
+		if err := q.AddTaskAssignee(ctx, sqlc.AddTaskAssigneeParams{TaskID: taskID, UserID: uid, AssignedBy: actorID}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // eligiblePICs memastikan semua PIC adalah Staf atau Manajer aktif, lalu mengembalikan divisi masing-masing.

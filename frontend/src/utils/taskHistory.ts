@@ -46,6 +46,9 @@ export function describeTaskHistory(h: TaskHistoryItem): string {
       return `menghapus sub task "${String((h.old_value ?? {}).title ?? '')}"`
     case 'subtask_renamed':
       return `mengganti nama sub task "${String((h.old_value ?? {}).title ?? '')}" menjadi "${String(after.title ?? '')}"`
+    case 'task_pics_changed':
+      return 'mengubah PIC task'
+    // Sampai revisi 6 PIC menempel di sub task. Teksnya dipertahankan untuk riwayat lama.
     case 'subtask_assignees_changed':
       return `mengubah PIC sub task "${String(after.title ?? '')}"`
     case 'subtask_checked':

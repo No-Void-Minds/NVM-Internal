@@ -12,10 +12,12 @@ export type TaskSubtask = {
   done_by: string
   // Dihitung backend dengan aturan yang sama dengan penolakan 403, jadi UI tidak menebak siapa yang boleh.
   can_check: boolean
+  // Boleh diubah nama atau dihapus: pembuatnya, atau Manajer, selama task masih Requested atau On Progress.
+  can_edit: boolean
   assignees: TaskPerson[]
 }
 // id kosong berarti sub task baru; backend memakainya untuk membedakan sub task lama yang hanya diubah.
-export type SubtaskInput = { id?: number; title: string; pic_ids: number[] }
+export type SubtaskInput = { id?: number; title: string }
 
 export type TaskSummary = {
   id: string
@@ -38,6 +40,7 @@ export type TaskCan = {
   delete: boolean
   edit_labels: boolean
   edit_deliverable: boolean
+  add_subtask: boolean
   move_to: TaskStatus[]
 }
 
@@ -66,6 +69,7 @@ export type TaskFields = {
   title: string
   description: string
   urgency: Urgency
+  pic_ids: number[]
   subtasks: SubtaskInput[]
   start_date: string
   due_date: string
@@ -112,4 +116,17 @@ export function deleteTask(id: string, version: number) {
 
 export function setSubtaskDone(taskId: string, subtaskId: number, done: boolean) {
   return apiPut<void>(`/tasks/${taskId}/subtasks/${subtaskId}/done`, { done })
+}
+
+// Sub task di luar form Manajer: PIC task menyusun sendiri pekerjaannya (revisi 6).
+export function addSubtask(taskId: string, title: string) {
+  return apiPost<{ id: number }>(`/tasks/${taskId}/subtasks`, { title })
+}
+
+export function renameSubtask(taskId: string, subtaskId: number, title: string) {
+  return apiPut<void>(`/tasks/${taskId}/subtasks/${subtaskId}`, { title })
+}
+
+export function deleteSubtask(taskId: string, subtaskId: number) {
+  return request<void>('DELETE', `/tasks/${taskId}/subtasks/${subtaskId}`)
 }

@@ -132,6 +132,10 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	app.GET("/tasks/:id/attachments/:attachmentId", s.downloadAttachment)
 	app.DELETE("/tasks/:id/attachments/:attachmentId", s.deleteAttachment)
 	app.PUT("/tasks/:id/subtasks/:subtaskId/done", s.setSubtaskDone)
+	// Tanpa managerOnly: PIC task menyusun sendiri sub task-nya (revisi 6). Haknya dicek di service.
+	app.POST("/tasks/:id/subtasks", s.addSubtask)
+	app.PUT("/tasks/:id/subtasks/:subtaskId", s.renameSubtask)
+	app.DELETE("/tasks/:id/subtasks/:subtaskId", s.deleteSubtask)
 
 	return r, nil
 }

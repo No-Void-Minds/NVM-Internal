@@ -11,6 +11,23 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addTaskAssignee = `-- name: AddTaskAssignee :exec
+INSERT INTO task_assignees (task_id, user_id, assigned_by, assigned_at)
+VALUES ($1, $2, $3, clock_timestamp())
+`
+
+type AddTaskAssigneeParams struct {
+	TaskID     string
+	UserID     int64
+	AssignedBy int64
+}
+
+// clock_timestamp, bukan now(), supaya urutan PIC dalam satu transaksi tetap terbaca.
+func (q *Queries) AddTaskAssignee(ctx context.Context, arg AddTaskAssigneeParams) error {
+	_, err := q.db.Exec(ctx, addTaskAssignee, arg.TaskID, arg.UserID, arg.AssignedBy)
+	return err
+}
+
 const bumpTaskVersion = `-- name: BumpTaskVersion :one
 UPDATE tasks SET version = version + 1 WHERE id = $1 RETURNING version
 `
@@ -70,11 +87,7 @@ func (q *Queries) GetTaskForUpdate(ctx context.Context, id string) (GetTaskForUp
 }
 
 const isTaskAssignee = `-- name: IsTaskAssignee :one
-SELECT EXISTS (
-  SELECT 1 FROM task_subtasks st
-  JOIN subtask_assignees sa ON sa.subtask_id = st.id
-  WHERE st.task_id = $1 AND sa.user_id = $2
-)
+SELECT EXISTS (SELECT 1 FROM task_assignees WHERE task_id = $1 AND user_id = $2)
 `
 
 type IsTaskAssigneeParams struct {
@@ -82,7 +95,6 @@ type IsTaskAssigneeParams struct {
 	UserID int64
 }
 
-// Nama dan parameternya dipertahankan supaya pemanggil tidak berubah: PIC task berarti PIC di salah satu sub task-nya.
 func (q *Queries) IsTaskAssignee(ctx context.Context, arg IsTaskAssigneeParams) (bool, error) {
 	row := q.db.QueryRow(ctx, isTaskAssignee, arg.TaskID, arg.UserID)
 	var exists bool
@@ -91,15 +103,10 @@ func (q *Queries) IsTaskAssignee(ctx context.Context, arg IsTaskAssigneeParams) 
 }
 
 const listAssigneeIDs = `-- name: ListAssigneeIDs :many
-SELECT sa.user_id
-FROM task_subtasks st
-JOIN subtask_assignees sa ON sa.subtask_id = st.id
-WHERE st.task_id = $1
-GROUP BY sa.user_id
-ORDER BY min(st.position), min(sa.assigned_at), sa.user_id
+SELECT user_id FROM task_assignees WHERE task_id = $1 ORDER BY assigned_at, user_id
 `
 
-// Satu baris per orang walaupun ia PIC di beberapa sub task. Urutannya sama dengan ListTaskAssignees.
+// Urutannya sama dengan ListTaskAssignees, supaya PIC pertama (penentu divisi) di baris pertama.
 func (q *Queries) ListAssigneeIDs(ctx context.Context, taskID string) ([]int64, error) {
 	rows, err := q.db.Query(ctx, listAssigneeIDs, taskID)
 	if err != nil {
@@ -150,6 +157,20 @@ func (q *Queries) ListTaskLabelScopes(ctx context.Context, taskID string) ([]Lis
 		return nil, err
 	}
 	return items, nil
+}
+
+const removeTaskAssignees = `-- name: RemoveTaskAssignees :exec
+DELETE FROM task_assignees WHERE task_id = $1 AND user_id = ANY($2::bigint[])
+`
+
+type RemoveTaskAssigneesParams struct {
+	TaskID  string
+	UserIds []int64
+}
+
+func (q *Queries) RemoveTaskAssignees(ctx context.Context, arg RemoveTaskAssigneesParams) error {
+	_, err := q.db.Exec(ctx, removeTaskAssignees, arg.TaskID, arg.UserIds)
+	return err
 }
 
 const setTaskDeliverable = `-- name: SetTaskDeliverable :one

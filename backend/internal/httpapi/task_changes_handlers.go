@@ -15,6 +15,7 @@ type updateTaskRequest struct {
 	Title          string           `json:"title"`
 	Description    string           `json:"description"`
 	Urgency        string           `json:"urgency"`
+	PICIDs         []int64          `json:"pic_ids"`
 	Subtasks       []subtaskRequest `json:"subtasks"`
 	StartDate      string           `json:"start_date"`
 	DueDate        string           `json:"due_date"`
@@ -36,6 +37,7 @@ func (s *Server) updateTask(c *gin.Context) {
 		Title:          req.Title,
 		Description:    req.Description,
 		Urgency:        req.Urgency,
+		PICIDs:         req.PICIDs,
 		Subtasks:       subtaskInputs(req.Subtasks),
 		StartDate:      req.StartDate,
 		DueDate:        req.DueDate,

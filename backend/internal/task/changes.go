@@ -21,6 +21,7 @@ type UpdateInput struct {
 	Title          string
 	Description    string
 	Urgency        string
+	PICIDs         []int64
 	Subtasks       []SubtaskInput
 	StartDate      string
 	DueDate        string
@@ -55,9 +56,8 @@ func canContribute(ctx context.Context, q *sqlc.Queries, actor Actor, id string)
 	}
 }
 
-// Update mengubah atribut task dan daftar sub task (beserta PIC-nya) sekaligus. Hanya Manajer.
-// Daftar sub task yang dikirim menggantikan daftar lama secara utuh. Divisi ikut PIC pertama
-// sesudah perubahan; tanpa PIC sama sekali, divisi dibiarkan seperti sebelumnya.
+// Update mengubah atribut task, daftar PIC, dan daftar sub task sekaligus. Hanya Manajer. Kedua daftar
+// yang dikirim menggantikan daftar lama secara utuh. Divisi ikut PIC pertama sesudah perubahan.
 func (s *Service) Update(ctx context.Context, actor Actor, id string, in UpdateInput) (int32, error) {
 	if actor.Role != RoleManager {
 		return 0, ErrForbidden
@@ -66,7 +66,11 @@ func (s *Service) Update(ctx context.Context, actor Actor, id string, in UpdateI
 	if err != nil {
 		return 0, err
 	}
-	subs, picIDs, err := cleanSubtasks(in.Subtasks)
+	picIDs := uniqueIDs(in.PICIDs)
+	if len(picIDs) == 0 {
+		return 0, apperr.Invalid("Pilih minimal satu PIC task.")
+	}
+	subs, err := cleanSubtasks(in.Subtasks)
 	if err != nil {
 		return 0, err
 	}
@@ -81,23 +85,38 @@ func (s *Service) Update(ctx context.Context, actor Actor, id string, in UpdateI
 		if _, err := eligiblePICs(ctx, q, picIDs); err != nil {
 			return err
 		}
+		oldPICs, err := q.ListAssigneeIDs(ctx, id)
+		if err != nil {
+			return err
+		}
 		oldSubs, err := loadSubtasks(ctx, q, id)
 		if err != nil {
 			return err
 		}
 
-		// Divisi dibaca dari database setelah sub task ditulis, bukan dari urutan form, supaya
+		// Divisi dibaca dari database setelah PIC ditulis, bukan dari urutan form, supaya
 		// "PIC pertama" selalu sama dengan urutan pemasangan yang tersimpan.
 		division := cur.DivisionID
-		subChanged := subtasksChanged(oldSubs, subs)
-		var newSubs []subtaskSnapshot
-		if subChanged {
-			if newSubs, err = syncSubtasks(ctx, q, actor.ID, id, oldSubs, subs); err != nil {
+		picChanged := len(without(picIDs, oldPICs)) > 0 || len(without(oldPICs, picIDs)) > 0
+		if picChanged {
+			if removed := without(oldPICs, picIDs); len(removed) > 0 {
+				if err := q.RemoveTaskAssignees(ctx, sqlc.RemoveTaskAssigneesParams{TaskID: id, UserIds: removed}); err != nil {
+					return err
+				}
+			}
+			if err := addTaskPICs(ctx, q, actor.ID, id, without(picIDs, oldPICs)); err != nil {
 				return err
 			}
 			if d, err := q.FirstPICDivision(ctx, id); err == nil {
 				division = d
 			} else if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
+		subChanged := subtasksChanged(oldSubs, subs)
+		var newSubs []subtaskSnapshot
+		if subChanged {
+			if newSubs, err = syncSubtasks(ctx, q, id, oldSubs, subs); err != nil {
 				return err
 			}
 		}
@@ -116,7 +135,7 @@ func (s *Service) Update(ctx context.Context, actor Actor, id string, in UpdateI
 		diff("deliverable_url", cur.DeliverableUrl.String, f.deliverableURL.String)
 		diff("division_id", cur.DivisionID, division)
 
-		if len(after) == 0 && !subChanged {
+		if len(after) == 0 && !subChanged && !picChanged {
 			return nil
 		}
 
@@ -135,6 +154,12 @@ func (s *Service) Update(ctx context.Context, actor Actor, id string, in UpdateI
 		}
 		if len(after) > 0 {
 			if err := audit.Change(ctx, q, actor.auditActor(), "task_updated", "task", id, before, after); err != nil {
+				return err
+			}
+		}
+		if picChanged {
+			if err := audit.Change(ctx, q, actor.auditActor(), "task_pics_changed", "task", id,
+				map[string]any{"pic_ids": oldPICs}, map[string]any{"pic_ids": picIDs}); err != nil {
 				return err
 			}
 		}

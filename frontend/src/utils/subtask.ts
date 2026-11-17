@@ -1,6 +1,7 @@
 import type { SubtaskInput, TaskDetail } from '../api/tasks'
 
-export type SubtaskDraft = { key: string; id: number; title: string; picIds: number[] }
+// PIC tidak lagi dipilih per sub task (revisi 6): Manajer memilih PIC di task induk.
+export type SubtaskDraft = { key: string; id: number; title: string }
 
 // Sama dengan batas di backend (task/subtasks.go).
 export const maxSubtasks = 50
@@ -13,22 +14,13 @@ export function newKey(): string {
 }
 
 export function emptyDraft(): SubtaskDraft {
-  return { key: newKey(), id: 0, title: '', picIds: [] }
+  return { key: newKey(), id: 0, title: '' }
 }
 
 export function draftsFromTask(t: TaskDetail | null): SubtaskDraft[] {
-  return (t?.subtasks ?? []).map((s) => ({
-    key: newKey(),
-    id: s.id,
-    title: s.title,
-    picIds: s.assignees.map((a) => a.id),
-  }))
+  return (t?.subtasks ?? []).map((s) => ({ key: newKey(), id: s.id, title: s.title }))
 }
 
 export function toPayload(drafts: SubtaskDraft[]): SubtaskInput[] {
-  return drafts.map((d) =>
-    d.id
-      ? { id: d.id, title: d.title.trim(), pic_ids: d.picIds }
-      : { title: d.title.trim(), pic_ids: d.picIds },
-  )
+  return drafts.map((d) => (d.id ? { id: d.id, title: d.title.trim() } : { title: d.title.trim() }))
 }

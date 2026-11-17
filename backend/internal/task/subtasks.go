@@ -17,64 +17,51 @@ const (
 	maxSubtaskTitle = 200
 )
 
-// SubtaskInput adalah satu baris sub task dari form. ID 0 berarti sub task baru.
+// SubtaskInput adalah satu baris sub task dari form Manajer. ID 0 berarti sub task baru.
+// Sejak revisi 6 form tidak memilih PIC per sub task: PIC dipilih di task induk.
 type SubtaskInput struct {
-	ID     int64
-	Title  string
-	PICIDs []int64
+	ID    int64
+	Title string
 }
 
 // subtaskSnapshot dipakai untuk audit: keadaan sub task sebelum dan sesudah perubahan.
 type subtaskSnapshot struct {
-	ID     int64   `json:"id"`
-	Title  string  `json:"title"`
-	PICIDs []int64 `json:"pic_ids"`
+	ID    int64  `json:"id"`
+	Title string `json:"title"`
 }
 
-// cleanSubtasks merapikan nama, membuang PIC ganda per sub task, dan mengembalikan gabungan PIC unik
-// untuk divalidasi sekali saja ke database.
-func cleanSubtasks(in []SubtaskInput) ([]SubtaskInput, []int64, error) {
+// cleanSubtaskTitle dipakai form Manajer dan penambahan sub task oleh PIC, supaya aturan namanya satu.
+func cleanSubtaskTitle(title, label string) (string, error) {
+	t := strings.TrimSpace(title)
+	if t == "" {
+		return "", apperr.Invalid(fmt.Sprintf("Nama sub task %s wajib diisi.", label))
+	}
+	if utf8.RuneCountInString(t) > maxSubtaskTitle {
+		return "", apperr.Invalid(fmt.Sprintf("Nama sub task %s maksimal %d karakter.", label, maxSubtaskTitle))
+	}
+	return t, nil
+}
+
+func cleanSubtasks(in []SubtaskInput) ([]SubtaskInput, error) {
 	if len(in) > maxSubtasks {
-		return nil, nil, apperr.Invalid(fmt.Sprintf("Satu task paling banyak punya %d sub task.", maxSubtasks))
+		return nil, apperr.Invalid(fmt.Sprintf("Satu task paling banyak punya %d sub task.", maxSubtasks))
 	}
 	out := make([]SubtaskInput, 0, len(in))
 	seenID := make(map[int64]bool, len(in))
-	seenPIC := map[int64]bool{}
-	var all []int64
 	for i, s := range in {
-		title := strings.TrimSpace(s.Title)
-		if title == "" {
-			return nil, nil, apperr.Invalid(fmt.Sprintf("Nama sub task nomor %d wajib diisi.", i+1))
-		}
-		if utf8.RuneCountInString(title) > maxSubtaskTitle {
-			return nil, nil, apperr.Invalid(fmt.Sprintf("Nama sub task nomor %d maksimal %d karakter.", i+1, maxSubtaskTitle))
+		title, err := cleanSubtaskTitle(s.Title, fmt.Sprintf("nomor %d", i+1))
+		if err != nil {
+			return nil, err
 		}
 		if s.ID != 0 {
 			if seenID[s.ID] {
-				return nil, nil, apperr.Invalid("Ada sub task yang terkirim dua kali.")
+				return nil, apperr.Invalid("Ada sub task yang terkirim dua kali.")
 			}
 			seenID[s.ID] = true
 		}
-		pics := uniqueIDs(s.PICIDs)
-		for _, p := range pics {
-			if !seenPIC[p] {
-				seenPIC[p] = true
-				all = append(all, p)
-			}
-		}
-		out = append(out, SubtaskInput{ID: s.ID, Title: title, PICIDs: pics})
+		out = append(out, SubtaskInput{ID: s.ID, Title: title})
 	}
-	return out, all, nil
-}
-
-// firstPIC mengikuti urutan form: sub task paling awal yang punya PIC, lalu PIC pertama di dalamnya.
-func firstPIC(subs []SubtaskInput) (int64, bool) {
-	for _, s := range subs {
-		if len(s.PICIDs) > 0 {
-			return s.PICIDs[0], true
-		}
-	}
-	return 0, false
+	return out, nil
 }
 
 // without mengembalikan isi a yang tidak ada di b.
@@ -88,26 +75,14 @@ func without(a, b []int64) []int64 {
 	return out
 }
 
-func addAssignees(ctx context.Context, q *sqlc.Queries, actorID, subtaskID int64, ids []int64) error {
-	for _, uid := range ids {
-		if err := q.AddSubtaskAssignee(ctx, sqlc.AddSubtaskAssigneeParams{SubtaskID: subtaskID, UserID: uid, AssignedBy: actorID}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func insertSubtasks(ctx context.Context, q *sqlc.Queries, actorID int64, taskID string, subs []SubtaskInput) ([]subtaskSnapshot, error) {
+func insertSubtasks(ctx context.Context, q *sqlc.Queries, taskID string, subs []SubtaskInput) ([]subtaskSnapshot, error) {
 	snaps := make([]subtaskSnapshot, 0, len(subs))
 	for i, s := range subs {
 		id, err := q.CreateSubtask(ctx, sqlc.CreateSubtaskParams{TaskID: taskID, Title: s.Title, Position: int32(i)})
 		if err != nil {
 			return nil, err
 		}
-		if err := addAssignees(ctx, q, actorID, id, s.PICIDs); err != nil {
-			return nil, err
-		}
-		snaps = append(snaps, subtaskSnapshot{ID: id, Title: s.Title, PICIDs: append([]int64{}, s.PICIDs...)})
+		snaps = append(snaps, subtaskSnapshot{ID: id, Title: s.Title})
 	}
 	return snaps, nil
 }
@@ -118,24 +93,9 @@ func loadSubtasks(ctx context.Context, q *sqlc.Queries, taskID string) ([]subtas
 	if err != nil {
 		return nil, err
 	}
-	if len(rows) == 0 {
-		return []subtaskSnapshot{}, nil
-	}
-	ids := make([]int64, len(rows))
-	for i, r := range rows {
-		ids[i] = r.ID
-	}
-	pics, err := q.ListSubtaskAssignees(ctx, ids)
-	if err != nil {
-		return nil, err
-	}
-	byID := make(map[int64][]int64, len(rows))
-	for _, p := range pics {
-		byID[p.SubtaskID] = append(byID[p.SubtaskID], p.ID)
-	}
 	out := make([]subtaskSnapshot, len(rows))
 	for i, r := range rows {
-		out[i] = subtaskSnapshot{ID: r.ID, Title: r.Title, PICIDs: append([]int64{}, byID[r.ID]...)}
+		out[i] = subtaskSnapshot{ID: r.ID, Title: r.Title}
 	}
 	return out, nil
 }
@@ -189,17 +149,14 @@ func subtasksChanged(cur []subtaskSnapshot, in []SubtaskInput) bool {
 		if in[i].ID != cur[i].ID || in[i].Title != cur[i].Title {
 			return true
 		}
-		if len(without(in[i].PICIDs, cur[i].PICIDs)) > 0 || len(without(cur[i].PICIDs, in[i].PICIDs)) > 0 {
-			return true
-		}
 	}
 	return false
 }
 
-// syncSubtasks menyamakan database dengan daftar dari form. Sub task yang ID-nya tidak ikut terkirim dihapus,
-// ID 0 dibuat baru, sisanya diperbarui. Keunikan posisi baru dicek saat commit (constraint DEFERRABLE),
+// syncSubtasks menyamakan database dengan daftar dari form Manajer. Sub task yang ID-nya tidak ikut
+// terkirim dihapus, ID 0 dibuat baru, sisanya diperbarui. Pemilik sub task tidak disentuh di sini. Keunikan posisi baru dicek saat commit (constraint DEFERRABLE),
 // jadi urutan penulisan di sini tidak bisa bentrok.
-func syncSubtasks(ctx context.Context, q *sqlc.Queries, actorID int64, taskID string, cur []subtaskSnapshot, in []SubtaskInput) ([]subtaskSnapshot, error) {
+func syncSubtasks(ctx context.Context, q *sqlc.Queries, taskID string, cur []subtaskSnapshot, in []SubtaskInput) ([]subtaskSnapshot, error) {
 	existing := make(map[int64]subtaskSnapshot, len(cur))
 	for _, c := range cur {
 		existing[c.ID] = c
@@ -235,25 +192,13 @@ func syncSubtasks(ctx context.Context, q *sqlc.Queries, actorID int64, taskID st
 			if err != nil {
 				return nil, err
 			}
-			if err := addAssignees(ctx, q, actorID, id, s.PICIDs); err != nil {
-				return nil, err
-			}
 		} else {
 			err := q.UpdateSubtask(ctx, sqlc.UpdateSubtaskParams{ID: id, TaskID: taskID, Title: s.Title, Position: int32(i)})
 			if err != nil {
 				return nil, err
 			}
-			old := existing[id].PICIDs
-			if removed := without(old, s.PICIDs); len(removed) > 0 {
-				if err := q.RemoveSubtaskAssignees(ctx, sqlc.RemoveSubtaskAssigneesParams{SubtaskID: id, UserIds: removed}); err != nil {
-					return nil, err
-				}
-			}
-			if err := addAssignees(ctx, q, actorID, id, without(s.PICIDs, old)); err != nil {
-				return nil, err
-			}
 		}
-		after = append(after, subtaskSnapshot{ID: id, Title: s.Title, PICIDs: append([]int64{}, s.PICIDs...)})
+		after = append(after, subtaskSnapshot{ID: id, Title: s.Title})
 	}
 	return after, nil
 }
@@ -266,7 +211,7 @@ type subtaskEvent struct {
 }
 
 func snapMap(s subtaskSnapshot) map[string]any {
-	return map[string]any{"id": s.ID, "title": s.Title, "pic_ids": s.PICIDs}
+	return map[string]any{"id": s.ID, "title": s.Title}
 }
 
 // subtaskEvents menurunkan kejadian audit dengan membandingkan keadaan sebelum dan sesudah.
@@ -301,9 +246,6 @@ func subtaskEvents(before, after []subtaskSnapshot) []subtaskEvent {
 		if b.Title != a.Title {
 			ev = append(ev, subtaskEvent{"subtask_renamed",
 				map[string]any{"id": b.ID, "title": b.Title}, map[string]any{"id": a.ID, "title": a.Title}})
-		}
-		if len(without(a.PICIDs, b.PICIDs)) > 0 || len(without(b.PICIDs, a.PICIDs)) > 0 {
-			ev = append(ev, subtaskEvent{"subtask_assignees_changed", snapMap(b), snapMap(a)})
 		}
 	}
 	if !slices.Equal(orderBefore, orderAfter) {

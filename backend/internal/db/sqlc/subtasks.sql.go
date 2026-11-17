@@ -22,7 +22,7 @@ type AddSubtaskAssigneeParams struct {
 	AssignedBy int64
 }
 
-// clock_timestamp, bukan now(), supaya urutan PIC dalam satu transaksi tetap terbaca: PIC pertama menentukan divisi task.
+// Sejak revisi 6 isinya satu orang: pemilik sub task, yaitu PIC yang membuatnya. Sub task buatan Manajer tidak punya baris di sini.
 func (q *Queries) AddSubtaskAssignee(ctx context.Context, arg AddSubtaskAssigneeParams) error {
 	_, err := q.db.Exec(ctx, addSubtaskAssignee, arg.SubtaskID, arg.UserID, arg.AssignedBy)
 	return err
@@ -53,6 +53,17 @@ func (q *Queries) CountOpenSubtasks(ctx context.Context, taskID string) (int64, 
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const countSubtaskAssignees = `-- name: CountSubtaskAssignees :one
+SELECT count(*)::int FROM subtask_assignees WHERE subtask_id = $1
+`
+
+func (q *Queries) CountSubtaskAssignees(ctx context.Context, subtaskID int64) (int32, error) {
+	row := q.db.QueryRow(ctx, countSubtaskAssignees, subtaskID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const countSubtasksByTask = `-- name: CountSubtasksByTask :many
@@ -125,16 +136,14 @@ func (q *Queries) DeleteSubtasks(ctx context.Context, arg DeleteSubtasksParams) 
 
 const firstPICDivision = `-- name: FirstPICDivision :one
 SELECT u.division_id
-FROM task_subtasks st
-JOIN subtask_assignees sa ON sa.subtask_id = st.id
-JOIN users u ON u.id = sa.user_id
-WHERE st.task_id = $1
-ORDER BY st.position, sa.assigned_at, u.id
+FROM task_assignees tas
+JOIN users u ON u.id = tas.user_id
+WHERE tas.task_id = $1
+ORDER BY tas.assigned_at, u.id
 LIMIT 1
 `
 
-// Divisi task mengikuti PIC pertama: sub task paling awal yang punya PIC, lalu PIC yang dipasang lebih dulu.
-// Tidak ada baris berarti task belum punya PIC.
+// Divisi task mengikuti PIC task yang dipasang lebih dulu. Tidak ada baris berarti task belum punya PIC.
 func (q *Queries) FirstPICDivision(ctx context.Context, taskID string) (int64, error) {
 	row := q.db.QueryRow(ctx, firstPICDivision, taskID)
 	var division_id int64
@@ -311,6 +320,41 @@ type RemoveSubtaskAssigneesParams struct {
 func (q *Queries) RemoveSubtaskAssignees(ctx context.Context, arg RemoveSubtaskAssigneesParams) error {
 	_, err := q.db.Exec(ctx, removeSubtaskAssignees, arg.SubtaskID, arg.UserIds)
 	return err
+}
+
+const renameSubtask = `-- name: RenameSubtask :exec
+UPDATE task_subtasks SET title = $1 WHERE id = $2 AND task_id = $3
+`
+
+type RenameSubtaskParams struct {
+	Title  string
+	ID     int64
+	TaskID string
+}
+
+// Hanya nama; urutan tidak ikut berubah saat PIC atau Manajer memperbaiki tulisan.
+func (q *Queries) RenameSubtask(ctx context.Context, arg RenameSubtaskParams) error {
+	_, err := q.db.Exec(ctx, renameSubtask, arg.Title, arg.ID, arg.TaskID)
+	return err
+}
+
+const subtaskSlot = `-- name: SubtaskSlot :one
+SELECT count(*)::int AS total, COALESCE(max(position) + 1, 0)::int AS next_position
+FROM task_subtasks WHERE task_id = $1
+`
+
+type SubtaskSlotRow struct {
+	Total        int32
+	NextPosition int32
+}
+
+// Jumlah sub task dan posisi berikutnya, dipakai saat PIC atau Manajer menambah satu sub task.
+// Posisi dihitung dari max, bukan dari jumlah, karena penghapusan meninggalkan lubang.
+func (q *Queries) SubtaskSlot(ctx context.Context, taskID string) (SubtaskSlotRow, error) {
+	row := q.db.QueryRow(ctx, subtaskSlot, taskID)
+	var i SubtaskSlotRow
+	err := row.Scan(&i.Total, &i.NextPosition)
+	return i, err
 }
 
 const uncheckSubtask = `-- name: UncheckSubtask :exec

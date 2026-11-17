@@ -7,6 +7,7 @@ type Can struct {
 	Delete          bool     `json:"delete"`
 	EditLabels      bool     `json:"edit_labels"`
 	EditDeliverable bool     `json:"edit_deliverable"`
+	AddSubtask      bool     `json:"add_subtask"`
 	MoveTo          []Status `json:"move_to"`
 }
 
@@ -18,7 +19,9 @@ func PermissionsFor(role Role, isPIC bool, status Status) Can {
 		Delete:          manager,
 		EditLabels:      contributor,
 		EditDeliverable: contributor,
-		MoveTo:          []Status{},
+		// Revisi 6: PIC menyusun sendiri sub task yang ia kerjakan, Manajer boleh ikut menambah.
+		AddSubtask: contributor && subtaskWindowOpen(status),
+		MoveTo:     []Status{},
 	}
 	for _, to := range []Status{Requested, OnProgress, Ready, Completed} {
 		// Catatan diisi sembarang supaya aturan wajib-catatan tidak menyembunyikan tujuan yang sebenarnya boleh.

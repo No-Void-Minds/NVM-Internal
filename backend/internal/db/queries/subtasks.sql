@@ -27,7 +27,7 @@ WHERE id = @id AND task_id = @task_id;
 DELETE FROM task_subtasks WHERE task_id = @task_id AND id = ANY(@ids::bigint[]);
 
 -- name: AddSubtaskAssignee :exec
--- clock_timestamp, bukan now(), supaya urutan PIC dalam satu transaksi tetap terbaca: PIC pertama menentukan divisi task.
+-- Sejak revisi 6 isinya satu orang: pemilik sub task, yaitu PIC yang membuatnya. Sub task buatan Manajer tidak punya baris di sini.
 INSERT INTO subtask_assignees (subtask_id, user_id, assigned_by, assigned_at)
 VALUES (@subtask_id, @user_id, @assigned_by, clock_timestamp());
 
@@ -35,14 +35,12 @@ VALUES (@subtask_id, @user_id, @assigned_by, clock_timestamp());
 DELETE FROM subtask_assignees WHERE subtask_id = @subtask_id AND user_id = ANY(@user_ids::bigint[]);
 
 -- name: FirstPICDivision :one
--- Divisi task mengikuti PIC pertama: sub task paling awal yang punya PIC, lalu PIC yang dipasang lebih dulu.
--- Tidak ada baris berarti task belum punya PIC.
+-- Divisi task mengikuti PIC task yang dipasang lebih dulu. Tidak ada baris berarti task belum punya PIC.
 SELECT u.division_id
-FROM task_subtasks st
-JOIN subtask_assignees sa ON sa.subtask_id = st.id
-JOIN users u ON u.id = sa.user_id
-WHERE st.task_id = @task_id
-ORDER BY st.position, sa.assigned_at, u.id
+FROM task_assignees tas
+JOIN users u ON u.id = tas.user_id
+WHERE tas.task_id = @task_id
+ORDER BY tas.assigned_at, u.id
 LIMIT 1;
 
 -- name: GetSubtask :one
@@ -74,3 +72,15 @@ SELECT DISTINCT sa.subtask_id
 FROM subtask_assignees sa
 JOIN users u ON u.id = sa.user_id
 WHERE sa.subtask_id = ANY(@subtask_ids::bigint[]) AND u.role = 'manager' AND u.id <> @user_id;
+-- name: SubtaskSlot :one
+-- Jumlah sub task dan posisi berikutnya, dipakai saat PIC atau Manajer menambah satu sub task.
+-- Posisi dihitung dari max, bukan dari jumlah, karena penghapusan meninggalkan lubang.
+SELECT count(*)::int AS total, COALESCE(max(position) + 1, 0)::int AS next_position
+FROM task_subtasks WHERE task_id = @task_id;
+
+-- name: CountSubtaskAssignees :one
+SELECT count(*)::int FROM subtask_assignees WHERE subtask_id = @subtask_id;
+
+-- name: RenameSubtask :exec
+-- Hanya nama; urutan tidak ikut berubah saat PIC atau Manajer memperbaiki tulisan.
+UPDATE task_subtasks SET title = @title WHERE id = @id AND task_id = @task_id;

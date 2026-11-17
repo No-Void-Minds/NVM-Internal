@@ -38,12 +38,20 @@ func (s *Service) SetSubtaskDone(ctx context.Context, actor Actor, taskID string
 		if err != nil {
 			return err
 		}
-		isPIC, err := q.IsSubtaskAssignee(ctx, sqlc.IsSubtaskAssigneeParams{SubtaskID: subtaskID, UserID: actor.ID})
+		isOwner, err := q.IsSubtaskAssignee(ctx, sqlc.IsSubtaskAssigneeParams{SubtaskID: subtaskID, UserID: actor.ID})
+		if err != nil {
+			return err
+		}
+		owners, err := q.CountSubtaskAssignees(ctx, subtaskID)
+		if err != nil {
+			return err
+		}
+		isTaskPIC, err := q.IsTaskAssignee(ctx, sqlc.IsTaskAssigneeParams{TaskID: taskID, UserID: actor.ID})
 		if err != nil {
 			return err
 		}
 		otherManager := false
-		if !isPIC && isManager(actor) {
+		if !isOwner && isManager(actor) {
 			others, qerr := q.ListSubtasksWithOtherManagerPIC(ctx, sqlc.ListSubtasksWithOtherManagerPICParams{
 				SubtaskIds: []int64{subtaskID}, UserID: actor.ID,
 			})
@@ -52,7 +60,7 @@ func (s *Service) SetSubtaskDone(ctx context.Context, actor Actor, taskID string
 			}
 			otherManager = len(others) > 0
 		}
-		if !canToggle(actor, isPIC, otherManager) {
+		if !canToggle(actor, isOwner, owners == 0, isTaskPIC, otherManager) {
 			return ErrNotSubtaskPIC
 		}
 		if Status(cur.Status) != OnProgress {
@@ -81,10 +89,15 @@ func (s *Service) SetSubtaskDone(ctx context.Context, actor Actor, taskID string
 	})
 }
 
-// canToggle adalah satu-satunya aturan siapa yang boleh mencentang: PIC sub task itu, atau Manajer
-// untuk sub task yang tidak dipegang Manajer lain. Dipakai SetSubtaskDone dan CheckableSubtasks.
-func canToggle(actor Actor, isPIC, otherManagerPIC bool) bool {
-	if isPIC {
+// canToggle adalah satu-satunya aturan siapa yang boleh mencentang. Dipakai SetSubtaskDone dan CheckableSubtasks.
+// Pemilik sub task selalu boleh. Sub task tanpa pemilik (dibuat Manajer lewat form task) boleh dicentang
+// PIC task mana pun, kalau tidak, pekerjaan titipan Manajer tidak bisa diselesaikan siapa pun dan task
+// tertahan sebelum Ready. Manajer boleh, kecuali sub task itu milik Manajer lain.
+func canToggle(actor Actor, isOwner, ownerless, isTaskPIC, otherManagerPIC bool) bool {
+	if isOwner {
+		return true
+	}
+	if ownerless && isTaskPIC {
 		return true
 	}
 	return isManager(actor) && !otherManagerPIC
@@ -92,7 +105,7 @@ func canToggle(actor Actor, isPIC, otherManagerPIC bool) bool {
 
 // CheckableSubtasks menjawab sub task mana yang boleh dicentang actor, untuk kolom can_check di detail.
 // Satu query untuk semua sub task, dan kosong bila task tidak sedang On Progress.
-func (s *Service) CheckableSubtasks(ctx context.Context, actor Actor, status Status, subs []SubtaskView) (map[int64]bool, error) {
+func (s *Service) CheckableSubtasks(ctx context.Context, actor Actor, status Status, isTaskPIC bool, subs []SubtaskView) (map[int64]bool, error) {
 	out := make(map[int64]bool, len(subs))
 	if status != OnProgress || len(subs) == 0 {
 		return out, nil
@@ -114,8 +127,8 @@ func (s *Service) CheckableSubtasks(ctx context.Context, actor Actor, status Sta
 		}
 	}
 	for _, st := range subs {
-		isPIC := slices.ContainsFunc(st.Assignees, func(a sqlc.ListSubtaskAssigneesRow) bool { return a.ID == actor.ID })
-		out[st.ID] = canToggle(actor, isPIC, otherManager[st.ID])
+		isOwner := slices.ContainsFunc(st.Assignees, func(a sqlc.ListSubtaskAssigneesRow) bool { return a.ID == actor.ID })
+		out[st.ID] = canToggle(actor, isOwner, len(st.Assignees) == 0, isTaskPIC, otherManager[st.ID])
 	}
 	return out, nil
 }

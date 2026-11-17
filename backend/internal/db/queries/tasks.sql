@@ -33,21 +33,17 @@ FROM tasks t
 JOIN divisions d ON d.id = t.division_id
 WHERE NOT t.is_deleted
   AND (sqlc.narg(assignee_id)::bigint IS NULL
-       OR EXISTS (SELECT 1 FROM task_subtasks st
-                  JOIN subtask_assignees sa ON sa.subtask_id = st.id
-                  WHERE st.task_id = t.id AND sa.user_id = sqlc.narg(assignee_id)::bigint))
+       OR EXISTS (SELECT 1 FROM task_assignees tas
+                  WHERE tas.task_id = t.id AND tas.user_id = sqlc.narg(assignee_id)::bigint))
 ORDER BY t.created_at DESC;
 
 -- name: ListTaskAssignees :many
--- PIC task adalah gabungan unik PIC semua sub task. Urutannya: sub task paling awal dulu, lalu waktu dipasang,
--- supaya PIC pertama (penentu divisi task) selalu di baris pertama.
-SELECT st.task_id, u.id, u.name, u.username, u.avatar_id
-FROM task_subtasks st
-JOIN subtask_assignees sa ON sa.subtask_id = st.id
-JOIN users u ON u.id = sa.user_id
-WHERE st.task_id = ANY(@task_ids::text[])
-GROUP BY st.task_id, u.id, u.name, u.username, u.avatar_id
-ORDER BY st.task_id, min(st.position), min(sa.assigned_at), u.id;
+-- PIC dipilih Manajer di task (revisi 6). Urutan pemasangan dipertahankan: PIC pertama menentukan divisi task.
+SELECT tas.task_id, u.id, u.name, u.username, u.avatar_id
+FROM task_assignees tas
+JOIN users u ON u.id = tas.user_id
+WHERE tas.task_id = ANY(@task_ids::text[])
+ORDER BY tas.task_id, tas.assigned_at, u.id;
 
 -- name: ListTaskLabels :many
 SELECT tl.task_id, l.id, l.name, l.color, l.is_active
@@ -73,11 +69,10 @@ JOIN divisions d ON d.id = t.division_id
 WHERE NOT t.is_deleted
   AND (t.status <> 'completed' OR t.solved_date >= @completed_since::timestamptz)
   AND ((cardinality(@pic_ids::bigint[]) = 0 AND cardinality(@pic_usernames::text[]) = 0)
-       OR EXISTS (SELECT 1 FROM task_subtasks st
-                  JOIN subtask_assignees sa ON sa.subtask_id = st.id
-                  JOIN users u ON u.id = sa.user_id
-                  WHERE st.task_id = t.id
-                    AND (sa.user_id = ANY(@pic_ids::bigint[]) OR lower(u.username) = ANY(@pic_usernames::text[]))))
+       OR EXISTS (SELECT 1 FROM task_assignees tas
+                  JOIN users u ON u.id = tas.user_id
+                  WHERE tas.task_id = t.id
+                    AND (tas.user_id = ANY(@pic_ids::bigint[]) OR lower(u.username) = ANY(@pic_usernames::text[]))))
   AND (sqlc.narg(division_id)::bigint IS NULL OR t.division_id = sqlc.narg(division_id)::bigint)
   AND (sqlc.narg(label_id)::bigint IS NULL
        OR EXISTS (SELECT 1 FROM task_labels tl WHERE tl.task_id = t.id AND tl.label_id = sqlc.narg(label_id)::bigint))
@@ -95,10 +90,9 @@ WHERE NOT t.is_deleted
         OR EXISTS (SELECT 1 FROM users r WHERE r.id = t.requested_by AND r.name ILIKE sqlc.narg(pattern)::text)
         OR EXISTS (SELECT 1 FROM task_subtasks st
                    WHERE st.task_id = t.id AND st.title ILIKE sqlc.narg(pattern)::text)
-        OR EXISTS (SELECT 1 FROM task_subtasks st
-                   JOIN subtask_assignees sa ON sa.subtask_id = st.id
-                   JOIN users u ON u.id = sa.user_id
-                   WHERE st.task_id = t.id AND u.name ILIKE sqlc.narg(pattern)::text)
+        OR EXISTS (SELECT 1 FROM task_assignees tas
+                   JOIN users u ON u.id = tas.user_id
+                   WHERE tas.task_id = t.id AND u.name ILIKE sqlc.narg(pattern)::text)
         OR EXISTS (SELECT 1 FROM task_labels tl JOIN labels l ON l.id = tl.label_id
                    WHERE tl.task_id = t.id AND l.name ILIKE sqlc.narg(pattern)::text)
         OR EXISTS (SELECT 1 FROM task_attachments ta
@@ -125,11 +119,10 @@ FROM tasks t
 JOIN divisions d ON d.id = t.division_id
 WHERE NOT t.is_deleted AND t.status = 'completed'
   AND ((cardinality(@pic_ids::bigint[]) = 0 AND cardinality(@pic_usernames::text[]) = 0)
-       OR EXISTS (SELECT 1 FROM task_subtasks st
-                  JOIN subtask_assignees sa ON sa.subtask_id = st.id
-                  JOIN users u ON u.id = sa.user_id
-                  WHERE st.task_id = t.id
-                    AND (sa.user_id = ANY(@pic_ids::bigint[]) OR lower(u.username) = ANY(@pic_usernames::text[]))))
+       OR EXISTS (SELECT 1 FROM task_assignees tas
+                  JOIN users u ON u.id = tas.user_id
+                  WHERE tas.task_id = t.id
+                    AND (tas.user_id = ANY(@pic_ids::bigint[]) OR lower(u.username) = ANY(@pic_usernames::text[]))))
   AND (sqlc.narg(division_id)::bigint IS NULL OR t.division_id = sqlc.narg(division_id)::bigint)
   AND (sqlc.narg(label_id)::bigint IS NULL
        OR EXISTS (SELECT 1 FROM task_labels tl WHERE tl.task_id = t.id AND tl.label_id = sqlc.narg(label_id)::bigint))
@@ -144,10 +137,9 @@ WHERE NOT t.is_deleted AND t.status = 'completed'
         OR EXISTS (SELECT 1 FROM users r WHERE r.id = t.requested_by AND r.name ILIKE sqlc.narg(pattern)::text)
         OR EXISTS (SELECT 1 FROM task_subtasks st
                    WHERE st.task_id = t.id AND st.title ILIKE sqlc.narg(pattern)::text)
-        OR EXISTS (SELECT 1 FROM task_subtasks st
-                   JOIN subtask_assignees sa ON sa.subtask_id = st.id
-                   JOIN users u ON u.id = sa.user_id
-                   WHERE st.task_id = t.id AND u.name ILIKE sqlc.narg(pattern)::text)
+        OR EXISTS (SELECT 1 FROM task_assignees tas
+                   JOIN users u ON u.id = tas.user_id
+                   WHERE tas.task_id = t.id AND u.name ILIKE sqlc.narg(pattern)::text)
         OR EXISTS (SELECT 1 FROM task_labels tl JOIN labels l ON l.id = tl.label_id
                    WHERE tl.task_id = t.id AND l.name ILIKE sqlc.narg(pattern)::text)
         OR EXISTS (SELECT 1 FROM task_attachments ta

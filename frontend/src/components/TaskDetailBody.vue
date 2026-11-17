@@ -7,6 +7,9 @@ import {
   deleteTask,
   getTask,
   moveTask,
+  addSubtask,
+  deleteSubtask,
+  renameSubtask,
   setSubtaskDone,
   setTaskDeliverable,
   setTaskLabels,
@@ -40,6 +43,21 @@ const loadState = ref<'loading' | 'ready' | 'error'>('loading')
 const loadError = ref('')
 const actionError = ref<string | null>(null)
 const busy = ref(false)
+// Riwayat task bisa puluhan baris dan mendorong isi lain jauh ke bawah; yang terbaru saja yang
+// ditampilkan sampai pengguna meminta sisanya.
+const historyLimit = 3
+const historyAll = ref(false)
+const historyShown = computed(() =>
+  historyAll.value ? (task.value?.history ?? []) : (task.value?.history ?? []).slice(0, historyLimit),
+)
+
+// Menyusun sub task di luar form Manajer (revisi 6): PIC menambah pekerjaannya sendiri, dan memperbaiki
+// atau menghapus yang ia buat. Hak per barisnya datang dari server lewat can_edit.
+const newTitle = ref('')
+const addingSub = ref(false)
+const editingSub = ref<number | null>(null)
+const editTitle = ref('')
+
 // Dideklarasikan di atas karena watch taskId di bawah langsung berjalan (immediate) dan mengisinya.
 const editingLabels = ref(false)
 const chosenLabels = ref<number[]>([])
@@ -68,6 +86,8 @@ watch(
     actionError.value = null
     editingLabels.value = false
     historyAll.value = false
+    newTitle.value = ''
+    editingSub.value = null
     if (id) void load()
   },
   { immediate: true },
@@ -138,6 +158,60 @@ const moves = computed(() =>
 const checking = ref<number | null>(null)
 const rowErrors = ref<Record<number, string>>({})
 const announce = ref('')
+
+async function submitNewSubtask() {
+  const t = task.value
+  const title = newTitle.value.trim()
+  if (!t || !title || addingSub.value) return
+  addingSub.value = true
+  actionError.value = null
+  try {
+    await addSubtask(t.id, title)
+    newTitle.value = ''
+    announce.value = `Sub task "${title}" ditambahkan.`
+    await load(true)
+  } catch (err) {
+    actionError.value = messageOf(err)
+  } finally {
+    addingSub.value = false
+  }
+}
+
+function startEdit(s: TaskSubtask) {
+  editingSub.value = s.id
+  editTitle.value = s.title
+  rowErrors.value = { ...rowErrors.value, [s.id]: '' }
+}
+
+async function submitEdit(s: TaskSubtask) {
+  const t = task.value
+  const title = editTitle.value.trim()
+  if (!t || !title) return
+  if (title === s.title) {
+    editingSub.value = null
+    return
+  }
+  try {
+    await renameSubtask(t.id, s.id, title)
+    editingSub.value = null
+    announce.value = `Nama sub task diubah menjadi "${title}".`
+    await load(true)
+  } catch (err) {
+    rowErrors.value = { ...rowErrors.value, [s.id]: messageOf(err) }
+  }
+}
+
+async function removeSubtask(s: TaskSubtask) {
+  const t = task.value
+  if (!t) return
+  try {
+    await deleteSubtask(t.id, s.id)
+    announce.value = `Sub task "${s.title}" dihapus.`
+    await load(true)
+  } catch (err) {
+    rowErrors.value = { ...rowErrors.value, [s.id]: messageOf(err) }
+  }
+}
 
 // Hasil dari server yang dipercaya: kotak centang dikembalikan ke keadaan semula kalau gagal,
 // karena DOM tidak ikut berubah sendiri bila nilai model tidak berubah.
@@ -258,14 +332,8 @@ async function confirmDelete() {
   if (ok) emit('close')
 }
 
-// Riwayat task bisa puluhan baris dan mendorong isi lain jauh ke bawah; yang terbaru saja yang
-// ditampilkan sampai pengguna meminta sisanya.
-const historyLimit = 3
-const historyAll = ref(false)
-const historyShown = computed(() =>
-  historyAll.value ? (task.value?.history ?? []) : (task.value?.history ?? []).slice(0, historyLimit),
-)
-
+const linkButton =
+  'inline-flex min-h-11 items-center rounded-card px-2 text-sm font-medium hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark'
 const buttonPrimary =
   'inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-on-accent hover:bg-accent-hover active:translate-y-px disabled:opacity-60'
 const buttonSecondary =
@@ -357,8 +425,9 @@ const buttonSecondary =
             Sub task hanya bisa dicentang saat task berstatus On Progress.
           </p>
           <p v-else-if="readyReason" class="mt-1 text-sm text-ink-muted">
-            Semua sub task harus tercentang sebelum task bisa ditandai Ready. Yang bisa mencentang: PIC sub
-            task itu, dan Manajer kecuali untuk sub task yang dipegang Manajer lain.
+            Semua sub task harus tercentang sebelum task bisa ditandai Ready. Yang bisa mencentang: pembuat
+            sub task itu, PIC task mana pun untuk sub task yang ditambahkan Manajer, dan Manajer kecuali untuk
+            sub task milik Manajer lain.
           </p>
           <p class="sr-only" role="status">{{ announce }}</p>
           <ol v-if="task.subtasks.length" class="mt-2 divide-y divide-line rounded-card border border-line">
@@ -379,6 +448,25 @@ const buttonSecondary =
                   <span class="text-ink-muted">{{ i + 1 }}.</span> {{ s.title }}
                 </span>
               </label>
+              <div v-if="s.can_edit && editingSub !== s.id" class="mt-1 ml-8 flex gap-1">
+                <button type="button" :class="linkButton" @click="startEdit(s)">Ubah nama</button>
+                <button type="button" :class="linkButton" class="text-urgent" @click="removeSubtask(s)">
+                  Hapus
+                </button>
+              </div>
+              <form v-if="editingSub === s.id" class="mt-2 ml-8 flex gap-2" @submit.prevent="submitEdit(s)">
+                <label :for="`sub-edit-${s.id}`" class="sr-only">Nama sub task {{ i + 1 }}</label>
+                <input
+                  :id="`sub-edit-${s.id}`"
+                  v-model="editTitle"
+                  type="text"
+                  maxlength="200"
+                  autocomplete="off"
+                  class="min-h-11 min-w-0 flex-1 rounded-card border border-line bg-surface px-3 text-sm"
+                />
+                <button type="submit" :class="buttonSecondary" :disabled="!editTitle.trim()">Simpan</button>
+                <button type="button" :class="buttonSecondary" @click="editingSub = null">Batal</button>
+              </form>
               <p v-if="s.done" class="ml-8 text-sm text-ink-muted">
                 Dicentang oleh {{ s.done_by }}{{ s.done_at ? `, ${formatDateTime(s.done_at)}` : '' }}.
               </p>
@@ -389,7 +477,10 @@ const buttonSecondary =
               >
                 {{ rowErrors[s.id] }}
               </p>
-              <ul v-if="s.assignees.length" class="mt-2 ml-8 flex flex-wrap gap-1">
+              <p v-if="!s.assignees.length" class="mt-1 ml-8 text-sm text-ink-muted">
+                Ditambahkan Manajer, boleh dicentang PIC task mana pun.
+              </p>
+              <ul v-else class="mt-2 ml-8 flex flex-wrap gap-1">
                 <li
                   v-for="p in s.assignees"
                   :key="p.id"
@@ -399,12 +490,25 @@ const buttonSecondary =
                   {{ p.name }}<span v-if="p.id === session.user?.id" class="text-ink-muted"> (kamu)</span>
                 </li>
               </ul>
-              <p v-else class="mt-1 ml-8 text-sm text-ink-muted">Belum ada PIC.</p>
             </li>
           </ol>
-          <p v-else class="mt-2 text-sm text-ink-muted">
-            Task ini tidak punya sub task, jadi tidak punya PIC.
-          </p>
+          <p v-else class="mt-2 text-sm text-ink-muted">Belum ada sub task.</p>
+
+          <form v-if="task.can.add_subtask" class="mt-3 flex gap-2" @submit.prevent="submitNewSubtask">
+            <label for="sub-new" class="sr-only">Nama sub task baru</label>
+            <input
+              id="sub-new"
+              v-model="newTitle"
+              type="text"
+              maxlength="200"
+              autocomplete="off"
+              placeholder="Sub task yang kamu kerjakan"
+              class="min-h-11 min-w-0 flex-1 rounded-card border border-line bg-surface px-3 text-sm"
+            />
+            <button type="submit" :class="buttonSecondary" :disabled="addingSub || !newTitle.trim()">
+              {{ addingSub ? 'Menambah...' : 'Tambah' }}
+            </button>
+          </form>
         </section>
 
         <section v-if="task.description">

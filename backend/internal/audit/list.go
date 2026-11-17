@@ -27,7 +27,7 @@ var Categories = map[string][]string{
 		"label_created", "label_updated", "label_activated", "label_deactivated",
 	},
 	"task": {
-		"task_created", "task_updated", "task_deleted",
+		"task_created", "task_updated", "task_deleted", "task_pics_changed",
 		"task_labels_changed", "task_deliverable_changed", "task_status_changed",
 		"attachment_added", "attachment_deleted",
 		"subtask_added", "subtask_removed", "subtask_renamed",

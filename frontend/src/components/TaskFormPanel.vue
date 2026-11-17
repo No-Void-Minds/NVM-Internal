@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import BaseDialog from './BaseDialog.vue'
 import FileDropzone from './FileDropzone.vue'
 import SubtaskEditor from './SubtaskEditor.vue'
+import PicPicker from './PicPicker.vue'
 import { draftsFromTask, toPayload, type SubtaskDraft } from '../utils/subtask'
 import { ApiError } from '../api/client'
 import { uploadAttachment } from '../api/attachments'
@@ -27,6 +28,7 @@ const title = ref('')
 const urgency = ref<Urgency>('medium')
 // Urutan baris menentukan PIC pertama, dan PIC pertama menentukan divisi task (keputusan Sprint 3 dan 7).
 const subtasks = ref<SubtaskDraft[]>([])
+const picIds = ref<number[]>([])
 const labelIds = ref<number[]>([])
 const description = ref('')
 const startDate = ref('')
@@ -54,15 +56,14 @@ const picCandidates = computed(() =>
 const labelOptions = computed(() =>
   props.labels.filter((l) => l.is_active || props.task?.labels.some((t) => t.id === l.id)),
 )
-const firstPicDivision = computed(() => {
-  const first = subtasks.value.find((s) => s.picIds.length > 0)?.picIds[0]
-  return props.users.find((u) => u.id === first)?.division_name ?? null
-})
+const firstPicDivision = computed(
+  () => props.users.find((u) => u.id === picIds.value[0])?.division_name ?? null,
+)
 // PIC lama yang kini nonaktif tidak ada di daftar akun, jadi namanya diambil juga dari detail task.
 const nameById = computed(() => {
   const m = new Map<number, string>()
   props.users.forEach((u) => m.set(u.id, u.name))
-  props.task?.subtasks.forEach((s) => s.assignees.forEach((a) => m.set(a.id, a.name)))
+  props.task?.assignees.forEach((a) => m.set(a.id, a.name))
   return m
 })
 
@@ -75,6 +76,7 @@ watch(
     title.value = t?.title ?? ''
     urgency.value = t?.urgency ?? 'medium'
     subtasks.value = draftsFromTask(t)
+    picIds.value = t?.assignees.map((a) => a.id) ?? []
     labelIds.value = t?.labels.map((l) => l.id) ?? []
     description.value = t?.description ?? ''
     startDate.value = t?.start_date ?? ''
@@ -167,6 +169,7 @@ const submitLabel = computed(() => {
 
 function validate(): string | null {
   if (!title.value.trim()) return 'Judul wajib diisi.'
+  if (picIds.value.length === 0) return 'Pilih minimal satu PIC task.'
   const blank = subtasks.value.findIndex((s) => !s.title.trim())
   if (blank !== -1) return `Nama sub task nomor ${blank + 1} wajib diisi.`
   if (startDate.value && dueDate.value && dueDate.value < startDate.value) {
@@ -190,6 +193,7 @@ async function submit() {
     title: title.value.trim(),
     description: description.value.trim(),
     urgency: urgency.value,
+    pic_ids: picIds.value,
     subtasks: toPayload(subtasks.value),
     start_date: startDate.value,
     due_date: dueDate.value,
@@ -271,15 +275,27 @@ const optionClass =
       </fieldset>
 
       <div>
-        <SubtaskEditor v-model="subtasks" :candidates="picCandidates" :names="nameById" />
+        <p class="text-sm font-medium">PIC task (wajib)</p>
+        <PicPicker
+          v-model="picIds"
+          :candidates="picCandidates"
+          :names="nameById"
+          subject="task ini"
+          class="mt-1"
+        />
         <p class="mt-2 text-sm text-ink-muted" aria-live="polite">
           {{
             firstPicDivision
               ? `Divisi task: ${firstPicDivision} (mengikuti PIC pertama).`
-              : isEdit
-                ? 'Tanpa PIC, divisi task tidak berubah.'
-                : 'Tanpa PIC, divisi task mengikuti divisimu.'
+              : 'Divisi task mengikuti PIC pertama yang dipilih.'
           }}
+        </p>
+      </div>
+
+      <div>
+        <SubtaskEditor v-model="subtasks" />
+        <p class="mt-2 text-sm text-ink-muted">
+          Boleh dikosongkan. PIC bisa menambah sub task sendiri dari detail task.
         </p>
       </div>
 
