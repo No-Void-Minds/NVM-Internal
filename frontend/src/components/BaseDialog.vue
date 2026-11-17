@@ -37,7 +37,10 @@ function onCancel(e: Event) {
 
 const shape = computed(() =>
   props.variant === 'panel'
-    ? 'dialog-panel m-0 ml-auto h-dvh max-h-dvh w-full max-w-md border-l border-line shadow-dialog open:flex open:flex-col'
+    ? // overflow-hidden wajib: <dialog> bawaan browser punya overflow auto, jadi panelnya sendiri ikut
+      // tergulir dan menyeret area gulir plus bar aksi naik keluar layar (terukur 431 px di Chrome).
+      // Isinya sudah diatur flex: header tetap, isian yang menggulir sendiri.
+      'dialog-panel m-0 ml-auto h-dvh max-h-dvh w-full max-w-md overflow-hidden border-l border-line shadow-dialog open:flex open:flex-col'
     : `dialog-modal m-auto w-[calc(100%-2rem)] ${props.wide ? 'max-w-3xl' : 'max-w-md'} rounded-card border border-line shadow-dialog`,
 )
 </script>

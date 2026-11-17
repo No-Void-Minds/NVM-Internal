@@ -807,12 +807,14 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 
 - [x] S11j-01 Query `IsSubtaskPICEligible`: kandidat PIC sub task adalah akun aktif berperan Staf saja. Dipakai `setSubtaskPIC`, jadi aturannya berlaku untuk form tambah maupun form Ubah.
 - [x] S11j-02 Frontend: pilihan "Dikerjakan" menyaring peran Manajer, dan PIC task yang berperan Staf tetap di urutan atas.
+- [x] S11j-03 Panel detail diberi `overflow-hidden`: tanpa itu panelnya sendiri ikut tergulir dan menyeret bar aksi naik keluar layar.
 
 **Keputusan:**
 - Yang berubah hanya sisi penerima. Manajer tetap boleh membuat sub task, menugaskannya, mengubah namanya, menghapusnya, dan mencentangnya (aturan revisi 4 tidak berubah). Yang hilang hanya kemampuan menjadi PIC sub task.
 - Akun Admin memang sudah di luar daftar sejak awal, karena Admin mengelola sistem dan tidak mengerjakan task.
 - Sub task lama yang terlanjur ditugaskan ke Manajer tidak diubah dan tidak ada migrasi untuk itu. Barisnya tetap sah, dan aturan baru hanya berlaku saat menyimpan. Di form Ubah, PIC lama yang sudah tidak memenuhi syarat tetap ditampilkan sebagai pilihan barisnya sendiri, supaya mengubah nama sub task tidak memaksa mengganti PIC-nya lebih dulu.
 - PIC task boleh tetap berisi Manajer. Revisi ini hanya tentang sub task, dan Manajer yang menjadi PIC task memang mengerjakan task itu di tingkat task.
+- Bar aksi panel detail, sebab ketiga dan yang sebenarnya. Dua perbaikan sebelumnya (Sprint 11g S11g-05) benar tetapi tidak cukup. Diukur di panel yang sungguhan: `<dialog>` bawaan browser punya `overflow: auto`, dan isi panel melebihi tingginya karena elemen `sr-only` (input berkas tersembunyi dan label pembaca layar) yang `position: absolute` tanpa induk ber-`relative`, sehingga posisinya jatuh jauh di bawah dan menambah `scrollHeight` panel sampai sekitar 400 px. Akibatnya panel itu sendiri bisa tergulir, menyeret area gulir beserta bar aksinya naik keluar layar: terukur `scrollTop` 431 px dengan bar berhenti di 462 dari layar 893. Obatnya `overflow-hidden` pada panel, karena isinya memang sudah diatur flex (header tetap, isian menggulir sendiri). Setelah itu bar menempel di dasar panel pada 1024 px maupun 393 px, di awal gulir, tengah, dan mentok.
 
 **Selesai kalau:** `./scripts/check.sh` lolos dan terbukti di browser: daftar "Dikerjakan" tidak memuat satu pun akun Manajer, Manajer masih bisa menambah sub task dan menugaskannya ke Staf, dan permintaan yang memaksa `pic_id` akun Manajer ditolak dengan pesan "Sub task hanya bisa ditugaskan ke akun Staf yang aktif."
 
