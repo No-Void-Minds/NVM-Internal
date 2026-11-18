@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -223,5 +224,113 @@ func TestGantiJudulTidakMengubahPath(t *testing.T) {
 	// Folder lama dipakai lagi, dan nama berkas yang bentrok diberi nomor.
 	if got != "Task/2026-11/T-0012 Foto katalog/Brief/brief (2).pdf" {
 		t.Fatalf("path berkas baru %q", got)
+	}
+}
+
+// Ringkasan harus menjelaskan kenapa sebuah berkas tidak ikut disalin. Sebelum ringkasan ini ada, job yang
+// tidak menyalin apa pun terlihat sama dengan job yang berhasil: di produksi ada 6 lampiran aktif dan nol
+// yang masuk staging, tanpa satu pun alasan tercetak.
+func TestRingkasanMenjelaskanYangDilewati(t *testing.T) {
+	butuhSymlink(t)
+	f := setup(t)
+	f.seed(t)
+	ctx := context.Background()
+
+	var div, user int64
+	if err := f.pool.QueryRow(ctx, `SELECT division_id, id FROM users LIMIT 1`).Scan(&div, &user); err != nil {
+		t.Fatal(err)
+	}
+	// Task yang sudah dihapus: lampirannya tidak disalin, tetapi alasannya harus terbaca.
+	f.exec(t, `
+		INSERT INTO tasks (id, title, division_id, requested_by, urgency, is_deleted, created_at)
+		VALUES ('T-0013', 'Task dibuang', $1, $2, 'low', true, '2026-11-03 09:00+07')`, div, user)
+	const idTaskHapus = "66666666-6666-4666-8666-666666666666"
+	f.exec(t, `
+		INSERT INTO task_attachments (id, task_id, kind, original_name, mime_type, size_bytes, checksum, uploaded_by)
+		VALUES ($1, 'T-0013', 'brief', 'ikut.pdf', 'application/pdf', 10, repeat('c', 64), $2)`, idTaskHapus, user)
+	f.file(t, idTaskHapus)
+
+	// Lampiran yang barisnya ada tetapi berkasnya tidak ada di storage (mis. setelah restore sebagian).
+	const idTanpaBerkas = "77777777-7777-4777-8777-777777777777"
+	f.exec(t, `
+		INSERT INTO task_attachments (id, task_id, kind, original_name, mime_type, size_bytes, checksum, uploaded_by)
+		VALUES ($1, 'T-0012', 'deliverable', 'hilang.pdf', 'application/pdf', 10, repeat('d', 64), $2)`,
+		idTanpaBerkas, user)
+
+	m, err := f.svc.Stage(ctx, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Jenis dihitung per kelompok, dan jenis yang kosong tetap muncul sebagai nol.
+	mau := map[string]int{
+		KindBrief: 1, KindDeliverable: 0, KindSubtask: 1, KindActivity: 0, KindExport: 1, KindDump: 0,
+	}
+	for kind, n := range mau {
+		got, ada := m.Counts[kind]
+		if !ada {
+			t.Errorf("jenis %q tidak ada di ringkasan", kind)
+			continue
+		}
+		if got != n {
+			t.Errorf("jenis %q dihitung %d, mau %d", kind, got, n)
+		}
+	}
+
+	if m.Skipped["task sudah dihapus"] != 1 {
+		t.Errorf("lampiran di task yang dihapus harus terhitung sekali, dapat %d", m.Skipped["task sudah dihapus"])
+	}
+	if m.Skipped["lampiran sudah dihapus"] != 1 {
+		t.Errorf("lampiran is_deleted harus terhitung sekali, dapat %d", m.Skipped["lampiran sudah dihapus"])
+	}
+	if m.Skipped["berkas hilang di storage"] != 1 {
+		t.Errorf("berkas yang hilang harus terhitung sekali, dapat %d", m.Skipped["berkas hilang di storage"])
+	}
+	for _, p := range m.Listing() {
+		if strings.Contains(p, "ikut.pdf") || strings.Contains(p, "hilang.pdf") {
+			t.Fatalf("berkas yang harus dilewati ikut disalin: %q", p)
+		}
+	}
+
+	// Setelah dicatat, alasan "sudah tercatat" yang muncul, bukan nol tanpa keterangan.
+	if err := f.svc.Record(ctx, m); err != nil {
+		t.Fatal(err)
+	}
+	lagi, err := f.svc.Stage(ctx, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lagi.Skipped["sudah tercatat di drive_exports"] != 2 {
+		t.Errorf("dua berkas yang sudah tercatat harus terhitung, dapat %d", lagi.Skipped["sudah tercatat di drive_exports"])
+	}
+	if lagi.Counts[KindExport] != 1 {
+		t.Errorf("ekspor bulanan tetap disusun setiap run, dapat %d", lagi.Counts[KindExport])
+	}
+}
+
+// Uji kering tidak boleh meninggalkan manifest. Sebelumnya manifest tetap ditulis, jadi `record` yang
+// dijalankan setelah uji kering mencatat semua lampiran di drive_exports tanpa pernah diunggah, dan sejak
+// itu lampiran tersebut hilang dari staging tanpa peringatan apa pun.
+func TestUjiKeringTidakMeninggalkanManifest(t *testing.T) {
+	f := setup(t)
+	f.seed(t)
+	ctx := context.Background()
+
+	m, err := f.svc.Stage(ctx, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Files) != 2 {
+		t.Fatalf("uji kering harus tetap menyusun 2 lampiran, dapat %d", len(m.Files))
+	}
+	if _, err := f.svc.ReadManifest(); err == nil {
+		t.Fatal("uji kering menulis manifest, jadi record sesudahnya akan mencatat berkas yang belum terunggah")
+	}
+	var n int
+	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM drive_exports`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("uji kering mencatat %d baris drive_exports", n)
 	}
 }

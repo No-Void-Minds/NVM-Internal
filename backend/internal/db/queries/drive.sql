@@ -56,3 +56,27 @@ INSERT INTO drive_export_runs (ok, files, bytes, message) VALUES (@ok, @files, @
 -- name: GetLastDriveExportRun :one
 SELECT finished_at, ok, files, bytes, message FROM drive_export_runs
 ORDER BY finished_at DESC, id DESC LIMIT 1;
+
+-- name: CountDriveSkipped :one
+-- Alasan lampiran task tidak ikut disalin, dihitung di database. Dipakai ringkasan uji kering, supaya
+-- "tidak ada berkas baru" selalu punya sebabnya yang terbaca, bukan diam saja.
+SELECT
+  count(*) FILTER (WHERE a.is_deleted)::bigint AS lampiran_dihapus,
+  count(*) FILTER (WHERE NOT a.is_deleted AND t.is_deleted)::bigint AS task_dihapus,
+  count(*) FILTER (
+    WHERE NOT a.is_deleted AND NOT t.is_deleted
+      AND EXISTS (
+        SELECT 1 FROM drive_exports d
+        WHERE d.source_kind = 'task_attachment' AND d.source_id = a.id::text
+      )
+  )::bigint AS sudah_tercatat
+FROM task_attachments a
+JOIN tasks t ON t.id = a.task_id;
+
+-- name: CountActivityFilesSkipped :one
+SELECT count(*)::bigint AS sudah_tercatat
+FROM activity_attachments a
+WHERE EXISTS (
+  SELECT 1 FROM drive_exports d
+  WHERE d.source_kind = 'activity_attachment' AND d.source_id = a.id::text
+);

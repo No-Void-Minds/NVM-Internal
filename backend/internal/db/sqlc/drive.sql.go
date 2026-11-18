@@ -11,6 +11,52 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countActivityFilesSkipped = `-- name: CountActivityFilesSkipped :one
+SELECT count(*)::bigint AS sudah_tercatat
+FROM activity_attachments a
+WHERE EXISTS (
+  SELECT 1 FROM drive_exports d
+  WHERE d.source_kind = 'activity_attachment' AND d.source_id = a.id::text
+)
+`
+
+func (q *Queries) CountActivityFilesSkipped(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countActivityFilesSkipped)
+	var sudah_tercatat int64
+	err := row.Scan(&sudah_tercatat)
+	return sudah_tercatat, err
+}
+
+const countDriveSkipped = `-- name: CountDriveSkipped :one
+SELECT
+  count(*) FILTER (WHERE a.is_deleted)::bigint AS lampiran_dihapus,
+  count(*) FILTER (WHERE NOT a.is_deleted AND t.is_deleted)::bigint AS task_dihapus,
+  count(*) FILTER (
+    WHERE NOT a.is_deleted AND NOT t.is_deleted
+      AND EXISTS (
+        SELECT 1 FROM drive_exports d
+        WHERE d.source_kind = 'task_attachment' AND d.source_id = a.id::text
+      )
+  )::bigint AS sudah_tercatat
+FROM task_attachments a
+JOIN tasks t ON t.id = a.task_id
+`
+
+type CountDriveSkippedRow struct {
+	LampiranDihapus int64
+	TaskDihapus     int64
+	SudahTercatat   int64
+}
+
+// Alasan lampiran task tidak ikut disalin, dihitung di database. Dipakai ringkasan uji kering, supaya
+// "tidak ada berkas baru" selalu punya sebabnya yang terbaca, bukan diam saja.
+func (q *Queries) CountDriveSkipped(ctx context.Context) (CountDriveSkippedRow, error) {
+	row := q.db.QueryRow(ctx, countDriveSkipped)
+	var i CountDriveSkippedRow
+	err := row.Scan(&i.LampiranDihapus, &i.TaskDihapus, &i.SudahTercatat)
+	return i, err
+}
+
 const getDriveFolder = `-- name: GetDriveFolder :one
 SELECT folder_path FROM drive_folders WHERE scope = $1 AND source_id = $2
 `

@@ -34,6 +34,8 @@ if [[ "${1:-}" == "compose" ]]; then
   echo " Container nvm-internal-app-backend-run-abc123  Created" >&2
   if [[ "${args[*]}" == *"drive-export fail"* ]]; then exit 0; fi
   if [[ "${args[*]}" == *"drive-export stage"* ]]; then
+    # Isi tar yang dikirim skrip, untuk memeriksa pemilihan dump. Stdin kosong (</dev/null) tidak apa-apa.
+    if [[ ! -t 0 ]]; then tar -tf - 2>/dev/null | sed 's/^/TAR /' >&2 || true; fi
     case "${STUB_FAIL:-}" in
       stage)
         # Log perintah Go: JSON, dan sekarang di stderr, bukan stdout.
@@ -77,7 +79,12 @@ jalankan() {
     echo "SECRETS_DIR=$run/secrets"
     echo "DRIVE_BACKUP_AGE_RECIPIENT=age1contoh"
   } >"$run/deploy/.env"
-  [[ "$daily" == 1 ]] && { echo isi >"$run/backup/db-20261118T200000Z.dump"; echo isi >"$run/backup/db-20261117T200000Z.dump"; }
+  if [[ "$daily" == dobel ]]; then
+    dump_bertanggal_sama "$run/backup"
+  elif [[ "$daily" == 1 ]]; then
+    echo isi >"$run/backup/db-20261118T200000Z.dump"
+    echo isi >"$run/backup/db-20261117T200000Z.dump"
+  fi
   [[ "$weekly" == 1 ]] && echo isi >"$run/backup/weekly-db-20261115T200000Z.dump"
 
   echo "=== $nama (db-*: $daily, weekly-*: $weekly, gagal: ${gagal:-tidak}) ==="
@@ -91,6 +98,16 @@ jalankan() {
     periksa "$nama" "! grep -q '^{' '$run/stdout.txt'" "daftar path di stdout bebas baris log JSON"
     periksa "$nama" "grep -q 'Brief/brief.pdf' '$run/stdout.txt'" "daftar path tercetak"
     periksa "$nama" "[[ '$log' == *OK* ]]" "drive.log mencatat OK"
+    if [[ "$daily" == dobel ]]; then
+      local terkirim tanggal_unik
+      terkirim="$(grep -c '^TAR ' "$run/stderr.txt" || true)"
+      # Tanggal diambil dari nama berkas: db-20261118T... dan weekly-db-20261118T... sama tanggalnya.
+      tanggal_unik="$(grep '^TAR ' "$run/stderr.txt" | grep -o '[0-9]\{8\}T' | sort -u | wc -l | tr -d ' ')"
+      periksa "$nama" "[[ '$terkirim' == '$tanggal_unik' ]]" "dump yang dikirim satu per tanggal ($terkirim berkas, $tanggal_unik tanggal)"
+      periksa "$nama" "[[ '$terkirim' == 2 ]]" "dua tanggal dump yang dikirim (dapat $terkirim)"
+      periksa "$nama" "grep -q 'TAR db-20261118T210000Z.dump' '$run/stderr.txt'" "dump terbaru di tanggal itu yang dipakai"
+      periksa "$nama" "! grep -q 'TAR db-20261118T200000Z.dump' '$run/stderr.txt'" "dump lama di tanggal yang sama tidak ikut"
+    fi
   else
     periksa "$nama" "[[ $kode == 1 ]]" "keluar dengan kode 1 (dapat $kode)"
     periksa "$nama" "! grep -q 'Creating' '$run/stderr.txt'" "pesan galat bebas baris progres Compose"
@@ -103,9 +120,23 @@ jalankan() {
   echo
 }
 
+# Dump bertanggal sama: tiga kali backup di hari yang sama, plus satu dump mingguan yang bertanggal sama
+# dengan salah satu dump harian. Nama di Drive dibuat per tanggal, jadi yang terkirim harus satu per tanggal.
+dump_bertanggal_sama() {
+  local dir="$1"
+  echo isi1 >"$dir/db-20261118T200000Z.dump"
+  sleep 0.1
+  echo isi2 >"$dir/db-20261118T203000Z.dump"
+  sleep 0.1
+  echo isi3 >"$dir/db-20261118T210000Z.dump"   # terbaru di tanggal 18
+  echo isi4 >"$dir/db-20261117T200000Z.dump"
+  echo isi5 >"$dir/weekly-db-20261117T200000Z.dump"
+}
+
 jalankan tanpa-weekly 0 1
 jalankan tanpa-dump-apa-pun 0 0
 jalankan keduanya-ada 1 1
+jalankan dump-bertanggal-sama 0 dobel
 jalankan stage-gagal 1 1 stage
 jalankan stage-gagal-tanpa-pesan 1 1 sunyi
 

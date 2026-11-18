@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -47,6 +48,36 @@ type Manifest struct {
 	// Extra adalah berkas yang memang diunggah ulang setiap malam (ekspor bulanan dan dump), jadi tidak dicatat.
 	Extra []string `json:"extra"`
 	Bytes int64    `json:"bytes"`
+	// Counts dan Skipped mengisi ringkasan uji kering: berapa berkas per jenis, dan apa sebabnya kalau ada
+	// jenis yang kosong. Tanpa ini, job yang tidak menyalin apa pun terlihat sama dengan job yang berhasil.
+	Counts  map[string]int `json:"counts"`
+	Skipped map[string]int `json:"skipped"`
+}
+
+// Jenis berkas di ringkasan. Urutannya dipakai saat dicetak, jadi laporannya selalu sama.
+var KindOrder = []string{KindBrief, KindDeliverable, KindSubtask, KindActivity, KindExport, KindDump}
+
+const (
+	KindBrief       = "brief"
+	KindDeliverable = "deliverable"
+	KindSubtask     = "sub task"
+	KindActivity    = "aktivitas"
+	KindExport      = "ekspor bulanan"
+	KindDump        = "dump"
+)
+
+func (m *Manifest) count(kind string, n int) {
+	if m.Counts == nil {
+		m.Counts = map[string]int{}
+	}
+	m.Counts[kind] += n
+}
+
+func (m *Manifest) skip(reason string) {
+	if m.Skipped == nil {
+		m.Skipped = map[string]int{}
+	}
+	m.Skipped[reason]++
 }
 
 type Service struct {
@@ -91,6 +122,18 @@ func (s *Service) Stage(ctx context.Context, dumps io.Reader, dryRun bool) (Mani
 			return m, err
 		}
 	}
+	if err := s.countSkipped(ctx, &m); err != nil {
+		return m, err
+	}
+	// Semua jenis muncul di ringkasan, termasuk yang nol, supaya jenis yang kosong langsung kelihatan.
+	for _, k := range KindOrder {
+		m.count(k, 0)
+	}
+	// Uji kering tidak menulis manifest. Kalau ada, `record` yang dijalankan sesudahnya akan mencatat semua
+	// berkas di drive_exports sebagai sudah terunggah padahal belum, dan berkas itu tidak pernah dicoba lagi.
+	if dryRun {
+		return m, nil
+	}
 	return m, s.writeManifest(m)
 }
 
@@ -105,14 +148,17 @@ func (s *Service) stageTaskFiles(ctx context.Context, m *Manifest, taken *takenC
 		if err != nil {
 			return err
 		}
+		jenis := KindDeliverable
 		if r.SubtaskID.Valid {
 			sub, err := s.subtaskFolderPath(ctx, q, folder, r, taken, dryRun)
 			if err != nil {
 				return err
 			}
 			folder = sub
+			jenis = KindSubtask
 		} else if r.Kind == sqlc.AttachmentKindBrief {
 			folder += "/Brief"
+			jenis = KindBrief
 		} else {
 			folder += "/Deliverable"
 		}
@@ -120,7 +166,9 @@ func (s *Service) stageTaskFiles(ctx context.Context, m *Manifest, taken *takenC
 		if err != nil {
 			return err
 		}
-		s.link(m, kindTaskFile, r.ID, folder+"/"+name, r.SizeBytes)
+		if s.link(m, kindTaskFile, r.ID, folder+"/"+name, r.SizeBytes) {
+			m.count(jenis, 1)
+		}
 	}
 	return nil
 }
@@ -181,7 +229,9 @@ func (s *Service) stageActivityFiles(ctx context.Context, m *Manifest, taken *ta
 		if err != nil {
 			return err
 		}
-		s.link(m, kindActivityFile, r.ID, folder+"/"+name, r.SizeBytes)
+		if s.link(m, kindActivityFile, r.ID, folder+"/"+name, r.SizeBytes) {
+			m.count(KindActivity, 1)
+		}
 	}
 	return nil
 }
@@ -201,6 +251,7 @@ func (s *Service) stageMonthlyExport(ctx context.Context, m *Manifest) error {
 	}
 	m.Extra = append(m.Extra, rel)
 	m.Bytes += int64(len(data))
+	m.count(KindExport, 1)
 	return nil
 }
 
@@ -228,6 +279,13 @@ func (s *Service) stageDumps(m *Manifest, r io.Reader) error {
 			continue
 		}
 		rel := DumpPath(h.Name)
+		// Pengaman: dua dump dengan tanggal sama memberi path yang sama dan akan saling menimpa. Yang memilih
+		// dump sudah menyaring satu per tanggal; kalau masih ada, yang pertama (terbaru) yang dipakai.
+		if slices.Contains(m.Extra, rel) {
+			s.log.Warn("dump dengan tanggal yang sama dilewati", "nama", h.Name, "path", rel)
+			m.skip("dump bertanggal sama")
+			continue
+		}
 		full, err := s.create(rel)
 		if err != nil {
 			return err
@@ -249,6 +307,7 @@ func (s *Service) stageDumps(m *Manifest, r io.Reader) error {
 		}
 		m.Extra = append(m.Extra, rel)
 		m.Bytes += n
+		m.count(KindDump, 1)
 	}
 }
 
@@ -278,27 +337,53 @@ func (s *Service) clearStaging() error {
 // dalam container, jadi container rclone harus memount storage di path yang sama.
 // Berkas yang barisnya ada tetapi berkasnya hilang dari disk dicatat di log dan dilewati, supaya satu berkas
 // hilang tidak membatalkan seluruh salinan malam itu.
-func (s *Service) link(m *Manifest, kind, id, rel string, size int64) {
+func (s *Service) link(m *Manifest, kind, id, rel string, size int64) bool {
 	src, err := s.store.PathFor(id)
 	if err != nil {
 		s.log.Warn("id lampiran tidak valid, dilewati", "kind", kind, "id", id, "err", err)
-		return
+		m.skip("id tidak sah")
+		return false
 	}
 	if _, err := os.Stat(src); err != nil {
-		s.log.Warn("berkas tidak ada di storage, dilewati", "kind", kind, "id", id, "err", err)
-		return
+		s.log.Warn("berkas tidak ada di storage, dilewati", "kind", kind, "id", id, "path", src, "err", err)
+		m.skip("berkas hilang di storage")
+		return false
 	}
 	dst := filepath.Join(s.staging, filepath.FromSlash(rel))
 	if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
 		s.log.Warn("folder staging tidak bisa dibuat, dilewati", "path", rel, "err", err)
-		return
+		m.skip("folder staging gagal")
+		return false
 	}
 	if err := os.Symlink(src, dst); err != nil {
 		s.log.Warn("symlink tidak bisa dibuat, dilewati", "kind", kind, "id", id, "err", err)
-		return
+		m.skip("symlink gagal")
+		return false
 	}
 	m.Files = append(m.Files, ManifestFile{Kind: kind, ID: id, Path: rel, Size: size})
 	m.Bytes += size
+	return true
+}
+
+// countSkipped mengambil alasan yang hanya bisa dilihat dari database: lampiran atau task yang sudah dihapus,
+// dan berkas yang memang sudah pernah terunggah.
+func (s *Service) countSkipped(ctx context.Context, m *Manifest) error {
+	q := sqlc.New(s.pool)
+	task, err := q.CountDriveSkipped(ctx)
+	if err != nil {
+		return fmt.Errorf("hitung lampiran task yang dilewati: %w", err)
+	}
+	aktivitas, err := q.CountActivityFilesSkipped(ctx)
+	if err != nil {
+		return fmt.Errorf("hitung lampiran aktivitas yang dilewati: %w", err)
+	}
+	if m.Skipped == nil {
+		m.Skipped = map[string]int{}
+	}
+	m.Skipped["lampiran sudah dihapus"] += int(task.LampiranDihapus)
+	m.Skipped["task sudah dihapus"] += int(task.TaskDihapus)
+	m.Skipped["sudah tercatat di drive_exports"] += int(task.SudahTercatat) + int(aktivitas)
+	return nil
 }
 
 func (s *Service) create(rel string) (*os.File, error) {

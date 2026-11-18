@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -65,9 +66,13 @@ func runDriveExport(cfg config.Config, log *slog.Logger, args []string) error {
 		if err != nil {
 			return err
 		}
+		// stdout hanya daftar path, karena drive-export.sh membacanya sebagai daftar berkas.
 		for _, p := range m.Listing() {
 			fmt.Println(p)
 		}
+		// Ringkasan ke stderr: jenis yang kosong langsung kelihatan, dan kalau tidak ada berkas baru,
+		// alasannya ikut tercetak, bukan hanya angka nol.
+		printSummary(m)
 		log.Info("staging siap", "berkas_baru", len(m.Files), "berkas_ditimpa", len(m.Extra),
 			"bytes", m.Bytes, "dry_run", *dryRun)
 		return nil
@@ -104,4 +109,30 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// printSummary menulis ringkasan per jenis dan alasan yang dilewati ke stderr.
+func printSummary(m driveexport.Manifest) {
+	fmt.Fprintln(os.Stderr, "ringkasan staging:")
+	for _, kind := range driveexport.KindOrder {
+		fmt.Fprintf(os.Stderr, "  %-16s %d\n", kind, m.Counts[kind])
+	}
+	if len(m.Skipped) == 0 {
+		return
+	}
+	// Urut menurut alasan, supaya laporannya sama di setiap run dan mudah dibandingkan.
+	alasan := make([]string, 0, len(m.Skipped))
+	for a, n := range m.Skipped {
+		if n > 0 {
+			alasan = append(alasan, a)
+		}
+	}
+	if len(alasan) == 0 {
+		return
+	}
+	sort.Strings(alasan)
+	fmt.Fprintln(os.Stderr, "dilewati:")
+	for _, a := range alasan {
+		fmt.Fprintf(os.Stderr, "  %-32s %d\n", a, m.Skipped[a])
+	}
 }

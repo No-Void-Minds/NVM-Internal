@@ -91,14 +91,30 @@ if [[ "$(stat -c %u "$STAGING_DIR_HOST")" != "$STORAGE_UID" ]]; then
     chown "$STORAGE_UID:$STORAGE_UID" /s 2>"$err_file" || fail "folder staging tidak bisa disiapkan: $(last_error)"
 fi
 
-# Dump yang diunggah: 3 terbaru, ditambah satu per minggu (salinan weekly-) sebanyak 8.
+# Dump yang diunggah: 3 tanggal harian terakhir, ditambah 8 tanggal mingguan (salinan weekly-).
 # find, bukan ls dengan glob: pola yang tidak cocok dengan apa pun (mis. belum ada backup mingguan) membuat
 # ls keluar dengan kode bukan nol, dan dengan pipefail plus set -E itu memanggil fail() di dalam process
 # substitution. awk, bukan head: head menutup pipa lebih awal sehingga find kena SIGPIPE, yang juga gagal.
+#
+# Satu tanggal cukup satu dump. Nama di Drive dibuat per tanggal (2026-11-18.dump.age), jadi tiga dump dari
+# tiga kali backup di hari yang sama akan saling menimpa. Yang dipakai dump terbaru di tanggal itu, karena
+# isinya paling lengkap; jatah harian dan mingguan juga disaring sekali lagi bersama, supaya dump mingguan
+# yang bertanggal sama dengan dump harian tidak terkirim dua kali.
+satu_per_tanggal() {
+  awk '{
+    path = $0
+    n = split(path, bagian, "/")
+    nama = bagian[n]
+    tanggal = (match(nama, /[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T/) > 0) ? substr(nama, RSTART, 8) : nama
+    if (!(tanggal in terlihat)) { terlihat[tanggal] = 1; print path }
+  }'
+}
+
 pilih_dump() {
   local pola="$1" n="$2"
   find "$BACKUP_DIR" -maxdepth 1 -type f -name "$pola" -printf '%T@ %p\n' |
-    sort -rn | awk -v n="$n" 'NR <= n { print substr($0, index($0, " ") + 1) }'
+    sort -rn | awk '{ print substr($0, index($0, " ") + 1) }' |
+    satu_per_tanggal | awk -v n="$n" 'NR <= n'
 }
 dumps=()
 while IFS= read -r berkas; do
@@ -107,7 +123,7 @@ done < <(
   {
     pilih_dump 'db-*.dump' "$DRIVE_DUMP_DAILY"
     pilih_dump 'weekly-db-*.dump' "$DRIVE_DUMP_WEEKLY"
-  } | sort -u || true
+  } | satu_per_tanggal || true
 )
 if [[ -z "${DRIVE_BACKUP_AGE_RECIPIENT:-}" ]]; then
   echo "DRIVE_BACKUP_AGE_RECIPIENT kosong: dump tidak diunggah, hanya berkas aplikasi" >&2
@@ -133,6 +149,9 @@ size="$(du -shL "$STAGING_DIR_HOST" 2>/dev/null | cut -f1 || echo -)"
 if [[ "$dry_run" == 1 ]]; then
   echo "uji kering, tidak diunggah. $files path:"
   cat "$err_file.list"
+  # Ringkasan per jenis dan peringatan per berkas ada di stderr perintah Go. Tanpa baris ini, keduanya
+  # ikut terbuang bersama berkas sementara, dan uji kering tidak bisa dipakai untuk mendiagnosis apa pun.
+  cat "$err_file" >&2
   rm -f "$err_file" "$err_file.list"
   log_line OK "uji kering"
   exit 0

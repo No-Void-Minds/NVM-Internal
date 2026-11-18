@@ -381,10 +381,38 @@ Kalau variabel itu kosong, berkas aplikasi tetap diunggah dan dumpnya tidak, den
 Uji kering hanya menyusun staging dan mencetak daftar path, tanpa menyentuh database dan tanpa mengunggah apa pun:
 
 ```bash
-/srv/nvm-internal/deploy/drive-export.sh --dry-run | head -40
+/srv/nvm-internal/deploy/drive-export.sh --dry-run
 ```
 
-Periksa strukturnya: nama folder task, nama Staf, jam di depan nama berkas, dan ekspor bulanan. Setelah cocok, jalankan sekali sungguhan:
+Daftar path keluar di stdout, dan ringkasan per jenis di stderr, bentuknya seperti ini:
+
+```
+ringkasan staging:
+  brief            4
+  deliverable      2
+  sub task         0
+  aktivitas        0
+  ekspor bulanan   1
+  dump             2
+dilewati:
+  lampiran sudah dihapus           1
+```
+
+Periksa strukturnya: nama folder task, nama Staf, jam di depan nama berkas, dan ekspor bulanan. Kalau ada jenis yang nol padahal seharusnya ada isinya, bagian `dilewati` menyebut sebabnya. Tiga perintah baca untuk mendalaminya. Semuanya hanya membaca: query dijalankan dengan `default_transaction_read_only=on`, jadi salah ketik pun tidak bisa mengubah data:
+
+```bash
+docker exec -i -e PGOPTIONS="-c default_transaction_read_only=on" nvm-internal-postgres psql -U nvm_internal_migrator -d nvm_internal_prod -c "SELECT a.id::text AS lampiran, a.task_id, t.is_deleted AS task_dihapus, (a.subtask_id IS NOT NULL) AS di_sub_task, EXISTS (SELECT 1 FROM drive_exports d WHERE d.source_kind = 'task_attachment' AND d.source_id = a.id::text) AS sudah_tercatat, 'attachments/' || substr(a.id::text, 1, 2) || '/' || a.id::text AS path_di_storage FROM task_attachments a JOIN tasks t ON t.id = a.task_id WHERE NOT a.is_deleted ORDER BY a.uploaded_at"
+```
+
+```bash
+docker run --rm --network none --user 65532:65532 -v /srv/nvm-internal/storage:/data/storage:ro alpine:3.22 sh -c 'find /data/storage/attachments -type f | head -20; echo "jumlah: $(find /data/storage/attachments -type f | wc -l)"'
+```
+
+```bash
+docker exec -i -e PGOPTIONS="-c default_transaction_read_only=on" nvm-internal-postgres psql -U nvm_internal_migrator -d nvm_internal_prod -c "SELECT source_kind, source_id, drive_path, exported_at FROM drive_exports ORDER BY exported_at" -c "SELECT id, finished_at, ok, files, message FROM drive_export_runs ORDER BY id"; tail -5 /srv/nvm-internal/backup/drive.log
+```
+
+Yang pertama memperlihatkan apakah task-nya sudah dihapus, apakah berkasnya sudah tercatat, dan di path mana berkasnya seharusnya berada. Yang kedua memperlihatkan berkas yang benar-benar ada di disk, dibaca sebagai UID 65532 dengan storage `:ro`, jadi aman dijalankan saat aplikasi sedang dipakai. Yang ketiga memperlihatkan berkas yang sudah tercatat terunggah dan riwayat run: baris `drive_exports` tanpa run OK yang cocok berarti `record` pernah dijalankan tanpa unggahan. Setelah cocok, jalankan sekali sungguhan:
 
 ```bash
 /srv/nvm-internal/deploy/drive-export.sh && tail -1 /srv/nvm-internal/backup/drive.log
