@@ -1109,7 +1109,9 @@ Keputusan teknis:
 
 **Selesai kalau:** `./scripts/check.sh` lolos, test di atas lolos, curl skenario dua sub task memberi hasil yang diharapkan, dan E2E `revision` lolos di 360 dan 1280 px.
 
-**Hasil:** kode selesai 2026-11-18, `./scripts/check.sh` lolos, unit test lolos. Test DB menunggu `TEST_DATABASE_URL`. Curl dan E2E `revision` menunggu restart backend (backend yang jalan masih mengirim `subtask_pic_matches`).
+**Hasil:** kode selesai 2026-11-18, `./scripts/check.sh` lolos, unit test lolos. Setelah restart backend: `scripts/uji-revisi22.sh` 26 lolos 0 gagal (setiap penolakan dicek kode dan isi pesannya), E2E `revision` 28 pemeriksaan 0 gagal di 360 dan 1280 px. Test DB menunggu `TEST_DATABASE_URL`.
+
+**Catatan pengujian:** versi pertama `uji-revisi22.sh` membaca detail task di tingkat atas, padahal `GET /api/tasks/:id` membungkusnya di kunci `task`. Akibatnya version dan id sub task kosong, dan kasus 400 ikut "lolos" dengan pesan "Isian tidak terbaca.". Skrip sekarang membaca `d['task']`, mencocokkan pesan galat, dan berhenti bila nilai yang dibutuhkan kosong. E2E `revision` punya kesalahan bentuk yang sama di persiapan datanya dan sudah dibetulkan, ditambah pemilihan kolom Ready di layar sempit.
 
 ## Sprint 12: Persiapan deploy dan migrasi data
 

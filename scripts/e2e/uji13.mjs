@@ -1378,7 +1378,8 @@ async function setupRevisionTask(title) {
       `buat task ${created.status} ${JSON.stringify(created.body)}`,
     );
   const id = created.body.id;
-  const detail = async () => (await mgr.call("GET", `/tasks/${id}`)).body;
+  // GET /tasks/:id membungkus isinya di kunci "task".
+  const detail = async () => (await mgr.call("GET", `/tasks/${id}`)).body.task;
   let d = await detail();
   await mgr.call("POST", `/tasks/${id}/move`, {
     version: d.version,
@@ -1417,6 +1418,10 @@ async function checkRevision(width) {
   const { ctx, page, errors } = await open("staf", width, "terang");
   await page.goto(BASE + "/task");
   await page.waitForLoadState("networkidle");
+  // Di layar sempit papan hanya menampilkan satu kolom; task uji ada di kolom Ready.
+  const pilihKolom = page.locator("[aria-label='Pilih kolom']");
+  if (await pilihKolom.isVisible())
+    await pilihKolom.getByRole("button", { name: /^Ready/ }).click();
   const kartu = page.locator("article", {
     has: page.locator("h3", { hasText: title }),
   });
