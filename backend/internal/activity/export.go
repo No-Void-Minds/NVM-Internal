@@ -3,6 +3,7 @@ package activity
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -93,10 +94,26 @@ func exportRows(title string, people []Person, days []exportDay) [][]string {
 				if cells == nil {
 					continue
 				}
-				r[3+2*i], r[4+2*i] = cells[slot].Activity, cells[slot].Output
+				r[3+2*i], r[4+2*i] = cells[slot].Activity, outputWithFiles(cells[slot])
 			}
 			out = append(out, r)
 		}
 	}
 	return out
+}
+
+// outputWithFiles menambahkan nama lampiran di bawah teks Output, dipisah baris baru. Berkasnya sendiri tidak
+// disematkan: sheet dengan video 95 MB di dalamnya tidak bisa dibuka siapa pun (revisi 24).
+func outputWithFiles(c Cell) string {
+	if len(c.Files) == 0 {
+		return c.Output
+	}
+	names := make([]string, 0, len(c.Files)+1)
+	if c.Output != "" {
+		names = append(names, c.Output)
+	}
+	for _, f := range c.Files {
+		names = append(names, f.Name)
+	}
+	return strings.Join(names, "\n")
 }

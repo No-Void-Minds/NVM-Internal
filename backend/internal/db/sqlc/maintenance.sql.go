@@ -71,9 +71,13 @@ func (q *Queries) DeleteOldAuditLogs(ctx context.Context, arg DeleteOldAuditLogs
 
 const listAttachmentFileIDs = `-- name: ListAttachmentFileIDs :many
 SELECT id::text FROM task_attachments
+UNION ALL
+SELECT id::text FROM activity_attachments
 `
 
 // Termasuk lampiran is_deleted: berkasnya sengaja disimpan, jadi bukan berkas yatim.
+// Lampiran Aktivitas Harian (revisi 24) menumpang folder attachments/ yang sama, jadi wajib ikut di sini:
+// tanpa UNION ini job pembersih berkas yatim akan menghapus semua berkasnya.
 func (q *Queries) ListAttachmentFileIDs(ctx context.Context) ([]string, error) {
 	rows, err := q.db.Query(ctx, listAttachmentFileIDs)
 	if err != nil {

@@ -1,6 +1,16 @@
 import { apiGet, apiPut } from './client'
 
 // Aktivitas Harian (revisi 21). Daftar slot jam datang dari backend, frontend tidak menulisnya sendiri.
+// Lampiran satu jam (revisi 24).
+export type ActivityFile = {
+  id: string
+  name: string
+  mime_type: string
+  size_bytes: number
+  // Nama pengunggah, hanya terisi bila bukan pemilik jamnya.
+  uploaded_by: string
+}
+
 export type ActivityCell = {
   slot: number
   time: string
@@ -8,6 +18,7 @@ export type ActivityCell = {
   output: string
   // Nama penyimpan terakhir, hanya terisi bila bukan pemilik isian (Manajer yang mengubah isian orang lain).
   updated_by: string
+  files: ActivityFile[]
 }
 
 // Satu kolom tabel Aktivitas: seluruh sel orang itu di rentang yang diminta, dikelompokkan per tanggal.

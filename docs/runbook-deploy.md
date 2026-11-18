@@ -107,7 +107,7 @@ docker exec "$PG_CONTAINER" psql -U nvm_internal_migrator -d nvm_internal_prod -
 docker exec "$PG_CONTAINER" rm /tmp/10-grants.sql
 ```
 
-Hasil query terakhir di `10-grants.sql` harus tepat enam tabel: `audit_logs`, `subtask_assignees`, `task_assignees`, `task_labels`, `task_subtasks`, `user_sessions`.
+Hasil query terakhir di `10-grants.sql` harus tepat tujuh tabel: `activity_attachments`, `audit_logs`, `subtask_assignees`, `task_assignees`, `task_labels`, `task_subtasks`, `user_sessions`.
 
 Cek bahwa role aplikasi tidak bisa mengubah skema (harus `permission denied`):
 
@@ -199,6 +199,41 @@ docker compose --env-file deploy/.env -f deploy/docker-compose.yml run --rm -T b
 
 `backup.log` berisi satu baris per run (OK atau GAGAL dan alasannya). Skrip keluar dengan kode bukan nol bila gagal. Berkas storage dibaca lewat container `alpine` sebagai UID 65532, jadi tidak perlu mengubah izin folder.
 
+#### Snapshot storage inkremental (revisi 24)
+
+Dump database tetap seperti sebelumnya. Storage tidak lagi di-tar setiap hari, tetapi disalin jadi snapshot di `backup/storage-snapshots/<stamp>/`:
+
+- snapshot baru dikloning dari snapshot sebelumnya dengan hardlink, lalu hanya berkas baru yang benar-benar disalin dan berkas yang sudah hilang dari storage dibuang,
+- berkas yang tidak berubah tidak memakan blok disk lagi, jadi lampiran 95 MB tidak tersalin 14 kali,
+- retensi sama dengan sebelumnya: 14 snapshot harian, dan snapshot hari Minggu (bertanda berkas `.weekly` di dalamnya) disimpan 8 pekan,
+- semuanya dikerjakan satu container `alpine` sebagai UID 65532 dengan `--network none` dan storage di-mount baca-saja. `rsync --link-dest` tidak dipakai karena rsync tidak ada di image itu dan memasangnya butuh jaringan.
+
+Arsip `storage-*.tar.gz` lama **tidak dihapus**. Snapshot berjalan di sampingnya, dan arsip lama hilang sendiri karena aturan retensi harian yang sudah ada.
+
+Baris log menjadi `db=... storage=... total=...`: `storage` adalah blok baru snapshot hari ini, `total` seluruh folder snapshot. Keduanya dihitung `du`, yang menghitung hardlink sekali.
+
+Uji di VM, jalankan dua kali berturut-turut:
+
+```bash
+/srv/nvm-internal/deploy/backup.sh && /srv/nvm-internal/deploy/backup.sh
+tail -2 /srv/nvm-internal/backup/backup.log
+cd /srv/nvm-internal/backup/storage-snapshots
+
+# Jumlah berkas harus sama di kedua snapshot (dan sama dengan storage).
+for d in */; do echo "$d $(find "$d" -type f ! -name .weekly | wc -l)"; done
+sudo find /srv/nvm-internal/storage -type f | wc -l
+
+# Ukuran: tiap snapshot "terlihat" penuh, tetapi totalnya hampir sama dengan satu snapshot saja,
+# karena du menghitung hardlink sekali.
+du -sh */
+du -sh .
+
+# Bukti hardlink: jumlah tautan sebuah berkas harus 2 atau lebih (satu per snapshot).
+sudo stat -c '%h %n' "$(sudo find . -type f ! -name .weekly | head -1)"
+```
+
+Kalau `du -sh .` kira-kira sebesar satu snapshot, bukan dua, snapshot inkrementalnya bekerja.
+
 ### Uji restore pertama (S14-04)
 
 Catat jam mulai dan selesai; targetnya di bawah 4 jam.
@@ -206,7 +241,7 @@ Catat jam mulai dan selesai; targetnya di bawah 4 jam.
 ```bash
 cd /srv/nvm-internal
 set -a; source deploy/.env; set +a
-DUMP="$(ls -t backup/db-*.dump | head -1)"; ARSIP="$(ls -t backup/storage-*.tar.gz | head -1)"
+DUMP="$(ls -t backup/db-*.dump | head -1)"; SNAP="$(ls -1d backup/storage-snapshots/*/ | tail -1)"
 date
 
 # 1. Database kosong untuk uji, dimiliki migrator.
@@ -219,17 +254,33 @@ for db in nvm_internal_prod nvm_internal_restore; do
     "SELECT '$db', (SELECT count(*) FROM tasks), (SELECT count(*) FROM users), (SELECT count(*) FROM task_attachments)"
 done
 
-# 3. Storage ke folder uji, lalu bandingkan jumlah berkas.
+# 3. Storage dari snapshot ke folder uji, lalu bandingkan jumlah berkas.
 mkdir -p /tmp/restore-storage
-tar -xzf "$ARSIP" -C /tmp/restore-storage
-find /tmp/restore-storage -type f | wc -l
+sudo cp -a "$SNAP." /tmp/restore-storage/
+sudo find /tmp/restore-storage -type f ! -name .weekly | wc -l
 sudo find /srv/nvm-internal/storage -type f | wc -l
 date
 ```
 
+Snapshot adalah folder biasa, jadi satu berkas bisa diambil sendiri tanpa mengekstrak apa pun:
+
+```bash
+sudo cp -a backup/storage-snapshots/<stamp>/attachments/ab/<uuid> /srv/nvm-internal/storage/attachments/ab/
+sudo chown 65532:65532 /srv/nvm-internal/storage/attachments/ab/<uuid>
+```
+
 Setelah dicatat, bersihkan database uji (`DROP DATABASE nvm_internal_restore` sebagai `nvm_internal`) dan `/tmp/restore-storage`.
 
-Pemulihan sungguhan memakai langkah yang sama, dengan target `nvm_internal_prod` yang dikosongkan dulu dan storage diekstrak ke `/srv/nvm-internal/storage`, lalu `sudo chown -R 65532:65532 /srv/nvm-internal/storage`.
+Pemulihan sungguhan memakai langkah yang sama, dengan target `nvm_internal_prod` yang dikosongkan dulu dan storage disalin dari satu snapshot:
+
+```bash
+SNAP=backup/storage-snapshots/<stamp>
+sudo rm -f "$SNAP/.weekly"                      # penanda retensi, bukan berkas aplikasi
+sudo cp -a "$SNAP/." /srv/nvm-internal/storage/
+sudo chown -R 65532:65532 /srv/nvm-internal/storage
+```
+
+`cp -a` dari snapshot tidak memakan ruang dua kali hanya bila targetnya di filesystem yang sama; ke `/srv` yang terpisah, berkasnya benar-benar disalin. Arsip `storage-*.tar.gz` yang masih ada tetap bisa dipakai dengan `tar -xzf` seperti sebelumnya.
 
 ### Salinan di luar VM (manual)
 
@@ -269,10 +320,12 @@ docker run --rm --network "$PG_NETWORK" -v "$PWD/backend/migrations:/migrations:
 # Migrasi 000013 (revisi 16, tenggat sub task) dan 000014 (revisi 18, catatan hasil) hanya menambah kolom,
 # jadi tidak perlu grants ulang.
 # Migrasi 000015 (revisi 19, task berulang) menambah tabel task_series: 10-grants.sql WAJIB dijalankan ulang
-# sesudahnya, lalu cek daftar DELETE di keluarannya tetap enam tabel (task_series tidak boleh ada di sana).
+# sesudahnya, lalu cek daftar DELETE di keluarannya tetap tujuh tabel (task_series tidak boleh ada di sana).
 # Migrasi 000016 (revisi 21, Aktivitas Harian) menambah tabel daily_activities: 10-grants.sql WAJIB dijalankan
-# ulang sesudahnya, lalu cek daftar DELETE di keluarannya tetap enam tabel (daily_activities tidak boleh ada
+# ulang sesudahnya, lalu cek daftar DELETE di keluarannya tetap tujuh tabel (daily_activities tidak boleh ada
 # di sana, karena sel yang dikosongkan disimpan NULL lewat UPDATE).
+# Migrasi 000017 (revisi 24, lampiran Aktivitas Harian) menambah tabel activity_attachments: 10-grants.sql WAJIB
+# dijalankan ulang sesudahnya, dan tabel itu MEMANG harus ada di daftar DELETE, jadi keluarannya tujuh tabel.
 docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
 curl -s http://127.0.0.1:8094/api/health
 ```

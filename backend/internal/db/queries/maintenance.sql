@@ -14,7 +14,11 @@ DELETE FROM audit_logs WHERE action = ANY(@actions::text[]) AND occurred_at < @b
 
 -- name: ListAttachmentFileIDs :many
 -- Termasuk lampiran is_deleted: berkasnya sengaja disimpan, jadi bukan berkas yatim.
-SELECT id::text FROM task_attachments;
+-- Lampiran Aktivitas Harian (revisi 24) menumpang folder attachments/ yang sama, jadi wajib ikut di sini:
+-- tanpa UNION ini job pembersih berkas yatim akan menghapus semua berkasnya.
+SELECT id::text FROM task_attachments
+UNION ALL
+SELECT id::text FROM activity_attachments;
 
 -- name: ListAvatarFileIDs :many
 SELECT avatar_id::text FROM users WHERE avatar_id IS NOT NULL;

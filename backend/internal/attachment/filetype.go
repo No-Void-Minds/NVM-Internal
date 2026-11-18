@@ -67,13 +67,23 @@ var rules = map[string]rule{
 // Detect memeriksa isi berkas terhadap ekstensi nama aslinya dan mengembalikan MIME yang terbukti dari isi.
 // Ekstensi yang cocok saja tidak cukup: EXE yang diganti nama menjadi .pdf tetap ditolak (NFR-SEC-09 a).
 func Detect(f *os.File, size int64, originalName string) (string, error) {
+	return detectWith(rules, allowedList, f, size, originalName)
+}
+
+// DetectActivity memakai daftar izin lampiran Aktivitas Harian (revisi 24), yang menambah gambar WebP dan GIF,
+// video, dan ZIP di atas daftar lampiran task. Aturan isi-harus-cocok-dengan-ekstensi sama persis.
+func DetectActivity(f *os.File, size int64, originalName string) (string, error) {
+	return detectWith(activityRules, ActivityAllowedList, f, size, originalName)
+}
+
+func detectWith(ruleset map[string]rule, allowed string, f *os.File, size int64, originalName string) (string, error) {
 	ext := strings.ToLower(path.Ext(strings.ReplaceAll(originalName, `\`, "/")))
-	r, ok := rules[ext]
+	r, ok := ruleset[ext]
 	if !ok {
 		if macroExts[ext] {
 			return "", macro()
 		}
-		return "", reject("Tipe berkas ini tidak diizinkan. Yang diizinkan: %s.", allowedList)
+		return "", reject("Tipe berkas ini tidak diizinkan. Yang diizinkan: %s.", allowed)
 	}
 	if size <= 0 {
 		return "", reject("Berkas kosong.")
@@ -85,6 +95,63 @@ func Detect(f *os.File, size int64, originalName string) (string, error) {
 		return "", err
 	}
 	return r.mime, nil
+}
+
+// ActivityAllowedList dipakai pesan galat dan harus sama dengan daftar di frontend (utils/activityFile.ts).
+const ActivityAllowedList = "JPG, PNG, WebP, GIF, MP4, MOV, WebM, PDF, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT, CSV, dan ZIP"
+
+// activityRules menambah gambar, video, dan ZIP di atas daftar lampiran task. SVG sengaja tidak ada: isinya
+// XML yang bisa memuat skrip, dan tidak ada gunanya sebagai bukti kerja.
+var activityRules = func() map[string]rule {
+	m := map[string]rule{
+		".webp": {"image/webp", riff("WEBP")},
+		".gif":  {"image/gif", anyPrefix([]byte("GIF87a"), []byte("GIF89a"))},
+		// MP4 dan MOV sama-sama ISO Base Media: kotak "ftyp" ada di offset 4. Merek di dalamnya tidak dipakai,
+		// karena MOV dari iPhone dan MP4 dari kamera memakai merek yang bermacam-macam.
+		".mp4":  {"video/mp4", prefixAt(4, []byte("ftyp"))},
+		".mov":  {"video/quicktime", prefixAt(4, []byte("ftyp"))},
+		".webm": {"video/webm", prefix([]byte{0x1A, 0x45, 0xDF, 0xA3})},
+		// ZIP kosong memakai tanda End Of Central Directory, bukan Local File Header.
+		".zip": {"application/zip", anyPrefix([]byte("PK"), []byte("PK"))},
+	}
+	for ext, r := range rules {
+		m[ext] = r
+	}
+	return m
+}()
+
+func prefixAt(offset int64, sig []byte) func(*os.File, int64) error {
+	return func(f *os.File, _ int64) error {
+		head := make([]byte, len(sig))
+		if _, err := f.ReadAt(head, offset); err != nil || !bytes.Equal(head, sig) {
+			return mismatch()
+		}
+		return nil
+	}
+}
+
+func anyPrefix(sigs ...[]byte) func(*os.File, int64) error {
+	return func(f *os.File, size int64) error {
+		for _, sig := range sigs {
+			if err := prefix(sig)(f, size); err == nil {
+				return nil
+			}
+			if _, err := f.Seek(0, io.SeekStart); err != nil {
+				return err
+			}
+		}
+		return mismatch()
+	}
+}
+
+// riff memeriksa wadah RIFF: "RIFF" di awal dan nama format di offset 8, mis. "WEBP".
+func riff(format string) func(*os.File, int64) error {
+	return func(f *os.File, size int64) error {
+		if err := prefix([]byte("RIFF"))(f, size); err != nil {
+			return err
+		}
+		return prefixAt(8, []byte(format))(f, size)
+	}
 }
 
 func prefix(sig []byte) func(*os.File, int64) error {

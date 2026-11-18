@@ -36,9 +36,10 @@ var Categories = map[string][]string{
 		// Revisi 19: task berulang.
 		"series_created", "series_updated", "series_stopped", "occurrence_created",
 	},
-	// Revisi 21: hanya perubahan Manajer pada isian orang lain yang tercatat, bukan isian Staf sendiri.
+	// Revisi 21 dan 24: hanya perubahan Manajer pada isian dan lampiran orang lain yang tercatat,
+	// bukan yang dilakukan Staf pada jamnya sendiri.
 	"activity": {
-		"activity_updated",
+		"activity_updated", "activity_file_added", "activity_file_deleted",
 	},
 }
 

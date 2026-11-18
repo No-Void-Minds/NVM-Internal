@@ -13,6 +13,8 @@
 // E2E_ONLY=subtaskresult (kelompok Arahan dan Hasil serta simpan catatan hasil, revisi 18; menulis catatan hasil
 // ke satu sub task di database dev),
 // E2E_ONLY=schedule (bagian Jadwal di form Buat task, revisi 19; tidak menyimpan apa pun),
+// E2E_ONLY=activityfiles (lampiran Aktivitas Harian, revisi 24; mengunggah dua berkas kecil ke jam pertama
+// milik akun Staf di database dev, lalu menghapusnya lagi),
 // E2E_ONLY=activity (Aktivitas Harian, revisi 21; menulis satu sel aktivitas hari ini milik akun Staf dan
 // satu sel lewat dialog Manajer di database dev, output-nya tautan file Drive karangan).
 // E2E_ONLY=revision (revisi 22: dua kelompok PIC di kartu dan PIC sub task mengembalikan Ready ke On Progress;
@@ -1626,6 +1628,164 @@ async function checkStatusPage(role, width) {
 if (ONLY === "status")
   for (const role of ["admin", "manajer", "staf"])
     for (const w of [360, 1280]) await checkStatusPage(role, w);
+
+// Lampiran Aktivitas Harian (revisi 24): unggah lewat input berkas, paste gambar, pratinjau yang dibuka dan
+// ditutup dengan keyboard, hapus, dan tanpa gulir horizontal halaman.
+async function checkActivityFiles(width) {
+  const { ctx, page, errors } = await open("staf", width, "terang");
+  const where = (what) => `lampiran ${width} ${what}`;
+  const expect = (cond, w, msg) => {
+    checks++;
+    if (!cond) fail(where(w), msg);
+  };
+  // PNG 1x1 yang lolos pemeriksaan magic bytes di backend.
+  const pngBase64 =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==";
+  const nama = `uji-${Date.now()}.png`;
+
+  await page.goto(BASE + "/task");
+  await page.waitForLoadState("networkidle");
+  const judul = page.getByRole("button", { name: /Aktivitas hari ini/ });
+  if ((await judul.getAttribute("aria-expanded")) === "false")
+    await judul.click();
+  await page.waitForSelector("textarea:visible");
+
+  // Unggah lewat input berkas jam pertama. Input-nya sr-only, jadi diisi langsung, bukan lewat klik tombol.
+  const input = page.locator("input[type=file]").first();
+  await input.setInputFiles({
+    name: nama,
+    mimeType: "image/png",
+    buffer: Buffer.from(pngBase64, "base64"),
+  });
+  const munculLampiran = await page
+    .getByRole("button", { name: `Pratinjau ${nama}` })
+    .first()
+    .waitFor({ timeout: 15000 })
+    .then(
+      () => true,
+      () => false,
+    );
+  expect(munculLampiran, "unggah", "lampiran tidak muncul setelah diunggah");
+  await audit(page, errors, where("kartu dengan lampiran"));
+
+  // Paste gambar di textarea Aktivitas jam pertama: namanya dibuat sendiri (tangkapan-09.00-n.png).
+  const sebelum = await page.locator("input[type=file]").count();
+  expect(sebelum > 0, "paste", "input berkas tidak ditemukan");
+  await page.evaluate(async (b64) => {
+    const area = document.querySelector("textarea");
+    if (!area) throw new Error("textarea tidak ada");
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const file = new File([bytes], "image.png", { type: "image/png" });
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    area.focus();
+    area.dispatchEvent(
+      new ClipboardEvent("paste", {
+        clipboardData: dt,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  }, pngBase64);
+  const adaTangkapan = await page
+    .getByRole("button", { name: /Pratinjau tangkapan-09\.00-\d+\.png/ })
+    .first()
+    .waitFor({ timeout: 15000 })
+    .then(
+      () => true,
+      () => false,
+    );
+  expect(adaTangkapan, "paste", "gambar yang ditempel tidak terunggah");
+
+  // Pratinjau dengan keyboard: Enter membuka dialog, Escape menutupnya.
+  const pemicu = page
+    .getByRole("button", { name: `Pratinjau ${nama}` })
+    .first();
+  await pemicu.focus();
+  await page.keyboard.press("Enter");
+  const terbuka = await page
+    .waitForSelector("dialog[open]", { timeout: 5000 })
+    .then(
+      () => true,
+      () => false,
+    );
+  expect(terbuka, "pratinjau", "Enter tidak membuka pratinjau");
+  if (terbuka) {
+    const gambar = await page
+      .locator("dialog[open] img")
+      .first()
+      .waitFor({ timeout: 10000 })
+      .then(
+        () => true,
+        () => false,
+      );
+    expect(gambar, "pratinjau", "gambar pratinjau tidak dimuat");
+    await audit(page, errors, where("dialog pratinjau"));
+    await page.keyboard.press("Escape");
+    const tertutup = await page
+      .waitForFunction(() => !document.querySelector("dialog[open]"), null, {
+        timeout: 5000,
+      })
+      .then(
+        () => true,
+        () => false,
+      );
+    expect(tertutup, "pratinjau", "Escape tidak menutup pratinjau");
+  }
+
+  // Hapus: tombol hapus membuka konfirmasi, lalu lampirannya hilang dari sel.
+  await page
+    .getByRole("button", { name: `Hapus ${nama}` })
+    .first()
+    .click();
+  await page.waitForSelector("dialog[open]");
+  await page
+    .locator("dialog[open]")
+    .getByRole("button", { name: "Hapus", exact: true })
+    .click();
+  const hilang = await page
+    .getByRole("button", { name: `Pratinjau ${nama}` })
+    .first()
+    .waitFor({ state: "detached", timeout: 15000 })
+    .then(
+      () => true,
+      () => false,
+    );
+  expect(hilang, "hapus", "lampiran masih ada setelah dihapus");
+
+  const lebar = await page.evaluate(() => [
+    document.documentElement.scrollWidth,
+    window.innerWidth,
+  ]);
+  expect(
+    lebar[0] <= lebar[1],
+    "lebar",
+    `scrollWidth ${lebar[0]} > ${lebar[1]}`,
+  );
+
+  // Sisa tangkapan layar dibersihkan supaya database dev tidak menumpuk berkas uji.
+  for (const tombol of await page
+    .getByRole("button", { name: /^Hapus tangkapan-09\.00-\d+\.png$/ })
+    .all()) {
+    await tombol.click();
+    await page.waitForSelector("dialog[open]");
+    await page
+      .locator("dialog[open]")
+      .getByRole("button", { name: "Hapus", exact: true })
+      .click();
+    await page.waitForTimeout(500);
+  }
+
+  checks++;
+  if (errors.length)
+    fail(where("console"), errors.splice(0).join(" | ").slice(0, 300));
+  await ctx.close();
+}
+
+if (ONLY === "activityfiles")
+  for (const w of [360, 1280]) await checkActivityFiles(w);
 
 await browser.close();
 console.log(

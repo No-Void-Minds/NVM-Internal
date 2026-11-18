@@ -9,16 +9,19 @@
 REVOKE DELETE ON ALL TABLES IN SCHEMA public FROM nvm_internal_app;
 
 GRANT DELETE ON
-  task_subtasks,      -- DeleteSubtasks
-  subtask_assignees,  -- RemoveSubtaskAssignees (juga lewat ON DELETE CASCADE)
-  task_assignees,     -- RemoveTaskAssignees saat Manajer mengganti PIC task (revisi 6)
-  task_labels,        -- DeleteTaskLabels
-  user_sessions,      -- job maintenance: sesi kedaluwarsa
-  audit_logs          -- job maintenance: audit log login lebih dari 1 tahun
+  task_subtasks,         -- DeleteSubtasks
+  subtask_assignees,     -- RemoveSubtaskAssignees (juga lewat ON DELETE CASCADE)
+  task_assignees,        -- RemoveTaskAssignees saat Manajer mengganti PIC task (revisi 6)
+  task_labels,           -- DeleteTaskLabels
+  activity_attachments,  -- DeleteActivityAttachment: lampiran aktivitas dihapus permanen (revisi 24)
+  user_sessions,         -- job maintenance: sesi kedaluwarsa
+  audit_logs             -- job maintenance: audit log login lebih dari 1 tahun
 TO nvm_internal_app;
 
 -- daily_activities (migrasi 000016, revisi 21) sengaja tidak ada di daftar DELETE: sel yang dikosongkan
--- disimpan sebagai NULL lewat UPDATE, barisnya tidak pernah dihapus.
+-- disimpan sebagai NULL lewat UPDATE, barisnya tidak pernah dihapus. Lampiran aktivitas (migrasi 000017,
+-- revisi 24) justru sebaliknya: berkasnya bisa 95 MB, jadi hapus berarti baris dan berkasnya ikut hilang,
+-- dan tabelnya masuk daftar DELETE di atas. Daftar itu sekarang tujuh tabel.
 
 -- task_series (migrasi 000015, revisi 19) sengaja tidak ada di daftar DELETE: seri hanya dihentikan
 -- (active = false) dan templatnya JSONB yang diganti utuh lewat UPDATE. SELECT, INSERT, dan UPDATE-nya datang dari

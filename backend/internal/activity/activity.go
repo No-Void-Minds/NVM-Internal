@@ -19,6 +19,7 @@ import (
 	"nvm-internal/internal/apperr"
 	"nvm-internal/internal/audit"
 	"nvm-internal/internal/db/sqlc"
+	"nvm-internal/internal/storage"
 )
 
 // Slots adalah jam kerja yang bisa diisi. Nomor slot yang tersimpan di database adalah indeks + 1, jadi
@@ -63,6 +64,8 @@ type Cell struct {
 	Output   string `json:"output"`
 	// Nama penyimpan terakhir, hanya diisi bila bukan pemilik isian (Manajer yang mengubah isian orang lain).
 	UpdatedBy string `json:"updated_by"`
+	// Lampiran jam itu (revisi 24). Selalu ada, kosong berarti belum ada berkas.
+	Files []FileInfo `json:"files"`
 }
 
 // Person adalah satu kolom tabel Aktivitas: isinya seluruh sel orang itu di rentang yang diminta, dikelompokkan
@@ -105,12 +108,14 @@ type SaveInput struct {
 
 type Service struct {
 	pool *pgxpool.Pool
+	// files dipakai lampiran per jam (revisi 24); folder dan aturan namanya sama dengan lampiran task.
+	files *storage.Store
 	// now bisa diganti di test supaya aturan "hanya hari ini" bisa diuji tanpa mengubah jam sistem.
 	now func() time.Time
 }
 
-func NewService(pool *pgxpool.Pool) *Service {
-	return &Service{pool: pool, now: time.Now}
+func NewService(pool *pgxpool.Pool, files *storage.Store) *Service {
+	return &Service{pool: pool, files: files, now: time.Now}
 }
 
 // Today adalah tanggal kantor hari ini dalam bentuk "2006-01-02".
@@ -179,19 +184,9 @@ func (s *Service) Save(ctx context.Context, actor Actor, in SaveInput) error {
 	}
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := sqlc.New(tx)
-		owner, err := q.GetUserForUpdate(ctx, in.UserID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return apperr.Invalid("Akun tidak ditemukan.")
-		}
+		owner, err := requireStaffOwner(ctx, q, in.UserID)
 		if err != nil {
 			return err
-		}
-		// Tabel aktivitas hanya ada untuk Staf, jadi Manajer pun tidak bisa menitipkan isian ke Manajer lain.
-		if owner.Role != sqlc.UserRoleStaff {
-			return apperr.Invalid("Isian aktivitas hanya ada untuk akun Staf.")
-		}
-		if !owner.IsActive {
-			return apperr.Invalid("Akun ini sudah nonaktif, isiannya tidak bisa diubah.")
 		}
 
 		before, err := q.GetDailyActivity(ctx, sqlc.GetDailyActivityParams{
@@ -232,6 +227,15 @@ func (s *Service) Mine(ctx context.Context, userID int64, date string) (Mine, er
 	for _, r := range rows {
 		if r.UserID == userID {
 			fill(out.Cells, r)
+		}
+	}
+	files, err := s.fileRows(ctx, date, date)
+	if err != nil {
+		return out, err
+	}
+	for _, r := range files {
+		if r.UserID == userID {
+			addFile(out.Cells, r)
 		}
 	}
 	return out, nil
@@ -279,6 +283,10 @@ func (s *Service) collect(ctx context.Context, from, to string) ([]Person, []str
 	if err != nil {
 		return nil, nil, err
 	}
+	files, err := s.fileRows(ctx, from, to)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	people := make([]Person, 0, len(rows))
 	index := make(map[int64]int, len(rows))
@@ -306,6 +314,18 @@ func (s *Service) collect(ctx context.Context, from, to string) ([]Person, []str
 	// tanpa itu Manajer tidak punya sel untuk diisi di akhir pekan. Aturan "akhir pekan hanya bila ada isinya"
 	// berlaku untuk rentang, yaitu tampilan mingguan dan ekspor.
 	single := from == to
+	for _, r := range files {
+		i, ok := index[r.UserID]
+		if !ok {
+			continue
+		}
+		key := r.ActivityDate.Time.Format(dayLayout)
+		if people[i].Days[key] == nil {
+			people[i].Days[key] = emptyCells()
+		}
+		addFile(people[i].Days[key], r)
+	}
+
 	dates := []string{}
 	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
 		key := d.Format(dayLayout)
@@ -321,7 +341,7 @@ func (s *Service) collect(ctx context.Context, from, to string) ([]Person, []str
 				people[i].Days[key] = emptyCells()
 			}
 			for _, c := range people[i].Days[key] {
-				if c.Activity != "" || c.Output != "" {
+				if c.Activity != "" || c.Output != "" || len(c.Files) > 0 {
 					people[i].Filled++
 				}
 			}
@@ -359,7 +379,7 @@ func parseSpan(from, to string) (time.Time, time.Time, error) {
 func dayHasContent(people []Person, date string) bool {
 	for _, p := range people {
 		for _, c := range p.Days[date] {
-			if c.Activity != "" || c.Output != "" {
+			if c.Activity != "" || c.Output != "" || len(c.Files) > 0 {
 				return true
 			}
 		}
@@ -382,7 +402,7 @@ func (s *Service) rows(ctx context.Context, from, to string) ([]sqlc.ListDailyAc
 func emptyCells() []Cell {
 	cells := make([]Cell, len(Slots))
 	for i, label := range Slots {
-		cells[i] = Cell{Slot: i + 1, Time: label}
+		cells[i] = Cell{Slot: i + 1, Time: label, Files: []FileInfo{}}
 	}
 	return cells
 }

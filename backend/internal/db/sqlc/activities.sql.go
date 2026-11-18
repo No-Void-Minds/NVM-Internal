@@ -11,6 +11,66 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countActivityAttachments = `-- name: CountActivityAttachments :one
+SELECT count(*) FROM activity_attachments
+WHERE user_id = $1 AND activity_date = $2 AND slot = $3
+`
+
+type CountActivityAttachmentsParams struct {
+	UserID       int64
+	ActivityDate pgtype.Date
+	Slot         int16
+}
+
+func (q *Queries) CountActivityAttachments(ctx context.Context, arg CountActivityAttachmentsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countActivityAttachments, arg.UserID, arg.ActivityDate, arg.Slot)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const deleteActivityAttachment = `-- name: DeleteActivityAttachment :exec
+DELETE FROM activity_attachments WHERE id = $1::uuid
+`
+
+func (q *Queries) DeleteActivityAttachment(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteActivityAttachment, id)
+	return err
+}
+
+const getActivityAttachment = `-- name: GetActivityAttachment :one
+SELECT a.id::text AS id, a.user_id, a.activity_date, a.slot, a.original_name, a.mime_type, a.size_bytes, a.created_at
+FROM activity_attachments a
+WHERE a.id = $1::uuid
+`
+
+type GetActivityAttachmentRow struct {
+	ID           string
+	UserID       int64
+	ActivityDate pgtype.Date
+	Slot         int16
+	OriginalName string
+	MimeType     string
+	SizeBytes    int64
+	CreatedAt    pgtype.Timestamptz
+}
+
+func (q *Queries) GetActivityAttachment(ctx context.Context, id pgtype.UUID) (GetActivityAttachmentRow, error) {
+	row := q.db.QueryRow(ctx, getActivityAttachment, id)
+	var i GetActivityAttachmentRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ActivityDate,
+		&i.Slot,
+		&i.OriginalName,
+		&i.MimeType,
+		&i.SizeBytes,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getDailyActivity = `-- name: GetDailyActivity :one
 SELECT activity, output FROM daily_activities
 WHERE user_id = $1 AND activity_date = $2 AND slot = $3
@@ -32,6 +92,99 @@ func (q *Queries) GetDailyActivity(ctx context.Context, arg GetDailyActivityPara
 	var i GetDailyActivityRow
 	err := row.Scan(&i.Activity, &i.Output)
 	return i, err
+}
+
+const insertActivityAttachment = `-- name: InsertActivityAttachment :one
+INSERT INTO activity_attachments (user_id, activity_date, slot, original_name, mime_type, size_bytes, checksum, uploaded_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id::text
+`
+
+type InsertActivityAttachmentParams struct {
+	UserID       int64
+	ActivityDate pgtype.Date
+	Slot         int16
+	OriginalName string
+	MimeType     string
+	SizeBytes    int64
+	Checksum     string
+	UploadedBy   int64
+}
+
+// id dikembalikan sebagai teks karena langsung dipakai sebagai nama berkas di disk.
+func (q *Queries) InsertActivityAttachment(ctx context.Context, arg InsertActivityAttachmentParams) (string, error) {
+	row := q.db.QueryRow(ctx, insertActivityAttachment,
+		arg.UserID,
+		arg.ActivityDate,
+		arg.Slot,
+		arg.OriginalName,
+		arg.MimeType,
+		arg.SizeBytes,
+		arg.Checksum,
+		arg.UploadedBy,
+	)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
+const listActivityAttachments = `-- name: ListActivityAttachments :many
+SELECT a.id::text AS id, a.user_id, a.activity_date, a.slot, a.original_name, a.mime_type, a.size_bytes,
+       a.created_at, u.name AS uploaded_by_name, a.uploaded_by AS uploaded_by_id
+FROM activity_attachments a
+JOIN users u ON u.id = a.uploaded_by
+WHERE a.activity_date BETWEEN $1::date AND $2::date
+ORDER BY a.created_at, a.id
+`
+
+type ListActivityAttachmentsParams struct {
+	FromDate pgtype.Date
+	ToDate   pgtype.Date
+}
+
+type ListActivityAttachmentsRow struct {
+	ID             string
+	UserID         int64
+	ActivityDate   pgtype.Date
+	Slot           int16
+	OriginalName   string
+	MimeType       string
+	SizeBytes      int64
+	CreatedAt      pgtype.Timestamptz
+	UploadedByName string
+	UploadedByID   int64
+}
+
+// Semua lampiran di rentang tanggal, urut dari yang paling lama diunggah, untuk diisikan ke selnya.
+func (q *Queries) ListActivityAttachments(ctx context.Context, arg ListActivityAttachmentsParams) ([]ListActivityAttachmentsRow, error) {
+	rows, err := q.db.Query(ctx, listActivityAttachments, arg.FromDate, arg.ToDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListActivityAttachmentsRow{}
+	for rows.Next() {
+		var i ListActivityAttachmentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.ActivityDate,
+			&i.Slot,
+			&i.OriginalName,
+			&i.MimeType,
+			&i.SizeBytes,
+			&i.CreatedAt,
+			&i.UploadedByName,
+			&i.UploadedByID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listActivityPeople = `-- name: ListActivityPeople :many

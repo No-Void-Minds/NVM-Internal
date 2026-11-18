@@ -228,6 +228,19 @@ func (ns NullUserRole) Value() (driver.Value, error) {
 	return string(ns.UserRole), nil
 }
 
+type ActivityAttachment struct {
+	ID           pgtype.UUID
+	UserID       int64
+	ActivityDate pgtype.Date
+	Slot         int16
+	OriginalName string
+	MimeType     string
+	SizeBytes    int64
+	Checksum     string
+	UploadedBy   int64
+	CreatedAt    pgtype.Timestamptz
+}
+
 type AuditLog struct {
 	ID         int64
 	UserID     pgtype.Int8

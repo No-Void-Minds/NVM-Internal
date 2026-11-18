@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"nvm-internal/internal/db/sqlc"
+	"nvm-internal/internal/storage"
 	"nvm-internal/internal/testdb"
 )
 
@@ -50,6 +51,7 @@ func sheetOf(t *testing.T, data []byte) string {
 
 type fixture struct {
 	pool    *pgxpool.Pool
+	store   *storage.Store
 	svc     *Service
 	manajer Actor
 	admin   Actor
@@ -60,7 +62,12 @@ type fixture struct {
 func setup(t *testing.T) fixture {
 	t.Helper()
 	pool := testdb.Pool(t)
-	svc := NewService(pool)
+	// Storage di folder sementara: lampiran aktivitas (revisi 24) menulis berkas sungguhan ke disk.
+	store, err := storage.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(pool, store)
 	// Jam palsu: pukul 10.00 WIB di hariIni, supaya aturan "hanya hari ini" tidak bergantung tanggal sistem.
 	svc.now = func() time.Time {
 		d, err := time.ParseInLocation(dayLayout, hariIni, officeTZ)
@@ -73,6 +80,7 @@ func setup(t *testing.T) fixture {
 	creative := testdb.Division(t, pool, "Creative", true)
 	return fixture{
 		pool:    pool,
+		store:   store,
 		svc:     svc,
 		manajer: Actor{ID: testdb.User(t, pool, "manajer.a", "manager", marketing, true), Role: sqlc.UserRoleManager},
 		admin:   Actor{ID: testdb.User(t, pool, "admin.a", "admin", marketing, true), Role: sqlc.UserRoleAdmin},

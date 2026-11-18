@@ -196,3 +196,18 @@ func TestExportTitleDanColName(t *testing.T) {
 		}
 	}
 }
+
+// Kolom Output ekspor memuat nama lampiran di bawah teksnya; berkasnya tidak disematkan (revisi 24).
+func TestOutputWithFiles(t *testing.T) {
+	if got := outputWithFiles(Cell{}); got != "" {
+		t.Fatalf("sel kosong %q", got)
+	}
+	tanpaTeks := Cell{Files: []FileInfo{{Name: "tangkapan.png"}, {Name: "rekaman.mp4"}}}
+	if got := outputWithFiles(tanpaTeks); got != "tangkapan.png\nrekaman.mp4" {
+		t.Fatalf("tanpa teks %q", got)
+	}
+	lengkap := Cell{Output: "https://drive.example/1", Files: []FileInfo{{Name: "bukti.pdf"}}}
+	if got := outputWithFiles(lengkap); got != "https://drive.example/1\nbukti.pdf" {
+		t.Fatalf("dengan teks %q", got)
+	}
+}

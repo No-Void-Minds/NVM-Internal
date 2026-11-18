@@ -71,6 +71,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 11s | Aktivitas Harian | Tabel aktivitas per jam di papan task, halaman Aktivitas, dan ekspor Excel |
 | 11t | PIC sub task di kartu dan revisi oleh PIC sub task | Kartu selalu menampilkan PIC sub task; PIC sub task mengembalikan Ready ke On Progress dengan membuka lagi sub task miliknya |
 | 11u | Halaman Status hanya untuk Admin | Menu dan rute Status hanya untuk Admin; peran lain melihat 404 |
+| 11v | Lampiran Aktivitas Harian | Berkas per jam di papan dan di halaman Aktivitas; backup storage jadi snapshot inkremental |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -1142,6 +1143,39 @@ Keputusan teknis:
 
 **Hasil:** selesai 2026-11-18, `./scripts/check.sh` lolos, E2E `status` 22 pemeriksaan 0 gagal. Tidak ada migrasi dan tidak perlu restart backend.
 
+## Sprint 11v: Lampiran Aktivitas Harian
+
+**Tujuan:** revisi 24 Manajer. Bukti kerja sering berupa tangkapan layar atau video pendek, dan sebelumnya hanya bisa ditempel sebagai tautan Drive. Sekarang berkasnya bisa menempel langsung di jamnya. Sekaligus memperbaiki backup storage, yang akan kehabisan disk kalau setiap lampiran 95 MB tersalin ulang setiap hari.
+
+- [x] S11v-01 Migrasi 000017: tabel `activity_attachments` (user_id, activity_date, slot, nama asli, mime, ukuran, checksum, uploaded_by, created_at), index (user_id, activity_date), CHECK ukuran 95 MB. Tanpa `is_deleted`: hapus berarti baris dan berkasnya hilang, jadi tabel ini masuk daftar DELETE di `deploy/sql/10-grants.sql` (sekarang tujuh tabel).
+- [x] S11v-02 Daftar jenis yang boleh diperluas (gambar termasuk WebP dan GIF, video MP4, MOV, dan WebM, PDF, dokumen Office, TXT, CSV, ZIP), tetap diperiksa dari magic bytes. SVG dan program ditolak.
+- [x] S11v-03 API: `POST /api/activities/files`, `GET /api/activities/files/:id`, `DELETE /api/activities/files/:id`. Hak sama dengan isian aktivitas: Staf hanya miliknya hari ini, Manajer siapa pun dan tanggal berapa pun, Admin hanya membaca. Perubahan Manajer pada jam orang lain tercatat di Audit Log.
+- [x] S11v-04 Penyajian: gambar, video, dan PDF boleh inline, sisanya selalu `attachment`, selalu dengan `X-Content-Type-Options: nosniff` dan `Content-Security-Policy: sandbox`. Video memakai `http.ServeContent`, jadi Range (206) jalan.
+- [x] S11v-05 Nginx: `client_max_body_size 96m` hanya di `location = /api/activities/files`, dengan timeout lebih panjang dan `proxy_request_buffering off`. Batas lampiran task tetap 51 MB. CSP menambah `media-src 'self' blob:`.
+- [x] S11v-06 Kartu di papan task: area lampiran di bawah Output tiap jam, tombol "Tambah berkas" berikon klip, seluruh sel jam menerima drag and drop dengan sorotan, Ctrl+V tangkapan layar mengunggah ke jam itu, bar progres dengan persentase dan tombol Batal, galat per berkas dengan "Coba lagi", thumbnail gambar yang diperkecil di browser, pratinjau, unduh, dan hapus dengan konfirmasi. Tampilan kartu ponsel memakai komponen yang sama.
+- [x] S11v-07 Halaman `/aktivitas`: sel menampilkan ikon klip, jumlah berkas, dan thumbnail gambar pertama; dialog sel menampilkan semua lampiran dengan pratinjau, dan Manajer bisa menambah atau menghapus dari mode Ubah.
+- [x] S11v-08 Ekspor Excel: nama lampiran ikut di kolom Output, dipisah baris baru. Berkasnya tidak disematkan.
+- [x] S11v-09 Backup storage jadi snapshot inkremental berbasis hardlink di `backup/storage-snapshots/<stamp>`, retensi harian dan mingguan sama seperti sebelumnya, langkah restore di runbook diperbarui.
+- [x] S11v-10 Test: unit (magic bytes jenis baru, SVG dan EXE yang diganti ekstensi, kolom Output ekspor), DB (hak unggah per peran dan tanggal, hapus menghapus berkas, batas 10 per jam, akhir pekan berisi lampiran tetap tampil), dan bagian `E2E_ONLY=activityfiles`.
+
+**Keputusan:**
+- Lampiran menempel pada satu jam (`user_id`, `activity_date`, `slot`), bukan pada kolom Aktivitas atau Output. Yang ditanya Manajer selalu "apa buktinya jam itu", dan memisahkan berkas per kolom hanya menambah pilihan yang tidak berarti apa-apa.
+- Tidak ada kolom "nama simpan" tersendiri. Nama berkas di disk adalah `id` barisnya, sama seperti `task_attachments`, dan `storage.PathFor(id)` yang menurunkan path-nya. Kolom kedua yang isinya UUID yang sama hanya menunggu jadi tidak sinkron.
+- Berkas lampiran aktivitas dihapus permanen, berbeda dari lampiran task yang hanya ditandai `is_deleted`. Satu video 95 MB yang disimpan terus setelah dihapus akan menghabiskan disk VM, sedangkan lampiran task dibatasi 50 MB dan jumlahnya jauh lebih sedikit. Karena itu tabel ini perlu hak DELETE, dan daftar DELETE di grants naik dari enam menjadi tujuh tabel.
+- Berkasnya menumpang folder `attachments/` yang sama dengan lampiran task, jadi `ListAttachmentFileIDs` di job pembersih berkas yatim wajib ikut membaca `activity_attachments`. Tanpa itu job harian akan menghapus seluruh lampiran aktivitas dalam satu malam.
+- Batas 95 MB, bukan 100 MB: Cloudflare menolak unggahan di atas 100 MB dengan halaman galatnya sendiri, yang tidak bisa dijelaskan aplikasi. Batas 10 berkas per jam menjaga satu jam tidak dipakai sebagai gudang.
+- Jenis berkas diperiksa dari magic bytes dengan daftar izin terpisah (`attachment.DetectActivity`), bukan dengan melonggarkan daftar lampiran task. Lampiran task tetap tanpa video dan ZIP, karena di sana isinya brief dan hasil kerja yang memang dokumen. SVG ditolak di kedua daftar: isinya XML yang bisa memuat skrip.
+- Gambar, video, dan PDF disajikan `inline` supaya pratinjau bisa langsung dibuka, tetapi tetap dengan `nosniff` dan `Content-Security-Policy: sandbox`. ZIP dan dokumen Office tidak pernah `inline`. Pratinjau di browser mengambil berkasnya sebagai blob, memakai komponen `AttachmentPreview` yang sudah ada, ditambah cabang video.
+- Thumbnail diperkecil di browser (createImageBitmap plus canvas), bukan di server. Membuat thumbnail di server berarti menyimpan berkas kedua, menambah pembersih berkas yatim yang kedua, dan menambah kolomnya di database, hanya untuk gambar yang jumlahnya belasan per hari.
+- Nama berkas tangkapan layar yang ditempel mengikuti jamnya (`tangkapan-09.00-1.png`), dan ekstensinya mengikuti jenis gambarnya, karena backend menolak isi yang tidak cocok dengan ekstensi.
+- Backup storage memakai klona hardlink (`cp -al`) lalu menyalin hanya berkas baru dan membuang yang sudah hilang, bukan `rsync --link-dest`. rsync tidak ada di image `alpine` yang dipakai skrip, dan memasangnya butuh jaringan, sedangkan job ini sengaja berjalan dengan `--network none`. Berkas storage tidak pernah diubah di tempat (namanya UUID barisnya), jadi hasilnya setara.
+- Retensi snapshot dijalankan di dalam container yang sama, sebagai UID pemilik storage, karena folder snapshot dimiliki UID itu dan user VM tidak bisa menghapus isinya. Penanda mingguan berupa berkas `.weekly` di dalam snapshot, bukan salinan terpisah, karena snapshot tidak bisa di-hardlink sebagai satu kesatuan.
+- Arsip `storage-*.tar.gz` lama tidak dihapus. Snapshot jalan di sampingnya dan arsip lama hilang sendiri lewat retensi yang sudah ada, jadi tidak ada satu hari pun tanpa cadangan storage yang bisa dipakai.
+
+**Selesai kalau:** `./scripts/check.sh` lolos, migrasi 000017 dan `10-grants.sql` jalan di dev (daftar DELETE tujuh tabel), Staf bisa menarik dan menempel berkas di papan, Manajer bisa menambah dan menghapus dari dialog sel, pratinjau gambar, video, dan PDF terbuka, `E2E_ONLY=activityfiles` lolos, dan `backup.sh` dua kali berturut-turut di VM menghasilkan dua snapshot dengan total ukuran kira-kira sebesar satu snapshot.
+
+**Hasil:** kode selesai 2026-11-18, `./scripts/check.sh` lolos, `go vet ./...` bersih, test unit backend dan frontend lolos. Logika snapshot diuji di laptop dengan dua run berturut-turut: berkas yang tidak berubah punya dua hardlink, berkas yang dihapus dari storage hilang dari snapshot baru, snapshot harian berumur 20 hari dibuang dan yang bertanda mingguan tetap. Migrasi, grants, uji curl, uji browser, dan uji backup di VM menunggu Rifky.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -1319,9 +1353,10 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 21 | 2026-11-18 | Aktivitas Harian, pengganti spreadsheet "Daily Activity Monitoring": Staf mengisi aktivitas dan output per jam, Manajer melihat semua orang per tanggal dan bisa mengekspor ke Excel | Sprint 11s |
 | 22 | 2026-11-18 | Kartu selalu menampilkan PIC sub task dalam kelompok tersendiri. PIC sub task boleh mengembalikan task Ready ke On Progress dengan membuka lagi sub task miliknya yang dipilih, alasan opsional | Sprint 11t |
 | 23 | 2026-11-18 | Halaman Status hanya untuk Admin. Peran lain tidak melihat menunya, dan membuka URL-nya langsung menampilkan 404 | Sprint 11u |
+| 24 | 2026-11-18 | Lampiran di Aktivitas Harian: berkas menempel pada satu jam, maksimal 95 MB dan 10 berkas per jam, dengan gambar, video, PDF, dokumen Office, TXT, CSV, dan ZIP. Bisa ditarik, ditempel dari papan ketik, dipratinjau, dan dihapus | Sprint 11v |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat kedua puluh tiga revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat kedua puluh empat revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

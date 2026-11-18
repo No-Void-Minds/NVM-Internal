@@ -4,10 +4,12 @@ import { RouterLink } from 'vue-router'
 import LoadingSkeleton from './LoadingSkeleton.vue'
 import ActivityCellFields from './ActivityCellFields.vue'
 import ActivityBox from './ActivityBox.vue'
+import ActivityFiles from './ActivityFiles.vue'
 import { getMyActivities, type ActivityCell } from '../api/activities'
 import { ApiError } from '../api/client'
 import { useActivitySave } from '../composables/useActivitySave'
 import { filledHours } from '../utils/activity'
+import { pasteName } from '../utils/activityFile'
 import { formatLong } from '../utils/recurrence'
 
 // Kartu Aktivitas hari ini di papan task (revisi 21), hanya untuk Staf. Isian hari lain diubah di /aktivitas.
@@ -75,6 +77,43 @@ function onTab(e: KeyboardEvent) {
 function tabRank(el: HTMLTextAreaElement): number {
   return Number(el.dataset.slot) * 2 + (el.dataset.kind === 'output' ? 1 : 0)
 }
+
+// Lampiran per jam (revisi 24). Acuan ke tiap komponen ActivityFiles supaya drag and drop dan paste bisa
+// menyerahkan berkasnya ke jam yang benar, tanpa menyalin logika unggah ke sini.
+type FilesHandle = { add: (files: File[]) => void }
+const fileBoxes = ref<Record<number, FilesHandle | null>>({})
+const dragSlot = ref(0)
+
+function setFileBox(slot: number, el: unknown) {
+  fileBoxes.value[slot] = (el as FilesHandle | null) ?? null
+}
+
+function dropFiles(e: DragEvent, slot: number) {
+  dragSlot.value = 0
+  const files = Array.from(e.dataTransfer?.files ?? [])
+  if (files.length) fileBoxes.value[slot]?.add(files)
+}
+
+function dragLeave(e: DragEvent, slot: number) {
+  // dragleave juga terpicu saat kursor pindah ke elemen di dalam sel; hanya keluar sel yang dihitung.
+  if ((e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) return
+  if (dragSlot.value === slot) dragSlot.value = 0
+}
+
+// Tangkapan layar yang ditempel (Ctrl+V) langsung jadi lampiran jam itu. Teks biasa tidak disentuh, jadi
+// paste teks ke textarea tetap bekerja seperti biasa.
+function onPaste(e: ClipboardEvent, c: ActivityCell) {
+  const images = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith('image/'))
+  if (images.length === 0) return
+  e.preventDefault()
+  const named = images.map((f, i) => {
+    const ext = f.type === 'image/jpeg' ? 'jpg' : f.type === 'image/webp' ? 'webp' : 'png'
+    return new File([f], pasteName(c.time, c.files.length + i + 1, ext), { type: f.type })
+  })
+  fileBoxes.value[c.slot]?.add(named)
+}
+
+const cellDrop = 'rounded-card transition-colors motion-reduce:transition-none'
 
 function toggle() {
   open.value = !open.value
@@ -172,7 +211,16 @@ onMounted(() => {
                 <th scope="row" class="sticky left-0 z-10 bg-surface px-2 py-1 text-left font-medium">
                   Aktivitas
                 </th>
-                <td v-for="c in cells" :key="c.slot" class="px-2 py-1">
+                <td
+                  v-for="c in cells"
+                  :key="c.slot"
+                  class="px-2 py-1"
+                  :class="[cellDrop, dragSlot === c.slot ? 'bg-canvas outline-2 outline-mark' : '']"
+                  @dragover.prevent="dragSlot = c.slot"
+                  @dragleave="dragLeave($event, c.slot)"
+                  @drop.prevent="dropFiles($event, c.slot)"
+                  @paste="onPaste($event, c)"
+                >
                   <ActivityBox
                     v-model="c.activity"
                     :num="c.slot"
@@ -189,7 +237,16 @@ onMounted(() => {
                 <th scope="row" class="sticky left-0 z-10 bg-surface px-2 py-1 text-left font-medium">
                   Output
                 </th>
-                <td v-for="c in cells" :key="c.slot" class="px-2 py-1">
+                <td
+                  v-for="c in cells"
+                  :key="c.slot"
+                  class="px-2 py-1"
+                  :class="[cellDrop, dragSlot === c.slot ? 'bg-canvas outline-2 outline-mark' : '']"
+                  @dragover.prevent="dragSlot = c.slot"
+                  @dragleave="dragLeave($event, c.slot)"
+                  @drop.prevent="dropFiles($event, c.slot)"
+                  @paste="onPaste($event, c)"
+                >
                   <ActivityBox
                     v-model="c.output"
                     :num="c.slot"
@@ -204,6 +261,18 @@ onMounted(() => {
                     :updated-by="c.updated_by"
                     @blur="blur(c)"
                     @retry="retry(0, c.slot)"
+                  />
+                  <ActivityFiles
+                    :ref="(el) => setFileBox(c.slot, el)"
+                    :user-id="0"
+                    :date="date"
+                    :num="c.slot"
+                    :time="c.time"
+                    :files="c.files"
+                    can-manage
+                    compact
+                    class="mt-1"
+                    @changed="load()"
                   />
                 </td>
               </tr>
@@ -225,6 +294,11 @@ onMounted(() => {
             v-for="c in cells"
             :key="c.slot"
             class="grid gap-2 rounded-card border border-line p-3 sm:grid-cols-[7rem_minmax(0,1fr)_minmax(0,1fr)] sm:items-start sm:gap-3"
+            :class="dragSlot === c.slot ? 'bg-canvas outline-2 outline-mark' : ''"
+            @dragover.prevent="dragSlot = c.slot"
+            @dragleave="dragLeave($event, c.slot)"
+            @drop.prevent="dropFiles($event, c.slot)"
+            @paste="onPaste($event, c)"
           >
             <p class="font-medium sm:pt-2">{{ c.time }}</p>
             <ActivityCellFields
@@ -236,6 +310,17 @@ onMounted(() => {
               :message="message[`0:${c.slot}`]"
               @blur="blur(c)"
               @retry="retry(0, c.slot)"
+            />
+            <ActivityFiles
+              :ref="(el) => setFileBox(c.slot, el)"
+              :user-id="0"
+              :date="date"
+              :num="c.slot"
+              :time="c.time"
+              :files="c.files"
+              can-manage
+              class="sm:col-span-3"
+              @changed="load()"
             />
           </li>
         </ul>

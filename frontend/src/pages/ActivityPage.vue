@@ -6,10 +6,17 @@ import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import PersonChip from '../components/PersonChip.vue'
 import UserAvatar from '../components/UserAvatar.vue'
 import BaseDialog from '../components/BaseDialog.vue'
+import ActivityFiles from '../components/ActivityFiles.vue'
 import ActivityCellView from '../components/ActivityCellView.vue'
 import ActivityOutputView from '../components/ActivityOutputView.vue'
 import { ApiError } from '../api/client'
-import { activityExportUrl, getActivityRange, saveActivity, type ActivityPerson } from '../api/activities'
+import {
+  activityExportUrl,
+  getActivityRange,
+  saveActivity,
+  type ActivityFile,
+  type ActivityPerson,
+} from '../api/activities'
 import { listDivisions, type DivisionItem } from '../api/divisions'
 import { useSessionStore } from '../stores/session'
 import {
@@ -166,6 +173,7 @@ type CellDialog = {
   activity: string
   output: string
   updatedBy: string
+  files: ActivityFile[]
 }
 const cellDialog = ref<CellDialog | null>(null)
 const cellSaving = ref(false)
@@ -201,7 +209,18 @@ function openCell(p: ActivityPerson, date: string, slot: number, e: Event) {
     activity: cell.activity,
     output: cell.output,
     updatedBy: cell.updated_by,
+    files: cell.files,
   }
+}
+
+// Lampiran berubah di dalam dialog (revisi 24): tabelnya dimuat ulang, lalu daftar di dialog disegarkan dari
+// data baru supaya jumlah di sel dan isi dialog tidak pernah berbeda.
+async function refreshFiles() {
+  const d = cellDialog.value
+  await load()
+  if (!d || !cellDialog.value) return
+  const cell = people.value.find((p) => p.id === d.personId)?.days[d.date]?.[d.slot - 1]
+  cellDialog.value.files = cell?.files ?? []
 }
 
 function startEdit() {
@@ -624,6 +643,19 @@ const timeCell = 'sticky left-0 z-20 w-28 px-3 py-2 text-left font-medium whites
               class="field-sizing-content min-h-11 rounded-card border border-line bg-surface px-3 py-2"
             ></textarea>
           </div>
+          <div>
+            <h3 class="font-medium">Berkas</h3>
+            <ActivityFiles
+              class="mt-1"
+              :user-id="cellDialog.personId"
+              :date="cellDialog.date"
+              :num="cellDialog.slot"
+              :time="cellDialog.time"
+              :files="cellDialog.files"
+              can-manage
+              @changed="refreshFiles"
+            />
+          </div>
           <p v-if="cellError" role="alert" class="rounded-card bg-danger-bg p-3 text-danger">
             {{ cellError }}
           </p>
@@ -646,6 +678,20 @@ const timeCell = 'sticky left-0 z-20 w-28 px-3 py-2 text-left font-medium whites
           <div>
             <h3 class="font-medium">Output</h3>
             <ActivityOutputView :output="cellDialog.output" />
+          </div>
+          <div>
+            <h3 class="font-medium">Berkas</h3>
+            <p v-if="cellDialog.files.length === 0" class="mt-1 text-sm text-ink-muted">Belum ada berkas.</p>
+            <ActivityFiles
+              class="mt-1"
+              :user-id="cellDialog.personId"
+              :date="cellDialog.date"
+              :num="cellDialog.slot"
+              :time="cellDialog.time"
+              :files="cellDialog.files"
+              :can-manage="false"
+              @changed="refreshFiles"
+            />
           </div>
           <p v-if="cellDialog.updatedBy" class="text-sm text-ink-muted">diubah {{ cellDialog.updatedBy }}</p>
           <p v-if="ownCell" class="text-sm text-ink-muted">Ubah isianmu lewat tabel di papan task.</p>

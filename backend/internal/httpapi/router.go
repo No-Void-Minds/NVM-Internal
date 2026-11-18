@@ -61,7 +61,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 		now:          time.Now,
 		loginLimiter: newIPLimiter(30*time.Second, 10),
 		accounts:     account.NewService(pool),
-		activities:   activity.NewService(pool),
+		activities:   activity.NewService(pool, files),
 		labels:       label.NewService(pool),
 		tasks:        task.NewService(pool),
 		files:        files,
@@ -147,6 +147,10 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	app.GET("/activities/me", s.myActivities)
 	app.PUT("/activities", s.saveActivity)
 	app.GET("/activities/export", managerOnly, s.exportActivities)
+	// Lampiran per jam (revisi 24). Haknya sama dengan isian aktivitas dan dicek di service.
+	app.POST("/activities/files", s.uploadActivityFile)
+	app.GET("/activities/files/:fileId", s.downloadActivityFile)
+	app.DELETE("/activities/files/:fileId", s.deleteActivityFile)
 
 	return r, nil
 }

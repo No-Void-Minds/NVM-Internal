@@ -32,3 +32,30 @@ INSERT INTO daily_activities (user_id, activity_date, slot, activity, output, up
 VALUES (@user_id, @activity_date, @slot, @activity, @output, @updated_by)
 ON CONFLICT (user_id, activity_date, slot) DO UPDATE
 SET activity = EXCLUDED.activity, output = EXCLUDED.output, updated_by = EXCLUDED.updated_by;
+
+-- name: InsertActivityAttachment :one
+-- id dikembalikan sebagai teks karena langsung dipakai sebagai nama berkas di disk.
+INSERT INTO activity_attachments (user_id, activity_date, slot, original_name, mime_type, size_bytes, checksum, uploaded_by)
+VALUES (@user_id, @activity_date, @slot, @original_name, @mime_type, @size_bytes, @checksum, @uploaded_by)
+RETURNING id::text;
+
+-- name: ListActivityAttachments :many
+-- Semua lampiran di rentang tanggal, urut dari yang paling lama diunggah, untuk diisikan ke selnya.
+SELECT a.id::text AS id, a.user_id, a.activity_date, a.slot, a.original_name, a.mime_type, a.size_bytes,
+       a.created_at, u.name AS uploaded_by_name, a.uploaded_by AS uploaded_by_id
+FROM activity_attachments a
+JOIN users u ON u.id = a.uploaded_by
+WHERE a.activity_date BETWEEN @from_date::date AND @to_date::date
+ORDER BY a.created_at, a.id;
+
+-- name: CountActivityAttachments :one
+SELECT count(*) FROM activity_attachments
+WHERE user_id = @user_id AND activity_date = @activity_date AND slot = @slot;
+
+-- name: GetActivityAttachment :one
+SELECT a.id::text AS id, a.user_id, a.activity_date, a.slot, a.original_name, a.mime_type, a.size_bytes, a.created_at
+FROM activity_attachments a
+WHERE a.id = @id::uuid;
+
+-- name: DeleteActivityAttachment :exec
+DELETE FROM activity_attachments WHERE id = @id::uuid;
