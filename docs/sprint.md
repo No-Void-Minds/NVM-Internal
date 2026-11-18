@@ -933,7 +933,7 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 **Keputusan:**
 - PIC sub task di sini berarti `user_id` di `subtask_assignees` untuk sub task milik task itu, dihitung backend saat permintaan pindah. Hanya dua perpindahan yang bertambah: Requested ke On Progress dan On Progress ke Ready. Ready ke On Progress (revisi), Ready ke Completed, dan membuka kembali tetap milik PIC task dan Manajer.
 - Hak lain tidak bertambah. PIC sub task tetap tidak bisa mengubah field task induk, label, deliverable task, atau menambah sub task (`PermissionsFor` hanya memakai `isSubtaskPIC` untuk `MoveTo`). Hak atas sub task-nya sendiri tetap dari Sprint 11i.
-- Manajer tidak terpengaruh karena sudah boleh semua perpindahan. Admin tetap tidak boleh satu pun.
+- Manajer tidak terpengaruh karena sudah boleh semua perpindahan: cabang `case RoleManager` di `CheckTransition` tidak membaca `isPIC` maupun `isSubtaskPIC`. Karena itu papan dan Arsip melewati query PIC sub task untuk Manajer, dan `TestManagerMoveToIgnoresSubtaskPIC` mengunci anggapan ini: Manajer yang hanya PIC sub task (bukan pembuat, bukan PIC task) mendapat `move_to` yang sama dengan Manajer lain. Bila suatu hari hak Manajer dibatasi per task, test itu gagal dan query-nya wajib dihitung untuk Manajer juga. Admin tetap tidak boleh satu pun.
 - Form Buat task tidak berubah: barisnya sudah muncul hanya setelah "Tambah sub task" diklik.
 - Tombol pemicu tetap terlihat saat form terbuka (`aria-expanded="true"`), supaya fokus selalu punya tempat kembali dan tombol yang sama bisa menutup form.
 - Escape di form tambah dihentikan di form (`keydown` dibatalkan dan tidak diteruskan), jadi `<dialog>` panel tidak menerima Escape yang sama. Terbukti di browser: panel tetap terbuka.

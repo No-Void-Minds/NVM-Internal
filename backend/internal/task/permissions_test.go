@@ -5,6 +5,19 @@ import (
 	"testing"
 )
 
+// Papan dan Arsip tidak menghitung PIC sub task untuk Manajer (subtaskPICTasks), dengan anggapan isSubtaskPIC
+// tidak mengubah hak Manajer. Test ini mengunci anggapan itu: Manajer yang hanya PIC sub task (bukan pembuat,
+// bukan PIC task) mendapat move_to yang sama persis dengan Manajer lain di setiap status.
+func TestManagerMoveToIgnoresSubtaskPIC(t *testing.T) {
+	for _, st := range []Status{Requested, OnProgress, Ready, Completed} {
+		plain := PermissionsFor(RoleManager, false, false, st).MoveTo
+		subPIC := PermissionsFor(RoleManager, false, true, st).MoveTo
+		if !slices.Equal(plain, subPIC) || len(plain) == 0 {
+			t.Errorf("%s: Manajer %v, Manajer PIC sub task %v, mau sama dan tidak kosong", st, plain, subPIC)
+		}
+	}
+}
+
 func TestPermissionsFor(t *testing.T) {
 	cases := []struct {
 		name   string
