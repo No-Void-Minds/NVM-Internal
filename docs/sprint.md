@@ -1113,6 +1113,14 @@ Keputusan teknis:
 
 **Catatan pengujian:** versi pertama `uji-revisi22.sh` membaca detail task di tingkat atas, padahal `GET /api/tasks/:id` membungkusnya di kunci `task`. Akibatnya version dan id sub task kosong, dan kasus 400 ikut "lolos" dengan pesan "Isian tidak terbaca.". Skrip sekarang membaca `d['task']`, mencocokkan pesan galat, dan berhenti bila nilai yang dibutuhkan kosong. E2E `revision` punya kesalahan bentuk yang sama di persiapan datanya dan sudah dibetulkan, ditambah pemilihan kolom Ready di layar sempit.
 
+**Perbaikan kecil (pesan 403 per aksi, 2026-11-18):** ditemukan saat menguji revisi 22. Semua penolakan hak di package task memakai `ErrForbidden` polos, dan `writeTaskError` memberinya satu pesan bersama tentang centang sub task, jadi Staf yang ditolak memindahkan task membaca "Sub task ini hanya bisa dicentang PIC-nya...". Keputusan:
+
+- Penolakan sekarang `ForbiddenError` yang membawa pesan aksinya (`task/forbidden.go`) dan tetap cocok dengan `errors.Is(err, ErrForbidden)`, jadi pemeriksaan lama tidak berubah. Handler membaca pesannya lewat `errors.As`; pesan bersama di `writeTaskError` dan `writeSubtaskError` dihapus.
+- Pesan per aksi: membuat, mengubah, menghapus task; label; tautan deliverable; menghentikan pengulangan; pindah status (`Kamu tidak punya hak memindahkan task ini ke <status>.`); menambah, mengubah, menghapus sub task; sub task orang lain (`ErrSubtaskLocked`); centang (`ErrNotSubtaskPIC`); mengunggah dan menghapus lampiran brief, berkas deliverable, dan berkas sub task. Hanya aksi atas sub task yang menyebut sub task.
+- Pesan centang mengikuti `canToggle` ("PIC-nya, pembuatnya, atau Manajer (kecuali sub task yang dipegang Manajer lain)"). Pesan lama di handler ("Hanya PIC sub task ini yang bisa mencentangnya.") keliru karena pembuat dan Manajer juga boleh.
+- `ErrForbidden` polos yang masih lolos ke handler mendapat pesan cadangan netral "Kamu tidak punya hak melakukan ini pada task ini.". `TestNoBareErrForbidden` memindai kode package task supaya `return ErrForbidden` polos tidak muncul lagi.
+- Test: `TestForbiddenMessagesPerAction` (21 jenis penolakan: pesan unik, menyebut sub task hanya untuk aksi sub task) dan `TestWriteTaskErrorForbiddenMessage` (handler meneruskan pesan, juga untuk galat yang dibungkus). Tidak ada perubahan perilaku hak akses; kode HTTP tetap 403.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.

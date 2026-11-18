@@ -49,15 +49,12 @@ func subtaskPath(c *gin.Context) (string, int64, bool) {
 	return id, sid, true
 }
 
-// writeSubtaskError memakai pesan yang sesuai konteks menyusun sub task, bukan pesan centang.
+// writeSubtaskError: pesan penolakan hak sudah dibawa galat dari package task (ForbiddenError), jadi di sini
+// hanya sub task yang tidak ada yang perlu pesan sendiri.
 func (s *Server) writeSubtaskError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, task.ErrSubtaskNotFound):
 		writeError(c, http.StatusNotFound, CodeNotFound, "Sub task tidak ditemukan.")
-	case errors.Is(err, task.ErrSubtaskLocked):
-		writeError(c, http.StatusForbidden, CodeForbidden, "Sub task ini urusan orang lain. Yang bisa mengubahnya: pembuatnya, PIC-nya, dan Manajer.")
-	case errors.Is(err, task.ErrForbidden):
-		writeError(c, http.StatusForbidden, CodeForbidden, "Hanya PIC task ini, Manajer, atau orang yang ditugaskan di sub task itu yang bisa mengubahnya.")
 	default:
 		s.writeTaskError(c, err)
 	}
@@ -134,8 +131,6 @@ func (s *Server) setSubtaskDone(c *gin.Context) {
 	switch {
 	case errors.Is(err, task.ErrSubtaskNotFound):
 		writeError(c, http.StatusNotFound, CodeNotFound, "Sub task tidak ditemukan.")
-	case errors.Is(err, task.ErrNotSubtaskPIC):
-		writeError(c, http.StatusForbidden, CodeForbidden, "Hanya PIC sub task ini yang bisa mencentangnya.")
 	case err != nil:
 		s.writeTaskError(c, err)
 	default:

@@ -97,7 +97,7 @@ func (a *Attachments) CheckUpload(ctx context.Context, actor Actor, taskID strin
 		return err
 	}
 	if !ok {
-		return ErrForbidden
+		return attachmentForbidden("mengunggah", kind, subtaskID)
 	}
 	return nil
 }
@@ -154,7 +154,7 @@ func (a *Attachments) Upload(ctx context.Context, actor Actor, taskID string, ki
 			return err
 		}
 		if !ok {
-			return ErrForbidden
+			return attachmentForbidden("mengunggah", kind, subtaskID)
 		}
 		if subtaskID != 0 {
 			// Dicek di dalam transaksi: sub task bisa dihapus selama berkasnya diunggah.
@@ -261,7 +261,7 @@ func (a *Attachments) Delete(ctx context.Context, actor Actor, taskID, attachmen
 			return err
 		}
 		if !ok {
-			return ErrForbidden
+			return attachmentForbidden("menghapus", AttachmentKind(row.Kind), row.SubtaskID.Int64)
 		}
 		if err := q.SoftDeleteAttachment(ctx, sqlc.SoftDeleteAttachmentParams{ID: uid, TaskID: taskID}); err != nil {
 			return err

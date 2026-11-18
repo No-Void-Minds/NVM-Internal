@@ -50,7 +50,7 @@ func (s *Service) Move(ctx context.Context, actor Actor, id string, version int3
 		case errors.Is(err, ErrInvalidTransition):
 			return ErrInvalidMove
 		case errors.Is(err, ErrTransitionForbidden):
-			return ErrForbidden
+			return moveForbidden(to)
 		case errors.Is(err, ErrNoteRequired):
 			return apperr.Invalid("Isi catatan revisi saat mengembalikan task ke On Progress.")
 		case errors.Is(err, ErrNoteTooLong) && subtaskRevision:

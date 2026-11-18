@@ -274,7 +274,7 @@ func stopSeries(ctx context.Context, q *sqlc.Queries, actor Actor, taskID string
 // task (keputusan 5), jadi hanya Manajer. Kemunculan yang sudah ada tidak berubah.
 func (s *Service) StopSeries(ctx context.Context, actor Actor, taskID string) error {
 	if actor.Role != RoleManager {
-		return ErrForbidden
+		return errStopSeriesForbidden
 	}
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := sqlc.New(tx)

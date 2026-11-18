@@ -74,7 +74,7 @@ func (s *Service) clock() time.Time {
 // PIC task, dan sub task boleh dikosongkan karena PIC yang akan mengisinya sendiri. Divisi task mengikuti PIC pertama.
 func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (string, error) {
 	if actor.Role != RoleManager {
-		return "", ErrForbidden
+		return "", errCreateForbidden
 	}
 	f, err := cleanFields(in.Title, in.Description, in.Urgency, in.StartDate, in.DueDate, in.DeliverableURL)
 	if err != nil {

@@ -14,7 +14,8 @@ import (
 
 var (
 	ErrSubtaskNotFound = errors.New("sub task tidak ditemukan")
-	ErrNotSubtaskPIC   = errors.New("bukan PIC sub task ini")
+	// Pesannya mengikuti canToggle: PIC sub task, pembuatnya, PIC task bila sub task tanpa PIC, dan Manajer.
+	ErrNotSubtaskPIC = forbidden("Sub task ini hanya bisa dicentang PIC-nya, pembuatnya, atau Manajer (kecuali sub task yang dipegang Manajer lain).")
 )
 
 // SetSubtaskDone mencentang atau melepas centang. Hanya PIC sub task itu, dan hanya saat task On Progress.

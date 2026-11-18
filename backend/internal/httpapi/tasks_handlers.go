@@ -304,13 +304,17 @@ func taskID(c *gin.Context) (string, bool) {
 
 func (s *Server) writeTaskError(c *gin.Context, err error) {
 	var ve *apperr.Validation
+	var fe *task.ForbiddenError
 	switch {
 	case errors.As(err, &ve):
 		writeError(c, http.StatusBadRequest, CodeBadRequest, ve.Message)
 	case errors.Is(err, task.ErrNotFound):
 		writeError(c, http.StatusNotFound, CodeNotFound, "Task tidak ditemukan.")
+	case errors.As(err, &fe):
+		writeError(c, http.StatusForbidden, CodeForbidden, fe.Message)
 	case errors.Is(err, task.ErrForbidden):
-		writeError(c, http.StatusForbidden, CodeForbidden, "Sub task ini hanya bisa dicentang PIC-nya, atau Manajer bila tidak dipegang Manajer lain.")
+		// Cadangan bila ada penolakan tanpa pesan aksi; tidak menyebut aksi tertentu supaya tidak menyesatkan.
+		writeError(c, http.StatusForbidden, CodeForbidden, "Kamu tidak punya hak melakukan ini pada task ini.")
 	case errors.Is(err, task.ErrVersionConflict):
 		writeError(c, http.StatusConflict, CodeConflict, "Task ini sudah diubah orang lain. Muat ulang untuk melihat versi terbaru.")
 	default:

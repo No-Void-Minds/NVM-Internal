@@ -62,7 +62,7 @@ func canContribute(ctx context.Context, q *sqlc.Queries, actor Actor, id string)
 // yang dikirim menggantikan daftar lama secara utuh. Divisi ikut PIC pertama sesudah perubahan.
 func (s *Service) Update(ctx context.Context, actor Actor, id string, in UpdateInput) (int32, error) {
 	if actor.Role != RoleManager {
-		return 0, ErrForbidden
+		return 0, errUpdateForbidden
 	}
 	f, err := cleanFields(in.Title, in.Description, in.Urgency, in.StartDate, in.DueDate, in.DeliverableURL)
 	if err != nil {
@@ -206,7 +206,7 @@ func (s *Service) SetLabels(ctx context.Context, actor Actor, id string, version
 			return err
 		}
 		if !ok {
-			return ErrForbidden
+			return errLabelsForbidden
 		}
 
 		current, err := q.ListTaskLabelScopes(ctx, id)
@@ -297,7 +297,7 @@ func (s *Service) SetDeliverable(ctx context.Context, actor Actor, id string, ve
 			return err
 		}
 		if !ok {
-			return ErrForbidden
+			return errDeliverableForbidden
 		}
 		if cur.DeliverableUrl.String == u.String {
 			return nil
@@ -314,7 +314,7 @@ func (s *Service) SetDeliverable(ctx context.Context, actor Actor, id string, ve
 // Delete menandai task terhapus (FR-TASK-16). Datanya tetap ada untuk audit, tetapi hilang dari semua daftar.
 func (s *Service) Delete(ctx context.Context, actor Actor, id string, version int32) error {
 	if actor.Role != RoleManager {
-		return ErrForbidden
+		return errDeleteForbidden
 	}
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := sqlc.New(tx)

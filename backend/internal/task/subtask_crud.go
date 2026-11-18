@@ -20,7 +20,7 @@ import (
 // mencentang adalah PIC sub task itu. Sub task yang belum ditugaskan boleh dicentang PIC task mana pun.
 
 // ErrSubtaskLocked dipakai saat sub task tidak boleh diubah karena bukan urusan pelaku.
-var ErrSubtaskLocked = errors.New("sub task tidak bisa diubah")
+var ErrSubtaskLocked = forbidden("Sub task ini urusan orang lain. Yang bisa mengubahnya: pembuatnya, PIC-nya, dan Manajer.")
 
 // subtaskWindow: menambah dan mengubah sub task hanya saat task masih disiapkan atau sedang dikerjakan.
 // Ditutup mulai Ready supaya pekerjaan tidak bertambah saat Manajer sedang mereview, dan supaya syarat
@@ -32,7 +32,8 @@ func SubtaskWindowOpen(status Status) bool {
 // lockForSubtask mengunci task dan memastikan pelaku boleh menyentuh sub task-nya sama sekali:
 // Manajer, Staf yang menjadi PIC task, atau sejak revisi 11 orang luar yang ditugaskan di sub task itu
 // sendiri (subtaskID 0 berarti menambah sub task baru, dan itu tetap hanya untuk PIC task dan Manajer).
-func lockForSubtask(ctx context.Context, q *sqlc.Queries, actor Actor, taskID string, subtaskID int64) (sqlc.GetTaskForUpdateRow, error) {
+// denied adalah galat penolakan yang sesuai aksi pemanggil (menambah, mengubah, menghapus).
+func lockForSubtask(ctx context.Context, q *sqlc.Queries, actor Actor, taskID string, subtaskID int64, denied error) (sqlc.GetTaskForUpdateRow, error) {
 	cur, err := q.GetTaskForUpdate(ctx, taskID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return cur, ErrNotFound
@@ -51,7 +52,7 @@ func lockForSubtask(ctx context.Context, q *sqlc.Queries, actor Actor, taskID st
 		}
 	}
 	if !ok {
-		return cur, ErrForbidden
+		return cur, denied
 	}
 	if !SubtaskWindowOpen(Status(cur.Status)) {
 		return cur, apperr.Invalid("Sub task hanya bisa diubah saat task berstatus Requested atau On Progress.")
@@ -161,7 +162,7 @@ func (s *Service) AddSubtask(ctx context.Context, actor Actor, taskID string, in
 	var id int64
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := sqlc.New(tx)
-		cur, err := lockForSubtask(ctx, q, actor, taskID, 0)
+		cur, err := lockForSubtask(ctx, q, actor, taskID, 0, errAddSubtaskForbidden)
 		if err != nil {
 			return err
 		}
@@ -229,7 +230,7 @@ func (s *Service) UpdateSubtask(ctx context.Context, actor Actor, taskID string,
 	}
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := sqlc.New(tx)
-		cur, err := lockForSubtask(ctx, q, actor, taskID, subtaskID)
+		cur, err := lockForSubtask(ctx, q, actor, taskID, subtaskID, subtaskForbidden("mengubah"))
 		if err != nil {
 			return err
 		}
@@ -292,7 +293,7 @@ func (s *Service) UpdateSubtask(ctx context.Context, actor Actor, taskID string,
 func (s *Service) DeleteSubtask(ctx context.Context, actor Actor, taskID string, subtaskID int64) error {
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := sqlc.New(tx)
-		if _, err := lockForSubtask(ctx, q, actor, taskID, subtaskID); err != nil {
+		if _, err := lockForSubtask(ctx, q, actor, taskID, subtaskID, subtaskForbidden("menghapus")); err != nil {
 			return err
 		}
 		st, err := editableSubtask(ctx, q, actor, taskID, subtaskID)
