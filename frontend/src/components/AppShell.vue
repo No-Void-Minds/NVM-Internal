@@ -46,7 +46,8 @@ const navItems: NavItem[] = [
     iconPath:
       'M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2M9 12h6M9 16h6',
   },
-  { to: '/status', label: 'Status', iconPath: 'M3 12h4l3-8 4 16 3-8h4' },
+  // Revisi 23: Status hanya untuk Admin, di top bar desktop maupun menu Lainnya (keduanya dari visibleNav).
+  { to: '/status', label: 'Status', roles: ['admin'], iconPath: 'M3 12h4l3-8 4 16 3-8h4' },
   {
     to: '/profil',
     label: 'Profil',

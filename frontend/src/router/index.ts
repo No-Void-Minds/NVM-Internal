@@ -24,6 +24,9 @@ declare module 'vue-router' {
     layout?: 'auth' | 'app'
     // Kosong berarti semua peran boleh membuka. Backend tetap menolak dengan 403 bila URL dipanggil langsung.
     roles?: Role[]
+    // Peran di luar roles melihat halaman 404, bukan dialihkan ke beranda, supaya keberadaan halaman ini tidak
+    // terungkap (revisi 23).
+    hideFromOthers?: boolean
   }
 }
 
@@ -42,7 +45,12 @@ export const router = createRouter({
       component: ForcePasswordPage,
       meta: { title: 'Buat password baru', layout: 'auth' },
     },
-    { path: '/status', name: 'status', component: StatusPage, meta: { title: 'Status sistem' } },
+    {
+      path: '/status',
+      name: 'status',
+      component: StatusPage,
+      meta: { title: 'Status sistem', roles: ['admin'], hideFromOthers: true },
+    },
     {
       path: '/pengguna',
       name: 'users',
@@ -104,7 +112,17 @@ router.beforeEach(async (to) => {
   if (user.must_change_password && to.name !== 'force-password')
     return { name: 'force-password', query: keepKembali(to.fullPath) }
   if (!user.must_change_password && to.name === 'force-password') return homeFor(user)
-  if (to.meta.roles && !to.meta.roles.includes(user.role)) return homeFor(user)
+  if (to.meta.roles && !to.meta.roles.includes(user.role)) {
+    if (!to.meta.hideFromOthers) return homeFor(user)
+    // Tampilkan 404 yang sudah ada dengan URL tetap sama, seperti alamat yang memang tidak ada.
+    return {
+      name: 'not-found',
+      params: { pathMatch: to.path.slice(1).split('/') },
+      query: to.query,
+      hash: to.hash,
+      replace: true,
+    }
+  }
   return true
 })
 

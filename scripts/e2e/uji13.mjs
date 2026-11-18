@@ -17,6 +17,8 @@
 // satu sel lewat dialog Manajer di database dev, output-nya tautan file Drive karangan).
 // E2E_ONLY=revision (revisi 22: dua kelompok PIC di kartu dan PIC sub task mengembalikan Ready ke On Progress;
 // membuat satu task uji per lebar di database dev lewat API, dengan Manajer sebagai PIC task).
+// E2E_ONLY=status (revisi 23: halaman Status hanya untuk Admin; Manajer dan Staf melihat 404 di /status dan tidak
+// punya menu Status; tidak menyimpan apa pun).
 // Keluar dengan kode 1 bila ada yang gagal.
 import { chromium } from "playwright-core";
 
@@ -60,7 +62,6 @@ const ROLES = {
       "/audit-log",
       "/pengaturan",
       "/profil",
-      "/status",
       "TASK",
       "/tidak-ada",
     ],
@@ -68,15 +69,7 @@ const ROLES = {
   staf: {
     user: env("DEV_STAFF_USERNAME"),
     pass: env("DEV_STAFF_PASSWORD"),
-    pages: [
-      "/task",
-      "/arsip",
-      "/aktivitas",
-      "/profil",
-      "/status",
-      "TASK",
-      "/tidak-ada",
-    ],
+    pages: ["/task", "/arsip", "/aktivitas", "/profil", "TASK", "/tidak-ada"],
   },
 };
 const WIDTHS = [360, 768, 1280, 1920];
@@ -1586,6 +1579,53 @@ async function checkRevision(width) {
 }
 
 if (ONLY === "revision") for (const w of [360, 1280]) await checkRevision(w);
+
+// Revisi 23: /status hanya untuk Admin. Peran lain melihat halaman 404 yang sudah ada dengan URL tetap /status,
+// dan tautan Status tidak ada di top bar maupun menu Lainnya. Admin tetap melihat halamannya.
+async function checkStatusPage(role, width) {
+  const { ctx, page, errors } = await open(role, width, "terang");
+  const where = (what) => `status ${role} ${width} ${what}`;
+  const expect = (cond, w, msg) => {
+    checks++;
+    if (!cond) fail(where(w), msg);
+  };
+  await page.goto(BASE + "/status");
+  await page.waitForLoadState("networkidle");
+  const judul = (await page.locator("h1").first().textContent())?.trim();
+  const path = new URL(page.url()).pathname;
+  // Semua tautan ke /status di DOM, termasuk menu Lainnya yang tersembunyi.
+  const tautan = await page.locator("a[href='/status']").count();
+  if (role === "admin") {
+    expect(
+      judul === "Status sistem",
+      "halaman",
+      `judul "${judul}", mau "Status sistem"`,
+    );
+    expect(tautan > 0, "menu", "Admin tidak punya tautan Status");
+  } else {
+    expect(
+      judul === "Halaman tidak ditemukan",
+      "404",
+      `judul "${judul}", mau "Halaman tidak ditemukan"`,
+    );
+    expect(
+      path === "/status",
+      "404",
+      `URL berubah ke ${path}, mau tetap /status`,
+    );
+    expect(
+      tautan === 0,
+      "menu",
+      `${tautan} tautan Status masih ada di navigasi`,
+    );
+  }
+  await audit(page, errors, where("audit"));
+  await ctx.close();
+}
+
+if (ONLY === "status")
+  for (const role of ["admin", "manajer", "staf"])
+    for (const w of [360, 1280]) await checkStatusPage(role, w);
 
 await browser.close();
 console.log(

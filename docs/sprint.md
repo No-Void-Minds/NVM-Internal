@@ -70,6 +70,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 11r | Filter Hari ini dan istilah Deadline | Filter deadline hari ini di papan; kata Tenggat diganti Deadline |
 | 11s | Aktivitas Harian | Tabel aktivitas per jam di papan task, halaman Aktivitas, dan ekspor Excel |
 | 11t | PIC sub task di kartu dan revisi oleh PIC sub task | Kartu selalu menampilkan PIC sub task; PIC sub task mengembalikan Ready ke On Progress dengan membuka lagi sub task miliknya |
+| 11u | Halaman Status hanya untuk Admin | Menu dan rute Status hanya untuk Admin; peran lain melihat 404 |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -1122,6 +1123,25 @@ Keputusan teknis:
 - `ErrForbidden` polos yang masih lolos ke handler mendapat pesan cadangan netral "Kamu tidak punya hak melakukan ini pada task ini.". `TestNoBareErrForbidden` memindai kode package task supaya `return ErrForbidden` polos tidak muncul lagi.
 - Test: `TestForbiddenMessagesPerAction` (21 jenis penolakan: pesan unik, menyebut sub task hanya untuk aksi sub task) dan `TestWriteTaskErrorForbiddenMessage` (handler meneruskan pesan, juga untuk galat yang dibungkus). Tidak ada perubahan perilaku hak akses; kode HTTP tetap 403.
 
+## Sprint 11u: Halaman Status hanya untuk Admin
+
+**Tujuan:** revisi 23 Manajer. Halaman Status adalah alat pemeriksaan teknis, jadi hanya Admin yang melihatnya.
+
+- [x] S11u-01 Pemeriksaan endpoint: halaman Status (`pages/StatusPage.vue`) hanya memanggil `GET /api/health`, yang mengembalikan `{"status":"ok","database":"ok"}` atau 503 "Database tidak dapat dihubungi." Tidak ada endpoint lain yang memberi versi, waktu jalan, atau detail sistem.
+- [x] S11u-02 Navigasi: menu Status diberi `roles: ['admin']`. Top bar desktop dan menu Lainnya di ponsel sama-sama dibangun dari `visibleNav`, jadi keduanya ikut.
+- [x] S11u-03 Router: rute `/status` diberi `roles: ['admin']` dan penanda baru `hideFromOthers`. Peran lain yang membuka URL itu langsung melihat halaman 404 yang sudah ada (`not-found`), dengan URL tetap `/status`.
+- [x] S11u-04 `scripts/e2e/uji13.mjs`: `/status` keluar dari daftar halaman Manajer dan Staf, dan bagian baru `E2E_ONLY=status` memeriksa Admin (halaman tampil, ada tautan) serta Manajer dan Staf (judul "Halaman tidak ditemukan", URL tetap, tanpa tautan Status) di 360 dan 1280 px.
+
+**Keputusan:**
+- Backend tidak diubah. `/api/health` tetap publik dan minimal karena dipakai healthcheck Docker dan pemeriksaan deploy, dan halaman Status memakainya langsung. Isinya tidak membocorkan apa pun yang tidak bisa diketahui dari fakta bahwa aplikasi menjawab, jadi membatasinya hanya merusak healthcheck tanpa menambah keamanan. Karena tidak ada endpoint yang dibatasi, tidak ada test akses per peran di backend.
+- Peran lain mendapat 404, bukan dialihkan ke beranda seperti halaman Pengguna, Pengaturan, dan Audit Log, supaya keberadaan halaman ini tidak terungkap. Perilaku itu hanya untuk rute bertanda `hideFromOthers`; rute lain yang dibatasi peran tetap dialihkan ke beranda seperti sebelumnya. Pengalihannya memakai rute `not-found` dengan `pathMatch` dari path asli dan `replace`, jadi URL di bilah alamat tetap `/status` dan tombol Kembali tidak memantul.
+- Pengguna yang belum login dan membuka `/status` tetap diarahkan ke halaman masuk dengan `kembali=/status`, sama seperti rute lain. Setelah masuk, Admin sampai ke Status dan peran lain melihat 404.
+- `docs/panduan-tim.md` tidak menyebut halaman Status, jadi tidak diubah.
+
+**Selesai kalau:** `./scripts/check.sh` lolos dan E2E `status` lolos.
+
+**Hasil:** selesai 2026-11-18, `./scripts/check.sh` lolos, E2E `status` 22 pemeriksaan 0 gagal. Tidak ada migrasi dan tidak perlu restart backend.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -1298,9 +1318,10 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 20 | 2026-11-18 | Papan punya filter deadline "Hari ini". Kata "Tenggat" diganti "Deadline" di seluruh teks pengguna | Sprint 11r |
 | 21 | 2026-11-18 | Aktivitas Harian, pengganti spreadsheet "Daily Activity Monitoring": Staf mengisi aktivitas dan output per jam, Manajer melihat semua orang per tanggal dan bisa mengekspor ke Excel | Sprint 11s |
 | 22 | 2026-11-18 | Kartu selalu menampilkan PIC sub task dalam kelompok tersendiri. PIC sub task boleh mengembalikan task Ready ke On Progress dengan membuka lagi sub task miliknya yang dipilih, alasan opsional | Sprint 11t |
+| 23 | 2026-11-18 | Halaman Status hanya untuk Admin. Peran lain tidak melihat menunya, dan membuka URL-nya langsung menampilkan 404 | Sprint 11u |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat kedua puluh dua revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat kedua puluh tiga revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 
