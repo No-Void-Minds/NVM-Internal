@@ -72,6 +72,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 11t | PIC sub task di kartu dan revisi oleh PIC sub task | Kartu selalu menampilkan PIC sub task; PIC sub task mengembalikan Ready ke On Progress dengan membuka lagi sub task miliknya |
 | 11u | Halaman Status hanya untuk Admin | Menu dan rute Status hanya untuk Admin; peran lain melihat 404 |
 | 11v | Lampiran Aktivitas Harian | Berkas per jam di papan dan di halaman Aktivitas; backup storage jadi snapshot inkremental |
+| 11w | Salinan ke Google Drive | Job malam menyalin berkas ke Drive akun tim dengan struktur yang dibaca orang |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -1176,6 +1177,38 @@ Keputusan teknis:
 
 **Hasil:** kode selesai 2026-11-18, `./scripts/check.sh` lolos, `go vet ./...` bersih, test unit backend dan frontend lolos. Logika snapshot diuji di laptop dengan dua run berturut-turut: berkas yang tidak berubah punya dua hardlink, berkas yang dihapus dari storage hilang dari snapshot baru, snapshot harian berumur 20 hari dibuang dan yang bertanda mingguan tetap. Migrasi, grants, uji curl, uji browser, dan uji backup di VM menunggu Rifky.
 
+## Sprint 11w: Salinan ke Google Drive
+
+**Tujuan:** revisi 25 Manajer. Semua berkas aplikasi perlu salinan di Google Drive akun tim dengan struktur yang bisa dibuka orang tanpa aplikasi, supaya tim punya arsip yang bisa dibaca dan dicari sendiri. VM tetap tempat utama; Drive adalah arsip.
+
+- [x] S11w-01 Migrasi 000018: `drive_exports` (berkas yang sudah terunggah), `drive_folders` (nama folder task dan sub task yang sudah ditetapkan), `drive_export_runs` (status run terakhir untuk halaman Status). Ketiganya hanya ditambah dan dibaca, jadi daftar DELETE di `deploy/sql/10-grants.sql` tetap tujuh tabel.
+- [x] S11w-02 Paket `internal/driveexport`: aturan nama Drive (karakter terlarang dibuang, spasi dirapikan, batas 120 karakter, bentrok diberi " (2)"), nama bulan dan hari bahasa Indonesia, dan penyusun path untuk aktivitas, Brief, Deliverable, sub task, ekspor bulanan, dan dump.
+- [x] S11w-03 Perintah `server drive-export stage|record|fail` dengan `--dry-run`: menyusun pohon hardlink bernama rapi di folder staging, menulis ekspor Excel bulan berjalan lewat kode ekspor Aktivitas yang sudah ada, dan mengenkripsi dump dengan age.
+- [x] S11w-04 `deploy/drive-export.sh`: tiga langkah (stage, rclone copy, record), log ke `backup/drive.log` dengan pola yang sama seperti `backup.log`, dan `--dry-run` untuk memeriksa struktur sebelum unggahan pertama.
+- [x] S11w-05 Endpoint `GET /api/drive-export/status` hanya untuk Admin, dan halaman Status menampilkan "Salinan Drive terakhir" berisi waktu, OK atau galat beserta pesannya, dan jumlah berkas.
+- [x] S11w-06 Bagian baru "Salinan ke Google Drive" di `docs/runbook-deploy.md`: membuat remote rclone dengan scope `drive.file` lewat `rclone authorize` di laptop, membuat pasangan kunci age dan menyimpan kunci privatnya di dua tempat di luar VM, uji kering, unggah pertama, pemulihan dump, dan baris cron.
+- [x] S11w-07 Test: unit (pembersihan nama, penomoran bentrok, path setiap jenis, nama bulan dan hari) dan DB (berkas yang sudah tercatat tidak disusun lagi, `is_deleted` dilewati, ganti judul task tidak mengubah path yang sudah tercatat).
+
+**Keputusan:**
+- Rancangannya tetap seperti usulan Manajer: perintah di binary backend menyusun pohon hardlink di staging, lalu container rclone resmi yang mengunggah. Alternatif yang dipertimbangkan dan ditolak: memakai Drive API langsung dari Go (menambah pustaka Google, menangani OAuth dan percobaan ulang sendiri, padahal rclone sudah melakukannya), dan memanggil `rclone copyto` satu kali per berkas supaya tidak perlu staging (satu proses rclone per berkas, lambat dan ratusan kali lebih mudah gagal di tengah).
+- Hardlink, bukan salinan: staging satu filesystem dengan storage, jadi pohon bernama rapi itu tidak memakan disk sama sekali. Staging ditaruh di `/srv/nvm-internal/drive-staging`, di luar folder storage, supaya tidak ikut terbawa snapshot backup (kalau di dalam storage, berkasnya akan tersalin sungguhan ke snapshot setiap malam).
+- `stage` dan `record` dipisah, dengan rclone di antaranya. Dengan begitu "setiap berkas hanya diunggah sekali" tidak berubah jadi "hanya dicoba sekali": baris `drive_exports` baru ditulis setelah unggahan berhasil, jadi unggahan yang gagal dicoba lagi malam berikutnya.
+- Dump dikirim ke perintah `stage` sebagai tar lewat stdin, bukan dengan memberi container itu akses ke folder backup. Dump dibuat `backup.sh` dengan mode 0600 milik user VM, dan container ini berjalan sebagai UID 65532 pemilik storage. Lewat pipe, tidak ada izin yang perlu dilonggarkan dan tidak ada salinan plaintext tambahan di disk.
+- Yang memilih dump mana yang diunggah adalah skrip (3 harian terakhir dan 8 salinan mingguan), karena skrip yang melihat folder backup. Perintah Go hanya mengenkripsi apa pun yang datang di tar. Dump tidak dicatat di `drive_exports`: rclone sendiri melewati berkas yang sudah sama, dan dump harian yang sama memang diunggah beberapa malam berturut-turut.
+- Ekspor Excel bulan berjalan ditimpa setiap malam, jadi juga tidak dicatat di `drive_exports`. Yang dicatat hanya lampiran task dan lampiran aktivitas, yaitu berkas yang memang tidak pernah berubah isinya.
+- Enkripsi age dikerjakan di dalam backend dengan pustaka `filippo.io/age`, bukan dengan biner `age` di VM. Image backend distroless tidak punya shell atau biner tambahan, dan menambah image lagi hanya untuk satu langkah enkripsi lebih mahal daripada satu pustaka Go. Kunci privat tidak pernah ada di VM: yang disimpan di `deploy/.env` hanya kunci publik (recipient). Kalau `DRIVE_BACKUP_AGE_RECIPIENT` kosong, berkas aplikasi tetap diunggah dan dumpnya tidak, dengan alasannya tertulis di log.
+- Scope rclone `drive.file`, bukan `drive`. rclone hanya bisa melihat dan mengubah berkas yang dia buat sendiri, jadi token yang bocor dari VM tidak membuka seluruh Drive akun tim. Konsekuensinya rclone tidak bisa memakai folder yang dibuat orang lewat browser, karena itu folder induk dibuat rclone sendiri.
+- `rclone.conf` disimpan di `/srv/nvm-internal/secrets/`, di luar repo, dimiliki UID 65532 dengan mode 600. Foldernya yang di-mount, bukan berkasnya, karena rclone menulis ulang berkas itu setiap kali token OAuth diperbarui dan penulisan itu lewat rename di dalam folder.
+- Nama folder task dan sub task ditetapkan sekali di `drive_folders`. Judul yang diganti di aplikasi tidak membuat folder kedua di Drive, dan berkas lama tidak perlu dipindah. ID task ikut di nama folder, jadi dua task berjudul sama tidak pernah bentrok; penomoran " (2)" hanya diperlukan untuk sub task dan nama berkas di dalam satu folder.
+- Berkas yang sudah tercatat tidak disusun lagi, jadi pohon staging setiap malam hanya berisi berkas baru. Akibatnya `rclone copy` hampir selalu memindahkan sedikit data, dan berkas yang dihapus di aplikasi tidak pernah diunggah lagi tanpa harus menghapus apa pun di Drive.
+- Berkas yang barisnya ada tetapi berkasnya hilang dari disk dicatat di log dan dilewati, tidak membatalkan seluruh salinan malam itu.
+- Halaman Status membaca `drive_export_runs`, bukan `backup/drive.log`. Backend di dalam container tidak punya akses ke folder log host, dan membaca berkas log dari HTTP akan menambah jalan baru ke filesystem host tanpa alasan.
+- Status salinan hanya untuk Admin, mengikuti revisi 23 yang menjadikan halaman Status milik Admin. `/api/health` tidak diubah.
+
+**Selesai kalau:** `./scripts/check.sh` lolos, migrasi 000018 jalan di dev, `drive-export.sh --dry-run` di VM mencetak struktur yang sesuai, unggahan pertama muncul di Drive akun tim, halaman Status (Admin) menampilkan hasilnya, dan dump yang diunduh dari Drive bisa didekripsi dengan kunci privat age di laptop.
+
+**Hasil:** kode selesai 2026-11-18, `./scripts/check.sh` lolos, `go vet ./...` bersih, test unit dan test DB baru lolos. Satu dependensi Go baru: `filippo.io/age v1.2.1`. Migrasi, langkah persiapan (rclone authorize, kunci age, secrets, cron), uji kering, dan unggah pertama menunggu Rifky.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -1354,9 +1387,10 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 22 | 2026-11-18 | Kartu selalu menampilkan PIC sub task dalam kelompok tersendiri. PIC sub task boleh mengembalikan task Ready ke On Progress dengan membuka lagi sub task miliknya yang dipilih, alasan opsional | Sprint 11t |
 | 23 | 2026-11-18 | Halaman Status hanya untuk Admin. Peran lain tidak melihat menunya, dan membuka URL-nya langsung menampilkan 404 | Sprint 11u |
 | 24 | 2026-11-18 | Lampiran di Aktivitas Harian: berkas menempel pada satu jam, maksimal 95 MB dan 10 berkas per jam, dengan gambar, video, PDF, dokumen Office, TXT, CSV, dan ZIP. Bisa ditarik, ditempel dari papan ketik, dipratinjau, dan dihapus | Sprint 11v |
+| 25 | 2026-11-18 | Salinan rapi semua berkas ke Google Drive akun tim setiap malam: Aktivitas per bulan, hari, dan orang; Task per bulan dengan Brief, Deliverable, dan sub task; dump database terenkripsi age. Satu arah dan tidak menghapus | Sprint 11w |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat kedua puluh empat revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat kedua puluh lima revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

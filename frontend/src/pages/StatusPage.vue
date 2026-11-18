@@ -1,13 +1,25 @@
 <script setup lang="ts">
 import PageHeader from '../components/PageHeader.vue'
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ApiError, apiGet } from '../api/client'
+import { formatDateTime } from '../utils/format'
 
 type Health = { status: string; database: string }
+// Salinan Drive terakhir (revisi 25). never berarti job-nya belum pernah jalan.
+type DriveStatus = {
+  never: boolean
+  finished_at: string | null
+  ok: boolean
+  files: number
+  bytes: number
+  message: string
+}
 type CheckState =
   { kind: 'loading' } | { kind: 'ok'; checkedAt: Date } | { kind: 'error'; message: string; code: string }
 
 const state = ref<CheckState>({ kind: 'loading' })
+const drive = ref<DriveStatus | null>(null)
+const driveError = ref('')
 const timeFormat = new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 let controller: AbortController | null = null
 
@@ -29,7 +41,28 @@ async function check() {
   }
 }
 
+// Status salinan Drive dimuat sekali; gagal memuatnya tidak menutupi hasil pemeriksaan koneksi.
+async function loadDrive() {
+  driveError.value = ''
+  try {
+    drive.value = await apiGet<DriveStatus>('/drive-export/status')
+  } catch (err) {
+    drive.value = null
+    driveError.value = err instanceof ApiError ? err.message : 'Status salinan Drive tidak bisa dibaca.'
+  }
+}
+
+const driveLine = computed(() => {
+  const d = drive.value
+  if (!d) return ''
+  if (d.never) return 'Belum pernah jalan.'
+  const waktu = d.finished_at ? formatDateTime(d.finished_at) : 'waktu tidak tercatat'
+  const hasil = d.ok ? 'OK' : `galat: ${d.message || 'tanpa pesan'}`
+  return `${waktu}, ${hasil}, ${d.files} berkas`
+})
+
 onMounted(check)
+onMounted(loadDrive)
 onUnmounted(() => controller?.abort())
 </script>
 
@@ -53,6 +86,20 @@ onUnmounted(() => controller?.abort())
       <div v-else class="rounded-card bg-danger-bg p-4 text-danger">
         <p class="font-medium">{{ state.message }}</p>
         <p class="mt-1 text-sm">Kode: {{ state.code }}</p>
+      </div>
+    </div>
+
+    <h2 class="mt-8 text-lg font-semibold">Salinan Drive terakhir</h2>
+    <div class="mt-2" aria-live="polite">
+      <p v-if="driveError" role="alert" class="rounded-card bg-danger-bg p-4 text-danger">{{ driveError }}</p>
+      <p v-else-if="!drive" class="rounded-card border border-line bg-surface p-4 text-ink-muted">
+        Memuat status salinan Drive...
+      </p>
+      <div v-else class="rounded-card border border-line bg-surface p-4">
+        <p :class="drive.never || drive.ok ? 'font-medium' : 'font-medium text-danger'">{{ driveLine }}</p>
+        <p v-if="!drive.never" class="mt-1 text-sm text-ink-muted">
+          Job berjalan malam lewat cron di VM, setelah backup.
+        </p>
       </div>
     </div>
 

@@ -32,9 +32,16 @@ services:
       STORAGE_DIR: /data/storage
       # Hanya Nginx di jaringan ini yang boleh mengisi X-Forwarded-For (A5).
       TRUSTED_PROXIES: ${NVM_SUBNET:-172.30.94.0/24}
+      # Salinan ke Google Drive (revisi 25). Hanya dipakai perintah `drive-export`, bukan server HTTP.
+      # Kunci publik age; kosong berarti dump database tidak diunggah ke Drive.
+      DRIVE_BACKUP_AGE_RECIPIENT: ${DRIVE_BACKUP_AGE_RECIPIENT:-}
+      DRIVE_STAGING_DIR: /data/drive-staging
     # Dimiliki UID 65532 (user nonroot di image distroless), lihat docs/runbook-deploy.md.
     volumes:
       - /srv/nvm-internal/storage:/data/storage
+      # Folder staging salinan Drive. Satu filesystem dengan storage, jadi pohon hardlink-nya tidak memakan
+      # disk, tetapi di luar storage supaya tidak ikut masuk snapshot backup.
+      - /srv/nvm-internal/drive-staging:/data/drive-staging
     networks:
       - nvm
       - postgres

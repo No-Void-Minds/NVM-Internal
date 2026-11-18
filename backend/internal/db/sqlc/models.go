@@ -271,6 +271,32 @@ type Division struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type DriveExport struct {
+	ID         int64
+	SourceKind string
+	SourceID   string
+	DrivePath  string
+	SizeBytes  int64
+	ExportedAt pgtype.Timestamptz
+}
+
+type DriveExportRun struct {
+	ID         int64
+	FinishedAt pgtype.Timestamptz
+	Ok         bool
+	Files      int32
+	Bytes      int64
+	Message    pgtype.Text
+}
+
+type DriveFolder struct {
+	ID         int64
+	Scope      string
+	SourceID   string
+	FolderPath string
+	CreatedAt  pgtype.Timestamptz
+}
+
 type Label struct {
 	ID         int64
 	Name       string

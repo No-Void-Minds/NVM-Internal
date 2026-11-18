@@ -40,6 +40,15 @@ func main() {
 		}
 		return
 	}
+	// `server drive-export stage|record|fail` (revisi 25): salinan berkas ke Google Drive, dipanggil
+	// deploy/drive-export.sh dari cron host.
+	if len(os.Args) > 1 && os.Args[1] == "drive-export" {
+		if err := runDriveExport(cfg, log, os.Args[2:]); err != nil {
+			log.Error("salinan Drive gagal", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(cfg, log); err != nil {
 		log.Error("server berhenti karena galat", "err", err)
 		os.Exit(1)

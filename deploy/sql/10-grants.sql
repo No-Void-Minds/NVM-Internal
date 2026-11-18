@@ -27,6 +27,9 @@ TO nvm_internal_app;
 -- (active = false) dan templatnya JSONB yang diganti utuh lewat UPDATE. SELECT, INSERT, dan UPDATE-nya datang dari
 -- ALTER DEFAULT PRIVILEGES di 00-bootstrap.sql, termasuk sequence identity-nya.
 
+-- drive_exports, drive_folders, dan drive_export_runs (migrasi 000018, revisi 25) juga tidak ada di daftar
+-- DELETE: ketiganya hanya ditambah dan dibaca. Salinan ke Drive tidak pernah menghapus apa pun.
+
 -- Bukti untuk runbook: daftar tabel yang boleh dihapus app.
 SELECT table_name FROM information_schema.role_table_grants
 WHERE grantee = 'nvm_internal_app' AND privilege_type = 'DELETE'

@@ -3,6 +3,7 @@ module nvm-internal
 go 1.27.0
 
 require (
+	filippo.io/age v1.2.1
 	github.com/disintegration/imaging v1.6.2
 	github.com/gin-gonic/gin v1.12.0
 	github.com/golang-jwt/jwt/v5 v5.3.1

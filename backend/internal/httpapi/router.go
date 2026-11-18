@@ -101,6 +101,8 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	app.GET("/me/task-counts", s.myTaskCounts)
 	app.GET("/users/:id/avatar", s.userAvatar)
 	manage := app.Group("", requireRole(sqlc.UserRoleAdmin, sqlc.UserRoleManager))
+	// Hasil salinan Drive hanya untuk Admin, sama dengan halaman Status (revisi 23 dan 25).
+	app.GET("/drive-export/status", requireRole(sqlc.UserRoleAdmin), s.driveExportStatus)
 	manage.GET("/users", s.listUsers)
 	manage.POST("/users", s.createUser)
 	manage.PUT("/users/:id", s.updateUser)

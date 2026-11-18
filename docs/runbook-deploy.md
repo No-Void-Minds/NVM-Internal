@@ -188,6 +188,9 @@ Cron milik user VM (`crontab -e`). VM memakai UTC; jadwal dibuat setelah compro 
 0 20 * * * /srv/nvm-internal/deploy/backup.sh >>/srv/nvm-internal/backup/cron.log 2>&1
 # 20.30 UTC = 03.30 WIB: sesi kedaluwarsa, audit log login lebih dari 1 tahun, berkas yatim
 30 20 * * * cd /srv/nvm-internal && docker compose --env-file deploy/.env -f deploy/docker-compose.yml run --rm -T backend maintenance >>/srv/nvm-internal/backup/maintenance.log 2>&1
+# 20.45 UTC = 03.45 WIB: salinan berkas ke Google Drive (revisi 25). Baris ini baru dipasang setelah langkah
+# persiapan di bagian "Salinan ke Google Drive" di bawah selesai.
+45 20 * * * /srv/nvm-internal/deploy/drive-export.sh >>/srv/nvm-internal/backup/drive-cron.log 2>&1
 ```
 
 Sebelum memasang cron, jalankan sekali dengan tangan:
@@ -281,6 +284,132 @@ sudo chown -R 65532:65532 /srv/nvm-internal/storage
 ```
 
 `cp -a` dari snapshot tidak memakan ruang dua kali hanya bila targetnya di filesystem yang sama; ke `/srv` yang terpisah, berkasnya benar-benar disalin. Arsip `storage-*.tar.gz` yang masih ada tetap bisa dipakai dengan `tar -xzf` seperti sebelumnya.
+
+### Salinan ke Google Drive (revisi 25)
+
+Setiap malam VM menyalin berkas aplikasi ke Google Drive akun tim dengan struktur yang bisa dibaca orang. VM tetap tempat utama; Drive adalah arsip. Salinannya satu arah dan tidak pernah menghapus: berkas yang dihapus di aplikasi tidak diunggah lagi, tetapi salinan lamanya di Drive dibiarkan.
+
+Struktur di Drive, di dalam folder induk `NVM Internal` yang dibuat rclone sendiri:
+
+```
+NVM Internal/
+  Aktivitas/2026-11 November/Aktivitas Harian November 2026.xlsx    (ditimpa tiap malam)
+  Aktivitas/2026-11 November/18 Rabu/<Nama Staf>/09.00-10.00 - <nama berkas>
+  Task/2026-11/T-0012 <judul task>/Brief/<nama berkas>
+  Task/2026-11/T-0012 <judul task>/Deliverable/<nama berkas>
+  Task/2026-11/T-0012 <judul task>/Sub task 1 - <judul> (<PIC>)/<nama berkas>
+  Backup Database/2026-11-18.dump.age
+```
+
+Yang mengerjakannya: `deploy/drive-export.sh`, tiga langkah. Pertama perintah `backend drive-export stage` menyusun pohon hardlink bernama rapi di `/srv/nvm-internal/drive-staging` (satu filesystem dengan storage, jadi tidak memakan disk), menulis ekspor Excel bulan berjalan, dan mengenkripsi dump dengan age. Kedua container rclone resmi menyalin folder itu ke Drive. Ketiga `backend drive-export record` mencatat berkas yang sudah terunggah di tabel `drive_exports`, menulis baris status untuk halaman Status, lalu membuang staging. Kalau langkah mana pun gagal, tidak ada yang tercatat dan malam berikutnya dicoba lagi.
+
+#### 1. Membuat remote rclone dengan scope drive.file
+
+VM tidak punya browser, jadi izin Google diambil di laptop lalu hasilnya dipindah. **Jangan pernah mengirim token lewat chat atau menempelkannya di tempat yang tidak perlu.**
+
+Di laptop Windows (rclone dari [rclone.org/downloads](https://rclone.org/downloads/)):
+
+```powershell
+rclone authorize "drive" "{""scope"":""drive.file""}"
+```
+
+Browser terbuka, masuk dengan akun Google tim, izinkan. `scope=drive.file` berarti rclone hanya bisa melihat dan mengubah berkas yang dia buat sendiri, bukan seluruh Drive akun tim. rclone mencetak satu baris token JSON yang panjang; salin baris itu.
+
+Di VM, buat folder secrets dan berkas konfigurasinya:
+
+```bash
+sudo install -d -o 65532 -g 65532 -m 700 /srv/nvm-internal/secrets
+sudoedit /srv/nvm-internal/secrets/rclone.conf
+```
+
+Isinya, dengan `<token JSON dari laptop>` diganti baris tadi:
+
+```ini
+[nvmdrive]
+type = drive
+scope = drive.file
+token = <token JSON dari laptop>
+```
+
+Lalu kunci izinnya. Folder di-mount sebagai folder, bukan satu berkas, karena rclone menulis ulang berkas ini setiap kali token diperbarui:
+
+```bash
+sudo chown -R 65532:65532 /srv/nvm-internal/secrets
+sudo chmod 600 /srv/nvm-internal/secrets/rclone.conf
+```
+
+Periksa remote-nya bisa dipakai, tanpa mencetak isi rclone.conf:
+
+```bash
+docker run --rm --user 65532:65532 -e XDG_CACHE_HOME=/tmp \
+  -v /srv/nvm-internal/secrets:/config/rclone rclone/rclone:1.71.0 \
+  --config /config/rclone/rclone.conf about nvmdrive:
+```
+
+#### 2. Kunci age untuk dump database
+
+Dump berisi seluruh data akun dan isi task, jadi yang diunggah ke Drive hanya versi terenkripsi. Kunci privatnya tidak pernah ada di VM, jadi siapa pun yang bisa membaca Drive tetap tidak bisa membuka dumpnya.
+
+Di laptop (age dari [github.com/FiloSottile/age/releases](https://github.com/FiloSottile/age/releases)):
+
+```powershell
+age-keygen -o nvm-backup-key.txt
+```
+
+Berkas itu memuat dua hal: baris `# public key: age1...` dan kunci privat `AGE-SECRET-KEY-1...`.
+
+- Kunci privat disimpan di **dua tempat di luar VM**, misalnya hard disk eksternal yang disimpan di kantor dan satu lagi di pengelola password (sebagai catatan aman), atau di volume BitLocker atau VeraCrypt. Tanpa kunci ini dump di Drive tidak bisa dipulihkan, jadi kehilangan kunci sama dengan kehilangan cadangan itu.
+- Kunci privat tidak pernah ditaruh di VM, di repo, atau dikirim lewat chat.
+
+Kunci publiknya dimasukkan ke `deploy/.env` di VM:
+
+```bash
+sudoedit /srv/nvm-internal/deploy/.env
+# DRIVE_BACKUP_AGE_RECIPIENT=age1contohkuncipublikyangpanjang...
+```
+
+Kalau variabel itu kosong, berkas aplikasi tetap diunggah dan dumpnya tidak, dengan alasannya tertulis di `drive.log`.
+
+#### 3. Uji kering dan unggah pertama
+
+Uji kering hanya menyusun staging dan mencetak daftar path, tanpa menyentuh database dan tanpa mengunggah apa pun:
+
+```bash
+/srv/nvm-internal/deploy/drive-export.sh --dry-run | head -40
+```
+
+Periksa strukturnya: nama folder task, nama Staf, jam di depan nama berkas, dan ekspor bulanan. Setelah cocok, jalankan sekali sungguhan:
+
+```bash
+/srv/nvm-internal/deploy/drive-export.sh && tail -1 /srv/nvm-internal/backup/drive.log
+```
+
+Barisnya berbentuk `OK berkas=12 ukuran=48M`, atau `GAGAL ... pesan=...`. Lalu cek di Drive akun tim lewat browser, dan di aplikasi buka halaman **Status** (Admin): di bawah pemeriksaan koneksi ada "Salinan Drive terakhir" dengan waktu, OK atau galat, dan jumlah berkas.
+
+Staging setelah run yang berhasil kosong, karena dibuang perintah `record`:
+
+```bash
+ls -la /srv/nvm-internal/drive-staging
+```
+
+#### 4. Memulihkan dump dari Drive
+
+Unduh dumpnya (di laptop, dari Drive lewat browser atau rclone), lalu dekripsi dengan kunci privat age:
+
+```powershell
+age --decrypt -i nvm-backup-key.txt -o 2026-11-18.dump 2026-11-18.dump.age
+```
+
+Setelah itu pindahkan `.dump` ke VM dan ikuti langkah di bagian **Uji restore pertama** di atas, dengan `$DUMP` menunjuk berkas itu. Berkas lampiran di Drive tidak terenkripsi, jadi bisa disalin langsung ke `/srv/nvm-internal/storage` bila perlu, tetapi namanya di Drive adalah nama yang dibaca orang, bukan UUID yang dipakai aplikasi: untuk pemulihan penuh pakai snapshot storage di VM, bukan Drive.
+
+#### 5. Cron
+
+```cron
+# 20.45 UTC = 03.45 WIB: salinan berkas ke Google Drive, setelah backup (20.00) dan job harian (20.30)
+45 20 * * * /srv/nvm-internal/deploy/drive-export.sh >>/srv/nvm-internal/backup/drive-cron.log 2>&1
+```
+
+Bandwidth tidak dibatasi karena jalannya malam; rclone memakai `--transfers 2` dan percobaan ulang bawaannya.
 
 ### Salinan di luar VM (manual)
 
