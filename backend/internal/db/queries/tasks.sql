@@ -94,6 +94,7 @@ WHERE NOT t.is_deleted
   AND (sqlc.narg(urgency)::task_urgency IS NULL OR t.urgency = sqlc.narg(urgency)::task_urgency)
   AND (sqlc.narg(due)::text IS NULL
        OR (sqlc.narg(due)::text = 'overdue' AND t.due_date < @today::date AND t.status <> 'completed')
+       OR (sqlc.narg(due)::text = 'today' AND t.due_date = @today::date)
        OR (sqlc.narg(due)::text = 'week' AND t.due_date BETWEEN @today::date AND (@today::date) + 6)
        OR (sqlc.narg(due)::text = 'none' AND t.due_date IS NULL))
          -- Blok kata kunci ini harus sama dengan ListArchiveTasks. Diubah di satu tempat, ubah di tempat lain.

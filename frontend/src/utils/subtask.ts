@@ -53,7 +53,7 @@ export function toCreatePayload(drafts: SubtaskDraft[]): CreateSubtaskInput[] {
 // Sama dengan pesan backend (checkSubtaskDue), supaya galat muncul sebelum dikirim.
 export function subtaskDueProblem(due: string, taskDue: string | null): string | null {
   if (!due || !taskDue || due <= taskDue) return null
-  return `Tenggat sub task tidak boleh melewati tenggat task (${formatLongDay(taskDue)}).`
+  return `Deadline sub task tidak boleh melewati deadline task (${formatLongDay(taskDue)}).`
 }
 
 const longDay = new Intl.DateTimeFormat('id-ID', {

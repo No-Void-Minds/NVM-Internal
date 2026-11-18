@@ -650,7 +650,7 @@ const buttonSecondary =
         <dd>{{ task.division.name }}</dd>
         <dt class="text-ink-muted">Tanggal mulai</dt>
         <dd>{{ task.start_date ? formatDay(task.start_date) : 'Belum diisi' }}</dd>
-        <dt class="text-ink-muted">Tenggat</dt>
+        <dt class="text-ink-muted">Deadline</dt>
         <dd :class="isOverdue(task.due_date, task.status) ? 'font-medium text-urgent' : ''">
           <template v-if="task.due_date">
             {{ isOverdue(task.due_date, task.status) ? 'Terlambat, ' : '' }}{{ formatDay(task.due_date) }}
@@ -831,13 +831,13 @@ const buttonSecondary =
                       <circle cx="12" cy="12" r="9" />
                       <path d="M12 7v5l3 2" />
                     </svg>
-                    {{ subOverdue(s) ? 'Terlambat, ' : 'Tenggat ' }}{{ formatDay(s.due_date) }}
+                    {{ subOverdue(s) ? 'Terlambat, ' : 'Deadline ' }}{{ formatDay(s.due_date) }}
                   </span>
                   <span
                     v-if="pastTaskDue(s)"
                     class="rounded-chip border border-urgent px-2 py-0.5 text-urgent"
                   >
-                    Melewati tenggat task
+                    Melewati deadline task
                   </span>
                   <span v-if="s.attachments.length" class="text-ink-muted">
                     {{ s.attachments.length }} berkas

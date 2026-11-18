@@ -129,7 +129,7 @@ func cleanFieldsOf(in SubtaskFields) (cleanSubtaskFields, error) {
 		return out, err
 	}
 	out.reference, out.deliverable = ref.String, del.String
-	if out.due, err = parseDate(in.DueDate, "Tenggat sub task"); err != nil {
+	if out.due, err = parseDate(in.DueDate, "Deadline sub task"); err != nil {
 		return out, err
 	}
 	if in.ResultNote != nil {

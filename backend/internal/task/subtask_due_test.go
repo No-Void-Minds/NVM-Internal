@@ -37,7 +37,7 @@ func TestCheckSubtaskDue(t *testing.T) {
 	}
 	var ve *apperr.Validation
 	err := checkSubtaskDue(day("2026-11-21"), taskDue)
-	if !errors.As(err, &ve) || ve.Message != "Tenggat sub task tidak boleh melewati tenggat task (20 November 2026)." {
+	if !errors.As(err, &ve) || ve.Message != "Deadline sub task tidak boleh melewati deadline task (20 November 2026)." {
 		t.Fatalf("pesan galat: %v", err)
 	}
 	if err := numbered(1, err); err.Error() != "Sub task nomor 2: "+ve.Message {

@@ -15,7 +15,7 @@ Alamat: **https://novoidminds.xyz**. Bisa dibuka dari laptop dan HP, di kantor m
 - Staf melihat **Task saya** lebih dulu. Pilih **Semua task** untuk melihat pekerjaan tim (hanya baca untuk task orang lain).
 - **Task saya** dan filter PIC memuat task yang kamu pegang sebagai PIC, dan task yang salah satu sub task-nya ditugaskan ke kamu. Kartu yang masuk karena sub task diberi baris **Sub task: <nama>**.
 - Klik judul kartu untuk membuka detail. Tombol **Buka di tab baru** membuka halaman task penuh.
-- Kartu dengan tanda **Terlambat** sudah lewat tenggatnya.
+- Kartu dengan tanda **Terlambat** sudah lewat deadline-nya.
 
 ## Memindahkan task
 

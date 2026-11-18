@@ -340,6 +340,7 @@ WHERE NOT t.is_deleted
   AND ($6::task_urgency IS NULL OR t.urgency = $6::task_urgency)
   AND ($7::text IS NULL
        OR ($7::text = 'overdue' AND t.due_date < $8::date AND t.status <> 'completed')
+       OR ($7::text = 'today' AND t.due_date = $8::date)
        OR ($7::text = 'week' AND t.due_date BETWEEN $8::date AND ($8::date) + 6)
        OR ($7::text = 'none' AND t.due_date IS NULL))
          -- Blok kata kunci ini harus sama dengan ListArchiveTasks. Diubah di satu tempat, ubah di tempat lain.

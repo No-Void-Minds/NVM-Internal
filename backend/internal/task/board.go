@@ -20,8 +20,11 @@ const CompletedDays = 7
 
 const (
 	DueOverdue = "overdue"
-	DueWeek    = "week"
-	DueNone    = "none"
+	// DueToday dan DueWeek sengaja tumpang tindih: "7 hari ke depan" memang menghitung hari ini sebagai
+	// hari pertama (due_date BETWEEN today AND today + 6), jadi task hari ini muncul di keduanya.
+	DueToday = "today"
+	DueWeek  = "week"
+	DueNone  = "none"
 )
 
 // officeTZ dipakai untuk menentukan "hari ini". Server bisa berjalan dalam UTC, sedangkan tenggat dibaca tim
@@ -121,10 +124,10 @@ func (f BoardFilter) params(now time.Time) (sqlc.ListBoardTasksParams, error) {
 	}
 	switch f.Due {
 	case "":
-	case DueOverdue, DueWeek, DueNone:
+	case DueOverdue, DueToday, DueWeek, DueNone:
 		p.Due = pgtype.Text{String: f.Due, Valid: true}
 	default:
-		return p, apperr.Invalid("Filter tenggat tidak dikenal.")
+		return p, apperr.Invalid("Filter deadline tidak dikenal.")
 	}
 	if f.DivisionID != nil {
 		p.DivisionID = pgtype.Int8{Int64: *f.DivisionID, Valid: true}

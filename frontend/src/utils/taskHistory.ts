@@ -7,7 +7,7 @@ const fieldName: Record<string, string> = {
   description: 'deskripsi',
   urgency: 'urgency',
   start_date: 'tanggal mulai',
-  due_date: 'tenggat',
+  due_date: 'deadline',
   deliverable_url: 'tautan deliverable',
   division_id: 'divisi',
   // Baris riwayat sebelum Sprint 7 masih memakai assignee_ids; dipertahankan supaya tetap terbaca.
@@ -61,8 +61,8 @@ export function describeTaskHistory(h: TaskHistoryItem): string {
       // Revisi 16: tenggat ikut dicatat. Riwayat lama tanpa due_date terbaca sama (undefined) dan jatuh ke bawah.
       if ((prev.due_date ?? null) !== (after.due_date ?? null)) {
         return after.due_date
-          ? `mengubah tenggat sub task "${String(after.title ?? '')}" menjadi ${formatDay(String(after.due_date))}`
-          : `menghapus tenggat sub task "${String(after.title ?? '')}"`
+          ? `mengubah deadline sub task "${String(after.title ?? '')}" menjadi ${formatDay(String(after.due_date))}`
+          : `menghapus deadline sub task "${String(after.title ?? '')}"`
       }
       // Revisi 18: catatan hasil dan tautan hasil, disimpan bersama dari kotak Hasil.
       const name = String(after.title ?? '')

@@ -2,7 +2,7 @@ import { apiGet } from './client'
 import type { TaskSummary } from './tasks'
 import type { TaskStatus, Urgency } from '../utils/task'
 
-export type DueFilter = 'overdue' | 'week' | 'none'
+export type DueFilter = 'overdue' | 'today' | 'week' | 'none'
 
 export type BoardQuery = {
   q?: string

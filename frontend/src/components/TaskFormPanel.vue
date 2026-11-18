@@ -240,7 +240,7 @@ function validate(): string | null {
     }
   }
   if (startDate.value && dueDate.value && dueDate.value < startDate.value) {
-    return 'Tenggat tidak boleh lebih awal dari tanggal mulai.'
+    return 'Deadline tidak boleh lebih awal dari tanggal mulai.'
   }
   const url = deliverableUrl.value.trim()
   if (url && !/^https?:\/\//i.test(url)) return 'Tautan deliverable harus diawali http:// atau https://.'
@@ -372,7 +372,7 @@ const optionClass =
 
       <!-- Revisi 16: tenggat tepat di bawah judul, karena keduanya yang paling sering diisi. -->
       <div>
-        <label for="task-due" class="block text-sm font-medium">Tenggat</label>
+        <label for="task-due" class="block text-sm font-medium">Deadline</label>
         <input
           id="task-due"
           v-model="dueDate"

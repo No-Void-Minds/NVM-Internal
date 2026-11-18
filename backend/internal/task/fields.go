@@ -52,11 +52,11 @@ func cleanFields(title, description, urgency, start, due, deliverable string) (f
 	if f.startDate, err = parseDate(start, "Tanggal mulai"); err != nil {
 		return f, err
 	}
-	if f.dueDate, err = parseDate(due, "Tenggat"); err != nil {
+	if f.dueDate, err = parseDate(due, "Deadline"); err != nil {
 		return f, err
 	}
 	if f.startDate.Valid && f.dueDate.Valid && f.dueDate.Time.Before(f.startDate.Time) {
-		return f, apperr.Invalid("Tenggat tidak boleh lebih awal dari tanggal mulai.")
+		return f, apperr.Invalid("Deadline tidak boleh lebih awal dari tanggal mulai.")
 	}
 
 	if f.deliverableURL, err = cleanURL(deliverable); err != nil {
@@ -117,7 +117,7 @@ func formatDay(d pgtype.Date) string {
 // tidak membatasi apa pun.
 func checkSubtaskDue(sub, taskDue pgtype.Date) error {
 	if sub.Valid && taskDue.Valid && sub.Time.After(taskDue.Time) {
-		return apperr.Invalid(fmt.Sprintf("Tenggat sub task tidak boleh melewati tenggat task (%s).", formatDay(taskDue)))
+		return apperr.Invalid(fmt.Sprintf("Deadline sub task tidak boleh melewati deadline task (%s).", formatDay(taskDue)))
 	}
 	return nil
 }

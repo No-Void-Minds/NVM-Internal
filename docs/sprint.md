@@ -67,6 +67,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 11o | PIC sub task memindahkan task, form tambah dilipat | PIC sub task bisa memulai task dan menandai Ready; panel detail tidak langsung panjang |
 | 11p | Catatan hasil sub task | Detail sub task dibagi Arahan dan Hasil; PIC sub task menulis catatan hasil |
 | 11q | Task berulang | Task harian, mingguan, atau bulanan muncul sendiri sebagai task baru |
+| 11r | Filter Hari ini dan istilah Deadline | Filter deadline hari ini di papan; kata Tenggat diganti Deadline |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -1006,6 +1007,23 @@ Keputusan teknis:
 
 **Hasil:** kode selesai 2026-11-18, `./scripts/check.sh` lolos. Unit test aturan (`TestRuleDaily`, `TestRuleWeekly`, `TestRuleMonthly`, `TestRuleStartEnd`, `TestRuleValidate`, `TestOfficeDate`) lolos. Test DB (`TestSeriesOccurrences`, `TestSeriesEndDate`, `TestSeriesUpdateTemplate`) menunggu `TEST_DATABASE_URL`. E2E `schedule` 20 pemeriksaan 0 gagal. Migrasi `000015` belum dijalankan; curl dan perintah dev menunggu migrasi dan restart backend.
 
+## Sprint 11r: Filter Hari ini dan istilah Deadline
+
+**Tujuan:** revisi 20 Manajer. Papan perlu satu klik untuk melihat yang jatuh tempo hari ini, dan seluruh teks memakai satu kata yang dipakai tim sehari-hari.
+
+- [x] S11r-01 Filter deadline `today` di papan: `due_date` sama dengan hari ini menurut `officeTZ`. Dihitung di backend dengan pola yang sama dengan `overdue` dan `week`, memakai parameter `@today` yang sudah ada. Urutan pilihan: Semua deadline, Terlambat, Hari ini, 7 hari ke depan, Tanpa deadline.
+- [x] S11r-02 Kata "Tenggat" diganti "Deadline" di label form task dan sub task, filter, kartu, panel detail, riwayat task, kalimat pratinjau jadwal, penanda "Melewati deadline task", pesan galat backend, dan `docs/panduan-tim.md`.
+
+**Keputusan:**
+- "7 hari ke depan" memang menghitung hari ini sebagai hari pertama (`due_date BETWEEN today AND today + 6`), jadi task yang jatuh tempo hari ini muncul di "Hari ini" maupun "7 hari ke depan". Perilaku itu tidak diubah, hanya dicatat supaya tidak dikira bug saat Sprint 13 menguji kedua filter.
+- Filter "Hari ini" tidak menyaring status, berbeda dengan "Terlambat" yang mengecualikan Completed. Task yang sudah selesai hari ini tetap muncul, karena yang ditanyakan Manajer adalah apa yang jatuh tempo hari ini, bukan apa yang belum selesai.
+- Arsip tidak punya filter deadline, jadi tidak ditambahkan. Arsip disaring dengan tanggal selesai, dan menambahkan filter deadline di sana akan menambah kolom yang tidak ditanyakan siapa pun.
+- Penggantian kata berhenti di teks pengguna. Nama kolom (`due_date`), field JSON (`due_date`, `due`), nilai parameter URL (`overdue`, `today`, `week`, `none`), nama variabel, dan nama fungsi tetap, supaya tidak ada migrasi dan tautan papan yang sudah dibagikan tetap berlaku. Komentar kode yang masih memakai kata "tenggat" dibiarkan, karena menyentuhnya hanya memperbesar diff tanpa mengubah apa pun yang dilihat pengguna.
+
+**Selesai kalau:** `./scripts/check.sh` lolos, papan dengan `?due=today` hanya memuat task yang deadline-nya hari ini, dan pencarian kata "tenggat" di teks pengguna tidak menemukan sisa.
+
+**Hasil:** kode selesai 2026-11-18, `./scripts/check.sh` lolos. Tidak ada migrasi. Uji curl dan uji browser menunggu Rifky.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -1179,9 +1197,10 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 17 | 2026-11-18 | PIC sub task boleh memindahkan task ke On Progress dan ke Ready (dengan Ready gate). Form tambah sub task di panel detail dilipat di balik satu tombol | Sprint 11o |
 | 18 | 2026-11-18 | PIC sub task menulis catatan hasil (output di mana, dikirim ke mana, versi mana). Detail sub task dibagi Arahan dan Hasil | Sprint 11p |
 | 19 | 2026-11-18 | Task berulang harian, mingguan, atau bulanan. Setiap kemunculan task biasa dengan ID sendiri, dibuat otomatis pada harinya | Sprint 11q |
+| 20 | 2026-11-18 | Papan punya filter deadline "Hari ini". Kata "Tenggat" diganti "Deadline" di seluruh teks pengguna | Sprint 11r |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat kesembilan belas revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat kedua puluh revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

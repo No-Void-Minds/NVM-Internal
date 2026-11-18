@@ -13,7 +13,7 @@ Sumber kebenaran urutan kerja, aturan bisnis, keputusan, dan revisi: `docs/sprin
 
 ## Peta repo
 
-- `backend/migrations`: migrasi berurutan (`000001` sampai `000007` sudah ada). Migrasi baru memakai nomor berikutnya, selalu dengan `up` dan `down`.
+- `backend/migrations`: migrasi berurutan (`000001` sampai `000015` sudah ada). Migrasi baru memakai nomor berikutnya, selalu dengan `up` dan `down`.
 - `backend/internal/db/queries/*.sql`: query sqlc. `backend/internal/db/sqlc`: hasil generate, jangan diedit tangan.
 - `backend/internal/task`: aturan bisnis task (service, sub task, centang, papan, arsip).
 - `backend/internal/httpapi`: handler dan `router.go`. Grup rute: `api` (sameOrigin), `authed`, `app` (password sudah diganti), `manage` (Admin dan Manajer).
@@ -23,20 +23,21 @@ Sumber kebenaran urutan kerja, aturan bisnis, keputusan, dan revisi: `docs/sprin
 
 ## Perintah
 
-- Pemeriksaan wajib sebelum melapor selesai: `./scripts/check.sh` dari root (gofmt, `go build`, `npm run check`). Jangan jalankan `--full` kecuali diminta: test lama memang rusak sampai Sprint 13.
+- Pemeriksaan wajib sebelum melapor selesai: `./scripts/check.sh` dari root (gofmt, `go build`, `npm run check`). Jangan jalankan `--full` kecuali diminta: Sprint 13 (pengujian) belum selesai, jadi sebagian test masih merah.
 - Setelah mengubah query: `cd backend && sqlc generate`.
 - Merapikan: `cd backend && gofmt -w .` dan `cd frontend && npx prettier --write src`.
 - Migrasi dev, dari folder `backend`: `migrate -path migrations -database "$DATABASE_URL" up`. Rifky yang memuat `DATABASE_URL`. Kalau variabel itu kosong, minta Rifky menjalankannya, jangan membaca `.env`.
 - Uji API manual, dari folder `backend`: `API=http://127.0.0.1:8080`, lalu `../scripts/dev-login.sh` (menyimpan cookie `/tmp/admin.txt`, `/tmp/staf.txt`, `/tmp/manajer.txt`). POST dan PUT wajib memakai `-H "Origin: $API" -H "Content-Type: application/json"`.
 - Backend dijalankan Rifky di terminalnya sendiri. Setelah kode Go berubah, minta dia me-restart backend sebelum uji curl: `go build` tidak mengganti proses yang sedang jalan.
+- Deploy ke produksi: ikuti `docs/runbook-deploy.md` bagian "Update versi". Urutannya backup, tandai image lama, `git pull`, migrasi, baru build. Bila migrasi menambah tabel baru, `deploy/sql/10-grants.sql` wajib dijalankan ulang, karena hak DELETE diberikan per tabel. Rifky yang menjalankan semuanya di VM.
 
 ## Aturan kerja (wajib)
 
 - Jangan `git commit`, `git push`, atau mengubah riwayat git. Di akhir tiap langkah berikan satu perintah yang siap ditempel: `./scripts/check.sh && git add <path> && git commit -m "<pesan>" && git push`.
 - Kerjakan per langkah sprint (mis. S9-06) sesuai `docs/sprint.md`. Setelah tiap langkah tampilkan tabel semua langkah sprint itu beserta statusnya.
 - Verifikasi per sprint cukup `./scripts/check.sh`. Skrip uji API (`scripts/uji-*.sh`) hanya dijalankan kalau backend berubah. Screenshot dan Playwright hanya di Sprint 13 atau kalau Rifky memintanya.
-- Test otomatis tidak ditulis sebelum Sprint 13. Jangan memperbaiki test lama yang memakai `PICIDs`.
-- `nvm_internal_test` sengaja belum dimigrasi ke `000003` dan `000004`. Jangan dimigrasi sebelum Sprint 13.
+- Sprint 13 (pengujian) adalah langkah besar berikutnya dan belum selesai. Jangan mengerjakannya sambil lalu di tengah tugas lain. Test yang sudah ada boleh disesuaikan kalau tugas yang sedang dikerjakan mengubah teks pesan atau aturan yang diujinya.
+- `nvm_internal_test` tertinggal di belakang skema dev. Memigrasikannya bagian dari Sprint 13, bukan tugas lain.
 - Jangan menjalankan `migrate ... down`, `DROP`, `TRUNCATE`, atau `DELETE` massal tanpa izin eksplisit untuk perintah itu.
 - Jangan membaca atau mencetak `backend/.env`, `DATABASE_URL`, password, token sesi, atau isi cookie.
 - Jangan menebak isi file. Baca dulu, lalu ubah seperlunya.
@@ -67,13 +68,14 @@ Sumber kebenaran urutan kerja, aturan bisnis, keputusan, dan revisi: `docs/sprin
 - Pakai token warna yang sudah ada di `frontend/src/style.css` (line, canvas, surface, ink, ink-muted, accent, danger, urgent, dan token status). Warna baru butuh alasan satu kalimat.
 - Animasi hanya bila punya tujuan UX, tanpa loop, dan punya versi diam untuk `prefers-reduced-motion`.
 - Teks: spesifik, tanpa buzzword, tanpa klaim besar, CTA menyebut aksinya.
+- Istilah tetap: tanggal batas selesai disebut "Deadline" di label dan "deadline" di tengah kalimat (revisi 20). Kata "tenggat" tidak dipakai lagi di teks pengguna. Nama kolom, field JSON, dan nilai parameter URL tetap `due_date` dan `due`.
 - Untuk pekerjaan UI dan dokumen, laporan akhir memuat Delivery Gate: satu baris PASS atau FAIL per poin di atas beserta buktinya. Satu FAIL berarti belum selesai.
 - Sprint 11 (poles UI) baru dimulai setelah Rifky memberikan `docs/DESIGN.md`. Dial ENERGY, RHYTHM, dan MOTION ditetapkan di awal sprint itu dengan alasan, lalu dipegang sampai akhir.
 
 ## Data dev
 
 - Akun: `admin`, `manajer.uji` (id 7, Marketing), `staf.uji` (id 4, Marketing), `staf.a` (id 5, Creative), dan `manajer.dua` untuk uji aturan antar Manajer.
-- Task uji mulai `T-0009`. Data dev boleh berubah saat uji, data produksi belum ada.
+- Task uji mulai `T-0009`. Data dev boleh berubah saat uji. Produksi sudah dipakai tim, jadi perubahan skema di sana hanya lewat migrasi dan runbook.
 
 ## Cara melapor
 

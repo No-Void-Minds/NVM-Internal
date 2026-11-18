@@ -4,8 +4,9 @@ import { urgencies, type Urgency } from './task'
 
 export const dueOptions: { value: DueFilter; label: string }[] = [
   { value: 'overdue', label: 'Terlambat' },
+  { value: 'today', label: 'Hari ini' },
   { value: 'week', label: '7 hari ke depan' },
-  { value: 'none', label: 'Tanpa tenggat' },
+  { value: 'none', label: 'Tanpa deadline' },
 ]
 
 export function one(value: LocationQuery[string]): string | undefined {

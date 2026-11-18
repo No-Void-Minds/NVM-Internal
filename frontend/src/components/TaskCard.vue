@@ -104,7 +104,7 @@ const percent = computed(() =>
           <circle cx="12" cy="12" r="9" />
           <path d="M12 7v5l3 2" />
         </svg>
-        {{ overdue ? 'Terlambat, ' : 'Tenggat ' }}{{ formatDay(task.due_date) }}
+        {{ overdue ? 'Terlambat, ' : 'Deadline ' }}{{ formatDay(task.due_date) }}
       </span>
     </div>
     <!-- relative z-10 supaya tombol ini berada di atas lapisan klik judul yang membentang ke seluruh kartu. -->

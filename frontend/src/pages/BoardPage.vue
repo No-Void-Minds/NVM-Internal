@@ -497,14 +497,14 @@ const buttonSecondary =
             </select>
           </div>
           <div class="min-w-0">
-            <label for="filter-due" class="sr-only">Tenggat</label>
+            <label for="filter-due" class="sr-only">Deadline</label>
             <select
               id="filter-due"
               :class="filterControl"
               :value="query.due ?? ''"
               @change="setQuery({ due: (selected($event) || undefined) as DueFilter | undefined })"
             >
-              <option value="">Semua tenggat</option>
+              <option value="">Semua deadline</option>
               <option v-for="d in dueOptions" :key="d.value" :value="d.value">{{ d.label }}</option>
             </select>
           </div>

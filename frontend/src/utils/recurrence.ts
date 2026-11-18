@@ -108,10 +108,10 @@ export function dueOffset(due: string, from: string): number | null {
   return Math.round((parse(due).getTime() - parse(from).getTime()) / 86_400_000)
 }
 
-// Kalimat pratinjau, mis. "Muncul berikutnya Senin, 23 November 2026, tenggat 23 November 2026."
+// Kalimat pratinjau, mis. "Muncul berikutnya Senin, 23 November 2026, deadline 23 November 2026."
 export function previewSentence(next: string | null, offset: number | null): string {
   if (!next) return 'Tidak ada kemunculan berikutnya sebelum tanggal berhenti.'
-  const due = offset === null ? 'tanpa tenggat' : `tenggat ${formatPlain(addDays(next, offset))}`
+  const due = offset === null ? 'tanpa deadline' : `deadline ${formatPlain(addDays(next, offset))}`
   return `Muncul berikutnya ${formatLong(next)}, ${due}.`
 }
 

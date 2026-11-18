@@ -98,7 +98,7 @@ const label = 'block text-sm text-ink-muted'
     <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
       <div class="min-w-0">
         <label :for="id('due')" :class="label"
-          >Tenggat<span class="sr-only"> {{ labelSuffix }}</span></label
+          >Deadline<span class="sr-only"> {{ labelSuffix }}</span></label
         >
         <input
           :id="id('due')"
@@ -109,7 +109,7 @@ const label = 'block text-sm text-ink-muted'
           :class="[field, 'mt-1']"
           @input="set('due_date', ($event.target as HTMLInputElement).value)"
         />
-        <p v-if="taskDue" :id="id('due-hint')" class="sr-only">Paling lambat sama dengan tenggat task.</p>
+        <p v-if="taskDue" :id="id('due-hint')" class="sr-only">Paling lambat sama dengan deadline task.</p>
       </div>
       <div class="min-w-0">
         <label :for="id('pic')" :class="label"
