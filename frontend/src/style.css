@@ -202,12 +202,15 @@
   transform: translateY(-4px);
 }
 
-/* Garis isian ikut berubah ke warna penanda saat fokus, selain cincin fokus. Di luar @layer supaya menang atas
-   kelas utilitas border-line yang dipasang di setiap isian. */
-input:focus-visible:not([aria-invalid='true']),
+/* Garis isian berubah ke warna penanda saat fokus. Cincin fokus ditaruh menimpa garis itu (offset -1px), bukan
+   2px di luarnya: isian teks selalu cocok :focus-visible, juga sesudah diklik atau difokus otomatis, dan cincin
+   berjarak membuat garis dan cincin terbaca sebagai garis tebal dobel (terukur di nama sub task, revisi 16).
+   Di luar @layer supaya menang atas kelas utilitas border-line yang dipasang di setiap isian. */
+input:focus-visible:not([aria-invalid='true'], [type='checkbox'], [type='radio']),
 select:focus-visible:not([aria-invalid='true']),
 textarea:focus-visible:not([aria-invalid='true']) {
   border-color: var(--color-mark);
+  outline-offset: -1px;
 }
 
 /* Notifikasi muncul singkat supaya hasil aksi terlihat; pesan baru (key berganti) ikut ditandai. */

@@ -91,20 +91,6 @@ func without(a, b []int64) []int64 {
 	return out
 }
 
-func insertSubtasks(ctx context.Context, q *sqlc.Queries, taskID string, creatorID int64, subs []SubtaskInput) ([]subtaskSnapshot, error) {
-	snaps := make([]subtaskSnapshot, 0, len(subs))
-	for i, s := range subs {
-		id, err := q.CreateSubtask(ctx, sqlc.CreateSubtaskParams{
-			TaskID: taskID, Title: s.Title, Position: int32(i), CreatedBy: userRef(creatorID),
-		})
-		if err != nil {
-			return nil, err
-		}
-		snaps = append(snaps, subtaskSnapshot{ID: id, Title: s.Title})
-	}
-	return snaps, nil
-}
-
 // loadSubtasks membaca sub task task ini beserta PIC-nya, urut sesuai posisi.
 func loadSubtasks(ctx context.Context, q *sqlc.Queries, taskID string) ([]subtaskSnapshot, error) {
 	rows, err := q.ListSubtasks(ctx, []string{taskID})
@@ -129,6 +115,7 @@ type SubtaskView struct {
 	CreatedByName  string
 	DoneAt         pgtype.Timestamptz
 	DoneBy         string
+	DueDate        pgtype.Date
 	Assignees      []sqlc.ListSubtaskAssigneesRow
 }
 
@@ -145,7 +132,7 @@ func loadSubtaskViews(ctx context.Context, q *sqlc.Queries, taskID string) ([]Su
 			ID: r.ID, Title: r.Title, Description: r.Description,
 			ReferenceURL: r.ReferenceUrl, DeliverableURL: r.DeliverableUrl,
 			CreatedBy: r.CreatedBy.Int64, CreatedByName: r.CreatedByName.String,
-			DoneAt: r.DoneAt, DoneBy: r.DoneByName.String,
+			DoneAt: r.DoneAt, DoneBy: r.DoneByName.String, DueDate: r.DueDate,
 			Assignees: []sqlc.ListSubtaskAssigneesRow{},
 		}
 		ids[i] = r.ID

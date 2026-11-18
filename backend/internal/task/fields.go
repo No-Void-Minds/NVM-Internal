@@ -1,6 +1,7 @@
 package task
 
 import (
+	"fmt"
 	"net/url"
 	"strings"
 	"time"
@@ -102,4 +103,29 @@ func uniqueIDs(ids []int64) []int64 {
 		}
 	}
 	return out
+}
+
+var monthNames = [...]string{"Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus",
+	"September", "Oktober", "November", "Desember"}
+
+// formatDay menulis tanggal untuk pesan galat dalam bentuk yang dibaca tim, mis. "20 November 2026".
+func formatDay(d pgtype.Date) string {
+	return fmt.Sprintf("%d %s %d", d.Time.Day(), monthNames[d.Time.Month()-1], d.Time.Year())
+}
+
+// checkSubtaskDue: tenggat sub task tidak boleh melewati tenggat task induk (revisi 16). Task tanpa tenggat
+// tidak membatasi apa pun.
+func checkSubtaskDue(sub, taskDue pgtype.Date) error {
+	if sub.Valid && taskDue.Valid && sub.Time.After(taskDue.Time) {
+		return apperr.Invalid(fmt.Sprintf("Tenggat sub task tidak boleh melewati tenggat task (%s).", formatDay(taskDue)))
+	}
+	return nil
+}
+
+// dateValue menulis tanggal untuk audit log sebagai YYYY-MM-DD, atau nil bila kosong.
+func dateValue(d pgtype.Date) any {
+	if !d.Valid {
+		return nil
+	}
+	return d.Time.Format("2006-01-02")
 }

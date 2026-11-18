@@ -45,9 +45,14 @@ func (s *Server) archive(c *gin.Context) {
 		return
 	}
 	actor := taskActor(c)
+	subPIC, err := s.subtaskPICTasks(c, actor, res.Tasks)
+	if err != nil {
+		s.internalError(c, err)
+		return
+	}
 	items := make([]boardTask, 0, len(res.Tasks))
 	for _, r := range res.Tasks {
-		items = append(items, withMoveTo(actor, r))
+		items = append(items, withMoveTo(actor, r, subPIC[r.Task.ID]))
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"tasks": items, "total": res.Total, "page": res.Page, "page_size": task.ArchivePageSize,
@@ -56,7 +61,7 @@ func (s *Server) archive(c *gin.Context) {
 
 // withMoveTo memakai aturan hak yang sama dengan papan, supaya tombol "Buka kembali" di Arsip hanya
 // muncul untuk yang memang boleh.
-func withMoveTo(actor task.Actor, r task.Summary) boardTask {
+func withMoveTo(actor task.Actor, r task.Summary, isSubtaskPIC bool) boardTask {
 	isPIC := false
 	for _, a := range r.Assignees {
 		if a.ID == actor.ID {
@@ -64,6 +69,19 @@ func withMoveTo(actor task.Actor, r task.Summary) boardTask {
 			break
 		}
 	}
-	can := task.PermissionsFor(actor.Role, isPIC, task.Status(r.Task.Status))
+	can := task.PermissionsFor(actor.Role, isPIC, isSubtaskPIC, task.Status(r.Task.Status))
 	return boardTask{taskSummary: summaryOf(r), MoveTo: can.MoveTo}
+}
+
+// subtaskPICTasks: hanya Staf yang butuh jawaban ini (Manajer sudah boleh semua, Admin tidak boleh apa pun),
+// jadi peran lain tidak membayar query tambahan.
+func (s *Server) subtaskPICTasks(c *gin.Context, actor task.Actor, list []task.Summary) (map[string]bool, error) {
+	if actor.Role != task.RoleStaff {
+		return map[string]bool{}, nil
+	}
+	ids := make([]string, len(list))
+	for i, r := range list {
+		ids[i] = r.Task.ID
+	}
+	return s.tasks.SubtaskPICTasks(c.Request.Context(), actor.ID, ids)
 }

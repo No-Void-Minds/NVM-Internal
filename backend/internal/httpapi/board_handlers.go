@@ -58,11 +58,20 @@ func (s *Server) board(c *gin.Context) {
 		return
 	}
 	actor := taskActor(c)
+	var all []task.Summary
+	for _, col := range cols {
+		all = append(all, col.Tasks...)
+	}
+	subPIC, err := s.subtaskPICTasks(c, actor, all)
+	if err != nil {
+		s.internalError(c, err)
+		return
+	}
 	out := make([]boardColumn, 0, len(cols))
 	for _, col := range cols {
 		items := make([]boardTask, 0, len(col.Tasks))
 		for _, r := range col.Tasks {
-			items = append(items, withMoveTo(actor, r))
+			items = append(items, withMoveTo(actor, r, subPIC[r.Task.ID]))
 		}
 		out = append(out, boardColumn{Status: string(col.Status), Count: len(items), Tasks: items})
 	}

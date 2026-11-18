@@ -30,15 +30,21 @@ func (s *Service) Move(ctx context.Context, actor Actor, id string, version int3
 		if err != nil {
 			return err
 		}
-		isPIC := false
+		isPIC, isSubPIC := false, false
 		if actor.Role == RoleStaff {
 			if isPIC, err = q.IsTaskAssignee(ctx, sqlc.IsTaskAssigneeParams{TaskID: id, UserID: actor.ID}); err != nil {
 				return err
 			}
+			// Revisi 17: dihitung dari subtask_assignees saat itu juga, bukan dari data yang dikirim frontend.
+			subs, err := q.ListTasksWithSubtaskPIC(ctx, sqlc.ListTasksWithSubtaskPICParams{TaskIds: []string{id}, UserID: actor.ID})
+			if err != nil {
+				return err
+			}
+			isSubPIC = len(subs) > 0
 		}
 
 		from := Status(cur.Status)
-		cleanNote, err := CheckTransition(actor.Role, isPIC, from, to, note)
+		cleanNote, err := CheckTransition(actor.Role, isPIC, isSubPIC, from, to, note)
 		switch {
 		case errors.Is(err, ErrInvalidTransition):
 			return ErrInvalidMove

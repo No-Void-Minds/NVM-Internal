@@ -10,20 +10,27 @@ func TestPermissionsFor(t *testing.T) {
 		name   string
 		role   Role
 		isPIC  bool
+		isSub  bool
 		status Status
 		edit   bool
 		labels bool
 		moveTo []Status
 	}{
-		{"Admin hanya baca", RoleAdmin, false, Ready, false, false, []Status{}},
-		{"Staf bukan PIC hanya baca", RoleStaff, false, Requested, false, false, []Status{}},
-		{"Staf PIC di Ready", RoleStaff, true, Ready, false, true, []Status{OnProgress}},
-		{"Manajer di Ready", RoleManager, false, Ready, true, true, []Status{OnProgress, Completed}},
-		{"Manajer di Completed", RoleManager, false, Completed, true, true, []Status{OnProgress}},
+		{"Admin hanya baca", RoleAdmin, false, false, Ready, false, false, []Status{}},
+		{"Staf bukan PIC hanya baca", RoleStaff, false, false, Requested, false, false, []Status{}},
+		{"Staf PIC di Ready", RoleStaff, true, false, Ready, false, true, []Status{OnProgress}},
+		{"Manajer di Ready", RoleManager, false, false, Ready, true, true, []Status{OnProgress, Completed}},
+		{"Manajer di Completed", RoleManager, false, false, Completed, true, true, []Status{OnProgress}},
+		// Revisi 17: PIC sub task hanya mendapat perpindahan, hak lain tidak.
+		{"PIC sub task di Requested", RoleStaff, false, true, Requested, false, false, []Status{OnProgress}},
+		{"PIC sub task di On Progress", RoleStaff, false, true, OnProgress, false, false, []Status{Ready}},
+		{"PIC sub task di Ready", RoleStaff, false, true, Ready, false, false, []Status{}},
+		{"PIC sub task di Completed", RoleStaff, false, true, Completed, false, false, []Status{}},
 	}
 	for _, tc := range cases {
-		c := PermissionsFor(tc.role, tc.isPIC, tc.status)
-		if c.Edit != tc.edit || c.EditLabels != tc.labels || !slices.Equal(c.MoveTo, tc.moveTo) {
+		c := PermissionsFor(tc.role, tc.isPIC, tc.isSub, tc.status)
+		if c.Edit != tc.edit || c.EditLabels != tc.labels || !slices.Equal(c.MoveTo, tc.moveTo) ||
+			c.AddSubtask && tc.isSub && !tc.isPIC || c.SubtaskPIC != tc.isSub {
 			t.Errorf("%s: dapat %+v", tc.name, c)
 		}
 	}

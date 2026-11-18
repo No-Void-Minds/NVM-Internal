@@ -8,7 +8,8 @@
 //          DEV_MANAGER_USERNAME=... DEV_MANAGER_PASSWORD=...
 //   node uji13.mjs
 // Variabel sama dengan yang dipakai scripts/dev-login.sh. Opsional: DEV_ADMIN_USERNAME (bawaan admin),
-// E2E_BASE (bawaan http://localhost:5173), E2E_ONLY=popover (hanya uji popover profil, revisi 14).
+// E2E_BASE (bawaan http://localhost:5173), E2E_ONLY=popover (hanya uji popover profil, revisi 14),
+// E2E_ONLY=subtaskform (hanya uji form tambah sub task yang dilipat, revisi 17).
 // Keluar dengan kode 1 bila ada yang gagal.
 import { chromium } from "playwright-core";
 
@@ -246,7 +247,7 @@ async function checkKeyboard(page, where, matches) {
 
 for (const role of Object.keys(ROLES)) await login(role);
 
-for (const theme of ONLY === "popover" ? [] : THEMES) {
+for (const theme of ONLY ? [] : THEMES) {
   for (const [role, cfg] of Object.entries(ROLES)) {
     for (const width of WIDTHS) {
       const { ctx, page, errors } = await open(role, width, theme);
@@ -284,7 +285,7 @@ for (const theme of ONLY === "popover" ? [] : THEMES) {
         await page.waitForTimeout(400);
         await audit(page, errors, `${theme} ${role} ${width} panel detail`);
         await checkActionBar(page, `${theme} ${role} ${width} panel detail`);
-        const sub = page.locator("dialog[open] button[aria-expanded]").first();
+        const sub = page.locator("dialog[open] button[aria-controls^='sub-detail-']").first();
         if (await sub.count()) {
           await sub.click();
           await page.waitForTimeout(250);
@@ -379,6 +380,7 @@ async function checkPopover(width) {
   // Klik bulatan di kartu: popover terbuka, panel detail tidak ikut terbuka.
   await triggers.first().click();
   await page.waitForSelector(POP);
+  await page.waitForTimeout(150);
   await page
     .waitForFunction(
       (sel) => !document.querySelector(sel + ' [role="status"]'),
@@ -401,6 +403,8 @@ async function checkPopover(width) {
 
   // Klik di luar: popover tertutup, fokus kembali, dan kliknya tidak membuka apa pun.
   await page.mouse.click(Math.round(width / 2), 5);
+  // Fokus kembali ke pemicu setelah urutan pointer selesai, bukan saat pointerdown.
+  await page.waitForTimeout(100);
   st = await popoverState(page);
   expect(
     !st.open && st.focusTrigger && !st.panel,
@@ -412,6 +416,7 @@ async function checkPopover(width) {
   await triggers.first().focus();
   await page.keyboard.press("Enter");
   await page.waitForSelector(POP);
+  await page.waitForTimeout(150);
   st = await popoverState(page);
   expect(
     st.open && st.focusInside,
@@ -430,6 +435,7 @@ async function checkPopover(width) {
   if (width >= 640 && (await triggers.count()) > 1) {
     await triggers.nth(0).click();
     await page.waitForSelector(POP);
+    await page.waitForTimeout(150);
     const first = (await popoverState(page)).name;
     const other = triggers.nth(1);
     await other.click();
@@ -447,10 +453,13 @@ async function checkPopover(width) {
   // Di dalam panel detail: klik luar dan Escape pertama hanya menutup popover.
   await page.locator("article h3 button").first().click();
   await page.waitForSelector("dialog[open]");
+  // Detail dimuat setelah panel terbuka; tunggu pemicunya, bukan jeda tetap.
+  await page.waitForSelector("dialog[open] [data-person-trigger]", { timeout: 5000 }).catch(() => {});
   const inPanel = page.locator("dialog[open] [data-person-trigger]").first();
   if (await inPanel.count()) {
     await inPanel.click();
     await page.waitForSelector(POP);
+    await page.waitForTimeout(150);
     st = await popoverState(page);
     expect(
       st.open && st.panel,
@@ -468,6 +477,7 @@ async function checkPopover(width) {
     );
     await inPanel.click();
     await page.waitForSelector(POP);
+    await page.waitForTimeout(150);
     await page.keyboard.press("Escape");
     st = await popoverState(page);
     expect(
@@ -488,6 +498,122 @@ async function checkPopover(width) {
 
 if (!ONLY || ONLY === "popover")
   for (const w of [360, 1280]) await checkPopover(w);
+
+// Form tambah sub task di panel detail (revisi 17): tertutup saat panel dibuka, terbuka lewat klik dan Enter
+// dengan fokus ke nama, Escape dan Batal menutupnya tanpa menutup panel, fokus kembali ke tombol, dan isian
+// yang sudah diketik bertahan. Tidak ada yang disimpan.
+async function checkSubtaskForm(width) {
+  const { ctx, page, errors } = await open("manajer", width, "terang");
+  const where = (what) => `form sub task ${width} ${what}`;
+  const expect = (cond, w, msg) => {
+    checks++;
+    if (!cond) fail(where(w), msg);
+  };
+  await page.goto(BASE + "/task?scope=all");
+  await page.waitForLoadState("networkidle");
+  // Task Requested atau On Progress: hanya di situ sub task boleh ditambah.
+  const id = await page.evaluate(async () => {
+    const b = await (await fetch("/api/board")).json();
+    const t = b.columns
+      .filter((c) => c.status === "requested" || c.status === "on_progress")
+      .flatMap((c) => c.tasks)[0];
+    return t?.id ?? null;
+  });
+  if (!id) {
+    fail(where("papan"), "tidak ada task Requested atau On Progress");
+    return ctx.close();
+  }
+  await page
+    .locator("article", { has: page.locator(".specimen-tag", { hasText: id }) })
+    .locator("h3 button")
+    .click();
+  await page.waitForSelector("dialog[open]");
+  // Detail dimuat setelah panel terbuka; tunggu tombolnya, bukan jeda tetap.
+  await page
+    .waitForSelector("dialog[open] button[aria-controls='sub-new-form']", { timeout: 5000 })
+    .catch(() => {});
+
+  const state = () =>
+    page.evaluate(() => {
+      const trigger = [
+        ...document.querySelectorAll(
+          "dialog[open] button[aria-controls='sub-new-form']",
+        ),
+      ][0];
+      const el = document.activeElement;
+      return {
+        panel: !!document.querySelector("dialog[open]"),
+        form: !!document.getElementById("sub-new-form"),
+        expanded: trigger?.getAttribute("aria-expanded"),
+        hasTrigger: !!trigger,
+        focusTitle: el?.id === "sub-new-title",
+        focusTrigger: el === trigger,
+        title: document.getElementById("sub-new-title")?.value ?? null,
+        sw: document.documentElement.scrollWidth,
+        vw: window.innerWidth,
+      };
+    });
+  const trigger = page.locator(
+    "dialog[open] button[aria-controls='sub-new-form']",
+  );
+
+  let st = await state();
+  expect(st.hasTrigger, "awal", "tombol Tambah sub task tidak ada");
+  expect(
+    !st.form && st.expanded === "false",
+    "awal",
+    `form sudah terbuka (form ${st.form}, aria-expanded ${st.expanded})`,
+  );
+
+  await trigger.click();
+  await page.waitForSelector("#sub-new-form");
+  st = await state();
+  expect(
+    st.focusTitle && st.expanded === "true",
+    "klik",
+    `fokus ke nama ${st.focusTitle}, aria-expanded ${st.expanded}`,
+  );
+  expect(st.sw <= st.vw, "klik", `scrollWidth ${st.sw} > ${st.vw}`);
+
+  await page.keyboard.type("Uji draf");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+  st = await state();
+  expect(
+    !st.form && st.panel && st.focusTrigger,
+    "Escape",
+    `form tertutup ${!st.form}, panel tetap ${st.panel}, fokus ke tombol ${st.focusTrigger}`,
+  );
+
+  // Keyboard: Enter pada tombol membuka lagi, isian tadi masih ada.
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  await page.waitForSelector("#sub-new-form");
+  st = await state();
+  expect(st.focusTitle, "Enter", "Enter tidak memindahkan fokus ke nama");
+  expect(
+    st.title === "Uji draf",
+    "draf",
+    `isian tidak bertahan, dapat ${JSON.stringify(st.title)}`,
+  );
+
+  await page.getByRole("button", { name: "Batal", exact: true }).click();
+  await page.waitForTimeout(200);
+  st = await state();
+  expect(
+    !st.form && st.panel && st.focusTrigger,
+    "Batal",
+    `form tertutup ${!st.form}, panel tetap ${st.panel}, fokus ke tombol ${st.focusTrigger}`,
+  );
+
+  checks++;
+  if (errors.length)
+    fail(where("console"), errors.splice(0).join(" | ").slice(0, 300));
+  await ctx.close();
+}
+
+if (!ONLY || ONLY === "subtaskform")
+  for (const w of [360, 1280]) await checkSubtaskForm(w);
 
 await browser.close();
 console.log(

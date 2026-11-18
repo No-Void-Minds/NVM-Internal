@@ -46,11 +46,12 @@ export function formatDay(value: string): string {
   return dateFormat.format(parseDay(value))
 }
 
+// Hari ini menurut kantor (Asia/Jakarta), sama dengan officeTZ di backend, dalam bentuk YYYY-MM-DD.
+const officeDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' })
+
 export function isOverdue(due: string | null, status: TaskStatus): boolean {
   if (!due || status === 'completed') return false
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  return parseDay(due) < today
+  return due < officeDay.format(new Date())
 }
 
 // Untuk cap waktu lengkap seperti solved_date: tanggalnya dibaca dalam zona waktu browser.

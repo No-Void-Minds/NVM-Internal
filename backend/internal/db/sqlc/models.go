@@ -279,6 +279,7 @@ type TaskSubtask struct {
 	Description    string
 	DeliverableUrl string
 	ReferenceUrl   string
+	DueDate        pgtype.Date
 }
 
 type User struct {

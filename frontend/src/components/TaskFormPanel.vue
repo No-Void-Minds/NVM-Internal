@@ -4,7 +4,13 @@ import BaseDialog from './BaseDialog.vue'
 import FileDropzone from './FileDropzone.vue'
 import SubtaskEditor from './SubtaskEditor.vue'
 import PicPicker from './PicPicker.vue'
-import { draftsFromTask, toPayload, type SubtaskDraft } from '../utils/subtask'
+import {
+  draftsFromTask,
+  subtaskDueProblem,
+  toCreatePayload,
+  toPayload,
+  type SubtaskDraft,
+} from '../utils/subtask'
 import { ApiError } from '../api/client'
 import { uploadAttachment } from '../api/attachments'
 import { createTask, setTaskLabels, updateTask, type TaskDetail } from '../api/tasks'
@@ -53,6 +59,12 @@ const existingBriefs = computed(() => props.task?.attachments.filter((a) => a.ki
 const picCandidates = computed(() =>
   props.users.filter((u) => u.status !== 'nonaktif' && (u.role === 'staff' || u.role === 'manager')),
 )
+// Calon PIC sub task: aturan revisi 13 (Staf dan Manajer aktif), PIC task yang dipilih di urutan atas.
+const subtaskPicOptions = computed(() => {
+  const chosen = new Set(picIds.value)
+  const all = picCandidates.value.map((u) => ({ id: u.id, name: u.name }))
+  return [...all.filter((p) => chosen.has(p.id)), ...all.filter((p) => !chosen.has(p.id))]
+})
 const labelOptions = computed(() =>
   props.labels.filter((l) => l.is_active || props.task?.labels.some((t) => t.id === l.id)),
 )
@@ -143,17 +155,34 @@ watch(
 )
 onBeforeUnmount(() => document.removeEventListener('paste', onPaste))
 
-async function uploadPending(id: string): Promise<string[]> {
+// Lampiran brief task dan lampiran acuan tiap sub task diunggah setelah task jadi, karena butuh id.
+// Lampiran sub task memakai endpoint lampiran sub task yang sudah ada (kind deliverable, Sprint 11f).
+async function uploadPending(id: string, subtaskIds: number[]): Promise<string[]> {
   const failed: string[] = []
-  const files = [...pending.value]
-  for (const [i, file] of files.entries()) {
-    progress.value = { index: i + 1, total: files.length, fraction: 0 }
+  const jobs: { file: File; subtaskId?: number; where: string }[] = [
+    ...pending.value.map((file) => ({ file, where: 'lampiran brief' })),
+    ...subtasks.value.flatMap((s, i) =>
+      subtaskIds[i]
+        ? s.files.map((file) => ({ file, subtaskId: subtaskIds[i], where: `sub task ${i + 1}` }))
+        : [],
+    ),
+  ]
+  for (const [i, job] of jobs.entries()) {
+    progress.value = { index: i + 1, total: jobs.length, fraction: 0 }
     try {
-      await uploadAttachment(id, 'brief', file, (f) => {
-        if (progress.value) progress.value.fraction = f
-      }).promise
+      await uploadAttachment(
+        id,
+        job.subtaskId ? 'deliverable' : 'brief',
+        job.file,
+        (f) => {
+          if (progress.value) progress.value.fraction = f
+        },
+        job.subtaskId,
+      ).promise
     } catch (err) {
-      failed.push(`${file.name} (${err instanceof ApiError ? err.message : 'gagal diunggah'})`)
+      failed.push(
+        `${job.file.name}, ${job.where} (${err instanceof ApiError ? err.message : 'gagal diunggah'})`,
+      )
     }
   }
   progress.value = null
@@ -172,6 +201,16 @@ function validate(): string | null {
   if (picIds.value.length === 0) return 'Pilih minimal satu PIC task.'
   const blank = subtasks.value.findIndex((s) => !s.title.trim())
   if (blank !== -1) return `Nama sub task nomor ${blank + 1} wajib diisi.`
+  if (!isEdit.value) {
+    for (const [i, s] of subtasks.value.entries()) {
+      const problem = subtaskDueProblem(s.due_date, dueDate.value || null)
+      if (problem) return `Sub task nomor ${i + 1}: ${problem}`
+      const ref = s.reference_url.trim()
+      if (ref && !/^https?:\/\//i.test(ref)) {
+        return `Sub task nomor ${i + 1}: Tautan acuan harus diawali http:// atau https://.`
+      }
+    }
+  }
   if (startDate.value && dueDate.value && dueDate.value < startDate.value) {
     return 'Tenggat tidak boleh lebih awal dari tanggal mulai.'
   }
@@ -194,7 +233,6 @@ async function submit() {
     description: description.value.trim(),
     urgency: urgency.value,
     pic_ids: picIds.value,
-    subtasks: toPayload(subtasks.value),
     start_date: startDate.value,
     due_date: dueDate.value,
     deliverable_url: deliverableUrl.value.trim(),
@@ -204,8 +242,12 @@ async function submit() {
     const t = props.task
     let id: string
     let message: string
+    let subtaskIds: number[] = []
     if (t) {
-      const { version } = await updateTask(t.id, t.version, fields)
+      const { version } = await updateTask(t.id, t.version, {
+        ...fields,
+        subtasks: toPayload(subtasks.value),
+      })
       // Label punya endpoint sendiri karena Staf PIC juga boleh mengubahnya; dikirim hanya bila berubah.
       if (
         !sameIds(
@@ -217,13 +259,19 @@ async function submit() {
       id = t.id
       message = `${t.id} disimpan.`
     } else {
-      ;({ id } = await createTask({ ...fields, label_ids: labelIds.value }))
+      const created = await createTask({
+        ...fields,
+        label_ids: labelIds.value,
+        subtasks: toCreatePayload(subtasks.value),
+      })
+      id = created.id
+      subtaskIds = created.subtask_ids
       message = `${id} dibuat dan masuk ke Requested.`
     }
 
     // Task sudah tersimpan di titik ini. Lampiran yang gagal tidak membatalkannya; pesannya menyebut berkas
     // mana yang gagal, dan panel detail terbuka sesudahnya supaya bisa diunggah ulang di sana.
-    const failed = await uploadPending(id)
+    const failed = await uploadPending(id, subtaskIds)
     pending.value = []
     if (failed.length) {
       message += ` ${failed.length} lampiran gagal diunggah: ${failed.join('; ')}. Unggah ulang dari detail task.`
@@ -264,6 +312,18 @@ const optionClass =
         />
       </div>
 
+      <!-- Revisi 16: tenggat tepat di bawah judul, karena keduanya yang paling sering diisi. -->
+      <div>
+        <label for="task-due" class="block text-sm font-medium">Tenggat</label>
+        <input
+          id="task-due"
+          v-model="dueDate"
+          type="date"
+          :min="startDate || undefined"
+          :class="inputClass"
+        />
+      </div>
+
       <fieldset>
         <legend class="text-sm font-medium">Urgency (wajib)</legend>
         <div class="mt-1 grid grid-cols-4 gap-2">
@@ -293,9 +353,18 @@ const optionClass =
       </div>
 
       <div>
-        <SubtaskEditor v-model="subtasks" />
+        <SubtaskEditor
+          v-model="subtasks"
+          :full="!isEdit"
+          :pic-options="subtaskPicOptions"
+          :task-due="dueDate || null"
+        />
         <p class="mt-2 text-sm text-ink-muted">
-          Boleh dikosongkan. PIC bisa menambah sub task sendiri dari detail task.
+          {{
+            isEdit
+              ? 'Di sini hanya nama dan urutan. Isi lain sub task diubah dari detail task.'
+              : 'Boleh dikosongkan. PIC task dan Manajer bisa menambah sub task dari detail task.'
+          }}
         </p>
       </div>
 
@@ -374,21 +443,15 @@ const optionClass =
             </div>
           </fieldset>
 
-          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <label for="task-start" class="block text-sm font-medium">Tanggal mulai</label>
-              <input id="task-start" v-model="startDate" type="date" :class="inputClass" />
-            </div>
-            <div>
-              <label for="task-due" class="block text-sm font-medium">Tenggat</label>
-              <input
-                id="task-due"
-                v-model="dueDate"
-                type="date"
-                :min="startDate || undefined"
-                :class="inputClass"
-              />
-            </div>
+          <div>
+            <label for="task-start" class="block text-sm font-medium">Tanggal mulai</label>
+            <input
+              id="task-start"
+              v-model="startDate"
+              type="date"
+              :max="dueDate || undefined"
+              :class="inputClass"
+            />
           </div>
 
           <div>

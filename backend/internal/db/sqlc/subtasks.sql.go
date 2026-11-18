@@ -112,8 +112,8 @@ func (q *Queries) CountSubtasksByTask(ctx context.Context, taskIds []string) ([]
 }
 
 const createSubtask = `-- name: CreateSubtask :one
-INSERT INTO task_subtasks (task_id, title, description, reference_url, deliverable_url, position, created_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO task_subtasks (task_id, title, description, reference_url, deliverable_url, position, created_by, due_date)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING id
 `
 
@@ -125,6 +125,7 @@ type CreateSubtaskParams struct {
 	DeliverableUrl string
 	Position       int32
 	CreatedBy      pgtype.Int8
+	DueDate        pgtype.Date
 }
 
 func (q *Queries) CreateSubtask(ctx context.Context, arg CreateSubtaskParams) (int64, error) {
@@ -136,6 +137,7 @@ func (q *Queries) CreateSubtask(ctx context.Context, arg CreateSubtaskParams) (i
 		arg.DeliverableUrl,
 		arg.Position,
 		arg.CreatedBy,
+		arg.DueDate,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -193,7 +195,7 @@ func (q *Queries) FirstPICDivision(ctx context.Context, taskID string) (int64, e
 }
 
 const getSubtask = `-- name: GetSubtask :one
-SELECT id, title, description, reference_url, deliverable_url, done_at, created_by
+SELECT id, title, description, reference_url, deliverable_url, done_at, created_by, due_date
 FROM task_subtasks WHERE id = $1 AND task_id = $2
 `
 
@@ -210,6 +212,7 @@ type GetSubtaskRow struct {
 	DeliverableUrl string
 	DoneAt         pgtype.Timestamptz
 	CreatedBy      pgtype.Int8
+	DueDate        pgtype.Date
 }
 
 func (q *Queries) GetSubtask(ctx context.Context, arg GetSubtaskParams) (GetSubtaskRow, error) {
@@ -223,6 +226,7 @@ func (q *Queries) GetSubtask(ctx context.Context, arg GetSubtaskParams) (GetSubt
 		&i.DeliverableUrl,
 		&i.DoneAt,
 		&i.CreatedBy,
+		&i.DueDate,
 	)
 	return i, err
 }
@@ -287,7 +291,7 @@ func (q *Queries) ListSubtaskAssignees(ctx context.Context, subtaskIds []int64) 
 
 const listSubtasks = `-- name: ListSubtasks :many
 SELECT st.id, st.task_id, st.title, st.description, st.reference_url, st.deliverable_url,
-       st.position, st.done_at, st.created_by,
+       st.position, st.done_at, st.created_by, st.due_date,
        u.name AS done_by_name, c.name AS created_by_name
 FROM task_subtasks st
 LEFT JOIN users u ON u.id = st.done_by
@@ -306,6 +310,7 @@ type ListSubtasksRow struct {
 	Position       int32
 	DoneAt         pgtype.Timestamptz
 	CreatedBy      pgtype.Int8
+	DueDate        pgtype.Date
 	DoneByName     pgtype.Text
 	CreatedByName  pgtype.Text
 }
@@ -329,6 +334,7 @@ func (q *Queries) ListSubtasks(ctx context.Context, taskIds []string) ([]ListSub
 			&i.Position,
 			&i.DoneAt,
 			&i.CreatedBy,
+			&i.DueDate,
 			&i.DoneByName,
 			&i.CreatedByName,
 		); err != nil {
@@ -375,6 +381,39 @@ func (q *Queries) ListSubtasksWithOtherManagerPIC(ctx context.Context, arg ListS
 	return items, nil
 }
 
+const listTasksWithSubtaskPIC = `-- name: ListTasksWithSubtaskPIC :many
+SELECT DISTINCT st.task_id
+FROM task_subtasks st
+JOIN subtask_assignees sa ON sa.subtask_id = st.id
+WHERE st.task_id = ANY($1::text[]) AND sa.user_id = $2
+`
+
+type ListTasksWithSubtaskPICParams struct {
+	TaskIds []string
+	UserID  int64
+}
+
+// Revisi 17: task mana yang sub task-nya dipegang user ini, untuk menghitung move_to papan dan Arsip sekaligus.
+func (q *Queries) ListTasksWithSubtaskPIC(ctx context.Context, arg ListTasksWithSubtaskPICParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listTasksWithSubtaskPIC, arg.TaskIds, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var task_id string
+		if err := rows.Scan(&task_id); err != nil {
+			return nil, err
+		}
+		items = append(items, task_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const removeSubtaskAssignees = `-- name: RemoveSubtaskAssignees :exec
 DELETE FROM subtask_assignees WHERE subtask_id = $1 AND user_id = ANY($2::bigint[])
 `
@@ -391,8 +430,9 @@ func (q *Queries) RemoveSubtaskAssignees(ctx context.Context, arg RemoveSubtaskA
 
 const renameSubtask = `-- name: RenameSubtask :exec
 UPDATE task_subtasks
-SET title = $1, description = $2, reference_url = $3, deliverable_url = $4
-WHERE id = $5 AND task_id = $6
+SET title = $1, description = $2, reference_url = $3, deliverable_url = $4,
+    due_date = $5
+WHERE id = $6 AND task_id = $7
 `
 
 type RenameSubtaskParams struct {
@@ -400,17 +440,19 @@ type RenameSubtaskParams struct {
 	Description    string
 	ReferenceUrl   string
 	DeliverableUrl string
+	DueDate        pgtype.Date
 	ID             int64
 	TaskID         string
 }
 
-// Nama, deskripsi, dan tautan; urutan tidak ikut berubah saat PIC atau Manajer memperbaiki isinya.
+// Nama, deskripsi, tautan, dan tenggat; urutan tidak ikut berubah saat PIC atau Manajer memperbaiki isinya.
 func (q *Queries) RenameSubtask(ctx context.Context, arg RenameSubtaskParams) error {
 	_, err := q.db.Exec(ctx, renameSubtask,
 		arg.Title,
 		arg.Description,
 		arg.ReferenceUrl,
 		arg.DeliverableUrl,
+		arg.DueDate,
 		arg.ID,
 		arg.TaskID,
 	)

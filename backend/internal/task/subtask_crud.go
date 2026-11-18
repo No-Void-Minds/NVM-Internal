@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"nvm-internal/internal/apperr"
 	"nvm-internal/internal/audit"
@@ -90,6 +91,8 @@ type SubtaskFields struct {
 	Reference   string
 	Deliverable string
 	PICID       int64
+	// DueDate berbentuk YYYY-MM-DD, kosong berarti tanpa tenggat (revisi 16).
+	DueDate string
 }
 
 type cleanSubtaskFields struct {
@@ -97,6 +100,7 @@ type cleanSubtaskFields struct {
 	description string
 	reference   string
 	deliverable string
+	due         pgtype.Date
 }
 
 func cleanFieldsOf(in SubtaskFields) (cleanSubtaskFields, error) {
@@ -118,6 +122,9 @@ func cleanFieldsOf(in SubtaskFields) (cleanSubtaskFields, error) {
 		return out, err
 	}
 	out.reference, out.deliverable = ref.String, del.String
+	if out.due, err = parseDate(in.DueDate, "Tenggat sub task"); err != nil {
+		return out, err
+	}
 	return out, nil
 }
 
@@ -129,7 +136,11 @@ func (s *Service) AddSubtask(ctx context.Context, actor Actor, taskID string, in
 	var id int64
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := sqlc.New(tx)
-		if _, err := lockForSubtask(ctx, q, actor, taskID, 0); err != nil {
+		cur, err := lockForSubtask(ctx, q, actor, taskID, 0)
+		if err != nil {
+			return err
+		}
+		if err := checkSubtaskDue(f.due, cur.DueDate); err != nil {
 			return err
 		}
 		slot, err := q.SubtaskSlot(ctx, taskID)
@@ -142,7 +153,7 @@ func (s *Service) AddSubtask(ctx context.Context, actor Actor, taskID string, in
 		id, err = q.CreateSubtask(ctx, sqlc.CreateSubtaskParams{
 			TaskID: taskID, Title: f.title, Description: f.description,
 			ReferenceUrl: f.reference, DeliverableUrl: f.deliverable,
-			Position: slot.NextPosition, CreatedBy: userRef(actor.ID),
+			Position: slot.NextPosition, CreatedBy: userRef(actor.ID), DueDate: f.due,
 		})
 		if err != nil {
 			return err
@@ -156,7 +167,7 @@ func (s *Service) AddSubtask(ctx context.Context, actor Actor, taskID string, in
 			return err
 		}
 		return audit.Change(ctx, q, actor.auditActor(), "subtask_added", "task", taskID, nil,
-			map[string]any{"id": id, "title": f.title, "pic_id": in.PICID})
+			map[string]any{"id": id, "title": f.title, "pic_id": in.PICID, "due_date": dateValue(f.due)})
 	})
 	return id, err
 }
@@ -193,12 +204,21 @@ func (s *Service) UpdateSubtask(ctx context.Context, actor Actor, taskID string,
 	}
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := sqlc.New(tx)
-		if _, err := lockForSubtask(ctx, q, actor, taskID, subtaskID); err != nil {
+		cur, err := lockForSubtask(ctx, q, actor, taskID, subtaskID)
+		if err != nil {
 			return err
 		}
 		st, err := editableSubtask(ctx, q, actor, taskID, subtaskID)
 		if err != nil {
 			return err
+		}
+		// Hanya dicek bila tenggatnya diubah: sub task yang terlanjur melewati tenggat task (karena tenggat task
+		// dimajukan) tetap bisa diganti namanya tanpa dipaksa memperbaiki tenggatnya dulu.
+		sameDue := dateValue(st.DueDate) == dateValue(f.due)
+		if !sameDue {
+			if err := checkSubtaskDue(f.due, cur.DueDate); err != nil {
+				return err
+			}
 		}
 		oldPIC, err := q.ListSubtaskAssignees(ctx, []int64{subtaskID})
 		if err != nil {
@@ -209,14 +229,14 @@ func (s *Service) UpdateSubtask(ctx context.Context, actor Actor, taskID string,
 			oldPICID = oldPIC[0].ID
 		}
 		sameText := st.Title == f.title && st.Description == f.description &&
-			st.ReferenceUrl == f.reference && st.DeliverableUrl == f.deliverable
+			st.ReferenceUrl == f.reference && st.DeliverableUrl == f.deliverable && sameDue
 		if sameText && oldPICID == in.PICID {
 			return nil
 		}
 		if !sameText {
 			if err := q.RenameSubtask(ctx, sqlc.RenameSubtaskParams{
 				ID: subtaskID, TaskID: taskID, Title: f.title, Description: f.description,
-				ReferenceUrl: f.reference, DeliverableUrl: f.deliverable,
+				ReferenceUrl: f.reference, DeliverableUrl: f.deliverable, DueDate: f.due,
 			}); err != nil {
 				return err
 			}
@@ -232,8 +252,8 @@ func (s *Service) UpdateSubtask(ctx context.Context, actor Actor, taskID string,
 		// Satu kejadian audit untuk nama dan PIC sekalian, supaya riwayat tidak terbelah dua
 		// untuk satu kali simpan.
 		return audit.Change(ctx, q, actor.auditActor(), "subtask_renamed", "task", taskID,
-			map[string]any{"id": st.ID, "title": st.Title, "pic_id": oldPICID},
-			map[string]any{"id": st.ID, "title": f.title, "pic_id": in.PICID})
+			map[string]any{"id": st.ID, "title": st.Title, "pic_id": oldPICID, "due_date": dateValue(st.DueDate)},
+			map[string]any{"id": st.ID, "title": f.title, "pic_id": in.PICID, "due_date": dateValue(f.due)})
 	})
 }
 

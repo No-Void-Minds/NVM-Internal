@@ -1,8 +1,17 @@
 <script setup lang="ts">
 import { nextTick, ref } from 'vue'
-import { emptyDraft, maxSubtasks, type SubtaskDraft } from '../utils/subtask'
+import SubtaskFieldsForm from './SubtaskFieldsForm.vue'
+import { emptyDraft, maxSubtasks, type SubtaskDraft, type SubtaskForm } from '../utils/subtask'
 
+// full: form Buat task, tiap baris memakai isian lengkap yang sama dengan Tambah sub task di detail
+// (revisi 16). Tanpa full (form Ubah task) hanya nama dan urutan, supaya isi yang diisi PIC tidak tertimpa.
+const props = withDefaults(
+  defineProps<{ full?: boolean; picOptions?: { id: number; name: string }[]; taskDue?: string | null }>(),
+  { full: false, picOptions: () => [], taskDue: null },
+)
 const rows = defineModel<SubtaskDraft[]>({ required: true })
+
+const titleId = (key: string) => (props.full ? `subtask-${key}-title` : `subtask-title-${key}`)
 // Pembaca layar tidak melihat baris berpindah tempat, jadi setiap perubahan urutan atau hapus diumumkan.
 const announce = ref('')
 
@@ -16,11 +25,22 @@ function addAfter(index: number) {
   const next = [...rows.value]
   next.splice(index + 1, 0, draft)
   rows.value = next
-  focusId(`subtask-title-${draft.key}`)
+  focusId(titleId(draft.key))
 }
 
 function setTitle(i: number, title: string) {
   rows.value = rows.value.map((r, k) => (k === i ? { ...r, title } : r))
+}
+
+function setForm(i: number, f: SubtaskForm) {
+  rows.value = rows.value.map((r, k) => (k === i ? { ...r, ...f } : r))
+}
+
+// Di isian lengkap, Enter pada nama tetap membuat baris berikutnya, bukan mengirim form task.
+function onRowEnter(i: number, e: KeyboardEvent) {
+  if (!(e.target instanceof HTMLInputElement) || !e.target.id.endsWith('-title')) return
+  e.preventDefault()
+  onEnter(i)
 }
 
 // Enter di nama sub task membuat baris berikutnya, bukan menyimpan form. Baris kosong diabaikan.
@@ -32,7 +52,7 @@ function remove(i: number) {
   rows.value = rows.value.filter((_, k) => k !== i)
   announce.value = `Sub task ${i + 1} dihapus.`
   const left = rows.value
-  if (left.length) focusId(`subtask-title-${left[Math.min(i, left.length - 1)].key}`)
+  if (left.length) focusId(titleId(left[Math.min(i, left.length - 1)].key))
   else focusId('subtask-add')
 }
 
@@ -65,8 +85,7 @@ const iconButton =
   <fieldset>
     <legend class="text-sm font-medium">Sub task (opsional)</legend>
     <p class="mt-1 text-sm text-ink-muted">
-      Tiap sub task punya nama dan PIC sendiri, satu orang atau lebih. Task tanpa sub task tidak punya PIC,
-      jadi hanya Manajer yang bisa memindahkannya.
+      Satu sub task dikerjakan satu orang. Task bisa masuk Ready setelah semua sub task tercentang.
     </p>
 
     <ol v-if="rows.length" class="mt-2 space-y-3">
@@ -75,7 +94,19 @@ const iconButton =
           <span class="mt-2.5 w-6 shrink-0 text-sm font-medium text-ink-muted" aria-hidden="true">{{
             i + 1
           }}</span>
-          <div class="min-w-0 flex-1">
+          <SubtaskFieldsForm
+            v-if="full"
+            :model-value="r"
+            :id-prefix="`subtask-${r.key}`"
+            :label-suffix="`nomor ${i + 1}`"
+            :pic-options="picOptions"
+            :task-due="taskDue"
+            with-files
+            class="min-w-0 flex-1"
+            @update:model-value="setForm(i, $event)"
+            @keydown.enter="onRowEnter(i, $event)"
+          />
+          <div v-else class="min-w-0 flex-1">
             <label :for="`subtask-title-${r.key}`" class="sr-only">Nama sub task {{ i + 1 }}</label>
             <input
               :id="`subtask-title-${r.key}`"
@@ -136,7 +167,7 @@ const iconButton =
           </button>
           <button
             type="button"
-            :class="[iconButton, 'text-urgent']"
+            :class="[iconButton, 'text-danger']"
             :aria-label="`Hapus sub task ${i + 1}`"
             @click="remove(i)"
           >

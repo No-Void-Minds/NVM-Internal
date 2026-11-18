@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import LoadingSkeleton from './LoadingSkeleton.vue'
 import SubtaskFiles from './SubtaskFiles.vue'
-import { computed, ref, watch } from 'vue'
+import SubtaskFieldsForm from './SubtaskFieldsForm.vue'
+import { uploadAttachment } from '../api/attachments'
+import { emptyForm, subtaskDueProblem, type SubtaskForm } from '../utils/subtask'
+import { computed, nextTick, ref, watch } from 'vue'
 import BaseDialog from './BaseDialog.vue'
 import { ApiError } from '../api/client'
 import {
@@ -56,18 +59,15 @@ const historyShown = computed(() =>
 
 // Menyusun sub task di luar form Manajer (revisi 7): PIC task membagi pekerjaan, termasuk ke PIC lain
 // di task yang sama. Hak per barisnya datang dari server lewat can_edit.
-const newTitle = ref('')
+// Isi form Tambah dan Ubah sub task memakai SubtaskFieldsForm yang sama dengan form Buat task (revisi 16).
+const newForm = ref<SubtaskForm>(emptyForm())
+// Pilihan PIC awal diisi sekali setelah task termuat, tanpa menimpa pilihan yang sudah diubah pengguna.
+let newPicPrimed = false
 const addingSub = ref(false)
+const addOpen = ref(false)
+const addTrigger = ref<HTMLButtonElement | null>(null)
 const editingSub = ref<number | null>(null)
-const editTitle = ref('')
-// 0 berarti belum ditugaskan. -1 hanya dipakai sebelum task termuat, supaya pilihan awal bisa diisi
-// sekali dengan nama sendiri tanpa menimpa pilihan yang sudah diubah pengguna.
-const newPic = ref(-1)
-const editPic = ref(0)
-const newDesc = ref('')
-const editDesc = ref('')
-const newLink = ref('')
-const editRef = ref('')
+const editForm = ref<SubtaskForm>(emptyForm())
 // Tautan hasil diisi langsung di Detail, tanpa masuk mode Ubah, karena itu yang paling sering
 // diperbarui: satu sub task bisa berganti tautan hasil beberapa kali sampai disetujui.
 const resultLink = ref('')
@@ -106,9 +106,10 @@ async function load(quiet = false) {
     task.value = await getTask(props.taskId)
     loadState.value = 'ready'
     // Sub task paling sering dibuat untuk diri sendiri, jadi itu pilihan awalnya kalau pelaku PIC task.
-    if (newPic.value === -1) {
+    if (!newPicPrimed) {
+      newPicPrimed = true
       const me = session.user?.id ?? 0
-      newPic.value = task.value.assignees.some((p) => p.id === me) ? me : 0
+      newForm.value = { ...newForm.value, pic_id: task.value.assignees.some((p) => p.id === me) ? me : 0 }
     }
   } catch (err) {
     // Saat memuat ulang diam-diam, isi yang sudah tampil dipertahankan; galatnya cukup diberitahukan.
@@ -127,11 +128,10 @@ watch(
     actionError.value = null
     editingLabels.value = false
     historyAll.value = false
-    newTitle.value = ''
     editingSub.value = null
-    newPic.value = -1
-    newDesc.value = ''
-    newLink.value = ''
+    newForm.value = emptyForm()
+    newPicPrimed = false
+    addOpen.value = false
     openSub.value = null
     if (id) {
       void load()
@@ -180,10 +180,15 @@ function onFilesChanged(message: string) {
   void load(true)
 }
 
-const readOnly = computed(() => {
+// Tanpa hak mengubah task. PIC sub task mendapat teks sendiri (revisi 17), bukan "hanya bisa melihat".
+const noTaskRights = computed(() => {
   const c = task.value?.can
-  return !!c && !c.edit && !c.edit_labels && !c.edit_deliverable && c.move_to.length === 0
+  return !!c && !c.edit && !c.edit_labels && !c.edit_deliverable
 })
+const subtaskPicOnly = computed(() => noTaskRights.value && !!task.value?.can.subtask_pic)
+const readOnly = computed(
+  () => noTaskRights.value && !subtaskPicOnly.value && task.value?.can.move_to.length === 0,
+)
 
 const moveLabel: Record<string, string> = {
   'requested>on_progress': 'Mulai kerjakan',
@@ -214,24 +219,53 @@ const checking = ref<number | null>(null)
 const rowErrors = ref<Record<number, string>>({})
 const announce = ref('')
 
+function openAdd() {
+  addOpen.value = true
+  void nextTick(() => document.getElementById('sub-new-title')?.focus())
+}
+
+// Batal, Escape, dan simpan berhasil melipat form dan mengembalikan fokus ke tombol pemicunya.
+function closeAdd() {
+  addOpen.value = false
+  void nextTick(() => addTrigger.value?.focus())
+}
+
 async function submitNewSubtask() {
   const t = task.value
-  const title = newTitle.value.trim()
+  const f = newForm.value
+  const title = f.title.trim()
   if (!t || !title || addingSub.value) return
+  const due = subtaskDueProblem(f.due_date, t.due_date)
+  if (due) {
+    actionError.value = due
+    return
+  }
   addingSub.value = true
   actionError.value = null
   try {
-    await addSubtask(t.id, {
+    const { id } = await addSubtask(t.id, {
       title,
-      description: newDesc.value.trim(),
-      reference_url: newLink.value.trim(),
+      description: f.description.trim(),
+      reference_url: f.reference_url.trim(),
       deliverable_url: '',
-      pic_id: newPic.value === -1 ? 0 : newPic.value,
+      pic_id: f.pic_id,
+      due_date: f.due_date,
     })
-    newTitle.value = ''
-    newDesc.value = ''
-    newLink.value = ''
+    // Lampiran acuan diunggah setelah sub task punya id. Yang gagal tidak membatalkan sub task-nya.
+    const failed: string[] = []
+    for (const file of f.files) {
+      try {
+        await uploadAttachment(t.id, 'deliverable', file, () => {}, id).promise
+      } catch (err) {
+        failed.push(`${file.name} (${messageOf(err)})`)
+      }
+    }
+    newForm.value = { ...emptyForm(), pic_id: f.pic_id }
+    closeAdd()
     announce.value = `Sub task "${title}" ditambahkan.`
+    if (failed.length) {
+      actionError.value = `Sub task "${title}" ditambahkan, tetapi ${failed.length} berkas gagal diunggah: ${failed.join('; ')}.`
+    }
     await load(true)
   } catch (err) {
     actionError.value = messageOf(err)
@@ -242,10 +276,14 @@ async function submitNewSubtask() {
 
 function startEdit(s: TaskSubtask) {
   editingSub.value = s.id
-  editTitle.value = s.title
-  editDesc.value = s.description
-  editRef.value = s.reference_url
-  editPic.value = s.assignees[0]?.id ?? 0
+  editForm.value = {
+    ...emptyForm(),
+    title: s.title,
+    description: s.description,
+    reference_url: s.reference_url,
+    pic_id: s.assignees[0]?.id ?? 0,
+    due_date: s.due_date ?? '',
+  }
   rowErrors.value = { ...rowErrors.value, [s.id]: '' }
 }
 
@@ -263,17 +301,27 @@ function isMine(s: TaskSubtask): boolean {
 
 async function submitEdit(s: TaskSubtask) {
   const t = task.value
-  const title = editTitle.value.trim()
+  const f = editForm.value
+  const title = f.title.trim()
   if (!t || !title) return
-  const desc = editDesc.value.trim()
-  const acuan = editRef.value.trim()
+  const desc = f.description.trim()
+  const acuan = f.reference_url.trim()
+  const sameDue = f.due_date === (s.due_date ?? '')
   if (
     title === s.title &&
     desc === s.description &&
     acuan === s.reference_url &&
-    editPic.value === (s.assignees[0]?.id ?? 0)
+    sameDue &&
+    f.pic_id === (s.assignees[0]?.id ?? 0)
   ) {
     editingSub.value = null
+    return
+  }
+  // Sama dengan backend: tenggat hanya dicek bila diubah, jadi sub task yang terlanjur melewati tenggat task
+  // tetap bisa diganti namanya.
+  const due = sameDue ? null : subtaskDueProblem(f.due_date, t.due_date)
+  if (due) {
+    rowErrors.value = { ...rowErrors.value, [s.id]: due }
     return
   }
   try {
@@ -283,7 +331,8 @@ async function submitEdit(s: TaskSubtask) {
       reference_url: acuan,
       // Tautan hasil punya kotak isian sendiri di Detail; dikirim apa adanya supaya tidak terhapus.
       deliverable_url: s.deliverable_url,
-      pic_id: editPic.value,
+      pic_id: f.pic_id,
+      due_date: f.due_date,
     })
     editingSub.value = null
     announce.value = `Sub task "${title}" disimpan.`
@@ -424,8 +473,6 @@ async function confirmDelete() {
   if (ok) emit('close')
 }
 
-const picSelect =
-  'min-h-11 min-w-0 flex-1 rounded-card border border-line bg-surface px-3 text-sm sm:flex-none'
 const subtaskPercent = computed(() => {
   const t = task.value
   return t && t.subtask_total ? Math.round((t.subtask_done / t.subtask_total) * 100) : 0
@@ -451,6 +498,7 @@ async function saveResultLink(s: TaskSubtask) {
       reference_url: s.reference_url,
       deliverable_url: link,
       pic_id: s.assignees[0]?.id ?? 0,
+      due_date: s.due_date ?? '',
     })
     announce.value = link ? 'Tautan hasil disimpan.' : 'Tautan hasil dihapus.'
     await load(true)
@@ -476,6 +524,21 @@ function linkCount(s: TaskSubtask): number {
 // Nama di pilihan PIC: akun sendiri ditandai supaya tidak perlu mengingat nama sendiri di daftar.
 function picName(p: { id: number; name: string }): string {
   return p.id === session.user?.id ? `${p.name} (kamu)` : p.name
+}
+
+// Sub task yang sudah dicentang tidak dianggap terlambat, sama seperti task Completed.
+function subOverdue(s: TaskSubtask): boolean {
+  return isOverdue(s.due_date, s.done ? 'completed' : (task.value?.status ?? 'requested'))
+}
+
+// Tenggat task bisa dimajukan setelah sub task diberi tenggat (revisi 16); barisnya diberi tanda, bukan ditolak.
+function pastTaskDue(s: TaskSubtask): boolean {
+  const due = task.value?.due_date
+  return !!s.due_date && !!due && s.due_date > due
+}
+
+function labeled(list: { id: number; name: string }[]) {
+  return list.map((p) => ({ id: p.id, name: picName(p) }))
 }
 
 const linkButton =
@@ -517,7 +580,11 @@ const buttonSecondary =
         :class="wide ? 'text-2xl' : 'text-xl'"
         >{{ task.title }}</component
       >
-      <p v-if="readOnly" class="mt-2 text-sm text-ink-muted">Kamu hanya bisa melihat task ini.</p>
+      <p v-if="subtaskPicOnly" class="mt-2 text-sm text-ink-muted">
+        Kamu PIC sub task di task ini. Kamu bisa memindahkannya ke On Progress, dan ke Ready setelah semua sub
+        task tercentang.
+      </p>
+      <p v-else-if="readOnly" class="mt-2 text-sm text-ink-muted">Kamu hanya bisa melihat task ini.</p>
     </div>
 
     <div aria-live="polite">
@@ -587,10 +654,16 @@ const buttonSecondary =
             Ready.
           </p>
           <p class="sr-only" role="status">{{ announce }}</p>
+          <!-- Bar progres centang sub task, terbaca pembaca layar lewat role dan aria-valuetext. -->
           <div
             v-if="task.subtask_total > 0"
+            role="progressbar"
+            aria-label="Sub task tercentang"
+            :aria-valuemin="0"
+            :aria-valuemax="task.subtask_total"
+            :aria-valuenow="task.subtask_done"
+            :aria-valuetext="`${task.subtask_done} dari ${task.subtask_total} tercentang`"
             class="mt-2 h-1.5 overflow-hidden rounded-[2px] border border-line bg-canvas"
-            aria-hidden="true"
           >
             <div
               class="h-full bg-mark transition-[width] duration-200"
@@ -608,43 +681,17 @@ const buttonSecondary =
               :class="isMine(s) ? 'border-l-[3px] border-l-mark bg-canvas' : 'bg-surface'"
             >
               <form v-if="editingSub === s.id" class="space-y-2" @submit.prevent="submitEdit(s)">
-                <label :for="`sub-edit-${s.id}`" class="sr-only">Nama sub task {{ i + 1 }}</label>
-                <input
-                  :id="`sub-edit-${s.id}`"
-                  v-model="editTitle"
-                  type="text"
-                  maxlength="200"
-                  autocomplete="off"
-                  class="min-h-11 w-full rounded-card border border-line bg-surface px-3 text-sm"
+                <SubtaskFieldsForm
+                  v-model="editForm"
+                  :id-prefix="`sub-edit-${s.id}`"
+                  :label-suffix="`nomor ${i + 1}`"
+                  :pic-options="labeled(picOptionsFor(s))"
+                  :task-due="task.due_date"
                 />
-                <label :for="`sub-edit-desc-${s.id}`" class="sr-only">Deskripsi sub task {{ i + 1 }}</label>
-                <textarea
-                  :id="`sub-edit-desc-${s.id}`"
-                  v-model="editDesc"
-                  rows="3"
-                  maxlength="2000"
-                  placeholder="Deskripsi (opsional)"
-                  class="w-full rounded-card border border-line bg-surface p-3 text-sm"
-                ></textarea>
-                <label :for="`sub-edit-ref-${s.id}`" class="sr-only">Tautan acuan sub task {{ i + 1 }}</label>
-                <input
-                  :id="`sub-edit-ref-${s.id}`"
-                  v-model="editRef"
-                  type="url"
-                  maxlength="2000"
-                  inputmode="url"
-                  placeholder="Tautan acuan dari yang menugaskan (opsional)"
-                  class="min-h-11 w-full rounded-card border border-line bg-surface px-3 text-sm"
-                />
-                <div class="flex flex-wrap items-center gap-2">
-                  <label :for="`sub-edit-pic-${s.id}`" class="text-sm text-ink-muted">Dikerjakan</label>
-                  <select :id="`sub-edit-pic-${s.id}`" v-model.number="editPic" :class="picSelect">
-                    <option :value="0">Belum ditugaskan</option>
-                    <option v-for="p in picOptionsFor(s)" :key="p.id" :value="p.id">
-                      {{ picName(p) }}
-                    </option>
-                  </select>
-                  <button type="submit" :class="buttonSecondary" :disabled="!editTitle.trim()">Simpan</button>
+                <div class="flex flex-wrap gap-2">
+                  <button type="submit" :class="buttonSecondary" :disabled="!editForm.title.trim()">
+                    Simpan
+                  </button>
                   <button type="button" :class="buttonSecondary" @click="editingSub = null">Batal</button>
                 </div>
               </form>
@@ -711,6 +758,34 @@ const buttonSecondary =
                     }}</PersonChip
                     ><template v-else>{{ s.created_by }}</template></span
                   >
+                  <span
+                    v-if="s.due_date"
+                    class="inline-flex items-center gap-1"
+                    :class="subOverdue(s) ? 'font-medium text-urgent' : 'text-ink-muted'"
+                  >
+                    <!-- Sama dengan kartu task: terlambat ditandai ikon jam dan kata, bukan hanya warna. -->
+                    <svg
+                      v-if="subOverdue(s)"
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      class="size-4 shrink-0"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M12 7v5l3 2" />
+                    </svg>
+                    {{ subOverdue(s) ? 'Terlambat, ' : 'Tenggat ' }}{{ formatDay(s.due_date) }}
+                  </span>
+                  <span
+                    v-if="pastTaskDue(s)"
+                    class="rounded-chip border border-urgent px-2 py-0.5 text-urgent"
+                  >
+                    Melewati tenggat task
+                  </span>
                   <span v-if="s.attachments.length" class="text-ink-muted">
                     {{ s.attachments.length }} berkas
                   </span>
@@ -798,51 +873,61 @@ const buttonSecondary =
           </ol>
           <p v-else class="mt-2 text-sm text-ink-muted">Belum ada sub task.</p>
 
-          <form
-            v-if="task.can.add_subtask"
-            class="mt-3 space-y-2 rounded-card border border-dashed border-line p-3"
-            @submit.prevent="submitNewSubtask"
-          >
-            <label for="sub-new" class="sr-only">Nama sub task baru</label>
-            <input
-              id="sub-new"
-              v-model="newTitle"
-              type="text"
-              maxlength="200"
-              autocomplete="off"
-              placeholder="Pekerjaan yang perlu dilakukan"
-              class="min-h-11 w-full rounded-card border border-line bg-surface px-3 text-sm"
-            />
-            <label for="sub-new-desc" class="sr-only">Deskripsi sub task baru</label>
-            <textarea
-              id="sub-new-desc"
-              v-model="newDesc"
-              rows="2"
-              maxlength="2000"
-              placeholder="Deskripsi (opsional)"
-              class="w-full rounded-card border border-line bg-surface p-3 text-sm"
-            ></textarea>
-            <label for="sub-new-link" class="sr-only">Tautan acuan sub task baru</label>
-            <input
-              id="sub-new-link"
-              v-model="newLink"
-              type="url"
-              maxlength="2000"
-              inputmode="url"
-              placeholder="Tautan acuan, misalnya brief atau contoh (opsional)"
-              class="min-h-11 w-full rounded-card border border-line bg-surface px-3 text-sm"
-            />
-            <div class="flex flex-wrap items-center gap-2">
-              <label for="sub-new-pic" class="text-sm text-ink-muted">Dikerjakan</label>
-              <select id="sub-new-pic" v-model.number="newPic" :class="picSelect">
-                <option :value="0">Belum ditugaskan</option>
-                <option v-for="p in picOptions" :key="p.id" :value="p.id">{{ picName(p) }}</option>
-              </select>
-              <button type="submit" :class="buttonSecondary" :disabled="addingSub || !newTitle.trim()">
-                {{ addingSub ? 'Menambah...' : 'Tambah' }}
-              </button>
-            </div>
-          </form>
+          <!-- Revisi 17: form tambah dilipat supaya panel tidak langsung panjang saat orang hanya melihat task.
+               Isian yang sudah diketik tetap tersimpan di newForm selama panel terbuka. -->
+          <template v-if="task.can.add_subtask">
+            <button
+              ref="addTrigger"
+              type="button"
+              :aria-expanded="addOpen"
+              aria-controls="sub-new-form"
+              class="mt-3 inline-flex min-h-11 items-center gap-2 rounded-card border border-line px-4 text-sm font-medium hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark active:translate-y-px"
+              @click="addOpen ? closeAdd() : openAdd()"
+            >
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                class="size-4"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.75"
+                stroke-linecap="round"
+              >
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              Tambah sub task
+            </button>
+            <Transition
+              enter-from-class="opacity-0 -translate-y-1"
+              enter-active-class="transition duration-150 ease-out motion-reduce:transition-none"
+              leave-to-class="opacity-0"
+              leave-active-class="transition duration-100 ease-in motion-reduce:transition-none"
+            >
+              <form
+                v-if="addOpen"
+                id="sub-new-form"
+                class="mt-3 space-y-2 rounded-card border border-dashed border-line p-3"
+                aria-label="Tambah sub task"
+                @submit.prevent="submitNewSubtask"
+                @keydown.esc.stop.prevent="closeAdd"
+              >
+                <SubtaskFieldsForm
+                  v-model="newForm"
+                  id-prefix="sub-new"
+                  label-suffix="baru"
+                  :pic-options="labeled(picOptions)"
+                  :task-due="task.due_date"
+                  with-files
+                />
+                <div class="flex flex-wrap gap-2">
+                  <button type="submit" :class="buttonPrimary" :disabled="addingSub || !newForm.title.trim()">
+                    {{ addingSub ? 'Menyimpan...' : 'Simpan sub task' }}
+                  </button>
+                  <button type="button" :class="buttonSecondary" @click="closeAdd">Batal</button>
+                </div>
+              </form>
+            </Transition>
+          </template>
         </section>
 
         <section v-if="task.description">

@@ -16,6 +16,8 @@ export type TaskSubtask = {
   done: boolean
   done_at: string | null
   done_by: string
+  // Tenggat sub task (revisi 16), YYYY-MM-DD atau null.
+  due_date: string | null
   // Dihitung backend dengan aturan yang sama dengan penolakan 403, jadi UI tidak menebak siapa yang boleh.
   can_check: boolean
   // Boleh diubah atau dihapus: pembuatnya, PIC-nya, dan Manajer, selama task masih Requested atau On Progress.
@@ -51,6 +53,8 @@ export type TaskCan = {
   edit_deliverable: boolean
   add_subtask: boolean
   move_to: TaskStatus[]
+  // Pengguna ini PIC salah satu sub task (revisi 17). Hanya untuk teks; haknya sudah ada di move_to.
+  subtask_pic: boolean
 }
 
 export type TaskHistoryItem = {
@@ -96,8 +100,11 @@ export async function getTask(id: string): Promise<TaskDetail> {
   return res.task
 }
 
-export function createTask(input: TaskFields & { label_ids: number[] }) {
-  return apiPost<{ id: string }>('/tasks', input)
+// subtask_ids urut sesuai form, dipakai untuk mengunggah lampiran acuan tiap sub task setelah task jadi.
+export function createTask(
+  input: Omit<TaskFields, 'subtasks'> & { label_ids: number[]; subtasks: CreateSubtaskInput[] },
+) {
+  return apiPost<{ id: string; subtask_ids: number[] }>('/tasks', input)
 }
 
 export function updateTask(id: string, version: number, input: TaskFields) {
@@ -136,7 +143,11 @@ export type SubtaskBody = {
   reference_url: string
   deliverable_url: string
   pic_id: number
+  due_date: string
 }
+
+// Sub task dari form Buat task (revisi 16): isinya sama dengan Tambah sub task di detail, tanpa tautan hasil.
+export type CreateSubtaskInput = Omit<SubtaskBody, 'deliverable_url'>
 
 export function addSubtask(taskId: string, body: SubtaskBody) {
   return apiPost<{ id: number }>(`/tasks/${taskId}/subtasks`, body)

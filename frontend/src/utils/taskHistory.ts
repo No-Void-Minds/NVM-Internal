@@ -1,5 +1,5 @@
 import type { TaskHistoryItem } from '../api/tasks'
-import { statusLabel, type TaskStatus } from './task'
+import { formatDay, statusLabel, type TaskStatus } from './task'
 
 const fieldName: Record<string, string> = {
   title: 'judul',
@@ -56,7 +56,14 @@ export function describeTaskHistory(h: TaskHistoryItem): string {
       if (prev.title !== after.title) {
         return `mengganti nama sub task "${String(prev.title ?? '')}" menjadi "${String(after.title ?? '')}"`
       }
-      return `mengubah PIC sub task "${String(after.title ?? '')}"`
+      if (prev.pic_id !== after.pic_id) return `mengubah PIC sub task "${String(after.title ?? '')}"`
+      // Revisi 16: tenggat ikut dicatat. Riwayat lama tanpa due_date terbaca sama (undefined) dan jatuh ke bawah.
+      if ((prev.due_date ?? null) !== (after.due_date ?? null)) {
+        return after.due_date
+          ? `mengubah tenggat sub task "${String(after.title ?? '')}" menjadi ${formatDay(String(after.due_date))}`
+          : `menghapus tenggat sub task "${String(after.title ?? '')}"`
+      }
+      return `mengubah sub task "${String(after.title ?? '')}"`
     }
     case 'task_pics_changed':
       return 'mengubah PIC task'

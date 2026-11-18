@@ -68,6 +68,7 @@ type subtaskItem struct {
 	Done        bool               `json:"done"`
 	DoneAt      *time.Time         `json:"done_at"`
 	DoneBy      string             `json:"done_by"`
+	DueDate     *string            `json:"due_date"`
 	CanCheck    bool               `json:"can_check"`
 	CanEdit     bool               `json:"can_edit"`
 	Assignees   []taskPerson       `json:"assignees"`
@@ -98,15 +99,15 @@ type taskDetail struct {
 }
 
 type createTaskRequest struct {
-	Title          string           `json:"title"`
-	Description    string           `json:"description"`
-	Urgency        string           `json:"urgency"`
-	PICIDs         []int64          `json:"pic_ids"`
-	Subtasks       []subtaskRequest `json:"subtasks"`
-	LabelIDs       []int64          `json:"label_ids"`
-	StartDate      string           `json:"start_date"`
-	DueDate        string           `json:"due_date"`
-	DeliverableURL string           `json:"deliverable_url"`
+	Title          string                `json:"title"`
+	Description    string                `json:"description"`
+	Urgency        string                `json:"urgency"`
+	PICIDs         []int64               `json:"pic_ids"`
+	Subtasks       []subtaskTitleRequest `json:"subtasks"`
+	LabelIDs       []int64               `json:"label_ids"`
+	StartDate      string                `json:"start_date"`
+	DueDate        string                `json:"due_date"`
+	DeliverableURL string                `json:"deliverable_url"`
 }
 
 func (s *Server) createTask(c *gin.Context) {
@@ -120,7 +121,7 @@ func (s *Server) createTask(c *gin.Context) {
 		Description:    req.Description,
 		Urgency:        req.Urgency,
 		PICIDs:         req.PICIDs,
-		Subtasks:       subtaskInputs(req.Subtasks),
+		Subtasks:       subtaskFields(req.Subtasks),
 		LabelIDs:       req.LabelIDs,
 		StartDate:      req.StartDate,
 		DueDate:        req.DueDate,
@@ -130,7 +131,17 @@ func (s *Server) createTask(c *gin.Context) {
 		s.writeTaskError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"id": id})
+	// ID sub task dikirim urut sesuai form, supaya lampiran acuan tiap baris bisa diunggah ke sub task-nya.
+	d, err := s.tasks.Get(c.Request.Context(), id)
+	if err != nil {
+		s.internalError(c, err)
+		return
+	}
+	subIDs := make([]int64, len(d.Subtasks))
+	for i, st := range d.Subtasks {
+		subIDs[i] = st.ID
+	}
+	c.JSON(http.StatusCreated, gin.H{"id": id, "subtask_ids": subIDs})
 }
 
 func (s *Server) getTask(c *gin.Context) {
@@ -164,7 +175,7 @@ func (s *Server) getTask(c *gin.Context) {
 		RequestDate:    t.RequestDate.Time,
 		DeliverableURL: t.DeliverableUrl.String,
 		IsMigrated:     t.IsMigrated,
-		Can:            task.PermissionsFor(actor.Role, d.IsPIC(actor.ID), task.Status(t.Status)),
+		Can:            task.PermissionsFor(actor.Role, d.IsPIC(actor.ID), d.IsSubtaskPIC(actor.ID), task.Status(t.Status)),
 		History:        make([]historyItem, 0, len(d.History)),
 	}
 	for _, h := range d.History {
@@ -212,7 +223,7 @@ func (s *Server) getTask(c *gin.Context) {
 			ID: st.ID, Title: st.Title, Description: st.Description,
 			ReferenceURL: st.ReferenceURL, DeliverableURL: st.DeliverableURL,
 			CreatedBy: st.CreatedByName, CreatedByID: nonZero(st.CreatedBy),
-			Done: st.DoneAt.Valid, DoneAt: timePtr(st.DoneAt), DoneBy: st.DoneBy,
+			Done: st.DoneAt.Valid, DoneAt: timePtr(st.DoneAt), DoneBy: st.DoneBy, DueDate: dateString(st.DueDate),
 			Assignees:   make([]taskPerson, 0, len(st.Assignees)),
 			Attachments: subFiles[st.ID],
 		}
@@ -350,4 +361,12 @@ func nonZero(id int64) *int64 {
 		return nil
 	}
 	return &id
+}
+
+func subtaskFields(reqs []subtaskTitleRequest) []task.SubtaskFields {
+	out := make([]task.SubtaskFields, 0, len(reqs))
+	for _, r := range reqs {
+		out = append(out, r.fields())
+	}
+	return out
 }

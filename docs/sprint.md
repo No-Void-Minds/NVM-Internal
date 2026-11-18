@@ -63,6 +63,8 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 11k | Manajer kembali boleh menjadi PIC sub task | Daftar "Dikerjakan" memuat Staf dan Manajer aktif |
 | 11l | Popover profil | Klik foto atau nama orang membuka kartu profil kecil |
 | 11m | Filter PIC ikut PIC sub task | Filter PIC, Arsip, dan Task saya memuat task yang sub task-nya dipegang orang itu |
+| 11n | Form Buat task dan tenggat sub task | Sub task punya tenggat; form Buat task mengisi sub task lengkap dalam satu simpan |
+| 11o | PIC sub task memindahkan task, form tambah dilipat | PIC sub task bisa memulai task dan menandai Ready; panel detail tidak langsung panjang |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -889,6 +891,58 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 
 **Hasil:** kode selesai 2026-11-18, `./scripts/check.sh` lolos. Tidak ada migrasi. Perlu restart backend. Test DB menunggu `TEST_DATABASE_URL`.
 
+## Sprint 11n: Form Buat task dan tenggat sub task
+
+**Tujuan:** revisi 16 Manajer. Sub task punya tenggat sendiri, dan form Buat task bisa langsung mengisi sub task lengkap (nama, PIC, deskripsi, tautan acuan, tenggat, lampiran acuan) dengan form yang sama dengan Tambah sub task di detail.
+
+- [x] S11n-01 Migrasi `000013`: kolom `task_subtasks.due_date` (date, nullable). Hanya kolom, tanpa grants baru.
+- [x] S11n-02 `SubtaskFields.DueDate`, divalidasi `checkSubtaskDue`: tenggat sub task tidak boleh melewati tenggat task induk, galat 400 "Tenggat sub task tidak boleh melewati tenggat task (<tanggal>)." Dipakai tambah, ubah, dan buat task.
+- [x] S11n-03 `POST /api/tasks` menerima sub task berisi lengkap (`title`, `description`, `reference_url`, `pic_id`, `due_date`) dan mengembalikan `subtask_ids` urut sesuai form. Task dan semua sub task dibuat dalam satu transaksi; galat menyebut "Sub task nomor N: ...".
+- [x] S11n-04 Komponen bersama `SubtaskFieldsForm`, dipakai Tambah sub task dan Ubah sub task di detail serta tiap baris form Buat task. Lampiran acuan diunggah setelah sub task punya id lewat endpoint lampiran sub task yang sudah ada.
+- [x] S11n-05 Form Buat task dan Ubah task: Judul, Tenggat, lalu sisanya. Teks bantuan sub task diganti. Tombol hapus baris sub task memakai `text-danger` (sebelumnya `text-urgent`).
+- [x] S11n-06 Detail: tenggat sub task tampil seperti tenggat task (ikon jam dan "Terlambat" menurut hari kantor), dan tanda "Melewati tenggat task" bila tenggat task induk lebih awal. Riwayat menulis perubahan tenggat sub task.
+- [x] S11n-07 Garis tebal dobel di isian: cincin fokus isian teks kini menimpa garisnya (`outline-offset: -1px`).
+
+**Keputusan:**
+- Tenggat sub task opsional. Batas "tidak melewati tenggat task" dicek di aplikasi, bukan CHECK database, karena tenggat task boleh dimajukan setelahnya. Task tanpa tenggat tidak membatasi tenggat sub task.
+- Tenggat task yang dimajukan lebih awal dari tenggat sub task tetap diterima. Sub task itu diberi tanda "Melewati tenggat task" di detail. Tenggat sub task hanya dicek ulang bila tenggatnya sendiri diubah, jadi sub task itu tetap bisa diganti nama, deskripsi, atau PIC-nya tanpa dipaksa memperbaiki tenggat dulu. Aturannya sama dengan PIC lama yang dipertahankan (Sprint 11k).
+- Penanda terlambat memakai hari kantor (Asia/Jakarta) di frontend, sama dengan `officeTZ` backend. Ini juga mengubah penanda terlambat task induk, yang sebelumnya memakai tanggal browser.
+- Audit: `subtask_added` dan `subtask_renamed` mencatat `due_date`; `task_created` mencatat isi tiap sub task (id, nama, PIC, tenggat). Riwayat lama tanpa `due_date` tetap terbaca seperti sebelumnya.
+- Form Buat task memakai isian sub task lengkap. Form Ubah task tetap hanya nama dan urutan, sesuai keputusan Sprint 11e dan 11f: daftar dari form menggantikan daftar lama, jadi isian lain di form itu akan menimpa yang sudah diisi PIC. Isi lain sub task diubah dari detail.
+- Yang boleh mengisi sub task saat membuat task sama dengan yang boleh menambah sub task: membuat task hanya untuk Manajer (BR-01), dan Manajer selalu boleh menambah sub task. Validasinya sama persis dengan Tambah sub task (`cleanFieldsOf`, `checkSubtaskDue`, `setSubtaskPIC`); tautan hasil dari form Buat task diabaikan karena diisi saat pengerjaan.
+- Satu sub task tidak valid membatalkan seluruh pembuatan task. Galatnya diberi awalan "Sub task nomor N:" supaya Manajer tahu baris mana yang salah.
+- Lampiran acuan sub task disimpan sebagai lampiran sub task (`kind` deliverable, keputusan Sprint 11f), diunggah setelah task jadi. Berkas yang gagal tidak membatalkan task: panel detail terbuka dan pesan menyebut nama berkas, sub task ke berapa, dan alasannya.
+- Isian teks selalu cocok `:focus-visible`, juga sesudah diklik atau difokus otomatis (Tambah sub task memfokuskan nama baris baru). Diukur di form: tanpa fokus garisnya 1 px `line` sama dengan isian lain, dengan fokus garisnya berubah `mark` dan cincin 2 px berjarak 2 px di luarnya, terbaca sebagai garis dobel. Obatnya di aturan global isian, jadi semua isian teks berubah sama: cincin menimpa garis, fokus tetap terlihat. Kotak centang dan pilihan radio tidak ikut.
+
+**Selesai kalau:** `./scripts/check.sh` lolos, test DB di bawah lolos, migrasi `000013` jalan di dev, dan curl buat task dengan dua sub task (satu bertenggat) berhasil, sedangkan sub task bertenggat setelah tenggat task ditolak 400 tanpa task tersimpan.
+
+**Hasil:** kode selesai 2026-11-18, `./scripts/check.sh` lolos. Migrasi `000013` sudah jalan di dev (Rifky). Curl 2026-11-18: buat task dengan dua sub task 201 (`T-0007`, satu bertenggat 2026-12-15 dan satu tanpa, PIC 4 dan 5 tersimpan), sub task bertenggat setelah tenggat task 400 "Sub task nomor 2: Tenggat sub task tidak boleh melewati tenggat task (20 Desember 2026)." tanpa task tersisa. Audit browser penuh `uji13.mjs` (termasuk form Buat task di semua lebar dan kedua tema) lolos di Sprint 11o. Test DB menunggu `TEST_DATABASE_URL`; `TestCheckSubtaskDue` lolos.
+
+## Sprint 11o: PIC sub task memindahkan task, form tambah sub task dilipat
+
+**Tujuan:** revisi 17 Manajer. (A) PIC sub task boleh memulai task dan menandai Ready, karena dia yang mengerjakan sebagian pekerjaannya. (B) Form tambah sub task di panel detail dilipat di balik satu tombol, supaya panel tidak langsung panjang bagi yang hanya melihat task.
+
+- [x] S11o-01 `CheckTransition` dan `PermissionsFor` menerima `isSubtaskPIC`. Tabel `edges` punya penanda `subtaskPIC` untuk Requested ke On Progress dan On Progress ke Ready. Ready gate dan optimistic locking tidak berubah.
+- [x] S11o-02 `Move` menghitung PIC sub task dari `subtask_assignees` di dalam transaksi yang mengunci task. Papan dan Arsip memakai `ListTasksWithSubtaskPIC` (satu query untuk semua kartu, hanya untuk Staf); detail memakai `Detail.IsSubtaskPIC`.
+- [x] S11o-03 `can.subtask_pic` dikirim ke frontend hanya untuk teks. Detail menampilkan "Kamu PIC sub task di task ini. ..." untuk PIC sub task; "Kamu hanya bisa melihat task ini." tetap untuk yang tanpa hak apa pun.
+- [x] S11o-04 Form tambah sub task di detail dilipat di balik tombol "Tambah sub task" (ikon plus, 44 px, `aria-expanded`, `aria-controls`). Batal dan Escape menutupnya tanpa menutup panel, fokus kembali ke tombol, isian bertahan selama panel terbuka. Transisi 150 ms, mati di `prefers-reduced-motion`.
+- [x] S11o-05 Bar progres sub task diberi `role="progressbar"` dengan `aria-valuetext` ("1 dari 3 tercentang"). Bar itu memang bar progres (muncul hanya bila ada sub task, lebarnya persentase tercentang), bukan elemen sisa; sebelumnya `aria-hidden`.
+- [x] S11o-06 `uji13.mjs`: bagian `E2E_ONLY=subtaskform`, dan pemilih tombol Detail sub task dipersempit ke `aria-controls^='sub-detail-'` (sejak revisi 14 pemicu profil juga ber-`aria-expanded`).
+- [x] S11o-07 Perbaikan popover profil revisi 14 yang ketahuan saat e2e popover pertama kali dijalankan: fokus tidak pindah ke popover, fokus tidak kembali sesudah klik luar, dan Enter pada pemicu tertelan sesaat setelah scrim di ponsel diketuk.
+
+**Keputusan:**
+- PIC sub task di sini berarti `user_id` di `subtask_assignees` untuk sub task milik task itu, dihitung backend saat permintaan pindah. Hanya dua perpindahan yang bertambah: Requested ke On Progress dan On Progress ke Ready. Ready ke On Progress (revisi), Ready ke Completed, dan membuka kembali tetap milik PIC task dan Manajer.
+- Hak lain tidak bertambah. PIC sub task tetap tidak bisa mengubah field task induk, label, deliverable task, atau menambah sub task (`PermissionsFor` hanya memakai `isSubtaskPIC` untuk `MoveTo`). Hak atas sub task-nya sendiri tetap dari Sprint 11i.
+- Manajer tidak terpengaruh karena sudah boleh semua perpindahan. Admin tetap tidak boleh satu pun.
+- Form Buat task tidak berubah: barisnya sudah muncul hanya setelah "Tambah sub task" diklik.
+- Tombol pemicu tetap terlihat saat form terbuka (`aria-expanded="true"`), supaya fokus selalu punya tempat kembali dan tombol yang sama bisa menutup form.
+- Escape di form tambah dihentikan di form (`keydown` dibatalkan dan tidak diteruskan), jadi `<dialog>` panel tidak menerima Escape yang sama. Terbukti di browser: panel tetap terbuka.
+- Popover profil, tiga perbaikan dari pengukuran e2e: (1) fokus dipindah satu render sesudah posisi ditulis, karena sebelum itu popover masih `visibility: hidden` dan browser diam-diam menolak `focus()`; (2) fokus dikembalikan ke pemicu setelah urutan pointer selesai, karena `mousedown` bawaan browser memindahkan fokus ke titik yang diklik setelah `pointerdown`; (3) klik yang ditelan setelah klik luar hanya klik pointer (`detail > 0`), karena di ponsel scrim hilang sebelum `pointerup` dan browser tidak mengirim click, jadi pendengarnya masih terpasang sebentar dan bisa menelan klik dari Enter.
+
+**Selesai kalau:** `./scripts/check.sh` lolos, test di bawah lolos, e2e `subtaskform` dan `popover` lolos, dan curl sebagai `staf.uji` di task yang hanya memberinya sub task: pindah ke On Progress 200, ke Ready saat sub task belum tercentang 400, centang, lalu ke Ready 200.
+
+**Hasil:** kode selesai 2026-11-18, `./scripts/check.sh` lolos. Unit test `TestEveryTransition` (144 kombinasi), `TestPermissionsFor`, dan `TestTaskPICAndSubtaskPIC` lolos. `TestSubtaskPICMoves` (DB) menunggu `TEST_DATABASE_URL`. E2E 2026-11-18: `subtaskform` 18 pemeriksaan 0 gagal, `popover` 27 pemeriksaan 0 gagal, audit penuh 320 pemeriksaan 0 gagal. Perlu restart backend; curl bagian A menunggu restart.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -1058,9 +1112,11 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 13 | 2026-11-17 | Revisi 12 dibatalkan. Manajer kembali boleh menjadi PIC sub task, dan tetap boleh membuat sub task serta menugaskan orang, sama seperti PIC task | Sprint 11k |
 | 14 | 2026-11-17 | Popover profil: klik foto atau nama orang membuka kartu kecil berisi foto, nama, divisi, jabatan, peran, dan tautan ke task-nya di papan | Sprint 11l |
 | 15 | 2026-11-18 | Filter PIC, Arsip, dan Task saya ikut menghitung PIC sub task. Mengganti keputusan revisi 11 soal Task saya | Sprint 11m |
+| 16 | 2026-11-18 | Sub task punya tenggat yang tidak boleh melewati tenggat task. Form Buat task: Judul lalu Tenggat, dan sub task diisi lengkap dengan form yang sama dengan Tambah sub task | Sprint 11n |
+| 17 | 2026-11-18 | PIC sub task boleh memindahkan task ke On Progress dan ke Ready (dengan Ready gate). Form tambah sub task di panel detail dilipat di balik satu tombol | Sprint 11o |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat kelima belas revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat ketujuh belas revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

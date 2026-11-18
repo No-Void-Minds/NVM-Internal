@@ -79,15 +79,26 @@ function inside(t: EventTarget | null) {
   return t instanceof Node && !!card.value?.contains(t)
 }
 
-function swallowNextClick() {
+// done dijalankan setelah urutan pointer selesai: mousedown bawaan browser memindahkan fokus ke titik yang
+// diklik setelah pointerdown, jadi fokus yang dikembalikan lebih awal akan tertimpa (terukur di Sprint 11o).
+function swallowNextClick(done: () => void) {
+  // Hanya klik pointer (detail > 0). Bila yang diklik scrim, scrim hilang sebelum pointerup dan browser tidak
+  // mengirim click sama sekali, jadi pendengar ini masih terpasang sebentar; klik dari Enter atau Space
+  // (detail 0) tidak boleh ikut tertelan di jeda itu.
   const eat = (e: Event) => {
+    if ((e as MouseEvent).detail === 0) return
     e.preventDefault()
     e.stopPropagation()
+    document.removeEventListener('click', eat, { capture: true })
   }
-  document.addEventListener('click', eat, { capture: true, once: true })
+  document.addEventListener('click', eat, { capture: true })
   document.addEventListener(
     'pointerup',
-    () => setTimeout(() => document.removeEventListener('click', eat, { capture: true })),
+    () =>
+      setTimeout(() => {
+        document.removeEventListener('click', eat, { capture: true })
+        done()
+      }),
     { capture: true, once: true },
   )
 }
@@ -97,8 +108,11 @@ function onPointerdown(e: PointerEvent) {
   // Pemicu lain mengurus dirinya sendiri: popover langsung pindah ke sana.
   if (e.target instanceof Element && e.target.closest('[data-person-trigger]')) return
   // Klik luar hanya menutup popover. Klik itu ditelan supaya tidak ikut menutup panel atau membuka kartu.
-  swallowNextClick()
-  close(true)
+  const trigger = current.value?.trigger
+  close(false)
+  swallowNextClick(() => {
+    if (trigger?.isConnected) trigger.focus()
+  })
 }
 
 function onFocusin(e: FocusEvent) {
@@ -130,6 +144,9 @@ watch(current, async (c, old) => {
   await nextTick()
   root.value?.showPopover()
   place()
+  // Tunggu satu render: sebelum posisi tertulis ke style, popover masih visibility hidden, dan browser
+  // diam-diam menolak focus() ke elemen yang tersembunyi (terukur di Sprint 11o, fokus tertinggal di pemicu).
+  await nextTick()
   closeBtn.value?.focus()
 })
 </script>

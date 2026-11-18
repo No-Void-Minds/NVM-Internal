@@ -1,6 +1,6 @@
 -- name: ListSubtasks :many
 SELECT st.id, st.task_id, st.title, st.description, st.reference_url, st.deliverable_url,
-       st.position, st.done_at, st.created_by,
+       st.position, st.done_at, st.created_by, st.due_date,
        u.name AS done_by_name, c.name AS created_by_name
 FROM task_subtasks st
 LEFT JOIN users u ON u.id = st.done_by
@@ -16,8 +16,8 @@ WHERE sa.subtask_id = ANY(@subtask_ids::bigint[])
 ORDER BY sa.subtask_id, sa.assigned_at, u.id;
 
 -- name: CreateSubtask :one
-INSERT INTO task_subtasks (task_id, title, description, reference_url, deliverable_url, position, created_by)
-VALUES (@task_id, @title, @description, @reference_url, @deliverable_url, @position, @created_by)
+INSERT INTO task_subtasks (task_id, title, description, reference_url, deliverable_url, position, created_by, due_date)
+VALUES (@task_id, @title, @description, @reference_url, @deliverable_url, @position, @created_by, sqlc.narg(due_date))
 RETURNING id;
 
 -- name: UpdateSubtask :exec
@@ -48,7 +48,7 @@ ORDER BY tas.assigned_at, u.id
 LIMIT 1;
 
 -- name: GetSubtask :one
-SELECT id, title, description, reference_url, deliverable_url, done_at, created_by
+SELECT id, title, description, reference_url, deliverable_url, done_at, created_by, due_date
 FROM task_subtasks WHERE id = @id AND task_id = @task_id;
 
 -- name: IsSubtaskAssignee :one
@@ -87,9 +87,10 @@ FROM task_subtasks WHERE task_id = @task_id;
 SELECT count(*)::int FROM subtask_assignees WHERE subtask_id = @subtask_id;
 
 -- name: RenameSubtask :exec
--- Nama, deskripsi, dan tautan; urutan tidak ikut berubah saat PIC atau Manajer memperbaiki isinya.
+-- Nama, deskripsi, tautan, dan tenggat; urutan tidak ikut berubah saat PIC atau Manajer memperbaiki isinya.
 UPDATE task_subtasks
-SET title = @title, description = @description, reference_url = @reference_url, deliverable_url = @deliverable_url
+SET title = @title, description = @description, reference_url = @reference_url, deliverable_url = @deliverable_url,
+    due_date = sqlc.narg(due_date)
 WHERE id = @id AND task_id = @task_id;
 
 -- name: ClearSubtaskAssignees :exec
@@ -102,3 +103,10 @@ DELETE FROM subtask_assignees WHERE subtask_id = @subtask_id;
 DELETE FROM subtask_assignees sa
 USING task_subtasks st
 WHERE sa.subtask_id = st.id AND st.task_id = @task_id AND sa.user_id = ANY(@user_ids::bigint[]);
+
+-- name: ListTasksWithSubtaskPIC :many
+-- Revisi 17: task mana yang sub task-nya dipegang user ini, untuk menghitung move_to papan dan Arsip sekaligus.
+SELECT DISTINCT st.task_id
+FROM task_subtasks st
+JOIN subtask_assignees sa ON sa.subtask_id = st.id
+WHERE st.task_id = ANY(@task_ids::text[]) AND sa.user_id = @user_id;

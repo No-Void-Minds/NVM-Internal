@@ -18,6 +18,7 @@ type subtaskTitleRequest struct {
 	ReferenceURL   string `json:"reference_url"`
 	DeliverableURL string `json:"deliverable_url"`
 	PicID          int64  `json:"pic_id"`
+	DueDate        string `json:"due_date"`
 }
 
 func (r subtaskTitleRequest) fields() task.SubtaskFields {
@@ -27,6 +28,7 @@ func (r subtaskTitleRequest) fields() task.SubtaskFields {
 		Reference:   r.ReferenceURL,
 		Deliverable: r.DeliverableURL,
 		PICID:       r.PicID,
+		DueDate:     r.DueDate,
 	}
 }
 

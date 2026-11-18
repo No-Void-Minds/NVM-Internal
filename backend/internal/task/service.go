@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/netip"
 	"regexp"
 
@@ -37,11 +38,12 @@ type Actor struct {
 func (a Actor) auditActor() audit.Actor { return audit.Actor{ID: a.ID, IP: a.IP} }
 
 type CreateInput struct {
-	Title          string
-	Description    string
-	Urgency        string
-	PICIDs         []int64
-	Subtasks       []SubtaskInput
+	Title       string
+	Description string
+	Urgency     string
+	PICIDs      []int64
+	// Revisi 16: sub task dari form Buat task membawa isi lengkap, sama dengan Tambah sub task di detail.
+	Subtasks       []SubtaskFields
 	LabelIDs       []int64
 	StartDate      string
 	DueDate        string
@@ -70,9 +72,16 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (stri
 	if len(picIDs) == 0 {
 		return "", apperr.Invalid("Pilih minimal satu PIC task.")
 	}
-	subs, err := cleanSubtasks(in.Subtasks)
-	if err != nil {
-		return "", err
+	if len(in.Subtasks) > maxSubtasks {
+		return "", apperr.Invalid(fmt.Sprintf("Satu task paling banyak punya %d sub task.", maxSubtasks))
+	}
+	subs := make([]cleanSubtaskFields, len(in.Subtasks))
+	for i, st := range in.Subtasks {
+		if subs[i], err = cleanFieldsOf(st); err != nil {
+			return "", numbered(i, err)
+		}
+		// Tautan hasil diisi saat pengerjaan, bukan saat task dibuat.
+		subs[i].deliverable = ""
 	}
 	labels := uniqueIDs(in.LabelIDs)
 
@@ -106,7 +115,7 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (stri
 		if err := addTaskPICs(ctx, q, actor.ID, id, picIDs); err != nil {
 			return err
 		}
-		snaps, err := insertSubtasks(ctx, q, id, actor.ID, subs)
+		snaps, err := createSubtasks(ctx, q, actor, id, f.dueDate, subs, in.Subtasks)
 		if err != nil {
 			return err
 		}
@@ -280,4 +289,53 @@ func requireActiveLabels(ctx context.Context, q *sqlc.Queries, ids []int64) erro
 		}
 	}
 	return nil
+}
+
+// createSubtasks menulis sub task dari form Buat task dalam transaksi pembuatan task, dengan aturan yang sama
+// dengan AddSubtask: tenggat tidak melewati tenggat task dan PIC harus calon yang sah. Galat pertama
+// membatalkan seluruh transaksi, jadi task tidak tersimpan setengah jadi.
+func createSubtasks(ctx context.Context, q *sqlc.Queries, actor Actor, taskID string, taskDue pgtype.Date,
+	subs []cleanSubtaskFields, raw []SubtaskFields) ([]map[string]any, error) {
+	snaps := make([]map[string]any, 0, len(subs))
+	for i, f := range subs {
+		if err := checkSubtaskDue(f.due, taskDue); err != nil {
+			return nil, numbered(i, err)
+		}
+		sid, err := q.CreateSubtask(ctx, sqlc.CreateSubtaskParams{
+			TaskID: taskID, Title: f.title, Description: f.description,
+			ReferenceUrl: f.reference, DeliverableUrl: f.deliverable,
+			Position: int32(i), CreatedBy: userRef(actor.ID), DueDate: f.due,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if err := setSubtaskPIC(ctx, q, actor, taskID, sid, raw[i].PICID); err != nil {
+			return nil, numbered(i, err)
+		}
+		snaps = append(snaps, map[string]any{
+			"id": sid, "title": f.title, "pic_id": raw[i].PICID, "due_date": dateValue(f.due),
+		})
+	}
+	return snaps, nil
+}
+
+// numbered menyebut nomor sub task di galat validasi, supaya Manajer tahu baris mana yang perlu diperbaiki.
+func numbered(i int, err error) error {
+	var ve *apperr.Validation
+	if errors.As(err, &ve) {
+		return apperr.Invalid(fmt.Sprintf("Sub task nomor %d: %s", i+1, ve.Message))
+	}
+	return err
+}
+
+// IsSubtaskPIC menjawab apakah akun ini PIC salah satu sub task task ini (revisi 17).
+func (d Detail) IsSubtaskPIC(userID int64) bool {
+	for _, st := range d.Subtasks {
+		for _, a := range st.Assignees {
+			if a.ID == userID {
+				return true
+			}
+		}
+	}
+	return false
 }

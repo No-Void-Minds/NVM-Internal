@@ -37,19 +37,21 @@ const MaxNoteLength = 500
 
 type edge struct{ from, to Status }
 
-// Alur status (BR-03). staffPIC menandai perpindahan yang juga boleh dilakukan Staf yang menjadi PIC;
-// Manajer boleh semua perpindahan di sini (FR-TASK-07); Admin tidak boleh satu pun (FR-TASK-19).
-var edges = map[edge]struct{ staffPIC, needsNote bool }{
-	{Requested, OnProgress}: {staffPIC: true},
-	{OnProgress, Ready}:     {staffPIC: true},
+// Alur status (BR-03). staffPIC menandai perpindahan yang juga boleh dilakukan Staf yang menjadi PIC task;
+// subtaskPIC yang boleh dilakukan Staf yang menjadi PIC salah satu sub task (revisi 17). Manajer boleh semua
+// perpindahan di sini (FR-TASK-07); Admin tidak boleh satu pun (FR-TASK-19).
+var edges = map[edge]struct{ staffPIC, subtaskPIC, needsNote bool }{
+	{Requested, OnProgress}: {staffPIC: true, subtaskPIC: true},
+	{OnProgress, Ready}:     {staffPIC: true, subtaskPIC: true},
 	{Ready, OnProgress}:     {staffPIC: true, needsNote: true}, // revisi (FR-TASK-22)
 	{Ready, Completed}:      {},                                // hanya Manajer, setelah memeriksa hasil
 	{Completed, OnProgress}: {},                                // buka kembali, hanya Manajer
 }
 
 // CheckTransition memeriksa apakah pelaku boleh memindahkan task dari from ke to.
-// isPIC hanya berpengaruh untuk Staf. Catatan yang dikembalikan sudah dirapikan.
-func CheckTransition(role Role, isPIC bool, from, to Status, note string) (string, error) {
+// isPIC (PIC task) dan isSubtaskPIC (PIC salah satu sub task task ini) hanya berpengaruh untuk Staf.
+// Catatan yang dikembalikan sudah dirapikan.
+func CheckTransition(role Role, isPIC, isSubtaskPIC bool, from, to Status, note string) (string, error) {
 	rule, ok := edges[edge{from, to}]
 	if !ok {
 		return "", ErrInvalidTransition
@@ -58,7 +60,7 @@ func CheckTransition(role Role, isPIC bool, from, to Status, note string) (strin
 	switch role {
 	case RoleManager:
 	case RoleStaff:
-		if !isPIC || !rule.staffPIC {
+		if !(isPIC && rule.staffPIC) && !(isSubtaskPIC && rule.subtaskPIC) {
 			return "", ErrTransitionForbidden
 		}
 	default:

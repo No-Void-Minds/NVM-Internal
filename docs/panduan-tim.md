@@ -21,6 +21,7 @@ Alamat: **https://novoidminds.xyz**. Bisa dibuka dari laptop dan HP, di kantor m
 
 - Di laptop, seret kartu ke kolom lain. Kolom yang boleh dituju bergaris putus-putus. Di HP, pakai tombol **Pindahkan** di kartu.
 - PIC memindahkan task dari Requested ke On Progress, dari On Progress ke Ready, dan dari Ready kembali ke On Progress bila perlu revisi (wajib catatan).
+- PIC sub task juga boleh memindahkan task dari Requested ke On Progress, dan ke Ready setelah semua sub task tercentang.
 - Hanya Manajer yang menutup task Ready ke Completed, dan membuka kembali task Completed dari Arsip.
 
 ## Sub task dan centang

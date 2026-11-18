@@ -266,6 +266,7 @@ set -a; source deploy/.env; set +a
 docker run --rm --network "$PG_NETWORK" -v "$PWD/backend/migrations:/migrations:ro" \
   migrate/migrate:v4.18.3 -path=/migrations -database "$MIGRATOR_URL" up
 # Bila ada tabel baru: jalankan lagi 10-grants.sql (langkah 3). Migrasi 000008 menambah task_assignees, jadi wajib.
+# Migrasi 000013 (revisi 16, tenggat sub task) hanya menambah kolom, jadi tidak perlu grants ulang.
 docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
 curl -s http://127.0.0.1:8094/api/health
 ```
