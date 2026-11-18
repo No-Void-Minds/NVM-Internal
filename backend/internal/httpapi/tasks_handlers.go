@@ -53,7 +53,7 @@ type taskSummary struct {
 	SubtaskTotal int          `json:"subtask_total"`
 	SubtaskDone  int          `json:"subtask_done"`
 	// PIC sub task yang membuat task ini masuk hasil filter PIC (revisi 15). Kosong tanpa filter PIC.
-	SubtaskPICMatches []idName `json:"subtask_pic_matches"`
+	SubtaskPICs []taskPerson `json:"subtask_pics"`
 	// Revisi 19: frekuensi seri untuk penanda berulang; null bila tidak berulang.
 	SeriesFreq     *string `json:"series_freq"`
 	OccurrenceDate *string `json:"occurrence_date"`
@@ -94,16 +94,18 @@ type historyItem struct {
 
 type taskDetail struct {
 	taskSummary
-	Description    string             `json:"description"`
-	RequestedBy    idName             `json:"requested_by"`
-	RequestDate    time.Time          `json:"request_date"`
-	DeliverableURL string             `json:"deliverable_url"`
-	IsMigrated     bool               `json:"is_migrated"`
-	Can            task.Can           `json:"can"`
-	History        []historyItem      `json:"history"`
-	Attachments    []attachmentDetail `json:"attachments"`
-	Subtasks       []subtaskItem      `json:"subtasks"`
-	Series         *seriesItem        `json:"series"`
+	Description    string    `json:"description"`
+	RequestedBy    idName    `json:"requested_by"`
+	RequestDate    time.Time `json:"request_date"`
+	DeliverableURL string    `json:"deliverable_url"`
+	IsMigrated     bool      `json:"is_migrated"`
+	Can            task.Can  `json:"can"`
+	// RevisionSubtasks: sama dengan di papan, untuk jalur revisi PIC sub task (revisi 22).
+	RevisionSubtasks []task.SubtaskRef  `json:"revision_subtasks"`
+	History          []historyItem      `json:"history"`
+	Attachments      []attachmentDetail `json:"attachments"`
+	Subtasks         []subtaskItem      `json:"subtasks"`
+	Series           *seriesItem        `json:"series"`
 }
 
 type createTaskRequest struct {
@@ -186,9 +188,10 @@ func (s *Server) getTask(c *gin.Context) {
 		DeliverableURL: t.DeliverableUrl.String,
 		IsMigrated:     t.IsMigrated,
 		Series:         seriesOf(d, time.Now()),
-		Can:            task.PermissionsFor(actor.Role, d.IsPIC(actor.ID), d.IsSubtaskPIC(actor.ID), task.Status(t.Status)),
 		History:        make([]historyItem, 0, len(d.History)),
 	}
+	out.Can, out.RevisionSubtasks = task.MoveOptions(actor.Role, d.IsPIC(actor.ID), d.MySubtasks(actor.ID), task.Status(t.Status))
+	out.SubtaskPICs = detailSubtaskPICs(d)
 	for _, h := range d.History {
 		out.History = append(out.History, historyItem{
 			ID:         h.ID,
@@ -452,4 +455,20 @@ func seriesFreq(f sqlc.NullRecurrenceFreq) *string {
 	}
 	v := string(f.RecurrenceFreq)
 	return &v
+}
+
+// detailSubtaskPICs mengisi subtask_pics di detail dengan aturan yang sama dengan ListSubtaskPICs: unik, urut
+// menurut sub task pertama yang dipegang. Sub task di Detail sudah urut posisi.
+func detailSubtaskPICs(d task.Detail) []taskPerson {
+	out := []taskPerson{}
+	seen := map[int64]bool{}
+	for _, st := range d.Subtasks {
+		for _, a := range st.Assignees {
+			if !seen[a.ID] {
+				seen[a.ID] = true
+				out = append(out, taskPerson{ID: a.ID, Name: a.Name, Username: a.Username, AvatarID: avatarID(a.AvatarID)})
+			}
+		}
+	}
+	return out
 }

@@ -29,6 +29,8 @@ export function describeTaskHistory(h: TaskHistoryItem): string {
       return 'membuat task'
     case 'task_status_changed': {
       const to = after.status as TaskStatus
+      const reopened = subtaskRevisionText(after)
+      if (reopened) return reopened
       return `memindahkan ke ${statusLabel[to] ?? String(to)}`
     }
     case 'task_updated': {
@@ -113,4 +115,14 @@ export function historyNote(h: TaskHistoryItem): string | null {
 
 function freqWord(v: unknown): string {
   return v === 'daily' || v === 'weekly' || v === 'monthly' ? freqLabel[v].toLowerCase() : String(v ?? '')
+}
+
+// Revisi 22: PIC sub task mengembalikan task ke On Progress dengan membuka lagi sub task miliknya. Kalimatnya
+// memuat alasan, jadi alasan disimpan di kunci reason (bukan note) supaya tidak tampil dua kali.
+export function subtaskRevisionText(after: Record<string, unknown>): string | null {
+  const list = after.reopened_subtasks
+  if (!Array.isArray(list) || list.length === 0) return null
+  const titles = list.map((s) => String((s as { title?: unknown }).title ?? '')).join(', ')
+  const reason = typeof after.reason === 'string' && after.reason ? ` Alasan: ${after.reason}.` : ''
+  return `mengembalikan ke On Progress untuk revisi: ${titles}.${reason}`
 }

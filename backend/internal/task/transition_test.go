@@ -19,9 +19,10 @@ var allowed = map[string]bool{
 	"staff,pic,on_progress,ready":     true,
 	"staff,pic,ready,on_progress":     true,
 
-	// Revisi 17: PIC sub task hanya boleh memulai dan menandai Ready.
+	// Revisi 17: PIC sub task boleh memulai dan menandai Ready. Revisi 22: juga mengembalikan Ready ke On Progress.
 	"staff,subpic,requested,on_progress": true,
 	"staff,subpic,on_progress,ready":     true,
+	"staff,subpic,ready,on_progress":     true,
 
 	"manager,subpic,requested,on_progress": true,
 	"manager,subpic,on_progress,ready":     true,
@@ -62,13 +63,27 @@ func TestEveryTransition(t *testing.T) {
 	}
 }
 
-// PIC task yang juga PIC sub task tetap boleh mengembalikan Ready ke On Progress lewat hak PIC task-nya.
+// PIC task yang juga PIC sub task memakai jalur PIC task: catatan tetap wajib. Hanya PIC sub task saja yang
+// memakai jalur revisi sub task dengan alasan opsional (revisi 22), dan batas 500 karakter tetap berlaku.
 func TestTaskPICAndSubtaskPIC(t *testing.T) {
-	if _, err := CheckTransition(RoleStaff, true, true, Ready, OnProgress, "catatan"); err != nil {
-		t.Fatalf("PIC task sekaligus PIC sub task: %v", err)
+	if _, err := CheckTransition(RoleStaff, true, true, Ready, OnProgress, ""); !errors.Is(err, ErrNoteRequired) {
+		t.Fatalf("PIC task sekaligus PIC sub task tanpa catatan: err %v, mau ErrNoteRequired", err)
 	}
-	if _, err := CheckTransition(RoleStaff, false, true, Ready, OnProgress, "catatan"); !errors.Is(err, ErrTransitionForbidden) {
-		t.Fatalf("PIC sub task saja mengembalikan Ready: err %v, mau ErrTransitionForbidden", err)
+	if IsSubtaskRevision(RoleStaff, true, true, Ready, OnProgress) || IsSubtaskRevision(RoleManager, false, true, Ready, OnProgress) {
+		t.Fatal("PIC task dan Manajer tidak boleh masuk jalur revisi sub task")
+	}
+	if !IsSubtaskRevision(RoleStaff, false, true, Ready, OnProgress) {
+		t.Fatal("PIC sub task saja harus masuk jalur revisi sub task")
+	}
+	if _, err := CheckTransition(RoleStaff, false, true, Ready, OnProgress, ""); err != nil {
+		t.Fatalf("PIC sub task saja tanpa alasan: %v", err)
+	}
+	long := make([]rune, MaxNoteLength+1)
+	for i := range long {
+		long[i] = 'a'
+	}
+	if _, err := CheckTransition(RoleStaff, false, true, Ready, OnProgress, string(long)); !errors.Is(err, ErrNoteTooLong) {
+		t.Fatalf("alasan 501 karakter: err %v, mau ErrNoteTooLong", err)
 	}
 }
 

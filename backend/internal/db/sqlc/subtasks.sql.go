@@ -249,6 +249,53 @@ func (q *Queries) IsSubtaskAssignee(ctx context.Context, arg IsSubtaskAssigneePa
 	return exists, err
 }
 
+const listMySubtasks = `-- name: ListMySubtasks :many
+SELECT st.task_id, st.id, st.title, (st.done_at IS NOT NULL)::bool AS done
+FROM task_subtasks st
+JOIN subtask_assignees sa ON sa.subtask_id = st.id
+WHERE st.task_id = ANY($1::text[]) AND sa.user_id = $2
+ORDER BY st.task_id, st.position
+`
+
+type ListMySubtasksParams struct {
+	TaskIds []string
+	UserID  int64
+}
+
+type ListMySubtasksRow struct {
+	TaskID string
+	ID     int64
+	Title  string
+	Done   bool
+}
+
+// Revisi 17 dan 22: sub task yang dipegang user ini di task-task itu, untuk move_to papan, Arsip, dan Move,
+// serta daftar sub task yang boleh dibuka lagi saat PIC sub task mengembalikan task ke On Progress.
+func (q *Queries) ListMySubtasks(ctx context.Context, arg ListMySubtasksParams) ([]ListMySubtasksRow, error) {
+	rows, err := q.db.Query(ctx, listMySubtasks, arg.TaskIds, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListMySubtasksRow{}
+	for rows.Next() {
+		var i ListMySubtasksRow
+		if err := rows.Scan(
+			&i.TaskID,
+			&i.ID,
+			&i.Title,
+			&i.Done,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSubtaskAssignees = `-- name: ListSubtaskAssignees :many
 SELECT sa.subtask_id, u.id, u.name, u.username, u.avatar_id
 FROM subtask_assignees sa
@@ -385,39 +432,6 @@ func (q *Queries) ListSubtasksWithOtherManagerPIC(ctx context.Context, arg ListS
 	return items, nil
 }
 
-const listTasksWithSubtaskPIC = `-- name: ListTasksWithSubtaskPIC :many
-SELECT DISTINCT st.task_id
-FROM task_subtasks st
-JOIN subtask_assignees sa ON sa.subtask_id = st.id
-WHERE st.task_id = ANY($1::text[]) AND sa.user_id = $2
-`
-
-type ListTasksWithSubtaskPICParams struct {
-	TaskIds []string
-	UserID  int64
-}
-
-// Revisi 17: task mana yang sub task-nya dipegang user ini, untuk menghitung move_to papan dan Arsip sekaligus.
-func (q *Queries) ListTasksWithSubtaskPIC(ctx context.Context, arg ListTasksWithSubtaskPICParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, listTasksWithSubtaskPIC, arg.TaskIds, arg.UserID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []string{}
-	for rows.Next() {
-		var task_id string
-		if err := rows.Scan(&task_id); err != nil {
-			return nil, err
-		}
-		items = append(items, task_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const removeSubtaskAssignees = `-- name: RemoveSubtaskAssignees :exec
 DELETE FROM subtask_assignees WHERE subtask_id = $1 AND user_id = ANY($2::bigint[])
 `
@@ -464,6 +478,25 @@ func (q *Queries) RenameSubtask(ctx context.Context, arg RenameSubtaskParams) er
 		arg.TaskID,
 	)
 	return err
+}
+
+const reopenSubtasks = `-- name: ReopenSubtasks :execrows
+UPDATE task_subtasks SET done_at = NULL, done_by = NULL
+WHERE task_id = $1 AND id = ANY($2::bigint[]) AND done_at IS NOT NULL
+`
+
+type ReopenSubtasksParams struct {
+	TaskID string
+	Ids    []int64
+}
+
+// Revisi 22: membuka lagi centang sub task yang direvisi. done_at dan done_by selalu dikosongkan berpasangan.
+func (q *Queries) ReopenSubtasks(ctx context.Context, arg ReopenSubtasksParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reopenSubtasks, arg.TaskID, arg.Ids)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const subtaskSlot = `-- name: SubtaskSlot :one

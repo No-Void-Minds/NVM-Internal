@@ -18,7 +18,7 @@ func TestLifecycleWithDatabase(t *testing.T) {
 	v := int32(1)
 
 	move := func(actor Actor, to Status, note string) (MoveResult, error) {
-		return f.svc.Move(ctx, actor, id, v, to, note)
+		return f.svc.Move(ctx, actor, id, v, to, note, nil)
 	}
 	mustMove := func(actor Actor, to Status, note string) MoveResult {
 		t.Helper()
@@ -62,7 +62,7 @@ func TestLifecycleWithDatabase(t *testing.T) {
 		t.Fatal("dibuka kembali harus mengosongkan solved_date")
 	}
 
-	if _, err := f.svc.Move(ctx, f.stafA, id, 1, Ready, ""); !errors.Is(err, ErrVersionConflict) {
+	if _, err := f.svc.Move(ctx, f.stafA, id, 1, Ready, "", nil); !errors.Is(err, ErrVersionConflict) {
 		t.Fatalf("versi basi: err %v, mau ErrVersionConflict", err)
 	}
 

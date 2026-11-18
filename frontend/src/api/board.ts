@@ -1,5 +1,5 @@
 import { apiGet } from './client'
-import type { TaskSummary } from './tasks'
+import type { RevisionSubtask, TaskSummary } from './tasks'
 import type { TaskStatus, Urgency } from '../utils/task'
 
 export type DueFilter = 'overdue' | 'today' | 'week' | 'none'
@@ -14,7 +14,7 @@ export type BoardQuery = {
   due?: DueFilter
 }
 
-export type BoardTask = TaskSummary & { move_to: TaskStatus[] }
+export type BoardTask = TaskSummary & { move_to: TaskStatus[]; revision_subtasks: RevisionSubtask[] }
 export type BoardColumn = { status: TaskStatus; count: number; tasks: BoardTask[] }
 export type Board = { columns: BoardColumn[]; completed_days: number }
 

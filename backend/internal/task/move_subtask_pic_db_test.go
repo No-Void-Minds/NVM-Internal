@@ -10,8 +10,9 @@ import (
 	"nvm-internal/internal/testdb"
 )
 
-// Revisi 17: PIC sub task boleh Requested ke On Progress dan On Progress ke Ready (dengan Ready gate), tidak
-// boleh perpindahan lain. move_to yang dihitung dari data yang sama harus cocok dengan hasil pindah sebenarnya.
+// Revisi 17: PIC sub task boleh Requested ke On Progress dan On Progress ke Ready (dengan Ready gate). Revisi 22:
+// juga Ready ke On Progress dengan memilih sub task yang dibuka lagi. Ready ke Completed dan lainnya tetap
+// ditolak. move_to yang dihitung dari data yang sama harus cocok dengan hasil pindah sebenarnya.
 func TestSubtaskPICMoves(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
@@ -29,13 +30,13 @@ func TestSubtaskPICMoves(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		c := PermissionsFor(actor.Role, d.IsPIC(actor.ID), d.IsSubtaskPIC(actor.ID), Status(d.Task.Status))
+		c, _ := MoveOptions(actor.Role, d.IsPIC(actor.ID), d.MySubtasks(actor.ID), Status(d.Task.Status))
 		return c.MoveTo, d.Task.Version
 	}
-	move := func(actor Actor, to Status, note string) error {
+	move := func(actor Actor, to Status, note string, subs ...int64) error {
 		t.Helper()
 		_, v := moveTo(actor)
-		_, err := f.svc.Move(ctx, actor, id, v, to, note)
+		_, err := f.svc.Move(ctx, actor, id, v, to, note, subs)
 		return err
 	}
 
@@ -70,22 +71,22 @@ func TestSubtaskPICMoves(t *testing.T) {
 		t.Fatalf("PIC sub task menandai Ready setelah semua tercentang: %v", err)
 	}
 
-	if got, _ := moveTo(f.stafC); len(got) != 0 {
-		t.Fatalf("PIC sub task di Ready: move_to %v, mau kosong", got)
-	}
-	if err := move(f.stafC, OnProgress, "Perlu revisi"); !errors.Is(err, ErrForbidden) {
-		t.Fatalf("PIC sub task mengembalikan Ready: err %v, mau ErrForbidden", err)
+	if got, _ := moveTo(f.stafC); !slices.Equal(got, []Status{OnProgress}) {
+		t.Fatalf("PIC sub task di Ready: move_to %v, mau [on_progress]", got)
 	}
 	if err := move(f.stafC, Completed, ""); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("PIC sub task menutup task: err %v, mau ErrForbidden", err)
 	}
+	if err := move(f.stafC, OnProgress, "", sub); err != nil {
+		t.Fatalf("PIC sub task mengembalikan Ready dengan sub task miliknya: %v", err)
+	}
 
 	// Papan dan Arsip menghitung hubungan yang sama lewat satu query.
-	m, err := f.svc.SubtaskPICTasks(ctx, f.stafC.ID, []string{id})
-	if err != nil || !m[id] {
-		t.Fatalf("SubtaskPICTasks: %v, err %v", m, err)
+	m, err := f.svc.MySubtasks(ctx, f.stafC.ID, []string{id})
+	if err != nil || len(m[id]) != 1 || m[id][0].ID != sub {
+		t.Fatalf("MySubtasks: %v, err %v", m, err)
 	}
-	if m, _ := f.svc.SubtaskPICTasks(ctx, outsider.ID, []string{id}); m[id] {
-		t.Fatal("SubtaskPICTasks menganggap orang luar PIC sub task")
+	if m, _ := f.svc.MySubtasks(ctx, outsider.ID, []string{id}); len(m[id]) != 0 {
+		t.Fatal("MySubtasks menganggap orang luar PIC sub task")
 	}
 }

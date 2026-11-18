@@ -483,41 +483,44 @@ func (q *Queries) ListPeople(ctx context.Context) ([]ListPeopleRow, error) {
 	return items, nil
 }
 
-const listSubtaskPICMatches = `-- name: ListSubtaskPICMatches :many
-SELECT DISTINCT st.task_id, u.id, u.name
+const listSubtaskPICs = `-- name: ListSubtaskPICs :many
+SELECT st.task_id, u.id, u.name, u.username, u.avatar_id, min(st.position)::int AS first_position
 FROM task_subtasks st
 JOIN subtask_assignees sa ON sa.subtask_id = st.id
 JOIN users u ON u.id = sa.user_id
 WHERE st.task_id = ANY($1::text[])
-  AND (sa.user_id = ANY($2::bigint[]) OR lower(u.username) = ANY($3::text[]))
-  AND NOT EXISTS (SELECT 1 FROM task_assignees tas WHERE tas.task_id = st.task_id AND tas.user_id = sa.user_id)
-ORDER BY st.task_id, u.name
+GROUP BY st.task_id, u.id
+ORDER BY st.task_id, first_position, u.id
 `
 
-type ListSubtaskPICMatchesParams struct {
-	TaskIds      []string
-	PicIds       []int64
-	PicUsernames []string
+type ListSubtaskPICsRow struct {
+	TaskID        string
+	ID            int64
+	Name          string
+	Username      string
+	AvatarID      pgtype.UUID
+	FirstPosition int32
 }
 
-type ListSubtaskPICMatchesRow struct {
-	TaskID string
-	ID     int64
-	Name   string
-}
-
-// Revisi 15: PIC sub task yang membuat task masuk hasil filter PIC, untuk baris "Sub task: <nama>" di kartu.
-// Orang yang juga PIC task induk tidak ikut, karena kartu sudah menampilkannya di daftar PIC.
-func (q *Queries) ListSubtaskPICMatches(ctx context.Context, arg ListSubtaskPICMatchesParams) ([]ListSubtaskPICMatchesRow, error) {
-	rows, err := q.db.Query(ctx, listSubtaskPICMatches, arg.TaskIds, arg.PicIds, arg.PicUsernames)
+// Revisi 22: semua PIC sub task per task untuk kelompok "Sub task" di kartu, satu query untuk semua kartu.
+// Unik per orang, urut menurut posisi sub task pertama yang dia pegang.
+func (q *Queries) ListSubtaskPICs(ctx context.Context, taskIds []string) ([]ListSubtaskPICsRow, error) {
+	rows, err := q.db.Query(ctx, listSubtaskPICs, taskIds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListSubtaskPICMatchesRow{}
+	items := []ListSubtaskPICsRow{}
 	for rows.Next() {
-		var i ListSubtaskPICMatchesRow
-		if err := rows.Scan(&i.TaskID, &i.ID, &i.Name); err != nil {
+		var i ListSubtaskPICsRow
+		if err := rows.Scan(
+			&i.TaskID,
+			&i.ID,
+			&i.Name,
+			&i.Username,
+			&i.AvatarID,
+			&i.FirstPosition,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

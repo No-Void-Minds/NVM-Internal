@@ -18,6 +18,9 @@ import (
 type boardTask struct {
 	taskSummary
 	MoveTo []task.Status `json:"move_to"`
+	// RevisionSubtasks terisi hanya bila pelaku memakai jalur revisi PIC sub task (revisi 22): sub task
+	// miliknya yang tercentang, untuk daftar centang di dialog Pindahkan.
+	RevisionSubtasks []task.SubtaskRef `json:"revision_subtasks"`
 }
 
 type boardColumn struct {
@@ -62,7 +65,7 @@ func (s *Server) board(c *gin.Context) {
 	for _, col := range cols {
 		all = append(all, col.Tasks...)
 	}
-	subPIC, err := s.subtaskPICTasks(c, actor, all)
+	mine, err := s.mySubtasks(c, actor, all)
 	if err != nil {
 		s.internalError(c, err)
 		return
@@ -71,7 +74,7 @@ func (s *Server) board(c *gin.Context) {
 	for _, col := range cols {
 		items := make([]boardTask, 0, len(col.Tasks))
 		for _, r := range col.Tasks {
-			items = append(items, withMoveTo(actor, r, subPIC[r.Task.ID]))
+			items = append(items, withMoveTo(actor, r, mine[r.Task.ID]))
 		}
 		out = append(out, boardColumn{Status: string(col.Status), Count: len(items), Tasks: items})
 	}
@@ -145,29 +148,29 @@ func queryID(c *gin.Context, key string) (*int64, bool) {
 func summaryOf(r task.Summary) taskSummary {
 	t := r.Task
 	return taskSummary{
-		ID:                t.ID,
-		Title:             t.Title,
-		Status:            string(t.Status),
-		Urgency:           string(t.Urgency),
-		Division:          idName{ID: t.DivisionID, Name: t.DivisionName},
-		StartDate:         dateString(t.StartDate),
-		DueDate:           dateString(t.DueDate),
-		SolvedDate:        timePtr(t.SolvedDate),
-		Version:           t.Version,
-		Assignees:         people(r.Assignees),
-		Labels:            labelsOf(r.Labels),
-		SubtaskTotal:      r.SubtaskTotal,
-		SubtaskDone:       r.SubtaskDone,
-		SubtaskPICMatches: subtaskPICMatches(r.SubtaskPICs),
-		SeriesFreq:        seriesFreq(t.SeriesFreq),
-		OccurrenceDate:    dateString(t.OccurrenceDate),
+		ID:             t.ID,
+		Title:          t.Title,
+		Status:         string(t.Status),
+		Urgency:        string(t.Urgency),
+		Division:       idName{ID: t.DivisionID, Name: t.DivisionName},
+		StartDate:      dateString(t.StartDate),
+		DueDate:        dateString(t.DueDate),
+		SolvedDate:     timePtr(t.SolvedDate),
+		Version:        t.Version,
+		Assignees:      people(r.Assignees),
+		Labels:         labelsOf(r.Labels),
+		SubtaskTotal:   r.SubtaskTotal,
+		SubtaskDone:    r.SubtaskDone,
+		SubtaskPICs:    subtaskPICs(r.SubtaskPICs),
+		SeriesFreq:     seriesFreq(t.SeriesFreq),
+		OccurrenceDate: dateString(t.OccurrenceDate),
 	}
 }
 
-func subtaskPICMatches(rows []sqlc.ListSubtaskPICMatchesRow) []idName {
-	out := make([]idName, 0, len(rows))
+func subtaskPICs(rows []sqlc.ListSubtaskPICsRow) []taskPerson {
+	out := make([]taskPerson, 0, len(rows))
 	for _, p := range rows {
-		out = append(out, idName{ID: p.ID, Name: p.Name})
+		out = append(out, taskPerson{ID: p.ID, Name: p.Name, Username: p.Username, AvatarID: avatarID(p.AvatarID)})
 	}
 	return out
 }

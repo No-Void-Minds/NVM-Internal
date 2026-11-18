@@ -15,6 +15,8 @@
 // E2E_ONLY=schedule (bagian Jadwal di form Buat task, revisi 19; tidak menyimpan apa pun),
 // E2E_ONLY=activity (Aktivitas Harian, revisi 21; menulis satu sel aktivitas hari ini milik akun Staf dan
 // satu sel lewat dialog Manajer di database dev, output-nya tautan file Drive karangan).
+// E2E_ONLY=revision (revisi 22: dua kelompok PIC di kartu dan PIC sub task mengembalikan Ready ke On Progress;
+// membuat satu task uji per lebar di database dev lewat API, dengan Manajer sebagai PIC task).
 // Keluar dengan kode 1 bila ada yang gagal.
 import { chromium } from "playwright-core";
 
@@ -1338,6 +1340,205 @@ if (ONLY === "activity") {
   for (const w of [360, 768, 1280, 1920]) await checkActivity(w);
   for (const w of [360, 1280]) await checkActivityManager(w);
 }
+
+// Revisi 22: kartu menampilkan kelompok "PIC" dan "Sub task", dan PIC sub task (bukan PIC task) mengembalikan
+// task Ready ke On Progress dengan memilih sub task miliknya. Datanya disiapkan lewat API: Manajer PIC task,
+// Staf memegang dua sub task, Manajer satu sub task; semuanya dicentang lalu task dipindah ke Ready.
+async function apiAs(role) {
+  const ctx = await browser.newContext({ storageState: sessions[role] });
+  const call = async (method, path, data) => {
+    const res = await ctx.request.fetch(BASE + "/api" + path, {
+      method,
+      headers: { Origin: BASE },
+      data,
+    });
+    const text = await res.text();
+    return { status: res.status(), body: text ? JSON.parse(text) : null };
+  };
+  const me = (await call("GET", "/auth/me")).body.user;
+  return { ctx, call, me };
+}
+
+async function setupRevisionTask(title) {
+  const mgr = await apiAs("manajer");
+  const staf = await apiAs("staf");
+  const created = await mgr.call("POST", "/tasks", {
+    title,
+    urgency: "medium",
+    pic_ids: [mgr.me.id],
+    label_ids: [],
+    subtasks: [
+      { title: "Naskah E2E", pic_id: staf.me.id },
+      { title: "Desain E2E", pic_id: staf.me.id },
+      { title: "Foto E2E", pic_id: mgr.me.id },
+    ],
+  });
+  if (created.status !== 201)
+    throw new Error(
+      `buat task ${created.status} ${JSON.stringify(created.body)}`,
+    );
+  const id = created.body.id;
+  const detail = async () => (await mgr.call("GET", `/tasks/${id}`)).body;
+  let d = await detail();
+  await mgr.call("POST", `/tasks/${id}/move`, {
+    version: d.version,
+    to: "on_progress",
+    note: "",
+  });
+  d = await detail();
+  for (const st of d.subtasks) {
+    const who = st.title === "Foto E2E" ? mgr : staf;
+    const r = await who.call("PUT", `/tasks/${id}/subtasks/${st.id}/done`, {
+      done: true,
+    });
+    if (r.status >= 300) throw new Error(`centang ${st.title} ${r.status}`);
+  }
+  d = await detail();
+  const ready = await mgr.call("POST", `/tasks/${id}/move`, {
+    version: d.version,
+    to: "ready",
+    note: "",
+  });
+  if (ready.status !== 200)
+    throw new Error(`ke Ready ${ready.status} ${JSON.stringify(ready.body)}`);
+  await staf.ctx.close();
+  return { id, mgr, detail };
+}
+
+async function checkRevision(width) {
+  const where = (what) => `revisi ${width} ${what}`;
+  const expect = (cond, w, msg) => {
+    checks++;
+    if (!cond) fail(where(w), msg);
+  };
+  const title = `E2E revisi ${width} ${Date.now()}`;
+  const { id, mgr, detail } = await setupRevisionTask(title);
+
+  const { ctx, page, errors } = await open("staf", width, "terang");
+  await page.goto(BASE + "/task");
+  await page.waitForLoadState("networkidle");
+  const kartu = page.locator("article", {
+    has: page.locator("h3", { hasText: title }),
+  });
+  await kartu.waitFor({ timeout: 8000 });
+  await kartu.scrollIntoViewIfNeeded();
+
+  // Dua kelompok berlabel: PIC (Manajer) dan Sub task (Staf dan Manajer, urut posisi sub task).
+  const grup = async (label) =>
+    kartu
+      .locator("ul[aria-labelledby]")
+      .evaluateAll(
+        (uls, l) =>
+          uls
+            .filter(
+              (u) =>
+                document
+                  .getElementById(u.getAttribute("aria-labelledby") ?? "")
+                  ?.textContent?.trim() === l,
+            )
+            .map((u) => u.querySelectorAll("li").length),
+        label,
+      );
+  const pic = await grup("PIC");
+  const sub = await grup("Sub task");
+  expect(
+    pic.length === 1 && pic[0] === 1,
+    "kartu",
+    `kelompok PIC ${JSON.stringify(pic)}, mau satu kelompok berisi 1`,
+  );
+  expect(
+    sub.length === 1 && sub[0] === 2,
+    "kartu",
+    `kelompok Sub task ${JSON.stringify(sub)}, mau satu kelompok berisi 2`,
+  );
+  await audit(page, errors, where("papan"));
+
+  // Dialog Pindahkan: tujuan satu (On Progress), daftar sub task milik Staf terpilih semua, alasan opsional.
+  await kartu.getByRole("button", { name: /Pindahkan ke On Progress/ }).click();
+  await page.waitForSelector("dialog[open]");
+  const dialog = page.locator("dialog[open]");
+  const legend = await dialog
+    .getByText("Sub task yang direvisi", { exact: true })
+    .count();
+  expect(legend === 1, "dialog", "judul daftar sub task tidak ada");
+  const kotak = dialog.locator("input[type='checkbox']");
+  const total = await kotak.count();
+  const tercentang = await dialog
+    .locator("input[type='checkbox']:checked")
+    .count();
+  expect(
+    total === 2 && tercentang === 2,
+    "dialog",
+    `centang ${tercentang} dari ${total}, mau 2 dari 2`,
+  );
+  const foto = await dialog.getByText("Foto E2E").count();
+  expect(foto === 0, "dialog", "sub task milik orang lain ikut ditawarkan");
+  expect(
+    (await dialog.getByLabel("Alasan revisi (opsional)").count()) === 1,
+    "dialog",
+    "textarea alasan tidak ada",
+  );
+  await audit(page, errors, where("dialog"));
+
+  await dialog.getByLabel("Desain E2E").uncheck();
+  await dialog
+    .getByLabel("Alasan revisi (opsional)")
+    .fill("Judul terlalu panjang");
+  await page.getByRole("button", { name: "Kembalikan ke On Progress" }).click();
+  const tutup = await page
+    .waitForFunction(() => !document.querySelector("dialog[open]"), null, {
+      timeout: 5000,
+    })
+    .then(
+      () => true,
+      () => false,
+    );
+  expect(
+    tutup,
+    "kembalikan",
+    "dialog tidak tertutup setelah Kembalikan ke On Progress",
+  );
+
+  const d = await detail();
+  const done = Object.fromEntries(
+    d.subtasks.map((st) => [st.title, !!st.done_at]),
+  );
+  expect(
+    d.status === "on_progress",
+    "kembalikan",
+    `status ${d.status}, mau on_progress`,
+  );
+  expect(
+    !done["Naskah E2E"] && done["Desain E2E"] && done["Foto E2E"],
+    "kembalikan",
+    `centang setelah revisi ${JSON.stringify(done)}, mau hanya Naskah yang terbuka`,
+  );
+  const riwayat = d.history.find((h) => h.new_value?.reopened_subtasks);
+  expect(
+    riwayat?.new_value?.reason === "Judul terlalu panjang" &&
+      riwayat.new_value.reopened_subtasks.length === 1,
+    "riwayat",
+    `riwayat revisi ${JSON.stringify(riwayat?.new_value)}`,
+  );
+
+  const lebar = await page.evaluate(() => [
+    document.documentElement.scrollWidth,
+    window.innerWidth,
+  ]);
+  expect(
+    lebar[0] <= lebar[1],
+    "lebar",
+    `scrollWidth ${lebar[0]} > ${lebar[1]}`,
+  );
+  checks++;
+  if (errors.length)
+    fail(where("console"), errors.splice(0).join(" | ").slice(0, 300));
+  await ctx.close();
+  await mgr.ctx.close();
+  console.log(`  task uji ${id}`);
+}
+
+if (ONLY === "revision") for (const w of [360, 1280]) await checkRevision(w);
 
 await browser.close();
 console.log(

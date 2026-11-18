@@ -13,6 +13,8 @@ type moveTaskRequest struct {
 	Version int32  `json:"version"`
 	To      string `json:"to"`
 	Note    string `json:"note"`
+	// SubtaskIDs: sub task yang dibuka lagi saat PIC sub task mengembalikan task ke On Progress (revisi 22).
+	SubtaskIDs []int64 `json:"subtask_ids"`
 }
 
 func (s *Server) moveTask(c *gin.Context) {
@@ -25,7 +27,7 @@ func (s *Server) moveTask(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, CodeBadRequest, "Isian tidak terbaca.")
 		return
 	}
-	res, err := s.tasks.Move(c.Request.Context(), taskActor(c), id, req.Version, task.Status(req.To), req.Note)
+	res, err := s.tasks.Move(c.Request.Context(), taskActor(c), id, req.Version, task.Status(req.To), req.Note, req.SubtaskIDs)
 	if errors.Is(err, task.ErrInvalidMove) {
 		writeError(c, http.StatusConflict, CodeConflict, "Perpindahan status ini tidak ada di alur task.")
 		return

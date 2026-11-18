@@ -47,12 +47,15 @@ export type TaskSummary = {
   labels: TaskLabel[]
   subtask_total: number
   subtask_done: number
-  // Revisi 15: PIC sub task yang cocok dengan filter PIC dan bukan PIC task. Kosong tanpa filter PIC.
-  subtask_pic_matches: { id: number; name: string }[]
+  // Revisi 22: semua PIC sub task, unik, urut menurut sub task pertama yang dipegang.
+  subtask_pics: TaskPerson[]
   // Revisi 19: null bila tidak berulang.
   series_freq: Freq | null
   occurrence_date: string | null
 }
+
+// Sub task milik pelaku yang sedang tercentang, yang bisa dibuka lagi saat mengembalikan task ke On Progress.
+export type RevisionSubtask = { id: number; title: string }
 
 export type SeriesInfo = {
   id: number
@@ -107,6 +110,8 @@ export type TaskDetail = TaskSummary & {
   is_migrated: boolean
   series: SeriesInfo | null
   can: TaskCan
+  // Revisi 22: terisi hanya untuk jalur revisi PIC sub task, sama dengan di papan.
+  revision_subtasks: RevisionSubtask[]
   history: TaskHistoryItem[]
   attachments: TaskAttachment[]
   subtasks: TaskSubtask[]
@@ -153,11 +158,13 @@ export function setTaskDeliverable(id: string, version: number, url: string) {
   return apiPut<{ version: number }>(`/tasks/${id}/deliverable`, { version, deliverable_url: url })
 }
 
-export function moveTask(id: string, version: number, to: TaskStatus, note = '') {
+// subtaskIds hanya untuk PIC sub task yang mengembalikan Ready ke On Progress (revisi 22).
+export function moveTask(id: string, version: number, to: TaskStatus, note = '', subtaskIds: number[] = []) {
   return apiPost<{ version: number; status: TaskStatus; solved_date: string | null }>(`/tasks/${id}/move`, {
     version,
     to,
     note,
+    subtask_ids: subtaskIds,
   })
 }
 

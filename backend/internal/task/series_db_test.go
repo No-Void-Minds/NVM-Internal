@@ -71,7 +71,7 @@ func TestSeriesOccurrences(t *testing.T) {
 
 	// Sub task kemunculan pertama dicentang; kemunculan berikutnya tetap tanpa centang.
 	d, _ := f.svc.Get(ctx, first)
-	if _, err := f.svc.Move(ctx, f.stafA, first, d.Task.Version, OnProgress, ""); err != nil {
+	if _, err := f.svc.Move(ctx, f.stafA, first, d.Task.Version, OnProgress, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.svc.SetSubtaskDone(ctx, f.stafC, first, d.Subtasks[0].ID, true); err != nil {

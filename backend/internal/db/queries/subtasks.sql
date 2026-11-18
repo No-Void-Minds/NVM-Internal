@@ -105,9 +105,16 @@ DELETE FROM subtask_assignees sa
 USING task_subtasks st
 WHERE sa.subtask_id = st.id AND st.task_id = @task_id AND sa.user_id = ANY(@user_ids::bigint[]);
 
--- name: ListTasksWithSubtaskPIC :many
--- Revisi 17: task mana yang sub task-nya dipegang user ini, untuk menghitung move_to papan dan Arsip sekaligus.
-SELECT DISTINCT st.task_id
+-- name: ListMySubtasks :many
+-- Revisi 17 dan 22: sub task yang dipegang user ini di task-task itu, untuk move_to papan, Arsip, dan Move,
+-- serta daftar sub task yang boleh dibuka lagi saat PIC sub task mengembalikan task ke On Progress.
+SELECT st.task_id, st.id, st.title, (st.done_at IS NOT NULL)::bool AS done
 FROM task_subtasks st
 JOIN subtask_assignees sa ON sa.subtask_id = st.id
-WHERE st.task_id = ANY(@task_ids::text[]) AND sa.user_id = @user_id;
+WHERE st.task_id = ANY(@task_ids::text[]) AND sa.user_id = @user_id
+ORDER BY st.task_id, st.position;
+
+-- name: ReopenSubtasks :execrows
+-- Revisi 22: membuka lagi centang sub task yang direvisi. done_at dan done_by selalu dikosongkan berpasangan.
+UPDATE task_subtasks SET done_at = NULL, done_by = NULL
+WHERE task_id = @task_id AND id = ANY(@ids::bigint[]) AND done_at IS NOT NULL;

@@ -69,6 +69,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 11q | Task berulang | Task harian, mingguan, atau bulanan muncul sendiri sebagai task baru |
 | 11r | Filter Hari ini dan istilah Deadline | Filter deadline hari ini di papan; kata Tenggat diganti Deadline |
 | 11s | Aktivitas Harian | Tabel aktivitas per jam di papan task, halaman Aktivitas, dan ekspor Excel |
+| 11t | PIC sub task di kartu dan revisi oleh PIC sub task | Kartu selalu menampilkan PIC sub task; PIC sub task mengembalikan Ready ke On Progress dengan membuka lagi sub task miliknya |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -890,6 +891,7 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 - Tidak ada migrasi. `subtask_assignees` sudah punya index `subtask_assignees_user_id_idx (user_id)` dan primary key `(subtask_id, user_id)`; `task_subtasks` dicari per task lewat unique `(task_id, position)`. EXISTS sub task masuk daftar `EXPLAIN ANALYZE` S13-06.
 - Hak akses tidak berubah. Task yang masuk hasil filter lewat sub task tetap hanya bisa diubah sesuai hak yang dihitung backend: orang luar yang hanya PIC sub task tetap bukan PIC task, jadi tidak bisa memindah status atau mengubah isi task induk.
 - Baris "Sub task: <nama>" tidak muncul untuk orang yang juga PIC task induk, karena namanya sudah ada di daftar PIC. Di "Task saya" baris ini juga muncul (berisi nama sendiri), sebagai penjelasan kenapa task itu ada di daftar.
+- Diganti revisi 22 (Sprint 11t): `subtask_pic_matches` dan baris "Sub task: <nama>" di kartu papan dihapus, diganti kelompok "Sub task" yang selalu tampil. Logika filter di atas tidak berubah.
 
 **Selesai kalau:** `./scripts/check.sh` lolos, test DB di atas lolos, dan curl papan dengan `pic=<username>` untuk orang yang hanya memegang sub task mengembalikan task itu dengan `subtask_pic_matches` berisi orang tersebut.
 
@@ -935,7 +937,7 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 - [x] S11o-07 Perbaikan popover profil revisi 14 yang ketahuan saat e2e popover pertama kali dijalankan: fokus tidak pindah ke popover, fokus tidak kembali sesudah klik luar, dan Enter pada pemicu tertelan sesaat setelah scrim di ponsel diketuk.
 
 **Keputusan:**
-- PIC sub task di sini berarti `user_id` di `subtask_assignees` untuk sub task milik task itu, dihitung backend saat permintaan pindah. Hanya dua perpindahan yang bertambah: Requested ke On Progress dan On Progress ke Ready. Ready ke On Progress (revisi), Ready ke Completed, dan membuka kembali tetap milik PIC task dan Manajer.
+- PIC sub task di sini berarti `user_id` di `subtask_assignees` untuk sub task milik task itu, dihitung backend saat permintaan pindah. Hanya dua perpindahan yang bertambah: Requested ke On Progress dan On Progress ke Ready. Ready ke On Progress (revisi), Ready ke Completed, dan membuka kembali tetap milik PIC task dan Manajer. (Ready ke On Progress dibuka untuk PIC sub task oleh revisi 22, lihat Sprint 11t.)
 - Hak lain tidak bertambah. PIC sub task tetap tidak bisa mengubah field task induk, label, deliverable task, atau menambah sub task (`PermissionsFor` hanya memakai `isSubtaskPIC` untuk `MoveTo`). Hak atas sub task-nya sendiri tetap dari Sprint 11i.
 - Manajer tidak terpengaruh karena sudah boleh semua perpindahan: cabang `case RoleManager` di `CheckTransition` tidak membaca `isPIC` maupun `isSubtaskPIC`. Karena itu papan dan Arsip melewati query PIC sub task untuk Manajer, dan `TestManagerMoveToIgnoresSubtaskPIC` mengunci anggapan ini: Manajer yang hanya PIC sub task (bukan pembuat, bukan PIC task) mendapat `move_to` yang sama dengan Manajer lain. Bila suatu hari hak Manajer dibatasi per task, test itu gagal dan query-nya wajib dihitung untuk Manajer juga. Admin tetap tidak boleh satu pun.
 - Form Buat task tidak berubah: barisnya sudah muncul hanya setelah "Tambah sub task" diklik.
@@ -1078,6 +1080,36 @@ Keputusan teknis:
 **Selesai kalau:** `./scripts/check.sh` lolos, migrasi 000016 jalan di dev, Staf bisa mengisi kartu di papan task dan isiannya muncul di `/aktivitas`, Manajer bisa mengubah isian orang lain (tercatat di Audit Log) dan mengunduh .xlsx, serta tidak ada gulir horizontal halaman di 360 dan 1280 px.
 
 **Hasil:** kode selesai 2026-11-18, `./scripts/check.sh` lolos. Migrasi 000016 dan `10-grants.sql` menunggu Rifky. Menu "Aktivitas" di navbar belum dipasang: `frontend/src/components/AppShell.vue` sedang dipakai perubahan Sprint 13 yang belum di-commit, jadi baris navigasinya diberikan ke Rifky untuk ditempel.
+
+## Sprint 11t: PIC sub task di kartu dan revisi oleh PIC sub task
+
+**Tujuan:** revisi 22 Manajer. (A) Siapa yang memegang sub task terlihat di setiap kartu, bukan hanya saat filter PIC dipakai. (B) PIC sub task bisa mengembalikan task Ready ke On Progress untuk merevisi bagiannya sendiri tanpa menunggu PIC task.
+
+- [x] S11t-01 Query `ListSubtaskPICs`: semua PIC sub task per task, unik, urut menurut posisi sub task pertama yang dipegang, satu query untuk semua kartu (`attachPeopleAndLabels`, jadi papan, Arsip, dan "Task saya" sekaligus). Dikirim sebagai `subtask_pics` (id, nama, username, avatar). `ListSubtaskPICMatches`, `attachSubtaskPICs`, dan `subtask_pic_matches` dihapus.
+- [x] S11t-02 Kartu papan: area bawah dibagi dua kelompok berlabel kecil, "PIC" dan "Sub task" (`AvatarGroup`), maksimal 4 bulatan per kelompok lalu "+n" dengan nama lengkap di `title` dan `aria-label`. Arsip tidak memakai komponen kartu yang sama; barisnya tetap "Sub task: <nama>", sekarang berisi semua PIC sub task.
+- [x] S11t-03 Aturan: tabel `edges` memberi Ready ke On Progress penanda `subtaskPIC`. `IsSubtaskRevision` menandai jalur Staf yang hanya PIC sub task; di jalur itu catatan tidak wajib.
+- [x] S11t-04 `Move` menerima `subtask_ids`. Di jalur revisi PIC sub task: minimal satu, setiap id harus sub task miliknya di task itu yang tercentang (400 bila tidak), centangnya dibuka lagi (`ReopenSubtasks`), dan status, pembukaan centang, serta audit tersimpan dalam satu transaksi yang sudah mengunci task dengan `version` (409 bila basi). Di jalur lain `subtask_ids` yang terisi ditolak 400.
+- [x] S11t-05 `MoveOptions` menghitung `move_to` dan `revision_subtasks` dari sub task milik pelaku (`ListMySubtasks`, menggantikan `ListTasksWithSubtaskPIC`), dipakai papan, Arsip, dan detail.
+- [x] S11t-06 Frontend: dialog Pindahkan dan dialog revisi di panel detail menampilkan "Sub task yang direvisi" (semua terpilih secara bawaan) dan "Alasan revisi (opsional)" dengan tombol "Kembalikan ke On Progress" bila `revision_subtasks` dari server berisi (`SubtaskRevisionFields`).
+- [x] S11t-07 Riwayat task dan Audit Log: "<nama> mengembalikan ke On Progress untuk revisi: <sub task>. Alasan: <alasan>."
+- [x] S11t-08 Test: unit (`TestEveryTransition`, `TestTaskPICAndSubtaskPIC`, `TestPermissionsFor`, `TestMoveOptionsSubtaskRevision`), DB (`TestSubtaskPICRevision` baru, `TestSubtaskPICMoves` dan test filter revisi 15 diperbarui), dan bagian `E2E_ONLY=revision` di `scripts/e2e/uji13.mjs`.
+
+**Keputusan:**
+- Revisi 22 menambah aturan revisi 17: PIC sub task (Staf yang bukan PIC task) boleh Ready ke On Progress. Ready ke Completed dan membuka kembali Completed tetap milik Manajer.
+- Jalurnya ditentukan backend, bukan frontend: Staf, bukan PIC task, memegang minimal satu sub task, dari Ready ke On Progress (`IsSubtaskRevision`). Staf yang sekaligus PIC task dan Manajer yang memegang sub task tetap memakai jalur revisi biasa dengan catatan wajib, karena perilaku mereka tidak boleh berubah. Untuk mereka `revision_subtasks` selalu kosong dan `subtask_ids` yang dikirim ditolak 400, supaya tidak ada sub task yang terbuka diam-diam lewat jalur yang tidak memeriksanya.
+- Jalur ini butuh minimal satu sub task milik pelaku yang sedang tercentang. Bila tidak ada (mis. Manajer melepas centangnya, atau sub task baru ditambahkan di Ready), On Progress dibuang dari `move_to`, supaya tombol yang tampil selalu cocok dengan yang diterima `Move`.
+- Hanya sub task yang dipilih yang dibuka. Sub task lain, termasuk milik orang lain dan sub task miliknya yang tidak dipilih, tetap tercentang. Akibatnya task kembali bisa ke Ready begitu sub task yang direvisi dicentang lagi, tanpa mengulang pekerjaan orang lain.
+- Pilihan yang ditolak menyebut id sub task, bukan judulnya: sub task milik orang lain atau dari task lain tidak boleh dibocorkan judulnya lewat pesan galat.
+- Alasan revisi opsional, maksimal 500 karakter (batas yang sama dengan catatan revisi, `MaxNoteLength`). Disimpan di audit `task_status_changed` dengan kunci `reason` dan `reopened_subtasks` (id dan judul saat itu), bukan `note`, karena riwayat menulisnya di dalam satu kalimat; dengan `note` alasannya akan tampil dua kali (kalimat dan baris "Catatan"). Tidak ada action audit baru, jadi filter kategori Task di Audit Log tetap menangkapnya.
+- Centang yang dibuka tidak dicatat sebagai `subtask_unchecked` terpisah. Satu kejadian untuk satu keputusan, dan daftar sub task yang dibuka sudah ada di kejadian itu.
+- Kelompok "Sub task" di kartu berisi semua PIC sub task, termasuk orang yang juga PIC task induk. Ini berbeda dari revisi 15 yang menyembunyikannya: di sana barisnya menjelaskan hasil filter, di sini kelompoknya menjawab siapa mengerjakan sub task, dan PIC task yang memegang sub task memang mengerjakannya.
+- Batas 4 bulatan per kelompok menjaga satu kelompok tetap satu baris di kartu 360 px (4 bulatan plus "+n", sekitar 208 px). Dua kelompok penuh tidak muat sebaris di lebar itu, jadi keduanya memakai `flex-wrap` dan kelompok "Sub task" turun ke baris berikutnya, tanpa gulir horizontal. Kelompok "PIC" memakai aturan "+n" yang sama, walaupun task jarang punya lebih dari 4 PIC.
+- Satu query `ListSubtaskPICs` untuk semua kartu, dipanggil dari `attachPeopleAndLabels` bersama PIC dan label. Detail task membentuk daftar yang sama dari sub task yang sudah dimuat (`detailSubtaskPICs`), tanpa query tambahan.
+- Tidak ada migrasi. Query baru memakai index yang sudah ada (`task_subtasks_position_key (task_id, position)` dan primary key `subtask_assignees`). Tidak ada tabel baru, jadi grants tidak perlu dijalankan ulang.
+
+**Selesai kalau:** `./scripts/check.sh` lolos, test di atas lolos, curl skenario dua sub task memberi hasil yang diharapkan, dan E2E `revision` lolos di 360 dan 1280 px.
+
+**Hasil:** kode selesai 2026-11-18, `./scripts/check.sh` lolos, unit test lolos. Test DB menunggu `TEST_DATABASE_URL`. Curl dan E2E `revision` menunggu restart backend (backend yang jalan masih mengirim `subtask_pic_matches`).
 
 ## Sprint 12: Persiapan deploy dan migrasi data
 
@@ -1254,9 +1286,10 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 19 | 2026-11-18 | Task berulang harian, mingguan, atau bulanan. Setiap kemunculan task biasa dengan ID sendiri, dibuat otomatis pada harinya | Sprint 11q |
 | 20 | 2026-11-18 | Papan punya filter deadline "Hari ini". Kata "Tenggat" diganti "Deadline" di seluruh teks pengguna | Sprint 11r |
 | 21 | 2026-11-18 | Aktivitas Harian, pengganti spreadsheet "Daily Activity Monitoring": Staf mengisi aktivitas dan output per jam, Manajer melihat semua orang per tanggal dan bisa mengekspor ke Excel | Sprint 11s |
+| 22 | 2026-11-18 | Kartu selalu menampilkan PIC sub task dalam kelompok tersendiri. PIC sub task boleh mengembalikan task Ready ke On Progress dengan membuka lagi sub task miliknya yang dipilih, alasan opsional | Sprint 11t |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat kedua puluh satu revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat kedua puluh dua revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

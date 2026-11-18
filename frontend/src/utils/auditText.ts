@@ -1,6 +1,7 @@
 import type { AuditEntry } from '../api/audit'
 import { roleLabel, type Role } from './roles'
 import { statusLabel, type TaskStatus } from './task'
+import { subtaskRevisionText } from './taskHistory'
 
 // Durasi per tahap kuncian, sama dengan backend (lockout.go).
 const lockMinutes: Record<number, number> = { 1: 5, 2: 15, 3: 30 }
@@ -119,8 +120,12 @@ export function describeAudit(e: AuditEntry, divisionName: (id: number) => strin
       return `Mengubah label task ${e.target?.id ?? ''}`
     case 'task_deliverable_changed':
       return `Mengubah tautan deliverable ${e.target?.id ?? ''}`
-    case 'task_status_changed':
+    case 'task_status_changed': {
+      // Revisi 22: kalimat yang sama dengan riwayat task, ditambah ID task.
+      const reopened = subtaskRevisionText(after)
+      if (reopened) return reopened.replace('mengembalikan ke', `Mengembalikan ${e.target?.id ?? ''} ke`)
       return `Memindahkan ${e.target?.id ?? ''} ke ${statusLabel[after.status as TaskStatus] ?? str(after.status)}`
+    }
     case 'attachment_added':
       return `Mengunggah ${str(after.name)} ke ${e.target?.id ?? ''}`
     case 'attachment_deleted':

@@ -26,7 +26,7 @@ func (f fixture) complete(t *testing.T, id string) {
 		to    Status
 	}{{f.stafA, OnProgress}, {f.stafA, Ready}, {f.manager, Completed}}
 	for _, st := range steps {
-		r, err := f.svc.Move(context.Background(), st.actor, id, v, st.to, "")
+		r, err := f.svc.Move(context.Background(), st.actor, id, v, st.to, "", nil)
 		if err != nil {
 			t.Fatalf("pindah %s ke %s: %v", id, st.to, err)
 		}

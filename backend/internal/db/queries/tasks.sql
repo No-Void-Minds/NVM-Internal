@@ -180,14 +180,13 @@ ORDER BY
   t.id DESC
 LIMIT @row_limit::int OFFSET @row_offset::int;
 
--- name: ListSubtaskPICMatches :many
--- Revisi 15: PIC sub task yang membuat task masuk hasil filter PIC, untuk baris "Sub task: <nama>" di kartu.
--- Orang yang juga PIC task induk tidak ikut, karena kartu sudah menampilkannya di daftar PIC.
-SELECT DISTINCT st.task_id, u.id, u.name
+-- name: ListSubtaskPICs :many
+-- Revisi 22: semua PIC sub task per task untuk kelompok "Sub task" di kartu, satu query untuk semua kartu.
+-- Unik per orang, urut menurut posisi sub task pertama yang dia pegang.
+SELECT st.task_id, u.id, u.name, u.username, u.avatar_id, min(st.position)::int AS first_position
 FROM task_subtasks st
 JOIN subtask_assignees sa ON sa.subtask_id = st.id
 JOIN users u ON u.id = sa.user_id
 WHERE st.task_id = ANY(@task_ids::text[])
-  AND (sa.user_id = ANY(@pic_ids::bigint[]) OR lower(u.username) = ANY(@pic_usernames::text[]))
-  AND NOT EXISTS (SELECT 1 FROM task_assignees tas WHERE tas.task_id = st.task_id AND tas.user_id = sa.user_id)
-ORDER BY st.task_id, u.name;
+GROUP BY st.task_id, u.id
+ORDER BY st.task_id, first_position, u.id;

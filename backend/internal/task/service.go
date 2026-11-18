@@ -211,9 +211,8 @@ type Summary struct {
 	Labels       []sqlc.ListTaskLabelsRow
 	SubtaskTotal int
 	SubtaskDone  int
-	// SubtaskPICs: PIC sub task yang cocok dengan filter PIC dan bukan PIC task induk (revisi 15).
-	// Kosong bila filter PIC tidak aktif.
-	SubtaskPICs []sqlc.ListSubtaskPICMatchesRow
+	// SubtaskPICs: semua PIC sub task, unik, urut menurut sub task pertama yang dipegang (revisi 22).
+	SubtaskPICs []sqlc.ListSubtaskPICsRow
 }
 
 // List mengambil task yang belum dihapus. assigneeID diisi untuk tampilan "Task saya".
@@ -250,7 +249,7 @@ func attachPeopleAndLabels(ctx context.Context, q *sqlc.Queries, rows []sqlc.Lis
 	for i, r := range rows {
 		out[i] = Summary{
 			Task: r, Assignees: []sqlc.ListTaskAssigneesRow{}, Labels: []sqlc.ListTaskLabelsRow{},
-			SubtaskPICs: []sqlc.ListSubtaskPICMatchesRow{},
+			SubtaskPICs: []sqlc.ListSubtaskPICsRow{},
 		}
 		byTask[r.ID] = &out[i]
 	}
@@ -267,6 +266,13 @@ func attachPeopleAndLabels(ctx context.Context, q *sqlc.Queries, rows []sqlc.Lis
 	for _, c := range counts {
 		byTask[c.TaskID].SubtaskTotal = int(c.Total)
 		byTask[c.TaskID].SubtaskDone = int(c.Done)
+	}
+	subPICs, err := q.ListSubtaskPICs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range subPICs {
+		byTask[p.TaskID].SubtaskPICs = append(byTask[p.TaskID].SubtaskPICs, p)
 	}
 	return out, nil
 }
@@ -355,6 +361,21 @@ func numbered(i int, err error) error {
 		return apperr.Invalid(fmt.Sprintf("Sub task nomor %d: %s", i+1, ve.Message))
 	}
 	return err
+}
+
+// MySubtasks: sub task di detail ini yang dipegang userID, dalam bentuk yang sama dengan ListMySubtasks
+// supaya MoveOptions di detail dan di papan memakai hitungan yang sama.
+func (d Detail) MySubtasks(userID int64) []sqlc.ListMySubtasksRow {
+	out := []sqlc.ListMySubtasksRow{}
+	for _, st := range d.Subtasks {
+		for _, a := range st.Assignees {
+			if a.ID == userID {
+				out = append(out, sqlc.ListMySubtasksRow{TaskID: d.Task.ID, ID: st.ID, Title: st.Title, Done: st.DoneAt.Valid})
+				break
+			}
+		}
+	}
+	return out
 }
 
 // IsSubtaskPIC menjawab apakah akun ini PIC salah satu sub task task ini (revisi 17).

@@ -69,7 +69,7 @@ func TestSubtaskCheckBetweenManagers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.svc.Move(ctx, f.stafA, id, d.Task.Version, OnProgress, ""); err != nil {
+	if _, err := f.svc.Move(ctx, f.stafA, id, d.Task.Version, OnProgress, "", nil); err != nil {
 		t.Fatalf("ke On Progress: %v", err)
 	}
 	can, err := f.svc.CheckableSubtasks(ctx, f.manager, OnProgress, d.IsPIC(f.manager.ID), d.Subtasks)

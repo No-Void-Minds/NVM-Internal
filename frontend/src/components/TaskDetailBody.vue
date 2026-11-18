@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SubtaskRevisionFields from './SubtaskRevisionFields.vue'
 import RecurrenceBadge from './RecurrenceBadge.vue'
 import { RouterLink } from 'vue-router'
 import { describeRule, formatPlain, previewSentence } from '../utils/recurrence'
@@ -394,6 +395,9 @@ async function toggleSubtask(s: TaskSubtask, e: Event) {
 const revisionOpen = ref(false)
 const revisionNote = ref('')
 const revisionError = ref<string | null>(null)
+// Revisi 22: PIC sub task memilih sub task miliknya yang dibuka lagi; daftar dan jalurnya dari server.
+const revisionSelected = ref<number[]>([])
+const subtaskRevision = computed(() => (task.value?.revision_subtasks.length ?? 0) > 0)
 
 function startMove(to: TaskStatus) {
   const t = task.value
@@ -404,6 +408,7 @@ function startMove(to: TaskStatus) {
   }
   if (t.status === 'ready' && to === 'on_progress') {
     revisionNote.value = ''
+    revisionSelected.value = t.revision_subtasks.map((s) => s.id)
     revisionError.value = null
     revisionOpen.value = true
     return
@@ -414,12 +419,23 @@ function startMove(to: TaskStatus) {
 async function submitRevision() {
   const t = task.value
   if (!t) return
-  if (!revisionNote.value.trim()) {
+  if (subtaskRevision.value && revisionSelected.value.length === 0) {
+    revisionError.value = 'Pilih minimal satu sub task yang direvisi.'
+    return
+  }
+  if (!subtaskRevision.value && !revisionNote.value.trim()) {
     revisionError.value = 'Tulis apa yang perlu direvisi.'
     return
   }
   const ok = await run(
-    () => moveTask(t.id, t.version, 'on_progress', revisionNote.value),
+    () =>
+      moveTask(
+        t.id,
+        t.version,
+        'on_progress',
+        revisionNote.value.trim(),
+        subtaskRevision.value ? revisionSelected.value : [],
+      ),
     `${t.id} dikembalikan untuk revisi.`,
   )
   if (ok) revisionOpen.value = false
@@ -612,8 +628,8 @@ const buttonSecondary =
         >{{ task.title }}</component
       >
       <p v-if="subtaskPicOnly" class="mt-2 text-sm text-ink-muted">
-        Kamu PIC sub task di task ini. Kamu bisa memindahkannya ke On Progress, dan ke Ready setelah semua sub
-        task tercentang.
+        Kamu PIC sub task di task ini. Kamu bisa memindahkannya ke On Progress, ke Ready setelah semua sub
+        task tercentang, dan dari Ready kembali ke On Progress untuk merevisi sub task milikmu.
       </p>
       <p v-else-if="readOnly" class="mt-2 text-sm text-ink-muted">Kamu hanya bisa melihat task ini.</p>
     </div>
@@ -1265,20 +1281,32 @@ const buttonSecondary =
         <p v-if="revisionError" role="alert" class="mb-3 rounded-card bg-danger-bg p-3 text-sm text-danger">
           {{ revisionError }}
         </p>
-        <label for="revision-note" class="block text-sm font-medium">Apa yang perlu direvisi?</label>
-        <textarea
-          id="revision-note"
-          v-model="revisionNote"
-          rows="4"
-          maxlength="500"
-          autofocus
-          class="mt-1 block w-full rounded-card border border-line bg-surface px-3 py-2"
+        <SubtaskRevisionFields
+          v-if="subtaskRevision && task"
+          v-model:selected="revisionSelected"
+          v-model:reason="revisionNote"
+          :choices="task.revision_subtasks"
         />
-        <p class="mt-1 text-sm text-ink-muted">Catatan ini tampil di riwayat task. Maksimal 500 karakter.</p>
+        <template v-else>
+          <label for="revision-note" class="block text-sm font-medium">Apa yang perlu direvisi?</label>
+          <textarea
+            id="revision-note"
+            v-model="revisionNote"
+            rows="4"
+            maxlength="500"
+            autofocus
+            class="mt-1 block w-full rounded-card border border-line bg-surface px-3 py-2"
+          />
+          <p class="mt-1 text-sm text-ink-muted">
+            Catatan ini tampil di riwayat task. Maksimal 500 karakter.
+          </p>
+        </template>
       </form>
       <template #footer>
         <button type="button" :class="buttonSecondary" @click="revisionOpen = false">Batal</button>
-        <button type="submit" form="revision-form" :class="buttonPrimary" :disabled="busy">Kembalikan</button>
+        <button type="submit" form="revision-form" :class="buttonPrimary" :disabled="busy">
+          {{ subtaskRevision ? 'Kembalikan ke On Progress' : 'Kembalikan' }}
+        </button>
       </template>
     </BaseDialog>
 

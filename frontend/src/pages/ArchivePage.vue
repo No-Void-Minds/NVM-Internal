@@ -469,7 +469,7 @@ const buttonSecondary =
                   </li>
                 </ul>
                 <template v-else>Tanpa PIC</template>
-                <SubtaskPicLine :people="t.subtask_pic_matches" class="mt-1" />
+                <SubtaskPicLine :people="t.subtask_pics" class="mt-1" />
               </td>
               <td class="py-3 px-4">{{ t.division.name }}</td>
               <td class="py-3 px-4"><UrgencyLabel :urgency="t.urgency" /></td>
@@ -510,7 +510,7 @@ const buttonSecondary =
                   </li>
                 </ul>
                 <template v-else>Tanpa PIC</template>
-                <SubtaskPicLine :people="t.subtask_pic_matches" class="mt-1" />
+                <SubtaskPicLine :people="t.subtask_pics" class="mt-1" />
               </dd>
               <dt class="text-ink-muted">Divisi</dt>
               <dd>{{ t.division.name }}</dd>

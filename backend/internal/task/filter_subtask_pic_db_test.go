@@ -62,12 +62,14 @@ func checkPICResult(t *testing.T, where string, f fixture, c picCase, list []Sum
 	if seen[c.none] != 0 {
 		t.Errorf("%s: task tidak terkait %s ikut muncul", where, c.none)
 	}
-	if got := subPICs[c.onlySub]; len(got) != 1 || got[0] != f.stafC.ID {
-		t.Errorf("%s: PIC sub task untuk %s = %v, mau [%d]", where, c.onlySub, got, f.stafC.ID)
+	// Revisi 22: kelompok "Sub task" di kartu berisi semua PIC sub task, juga yang sekaligus PIC task induk.
+	for _, id := range []string{c.onlySub, c.both} {
+		if got := subPICs[id]; len(got) != 1 || got[0] != f.stafC.ID {
+			t.Errorf("%s: PIC sub task untuk %s = %v, mau [%d]", where, id, got, f.stafC.ID)
+		}
 	}
-	// Bila X juga PIC task induk, baris "Sub task" tidak dikirim karena namanya sudah ada di daftar PIC.
-	if len(subPICs[c.both]) != 0 || len(subPICs[c.onlyTask]) != 0 {
-		t.Errorf("%s: PIC sub task tidak boleh dikirim untuk PIC task induk, dapat %v", where, subPICs)
+	if len(subPICs[c.onlyTask]) != 0 {
+		t.Errorf("%s: task tanpa sub task membawa PIC sub task %v", where, subPICs[c.onlyTask])
 	}
 }
 
@@ -81,7 +83,7 @@ func TestBoardPICFilterIncludesSubtaskPIC(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.svc.Move(ctx, f.stafA, c.onlySub, d.Task.Version, OnProgress, ""); err != nil {
+	if _, err := f.svc.Move(ctx, f.stafA, c.onlySub, d.Task.Version, OnProgress, "", nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -106,17 +108,17 @@ func TestBoardPICFilterIncludesSubtaskPIC(t *testing.T) {
 		}
 	}
 
-	// Tanpa filter PIC: semua task, dan baris PIC sub task kosong.
+	// Revisi 22: tanpa filter PIC pun PIC sub task tetap dikirim.
 	cols, err := f.svc.Board(ctx, BoardFilter{}, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
+	var all []Summary
 	for _, col := range cols {
-		for _, s := range col.Tasks {
-			if len(s.SubtaskPICs) != 0 {
-				t.Errorf("tanpa filter PIC, %s tetap membawa PIC sub task %v", s.Task.ID, s.SubtaskPICs)
-			}
-		}
+		all = append(all, col.Tasks...)
+	}
+	if _, subPICs := matches(all); len(subPICs[c.none]) != 1 || subPICs[c.none][0] != f.stafA.ID {
+		t.Errorf("tanpa filter PIC: PIC sub task %s = %v, mau [%d]", c.none, subPICs[c.none], f.stafA.ID)
 	}
 
 	// GET /tasks?scope=mine memakai List.

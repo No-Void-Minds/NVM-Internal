@@ -295,7 +295,8 @@ async function onDrop(e: DragEvent, status: TaskStatus) {
     notice.value = { kind: 'error', text: `${t.id}: ${block}` }
     return
   }
-  // Revisi wajib catatan, jadi tetap lewat dialog dengan tujuan sudah terpilih.
+  // Revisi butuh catatan (PIC task, Manajer) atau pilihan sub task (PIC sub task, revisi 22), jadi tetap lewat
+  // dialog dengan tujuan sudah terpilih.
   if (t.status === 'ready' && status === 'on_progress') {
     movingTarget.value = status
     moving.value = t

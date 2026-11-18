@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import BaseDialog from './BaseDialog.vue'
+import SubtaskRevisionFields from './SubtaskRevisionFields.vue'
 import { ApiError } from '../api/client'
 import { moveTask } from '../api/tasks'
 import type { BoardTask } from '../api/board'
@@ -12,8 +13,11 @@ const props = defineProps<{ task: BoardTask | null; initialTarget?: TaskStatus |
 const emit = defineEmits<{ close: []; moved: [message: string]; stale: [message: string] }>()
 
 // Setiap tujuan diberi penjelasan, supaya pilihannya tidak hanya berupa nama status.
-function describe(from: TaskStatus, to: TaskStatus): string {
+function describe(t: BoardTask, to: TaskStatus): string {
+  const from = t.status
   if (from === 'requested') return 'Mulai dikerjakan.'
+  if (from === 'ready' && to === 'on_progress' && t.revision_subtasks.length)
+    return 'Buka lagi sub task milikmu yang perlu direvisi.'
   if (from === 'ready' && to === 'on_progress') return 'Kembalikan untuk revisi. Catatan revisi wajib diisi.'
   if (to === 'ready') return 'Kirim ke Manajer untuk ditinjau.'
   if (to === 'completed') return 'Tutup task. Solved Date terisi otomatis.'
@@ -27,6 +31,9 @@ const error = ref<string | null>(null)
 const busy = ref(false)
 
 const isRevision = computed(() => props.task?.status === 'ready' && target.value === 'on_progress')
+// Revisi 22: jalur PIC sub task dipilih server lewat revision_subtasks; kosong berarti jalur revisi biasa.
+const subtaskRevision = computed(() => isRevision.value && (props.task?.revision_subtasks.length ?? 0) > 0)
+const selected = ref<number[]>([])
 
 watch(
   () => props.task,
@@ -34,6 +41,8 @@ watch(
     // Kalau tujuannya hanya satu, langsung terpilih supaya cukup satu ketukan lagi.
     target.value = props.initialTarget ?? (t && t.move_to.length === 1 ? t.move_to[0] : null)
     note.value = ''
+    // Semua sub task miliknya terpilih secara bawaan.
+    selected.value = t ? t.revision_subtasks.map((s) => s.id) : []
     error.value = null
   },
 )
@@ -50,13 +59,23 @@ async function submit() {
     error.value = block
     return
   }
-  if (isRevision.value && !note.value.trim()) {
+  if (subtaskRevision.value && selected.value.length === 0) {
+    error.value = 'Pilih minimal satu sub task yang direvisi.'
+    return
+  }
+  if (isRevision.value && !subtaskRevision.value && !note.value.trim()) {
     error.value = 'Tulis catatan revisi supaya PIC tahu apa yang perlu diperbaiki.'
     return
   }
   busy.value = true
   try {
-    await moveTask(t.id, t.version, target.value, isRevision.value ? note.value.trim() : '')
+    await moveTask(
+      t.id,
+      t.version,
+      target.value,
+      isRevision.value ? note.value.trim() : '',
+      subtaskRevision.value ? selected.value : [],
+    )
     emit('moved', `${t.id} dipindahkan ke ${statusLabel[target.value]}.`)
   } catch (err) {
     const stale = staleMoveMessage(err, t.id)
@@ -97,13 +116,19 @@ const buttonSecondary =
             />
             <span>
               <span class="block font-medium">{{ statusLabel[to] }}</span>
-              <span class="block text-sm text-ink-muted">{{ describe(task.status, to) }}</span>
+              <span class="block text-sm text-ink-muted">{{ describe(task, to) }}</span>
             </span>
           </label>
         </div>
       </fieldset>
 
-      <div v-if="isRevision">
+      <SubtaskRevisionFields
+        v-if="subtaskRevision"
+        v-model:selected="selected"
+        v-model:reason="note"
+        :choices="task.revision_subtasks"
+      />
+      <div v-else-if="isRevision">
         <label for="move-note" class="block text-sm font-medium">Catatan revisi</label>
         <p id="move-note-hint" class="text-sm text-ink-muted">
           {{ task.id }} akan kembali ke On Progress. Catatan revisi tersimpan di riwayat task.
