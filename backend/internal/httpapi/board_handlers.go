@@ -159,6 +159,8 @@ func summaryOf(r task.Summary) taskSummary {
 		SubtaskTotal:      r.SubtaskTotal,
 		SubtaskDone:       r.SubtaskDone,
 		SubtaskPICMatches: subtaskPICMatches(r.SubtaskPICs),
+		SeriesFreq:        seriesFreq(t.SeriesFreq),
+		OccurrenceDate:    dateString(t.OccurrenceDate),
 	}
 }
 

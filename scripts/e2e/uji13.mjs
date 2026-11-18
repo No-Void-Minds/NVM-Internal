@@ -11,7 +11,8 @@
 // E2E_BASE (bawaan http://localhost:5173), E2E_ONLY=popover (hanya uji popover profil, revisi 14),
 // E2E_ONLY=subtaskform (hanya uji form tambah sub task yang dilipat, revisi 17),
 // E2E_ONLY=subtaskresult (kelompok Arahan dan Hasil serta simpan catatan hasil, revisi 18; menulis catatan hasil
-// ke satu sub task di database dev).
+// ke satu sub task di database dev),
+// E2E_ONLY=schedule (bagian Jadwal di form Buat task, revisi 19; tidak menyimpan apa pun).
 // Keluar dengan kode 1 bila ada yang gagal.
 import { chromium } from "playwright-core";
 
@@ -713,6 +714,87 @@ async function checkSubtaskResult(width) {
 
 if (ONLY === "subtaskresult")
   for (const w of [360, 1280]) await checkSubtaskResult(w);
+
+// Bagian Jadwal di form Buat task (revisi 19): setiap pilihan bisa dipilih, panah kiri dan kanan memindah
+// pilihan, tombol hari berganti aria-pressed, dan setiap tampilan lolos audit ukuran tombol dan lebar.
+async function checkSchedule(width) {
+  const { ctx, page, errors } = await open("manajer", width, "terang");
+  const where = (what) => `jadwal ${width} ${what}`;
+  const expect = (cond, w, msg) => {
+    checks++;
+    if (!cond) fail(where(w), msg);
+  };
+  await page.goto(BASE + "/task");
+  await page.waitForLoadState("networkidle");
+  await page.getByRole("button", { name: "Buat task" }).first().click();
+  await page.waitForSelector("dialog[open]");
+  const radio = (label) =>
+    page
+      .locator(`dialog[open] input[name='task-schedule']`)
+      .locator(`xpath=..`)
+      .filter({ hasText: label });
+
+  for (const label of ["Harian", "Mingguan", "Bulanan"]) {
+    await radio(label).click();
+    await page.waitForTimeout(100);
+    await audit(page, errors, where(label));
+    const preview = await page
+      .locator("dialog[open] p[aria-live='polite']")
+      .filter({ hasText: "Muncul berikutnya" })
+      .count();
+    expect(preview > 0, label, "kalimat pratinjau tidak muncul");
+  }
+
+  // Mingguan: hari bawaan dari tanggal mulai (hari ini), lalu tambah satu hari lewat tombol.
+  await radio("Mingguan").click();
+  const pressed = () =>
+    page.evaluate(
+      () =>
+        [
+          ...document.querySelectorAll(
+            "dialog[open] [aria-label='Hari pengulangan'] button[aria-pressed='true']",
+          ),
+        ].length,
+    );
+  const before = await pressed();
+  expect(before === 1, "hari bawaan", `hari menyala ${before}, mau 1`);
+  const off = page
+    .locator(
+      "dialog[open] [aria-label='Hari pengulangan'] button[aria-pressed='false']",
+    )
+    .first();
+  await off.focus();
+  await page.keyboard.press("Enter");
+  expect(
+    (await pressed()) === 2,
+    "toggle hari",
+    "Enter pada tombol hari tidak menyalakannya",
+  );
+
+  // Keyboard: panah kanan dari Tidak berulang pindah ke Harian.
+  await page
+    .locator("dialog[open] input[name='task-schedule'][value='none']")
+    .focus();
+  await page.keyboard.press("Space");
+  await page.keyboard.press("ArrowRight");
+  const checked = await page.evaluate(
+    () =>
+      document.querySelector("dialog[open] input[name='task-schedule']:checked")
+        ?.value,
+  );
+  expect(
+    checked === "daily",
+    "panah",
+    `pilihan setelah panah kanan ${checked}, mau daily`,
+  );
+
+  checks++;
+  if (errors.length)
+    fail(where("console"), errors.splice(0).join(" | ").slice(0, 300));
+  await ctx.close();
+}
+
+if (ONLY === "schedule") for (const w of [360, 1280]) await checkSchedule(w);
 
 await browser.close();
 console.log(

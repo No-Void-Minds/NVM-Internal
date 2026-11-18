@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import RecurrenceBadge from './RecurrenceBadge.vue'
+import { RouterLink } from 'vue-router'
+import { describeRule, formatPlain, previewSentence } from '../utils/recurrence'
 import LoadingSkeleton from './LoadingSkeleton.vue'
 import SubtaskFiles from './SubtaskFiles.vue'
 import SubtaskFieldsForm from './SubtaskFieldsForm.vue'
@@ -600,6 +603,7 @@ const buttonSecondary =
           statusLabel[task.status]
         }}</span>
         <UrgencyLabel :urgency="task.urgency" />
+        <RecurrenceBadge v-if="task.series" :freq="task.series.freq" />
       </div>
       <component
         :is="titleTag"
@@ -656,6 +660,28 @@ const buttonSecondary =
         <template v-if="task.solved_date">
           <dt class="text-ink-muted">Selesai</dt>
           <dd>{{ formatDateTime(task.solved_date) }}</dd>
+        </template>
+        <!-- Revisi 19: aturan seri, tanggal kemunculan ini, dan kemunculan berikutnya dari server. -->
+        <template v-if="task.series">
+          <dt class="text-ink-muted">Kemunculan</dt>
+          <dd>{{ task.occurrence_date ? formatPlain(task.occurrence_date) : '-' }}</dd>
+          <dt class="text-ink-muted">Jadwal</dt>
+          <dd class="space-y-1">
+            <p>{{ describeRule(task.series) }}</p>
+            <p class="text-ink-muted">
+              {{
+                !task.series.active
+                  ? 'Pengulangan sudah dihentikan.'
+                  : previewSentence(task.series.next_date, task.series.due_offset_days)
+              }}
+            </p>
+            <RouterLink
+              :to="{ name: 'archive', query: { series: String(task.series.id) } }"
+              class="inline-flex min-h-11 items-center font-medium underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
+            >
+              Lihat kemunculan lain
+            </RouterLink>
+          </dd>
         </template>
       </dl>
     </section>

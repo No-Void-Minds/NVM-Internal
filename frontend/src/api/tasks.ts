@@ -1,3 +1,4 @@
+import type { Freq } from '../utils/recurrence'
 import { apiGet, apiPost, apiPut, request } from './client'
 import type { TaskStatus, Urgency } from '../utils/task'
 import type { TaskAttachment } from './attachments'
@@ -48,6 +49,33 @@ export type TaskSummary = {
   subtask_done: number
   // Revisi 15: PIC sub task yang cocok dengan filter PIC dan bukan PIC task. Kosong tanpa filter PIC.
   subtask_pic_matches: { id: number; name: string }[]
+  // Revisi 19: null bila tidak berulang.
+  series_freq: Freq | null
+  occurrence_date: string | null
+}
+
+export type SeriesInfo = {
+  id: number
+  freq: Freq
+  skip_weekend: boolean
+  weekdays: number[]
+  month_day: number | null
+  start_date: string | null
+  end_date: string | null
+  active: boolean
+  // Dihitung server dengan aturan pembuat kemunculan; null bila seri berhenti atau habis.
+  next_date: string | null
+  due_offset_days: number | null
+}
+
+// Bagian Jadwal yang dikirim ke server. Tidak dikirim berarti seri tidak disentuh.
+export type ScheduleBody = {
+  freq: Freq | 'none'
+  skip_weekend: boolean
+  weekdays: number[]
+  month_day: number
+  end_date: string
+  apply_to_series?: boolean
 }
 
 export type TaskCan = {
@@ -77,6 +105,7 @@ export type TaskDetail = TaskSummary & {
   request_date: string
   deliverable_url: string
   is_migrated: boolean
+  series: SeriesInfo | null
   can: TaskCan
   history: TaskHistoryItem[]
   attachments: TaskAttachment[]
@@ -84,6 +113,7 @@ export type TaskDetail = TaskSummary & {
 }
 
 export type TaskFields = {
+  schedule?: ScheduleBody
   title: string
   description: string
   urgency: Urgency
@@ -129,6 +159,11 @@ export function moveTask(id: string, version: number, to: TaskStatus, note = '')
     to,
     note,
   })
+}
+
+// Hentikan pengulangan (revisi 19). Kemunculan yang sudah ada tidak berubah.
+export function stopSeries(id: string) {
+  return apiPost<void>(`/tasks/${id}/stop-series`)
 }
 
 export function deleteTask(id: string, version: number) {

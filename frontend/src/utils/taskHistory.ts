@@ -1,5 +1,6 @@
 import type { TaskHistoryItem } from '../api/tasks'
 import { formatDay, statusLabel, type TaskStatus } from './task'
+import { freqLabel } from './recurrence'
 
 const fieldName: Record<string, string> = {
   title: 'judul',
@@ -91,6 +92,15 @@ export function describeTaskHistory(h: TaskHistoryItem): string {
       return `melepas centang sub task "${String(after.title ?? '')}"`
     case 'subtask_reordered':
       return 'mengubah urutan sub task'
+    // Revisi 19: task berulang. Kemunculan dibuat aktor Sistem, jadi nama pelakunya kosong.
+    case 'series_created':
+      return `menjadikan task ini berulang (${freqWord(after.freq)})`
+    case 'series_updated':
+      return 'mengubah jadwal dan templat task berulang'
+    case 'series_stopped':
+      return 'menghentikan pengulangan'
+    case 'occurrence_created':
+      return `membuat kemunculan ${after.occurrence_date ? formatDay(String(after.occurrence_date)) : ''}`.trim()
     default:
       return h.action
   }
@@ -99,4 +109,8 @@ export function describeTaskHistory(h: TaskHistoryItem): string {
 export function historyNote(h: TaskHistoryItem): string | null {
   const note = h.new_value?.note
   return typeof note === 'string' && note ? note : null
+}
+
+function freqWord(v: unknown): string {
+  return v === 'daily' || v === 'weekly' || v === 'monthly' ? freqLabel[v].toLowerCase() : String(v ?? '')
 }

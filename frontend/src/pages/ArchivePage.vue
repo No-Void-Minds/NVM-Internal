@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import RecurrenceBadge from '../components/RecurrenceBadge.vue'
 import SubtaskPicLine from '../components/SubtaskPicLine.vue'
 import PersonChip from '../components/PersonChip.vue'
 import LoadingSkeleton from '../components/LoadingSkeleton.vue'
@@ -81,6 +82,7 @@ function clearFilters() {
     urgency: undefined,
     from: undefined,
     to: undefined,
+    series: undefined,
   })
 }
 
@@ -363,6 +365,17 @@ const buttonSecondary =
     </div>
 
     <h2 ref="resultsHeading" tabindex="-1" class="sr-only">Daftar task selesai</h2>
+    <!-- Revisi 19: datang dari "Lihat kemunculan lain" di detail task berulang. -->
+    <p v-if="query.series" class="mt-4 flex flex-wrap items-center gap-x-3 text-sm">
+      Menampilkan kemunculan yang sudah selesai dari satu task berulang.
+      <button
+        type="button"
+        class="inline-flex min-h-11 items-center font-medium underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
+        @click="setQuery({ series: undefined })"
+      >
+        Tampilkan semua task
+      </button>
+    </p>
 
     <LoadingSkeleton v-if="loadState === 'loading'" class="mt-6" label="Memuat arsip..." />
 
@@ -438,6 +451,7 @@ const buttonSecondary =
                 >
                   {{ t.title }}
                 </button>
+                <RecurrenceBadge v-if="t.series_freq" :freq="t.series_freq" class="block pb-2" />
                 <div v-if="t.labels.length" class="flex flex-wrap gap-1 pb-2">
                   <span
                     v-for="l in t.labels"
@@ -473,9 +487,10 @@ const buttonSecondary =
 
         <ul class="mt-2 space-y-2 @3xl:hidden">
           <li v-for="t in result.tasks" :key="t.id" class="rounded-card border border-line bg-surface p-3">
-            <div class="flex items-center gap-2 text-sm">
+            <div class="flex flex-wrap items-center gap-2 text-sm">
               <span class="specimen-tag">{{ t.id }}</span>
               <UrgencyLabel :urgency="t.urgency" />
+              <RecurrenceBadge v-if="t.series_freq" :freq="t.series_freq" />
             </div>
             <h3 class="font-medium">
               <button

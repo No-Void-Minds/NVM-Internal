@@ -29,6 +29,7 @@ export function parseArchiveQuery(q: LocationQuery, staffUsername: string | null
     to: to && dayPattern.test(to) ? to : undefined,
     sort: sort === 'oldest' || sort === 'urgency' ? sort : undefined,
     page: page && page > 1 ? page : undefined,
+    series: positiveInt(one(q.series)),
   }
   return normalizeBoardQuery(raw, staffUsername)
 }
@@ -46,9 +47,10 @@ export function toArchiveRouteQuery(a: ArchiveQuery): Record<string, string> {
   if (a.to) out.to = a.to
   if (a.sort && a.sort !== 'newest') out.sort = a.sort
   if (a.page && a.page > 1) out.page = String(a.page)
+  if (a.series) out.series = String(a.series)
   return out
 }
 
 export function hasArchiveFilters(a: ArchiveQuery): boolean {
-  return Boolean(a.q || a.pic || a.division || a.label || a.urgency || a.from || a.to)
+  return Boolean(a.q || a.pic || a.division || a.label || a.urgency || a.from || a.to || a.series)
 }

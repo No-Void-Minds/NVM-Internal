@@ -17,6 +17,10 @@ GRANT DELETE ON
   audit_logs          -- job maintenance: audit log login lebih dari 1 tahun
 TO nvm_internal_app;
 
+-- task_series (migrasi 000015, revisi 19) sengaja tidak ada di daftar DELETE: seri hanya dihentikan
+-- (active = false) dan templatnya JSONB yang diganti utuh lewat UPDATE. SELECT, INSERT, dan UPDATE-nya datang dari
+-- ALTER DEFAULT PRIVILEGES di 00-bootstrap.sql, termasuk sequence identity-nya.
+
 -- Bukti untuk runbook: daftar tabel yang boleh dihapus app.
 SELECT table_name FROM information_schema.role_table_grants
 WHERE grantee = 'nvm_internal_app' AND privilege_type = 'DELETE'

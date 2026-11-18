@@ -123,7 +123,7 @@ func (q *Queries) GetLabelsByIDs(ctx context.Context, ids []int64) ([]GetLabelsB
 const getTaskDetail = `-- name: GetTaskDetail :one
 SELECT t.id, t.title, t.description, t.status, t.urgency, t.division_id, d.name AS division_name,
        t.requested_by, r.name AS requested_by_name, t.request_date, t.start_date, t.due_date,
-       t.solved_date, t.deliverable_url, t.is_migrated, t.version
+       t.solved_date, t.deliverable_url, t.is_migrated, t.version, t.series_id, t.occurrence_date
 FROM tasks t
 JOIN divisions d ON d.id = t.division_id
 JOIN users r ON r.id = t.requested_by
@@ -147,6 +147,8 @@ type GetTaskDetailRow struct {
 	DeliverableUrl  pgtype.Text
 	IsMigrated      bool
 	Version         int32
+	SeriesID        pgtype.Int8
+	OccurrenceDate  pgtype.Date
 }
 
 func (q *Queries) GetTaskDetail(ctx context.Context, id string) (GetTaskDetailRow, error) {
@@ -169,6 +171,8 @@ func (q *Queries) GetTaskDetail(ctx context.Context, id string) (GetTaskDetailRo
 		&i.DeliverableUrl,
 		&i.IsMigrated,
 		&i.Version,
+		&i.SeriesID,
+		&i.OccurrenceDate,
 	)
 	return i, err
 }
@@ -176,53 +180,58 @@ func (q *Queries) GetTaskDetail(ctx context.Context, id string) (GetTaskDetailRo
 const listArchiveTasks = `-- name: ListArchiveTasks :many
 SELECT t.id, t.title, t.status, t.urgency, t.division_id, d.name AS division_name,
        t.start_date, t.due_date, t.solved_date, t.version,
+       t.series_id, t.occurrence_date, s.freq AS series_freq,
        count(*) OVER () AS total_count
 FROM tasks t
 JOIN divisions d ON d.id = t.division_id
+LEFT JOIN task_series s ON s.id = t.series_id
 WHERE NOT t.is_deleted AND t.status = 'completed'
+  -- Revisi 19: "Lihat kemunculan lain" dari detail task berulang.
+  AND ($1::bigint IS NULL OR t.series_id = $1::bigint)
   -- Revisi 15: filter PIC juga cocok lewat PIC sub task. Dua EXISTS, jadi task yang cocok lewat dua jalur
   -- tetap satu baris. Blok ini sama di ListBoardTasks dan ListArchiveTasks.
-  AND ((cardinality($1::bigint[]) = 0 AND cardinality($2::text[]) = 0)
+  AND ((cardinality($2::bigint[]) = 0 AND cardinality($3::text[]) = 0)
        OR EXISTS (SELECT 1 FROM task_assignees tas
                   JOIN users u ON u.id = tas.user_id
                   WHERE tas.task_id = t.id
-                    AND (tas.user_id = ANY($1::bigint[]) OR lower(u.username) = ANY($2::text[])))
+                    AND (tas.user_id = ANY($2::bigint[]) OR lower(u.username) = ANY($3::text[])))
        OR EXISTS (SELECT 1 FROM task_subtasks st
                   JOIN subtask_assignees sa ON sa.subtask_id = st.id
                   JOIN users u ON u.id = sa.user_id
                   WHERE st.task_id = t.id
-                    AND (sa.user_id = ANY($1::bigint[]) OR lower(u.username) = ANY($2::text[]))))
-  AND ($3::bigint IS NULL OR t.division_id = $3::bigint)
-  AND ($4::bigint IS NULL
-       OR EXISTS (SELECT 1 FROM task_labels tl WHERE tl.task_id = t.id AND tl.label_id = $4::bigint))
-  AND ($5::task_urgency IS NULL OR t.urgency = $5::task_urgency)
-  AND ($6::timestamptz IS NULL OR t.solved_date >= $6::timestamptz)
-  AND ($7::timestamptz IS NULL OR t.solved_date < $7::timestamptz)
-  AND ($8::text IS NULL OR (
-        t.id ILIKE $8::text
-        OR t.title ILIKE $8::text
-        OR t.description ILIKE $8::text
-        OR t.deliverable_url ILIKE $8::text
-        OR EXISTS (SELECT 1 FROM users r WHERE r.id = t.requested_by AND r.name ILIKE $8::text)
+                    AND (sa.user_id = ANY($2::bigint[]) OR lower(u.username) = ANY($3::text[]))))
+  AND ($4::bigint IS NULL OR t.division_id = $4::bigint)
+  AND ($5::bigint IS NULL
+       OR EXISTS (SELECT 1 FROM task_labels tl WHERE tl.task_id = t.id AND tl.label_id = $5::bigint))
+  AND ($6::task_urgency IS NULL OR t.urgency = $6::task_urgency)
+  AND ($7::timestamptz IS NULL OR t.solved_date >= $7::timestamptz)
+  AND ($8::timestamptz IS NULL OR t.solved_date < $8::timestamptz)
+  AND ($9::text IS NULL OR (
+        t.id ILIKE $9::text
+        OR t.title ILIKE $9::text
+        OR t.description ILIKE $9::text
+        OR t.deliverable_url ILIKE $9::text
+        OR EXISTS (SELECT 1 FROM users r WHERE r.id = t.requested_by AND r.name ILIKE $9::text)
         OR EXISTS (SELECT 1 FROM task_subtasks st
-                   WHERE st.task_id = t.id AND st.title ILIKE $8::text)
+                   WHERE st.task_id = t.id AND st.title ILIKE $9::text)
         OR EXISTS (SELECT 1 FROM task_assignees tas
                    JOIN users u ON u.id = tas.user_id
-                   WHERE tas.task_id = t.id AND u.name ILIKE $8::text)
+                   WHERE tas.task_id = t.id AND u.name ILIKE $9::text)
         OR EXISTS (SELECT 1 FROM task_labels tl JOIN labels l ON l.id = tl.label_id
-                   WHERE tl.task_id = t.id AND l.name ILIKE $8::text)
+                   WHERE tl.task_id = t.id AND l.name ILIKE $9::text)
         OR EXISTS (SELECT 1 FROM task_attachments ta
-                   WHERE ta.task_id = t.id AND NOT ta.is_deleted AND ta.original_name ILIKE $8::text)))
+                   WHERE ta.task_id = t.id AND NOT ta.is_deleted AND ta.original_name ILIKE $9::text)))
 ORDER BY
-  CASE WHEN $9::text = 'urgency'
+  CASE WHEN $10::text = 'urgency'
        THEN CASE t.urgency WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END END,
-  CASE WHEN $9::text = 'oldest' THEN t.solved_date END ASC,
-  CASE WHEN $9::text <> 'oldest' THEN t.solved_date END DESC,
+  CASE WHEN $10::text = 'oldest' THEN t.solved_date END ASC,
+  CASE WHEN $10::text <> 'oldest' THEN t.solved_date END DESC,
   t.id DESC
-LIMIT $11::int OFFSET $10::int
+LIMIT $12::int OFFSET $11::int
 `
 
 type ListArchiveTasksParams struct {
+	SeriesID     pgtype.Int8
 	PicIds       []int64
 	PicUsernames []string
 	DivisionID   pgtype.Int8
@@ -237,17 +246,20 @@ type ListArchiveTasksParams struct {
 }
 
 type ListArchiveTasksRow struct {
-	ID           string
-	Title        string
-	Status       TaskStatus
-	Urgency      TaskUrgency
-	DivisionID   int64
-	DivisionName string
-	StartDate    pgtype.Date
-	DueDate      pgtype.Date
-	SolvedDate   pgtype.Timestamptz
-	Version      int32
-	TotalCount   int64
+	ID             string
+	Title          string
+	Status         TaskStatus
+	Urgency        TaskUrgency
+	DivisionID     int64
+	DivisionName   string
+	StartDate      pgtype.Date
+	DueDate        pgtype.Date
+	SolvedDate     pgtype.Timestamptz
+	Version        int32
+	SeriesID       pgtype.Int8
+	OccurrenceDate pgtype.Date
+	SeriesFreq     NullRecurrenceFreq
+	TotalCount     int64
 }
 
 // Kolom sama dengan ListTasks, ditambah total_count: jumlah seluruh hasil sebelum LIMIT, supaya halaman
@@ -255,6 +267,7 @@ type ListArchiveTasksRow struct {
 // Tiga urutan dalam satu query: bobot urgency (FR-TASK-14), terlama selesai, dan terbaru selesai (bawaan).
 func (q *Queries) ListArchiveTasks(ctx context.Context, arg ListArchiveTasksParams) ([]ListArchiveTasksRow, error) {
 	rows, err := q.db.Query(ctx, listArchiveTasks,
+		arg.SeriesID,
 		arg.PicIds,
 		arg.PicUsernames,
 		arg.DivisionID,
@@ -285,6 +298,9 @@ func (q *Queries) ListArchiveTasks(ctx context.Context, arg ListArchiveTasksPara
 			&i.DueDate,
 			&i.SolvedDate,
 			&i.Version,
+			&i.SeriesID,
+			&i.OccurrenceDate,
+			&i.SeriesFreq,
 			&i.TotalCount,
 		); err != nil {
 			return nil, err
@@ -299,9 +315,11 @@ func (q *Queries) ListArchiveTasks(ctx context.Context, arg ListArchiveTasksPara
 
 const listBoardTasks = `-- name: ListBoardTasks :many
 SELECT t.id, t.title, t.status, t.urgency, t.division_id, d.name AS division_name,
-       t.start_date, t.due_date, t.solved_date, t.version
+       t.start_date, t.due_date, t.solved_date, t.version,
+       t.series_id, t.occurrence_date, s.freq AS series_freq
 FROM tasks t
 JOIN divisions d ON d.id = t.division_id
+LEFT JOIN task_series s ON s.id = t.series_id
 WHERE NOT t.is_deleted
   AND (t.status <> 'completed' OR t.solved_date >= $1::timestamptz)
   -- Revisi 15: filter PIC juga cocok lewat PIC sub task. Dua EXISTS, jadi task yang cocok lewat dua jalur
@@ -357,16 +375,19 @@ type ListBoardTasksParams struct {
 }
 
 type ListBoardTasksRow struct {
-	ID           string
-	Title        string
-	Status       TaskStatus
-	Urgency      TaskUrgency
-	DivisionID   int64
-	DivisionName string
-	StartDate    pgtype.Date
-	DueDate      pgtype.Date
-	SolvedDate   pgtype.Timestamptz
-	Version      int32
+	ID             string
+	Title          string
+	Status         TaskStatus
+	Urgency        TaskUrgency
+	DivisionID     int64
+	DivisionName   string
+	StartDate      pgtype.Date
+	DueDate        pgtype.Date
+	SolvedDate     pgtype.Timestamptz
+	Version        int32
+	SeriesID       pgtype.Int8
+	OccurrenceDate pgtype.Date
+	SeriesFreq     NullRecurrenceFreq
 }
 
 // Kolomnya sama persis dengan ListTasks supaya hasilnya bisa dikonversi dan dilengkapi PIC serta label
@@ -402,6 +423,9 @@ func (q *Queries) ListBoardTasks(ctx context.Context, arg ListBoardTasksParams) 
 			&i.DueDate,
 			&i.SolvedDate,
 			&i.Version,
+			&i.SeriesID,
+			&i.OccurrenceDate,
+			&i.SeriesFreq,
 		); err != nil {
 			return nil, err
 		}
@@ -636,9 +660,11 @@ func (q *Queries) ListTaskLabels(ctx context.Context, taskIds []string) ([]ListT
 
 const listTasks = `-- name: ListTasks :many
 SELECT t.id, t.title, t.status, t.urgency, t.division_id, d.name AS division_name,
-       t.start_date, t.due_date, t.solved_date, t.version
+       t.start_date, t.due_date, t.solved_date, t.version,
+       t.series_id, t.occurrence_date, s.freq AS series_freq
 FROM tasks t
 JOIN divisions d ON d.id = t.division_id
+LEFT JOIN task_series s ON s.id = t.series_id
 WHERE NOT t.is_deleted
   AND ($1::bigint IS NULL
        OR EXISTS (SELECT 1 FROM task_assignees tas
@@ -651,16 +677,19 @@ ORDER BY t.created_at DESC
 `
 
 type ListTasksRow struct {
-	ID           string
-	Title        string
-	Status       TaskStatus
-	Urgency      TaskUrgency
-	DivisionID   int64
-	DivisionName string
-	StartDate    pgtype.Date
-	DueDate      pgtype.Date
-	SolvedDate   pgtype.Timestamptz
-	Version      int32
+	ID             string
+	Title          string
+	Status         TaskStatus
+	Urgency        TaskUrgency
+	DivisionID     int64
+	DivisionName   string
+	StartDate      pgtype.Date
+	DueDate        pgtype.Date
+	SolvedDate     pgtype.Timestamptz
+	Version        int32
+	SeriesID       pgtype.Int8
+	OccurrenceDate pgtype.Date
+	SeriesFreq     NullRecurrenceFreq
 }
 
 // Daftar sederhana untuk Sprint 3; papan dengan filter lengkap dibuat di Sprint 4.
@@ -684,6 +713,9 @@ func (q *Queries) ListTasks(ctx context.Context, assigneeID pgtype.Int8) ([]List
 			&i.DueDate,
 			&i.SolvedDate,
 			&i.Version,
+			&i.SeriesID,
+			&i.OccurrenceDate,
+			&i.SeriesFreq,
 		); err != nil {
 			return nil, err
 		}

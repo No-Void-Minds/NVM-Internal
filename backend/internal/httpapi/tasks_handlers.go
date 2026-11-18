@@ -54,6 +54,9 @@ type taskSummary struct {
 	SubtaskDone  int          `json:"subtask_done"`
 	// PIC sub task yang membuat task ini masuk hasil filter PIC (revisi 15). Kosong tanpa filter PIC.
 	SubtaskPICMatches []idName `json:"subtask_pic_matches"`
+	// Revisi 19: frekuensi seri untuk penanda berulang; null bila tidak berulang.
+	SeriesFreq     *string `json:"series_freq"`
+	OccurrenceDate *string `json:"occurrence_date"`
 }
 
 type subtaskItem struct {
@@ -100,6 +103,7 @@ type taskDetail struct {
 	History        []historyItem      `json:"history"`
 	Attachments    []attachmentDetail `json:"attachments"`
 	Subtasks       []subtaskItem      `json:"subtasks"`
+	Series         *seriesItem        `json:"series"`
 }
 
 type createTaskRequest struct {
@@ -112,6 +116,7 @@ type createTaskRequest struct {
 	StartDate      string                `json:"start_date"`
 	DueDate        string                `json:"due_date"`
 	DeliverableURL string                `json:"deliverable_url"`
+	Schedule       *scheduleRequest      `json:"schedule"`
 }
 
 func (s *Server) createTask(c *gin.Context) {
@@ -130,6 +135,7 @@ func (s *Server) createTask(c *gin.Context) {
 		StartDate:      req.StartDate,
 		DueDate:        req.DueDate,
 		DeliverableURL: req.DeliverableURL,
+		Schedule:       req.Schedule.input(),
 	})
 	if err != nil {
 		s.writeTaskError(c, err)
@@ -179,6 +185,7 @@ func (s *Server) getTask(c *gin.Context) {
 		RequestDate:    t.RequestDate.Time,
 		DeliverableURL: t.DeliverableUrl.String,
 		IsMigrated:     t.IsMigrated,
+		Series:         seriesOf(d, time.Now()),
 		Can:            task.PermissionsFor(actor.Role, d.IsPIC(actor.ID), d.IsSubtaskPIC(actor.ID), task.Status(t.Status)),
 		History:        make([]historyItem, 0, len(d.History)),
 	}
@@ -378,4 +385,71 @@ func subtaskFields(reqs []subtaskTitleRequest) []task.SubtaskFields {
 		out = append(out, r.fields())
 	}
 	return out
+}
+
+type scheduleRequest struct {
+	Freq          string `json:"freq"`
+	SkipWeekend   bool   `json:"skip_weekend"`
+	Weekdays      []int  `json:"weekdays"`
+	MonthDay      int    `json:"month_day"`
+	EndDate       string `json:"end_date"`
+	ApplyToSeries bool   `json:"apply_to_series"`
+}
+
+// input: nil bila klien tidak mengirim bagian Jadwal, supaya klien lama tidak mengubah seri.
+func (r *scheduleRequest) input() *task.ScheduleInput {
+	if r == nil {
+		return nil
+	}
+	return &task.ScheduleInput{
+		Freq: r.Freq, SkipWeekend: r.SkipWeekend, Weekdays: r.Weekdays, MonthDay: r.MonthDay,
+		EndDate: r.EndDate, ApplyToSeries: r.ApplyToSeries,
+	}
+}
+
+type seriesItem struct {
+	ID          int64   `json:"id"`
+	Freq        string  `json:"freq"`
+	SkipWeekend bool    `json:"skip_weekend"`
+	Weekdays    []int16 `json:"weekdays"`
+	MonthDay    *int16  `json:"month_day"`
+	StartDate   *string `json:"start_date"`
+	EndDate     *string `json:"end_date"`
+	Active      bool    `json:"active"`
+	// NextDate: kemunculan berikutnya setelah hari ini dan setelah kemunculan task ini; null bila seri berhenti
+	// atau sudah habis. Dihitung server dengan aturan yang sama dengan pembuat kemunculan.
+	NextDate *string `json:"next_date"`
+	// Tenggat kemunculan berikutnya dari templat, untuk kalimat pratinjau. null berarti tanpa tenggat.
+	DueOffsetDays *int `json:"due_offset_days"`
+}
+
+func seriesOf(d task.Detail, now time.Time) *seriesItem {
+	sr := d.Series
+	if sr == nil {
+		return nil
+	}
+	out := &seriesItem{
+		ID: sr.ID, Freq: string(sr.Freq), SkipWeekend: sr.SkipWeekend, Weekdays: sr.Weekdays,
+		StartDate: dateString(sr.StartDate), EndDate: dateString(sr.EndDate), Active: sr.Active,
+		DueOffsetDays: task.TemplateDueOffset(sr.Template),
+	}
+	if sr.MonthDay.Valid {
+		out.MonthDay = &sr.MonthDay.Int16
+	}
+	if out.Weekdays == nil {
+		out.Weekdays = []int16{}
+	}
+	if next, ok := task.NextOccurrence(*sr, d.Task.OccurrenceDate, now); ok {
+		v := next.Format("2006-01-02")
+		out.NextDate = &v
+	}
+	return out
+}
+
+func seriesFreq(f sqlc.NullRecurrenceFreq) *string {
+	if !f.Valid {
+		return nil
+	}
+	v := string(f.RecurrenceFreq)
+	return &v
 }

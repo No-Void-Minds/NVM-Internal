@@ -66,6 +66,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 11n | Form Buat task dan tenggat sub task | Sub task punya tenggat; form Buat task mengisi sub task lengkap dalam satu simpan |
 | 11o | PIC sub task memindahkan task, form tambah dilipat | PIC sub task bisa memulai task dan menandai Ready; panel detail tidak langsung panjang |
 | 11p | Catatan hasil sub task | Detail sub task dibagi Arahan dan Hasil; PIC sub task menulis catatan hasil |
+| 11q | Task berulang | Task harian, mingguan, atau bulanan muncul sendiri sebagai task baru |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -968,6 +969,43 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 
 **Hasil:** kode selesai 2026-11-18, `./scripts/check.sh` lolos, `TestCleanResultNote` lolos. `TestSubtaskResultNote` (DB) menunggu `TEST_DATABASE_URL`. Migrasi `000014` belum dijalankan; curl dan e2e menunggu migrasi dan restart backend.
 
+## Sprint 11q: Task berulang
+
+**Tujuan:** revisi 19 Manajer. Task bisa diulang harian, mingguan, atau bulanan. Setiap kemunculan adalah task biasa dengan ID sendiri, dibuat otomatis oleh backend pada harinya.
+
+- [x] S11q-01 Migrasi `000015`: tipe `recurrence_freq`, tabel `task_series` (aturan, `start_date`, `end_date`, `active`, `template` JSONB, `created_by`), kolom `tasks.series_id` dan `tasks.occurrence_date`, unique `(series_id, occurrence_date)`. `deploy/sql/10-grants.sql` diberi catatan; daftar DELETE tidak berubah.
+- [x] S11q-02 `task/recurrence.go`: aturan hari kemunculan (`Rule.OccursOn`, `Rule.Next`, `Validate`) sebagai fungsi murni dengan tanggal yang disuntikkan.
+- [x] S11q-03 `task/series.go`: seri dibuat dari form Buat task atau Ubah task (task itu kemunculan pertama), diperbarui dari Ubah task bila dicentang, dihentikan lewat `POST /api/tasks/:id/stop-series`. `CreateDueOccurrences(now)` membuat kemunculan hari ini.
+- [x] S11q-04 Ticker di proses backend setiap 5 menit (`RunOccurrenceTicker`), dan perintah dev `server occurrences [--date YYYY-MM-DD]` yang memanggil fungsi yang sama dengan "hari ini" palsu tanpa mengubah jam sistem.
+- [x] S11q-05 API: `schedule` di buat dan ubah task (tidak dikirim berarti seri tidak disentuh), `series_freq` dan `occurrence_date` di papan dan Arsip, `series` (aturan, `next_date`, `due_offset_days`) di detail, filter `series` di Arsip.
+- [x] S11q-06 Frontend: bagian Jadwal (`ScheduleFields`) di bawah Deskripsi pada form Buat task dan Ubah task, penanda `RecurrenceBadge` (ikon panah melingkar plus teks) di kartu papan, baris Arsip, dan detail, aturan seri dan "Lihat kemunculan lain" di detail.
+- [x] S11q-07 Audit: `series_created`, `series_updated`, `series_stopped` oleh pengguna, `occurrence_created` oleh Sistem (user_id NULL). Masuk kategori Task di Audit Log dan riwayat task.
+- [x] S11q-08 Test unit aturan, test DB seri, dan bagian e2e `E2E_ONLY=schedule`.
+
+**Keputusan:**
+1. Kemunculan baru tetap dibuat walaupun kemunculan sebelumnya belum Completed.
+2. Tanggal bulanan yang tidak ada di bulan itu pindah ke hari terakhir bulan itu (31 jadi 30 April, 28 atau 29 Februari).
+3. Lampiran brief tidak ikut diulang. Tautan acuan sub task ikut. Tautan hasil, catatan hasil, deliverable task, dan centang tidak ikut, karena itu hasil pengerjaan kemunculan sebelumnya.
+4. Ubah task yang termasuk seri: centang "Pakai perubahan ini untuk kemunculan berikutnya" menyala secara bawaan. Kalau dicentang, aturan dan templat seri diperbarui dari isi task itu sesudah disimpan (judul, deskripsi, urgency, PIC, label, pemohon, jarak tenggat, sub task). Kemunculan yang sudah ada tidak berubah. Memilih "Tidak berulang" dengan centang menyala sama dengan menghentikan.
+5. Hak mengatur jadwal mengikuti hak membuat task: hanya Manajer (buat, ubah, hentikan).
+
+Keputusan teknis:
+- Templat disimpan sebagai JSONB di `task_series.template`, bukan tabel anak. Templat selalu dibaca dan ditulis utuh, tidak pernah dicari per isinya, dan bentuknya sama dengan input buat task. Tanpa tabel anak, mengganti daftar sub task templat cukup satu UPDATE, jadi app tidak butuh hak DELETE baru.
+- Seri tidak pernah dihapus, hanya dihentikan (`active = false`). Tidak ada GRANT DELETE untuk `task_series`.
+- Tanggal kemunculan pertama adalah tanggal mulai task, atau hari ini (officeTZ) bila kosong. Tanggal mulai setiap kemunculan berikutnya sama dengan tanggal kemunculannya.
+- Jarak tenggat = tenggat dikurangi tanggal kemunculan, dihitung dari task saat seri dibuat atau diperbarui. Tanpa tenggat berarti kemunculan juga tanpa tenggat. Tenggat sub task memakai jaraknya sendiri terhadap tanggal kemunculan yang sama.
+- Pembuat kemunculan hanya membuat kemunculan hari ini: hari yang terlewat (server mati, seri baru diaktifkan) tidak disusulkan. Seri yang `end_date`-nya sudah lewat dinonaktifkan oleh pembuat kemunculan.
+- Idempoten dan aman untuk dua instance: kemunculan yang sudah ada dilewati lebih dulu (supaya nomor task tidak terpakai sia-sia), dan bentrok unique `tasks_series_occurrence_key` dianggap "sudah dibuat".
+- Ticker berjalan di proses backend, bukan cron host, supaya tidak ada langkah deploy tambahan. Dijalankan sekali saat start lalu setiap 5 menit; galat dicatat di log dan tidak menghentikan server.
+- Isi templat yang sudah tidak sah tidak menggagalkan seri bila masih bisa dibuat: PIC task yang nonaktif dilewati (divisi mengikuti PIC pertama yang tersisa), label nonaktif dilewati, PIC sub task yang tidak lagi memenuhi syarat dikosongkan. Bila tidak ada satu pun PIC task yang aktif, kemunculan hari itu tidak dibuat dan galatnya tercatat di log.
+- Divisi kemunculan tidak disimpan di templat, tetapi dihitung dari PIC pertama seperti task biasa (keputusan Sprint 3), supaya tidak bisa berbeda dengan PIC-nya.
+- Kalimat pratinjau di form dihitung di frontend (`utils/recurrence.ts`) karena aturannya belum disimpan. Di detail, kemunculan berikutnya (`next_date`) dihitung server dengan fungsi yang sama dengan pembuat kemunculan.
+- "Lihat kemunculan lain" membuka Arsip dengan `series`, jadi hanya kemunculan yang sudah Completed yang tampil. Kemunculan yang masih berjalan ada di papan.
+
+**Selesai kalau:** `./scripts/check.sh` lolos, test di bawah lolos, migrasi `000015` dan `10-grants.sql` jalan di dev, curl membuat task berulang harian, dan `server occurrences --date <besok>` membuat tepat satu kemunculan (dijalankan dua kali tetap satu).
+
+**Hasil:** kode selesai 2026-11-18, `./scripts/check.sh` lolos. Unit test aturan (`TestRuleDaily`, `TestRuleWeekly`, `TestRuleMonthly`, `TestRuleStartEnd`, `TestRuleValidate`, `TestOfficeDate`) lolos. Test DB (`TestSeriesOccurrences`, `TestSeriesEndDate`, `TestSeriesUpdateTemplate`) menunggu `TEST_DATABASE_URL`. E2E `schedule` 20 pemeriksaan 0 gagal. Migrasi `000015` belum dijalankan; curl dan perintah dev menunggu migrasi dan restart backend.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -1140,9 +1178,10 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 16 | 2026-11-18 | Sub task punya tenggat yang tidak boleh melewati tenggat task. Form Buat task: Judul lalu Tenggat, dan sub task diisi lengkap dengan form yang sama dengan Tambah sub task | Sprint 11n |
 | 17 | 2026-11-18 | PIC sub task boleh memindahkan task ke On Progress dan ke Ready (dengan Ready gate). Form tambah sub task di panel detail dilipat di balik satu tombol | Sprint 11o |
 | 18 | 2026-11-18 | PIC sub task menulis catatan hasil (output di mana, dikirim ke mana, versi mana). Detail sub task dibagi Arahan dan Hasil | Sprint 11p |
+| 19 | 2026-11-18 | Task berulang harian, mingguan, atau bulanan. Setiap kemunculan task biasa dengan ID sendiri, dibuat otomatis pada harinya | Sprint 11q |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat kedelapan belas revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat kesembilan belas revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

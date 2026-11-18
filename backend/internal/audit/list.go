@@ -33,6 +33,8 @@ var Categories = map[string][]string{
 		"subtask_added", "subtask_removed", "subtask_renamed",
 		"subtask_assignees_changed", "subtask_reordered",
 		"subtask_checked", "subtask_unchecked",
+		// Revisi 19: task berulang.
+		"series_created", "series_updated", "series_stopped", "occurrence_created",
 	},
 }
 

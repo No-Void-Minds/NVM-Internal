@@ -20,6 +20,7 @@ type updateTaskRequest struct {
 	StartDate      string           `json:"start_date"`
 	DueDate        string           `json:"due_date"`
 	DeliverableURL string           `json:"deliverable_url"`
+	Schedule       *scheduleRequest `json:"schedule"`
 }
 
 func (s *Server) updateTask(c *gin.Context) {
@@ -42,6 +43,7 @@ func (s *Server) updateTask(c *gin.Context) {
 		StartDate:      req.StartDate,
 		DueDate:        req.DueDate,
 		DeliverableURL: req.DeliverableURL,
+		Schedule:       req.Schedule.input(),
 	})
 	if err != nil {
 		s.writeTaskError(c, err)
@@ -113,6 +115,19 @@ func (s *Server) deleteTask(c *gin.Context) {
 		return
 	}
 	if err := s.tasks.Delete(c.Request.Context(), taskActor(c), id, int32(v)); err != nil {
+		s.writeTaskError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// stopSeries menghentikan pengulangan task ini (revisi 19). Kemunculan yang sudah ada tidak berubah.
+func (s *Server) stopSeries(c *gin.Context) {
+	id, ok := taskID(c)
+	if !ok {
+		return
+	}
+	if err := s.tasks.StopSeries(c.Request.Context(), taskActor(c), id); err != nil {
 		s.writeTaskError(c, err)
 		return
 	}

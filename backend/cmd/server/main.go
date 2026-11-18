@@ -13,6 +13,7 @@ import (
 	"nvm-internal/internal/config"
 	"nvm-internal/internal/db"
 	"nvm-internal/internal/httpapi"
+	"nvm-internal/internal/task"
 )
 
 func main() {
@@ -27,6 +28,14 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "maintenance" {
 		if err := runMaintenance(cfg, log, os.Args[2:]); err != nil {
 			log.Error("maintenance gagal", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
+	// `server occurrences [--date YYYY-MM-DD]`: pembuat kemunculan task berulang sekali jalan (revisi 19).
+	if len(os.Args) > 1 && os.Args[1] == "occurrences" {
+		if err := runOccurrences(cfg, log, os.Args[2:]); err != nil {
+			log.Error("pembuat kemunculan gagal", "err", err)
 			os.Exit(1)
 		}
 		return
@@ -68,6 +77,10 @@ func run(cfg config.Config, log *slog.Logger) error {
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
+
+	// Revisi 19: kemunculan task berulang dibuat di dalam proses ini setiap 5 menit, bukan cron host, supaya
+	// tidak ada langkah deploy tambahan. Aman bila ada dua instance: pembuatnya idempoten.
+	go task.NewService(pool).RunOccurrenceTicker(ctx, log, 5*time.Minute)
 
 	serveErr := make(chan error, 1)
 	go func() {

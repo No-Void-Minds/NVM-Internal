@@ -19,7 +19,7 @@ INSERT INTO task_labels (task_id, label_id) VALUES (@task_id, @label_id);
 -- name: GetTaskDetail :one
 SELECT t.id, t.title, t.description, t.status, t.urgency, t.division_id, d.name AS division_name,
        t.requested_by, r.name AS requested_by_name, t.request_date, t.start_date, t.due_date,
-       t.solved_date, t.deliverable_url, t.is_migrated, t.version
+       t.solved_date, t.deliverable_url, t.is_migrated, t.version, t.series_id, t.occurrence_date
 FROM tasks t
 JOIN divisions d ON d.id = t.division_id
 JOIN users r ON r.id = t.requested_by
@@ -28,9 +28,11 @@ WHERE t.id = @id AND NOT t.is_deleted;
 -- name: ListTasks :many
 -- Daftar sederhana untuk Sprint 3; papan dengan filter lengkap dibuat di Sprint 4.
 SELECT t.id, t.title, t.status, t.urgency, t.division_id, d.name AS division_name,
-       t.start_date, t.due_date, t.solved_date, t.version
+       t.start_date, t.due_date, t.solved_date, t.version,
+       t.series_id, t.occurrence_date, s.freq AS series_freq
 FROM tasks t
 JOIN divisions d ON d.id = t.division_id
+LEFT JOIN task_series s ON s.id = t.series_id
 WHERE NOT t.is_deleted
   AND (sqlc.narg(assignee_id)::bigint IS NULL
        OR EXISTS (SELECT 1 FROM task_assignees tas
@@ -67,9 +69,11 @@ ORDER BY a.occurred_at DESC, a.id DESC;
 -- Kolomnya sama persis dengan ListTasks supaya hasilnya bisa dikonversi dan dilengkapi PIC serta label
 -- dengan kode yang sama. Completed hanya yang selesai sejak @completed_since; sisanya hanya ada di Arsip.
 SELECT t.id, t.title, t.status, t.urgency, t.division_id, d.name AS division_name,
-       t.start_date, t.due_date, t.solved_date, t.version
+       t.start_date, t.due_date, t.solved_date, t.version,
+       t.series_id, t.occurrence_date, s.freq AS series_freq
 FROM tasks t
 JOIN divisions d ON d.id = t.division_id
+LEFT JOIN task_series s ON s.id = t.series_id
 WHERE NOT t.is_deleted
   AND (t.status <> 'completed' OR t.solved_date >= @completed_since::timestamptz)
   -- Revisi 15: filter PIC juga cocok lewat PIC sub task. Dua EXISTS, jadi task yang cocok lewat dua jalur
@@ -125,10 +129,14 @@ ORDER BY lower(u.name);
 -- dan total didapat dari satu query. Pola @pattern sudah berisi tanda % dan wildcard pengguna sudah di-escape.
 SELECT t.id, t.title, t.status, t.urgency, t.division_id, d.name AS division_name,
        t.start_date, t.due_date, t.solved_date, t.version,
+       t.series_id, t.occurrence_date, s.freq AS series_freq,
        count(*) OVER () AS total_count
 FROM tasks t
 JOIN divisions d ON d.id = t.division_id
+LEFT JOIN task_series s ON s.id = t.series_id
 WHERE NOT t.is_deleted AND t.status = 'completed'
+  -- Revisi 19: "Lihat kemunculan lain" dari detail task berulang.
+  AND (sqlc.narg(series_id)::bigint IS NULL OR t.series_id = sqlc.narg(series_id)::bigint)
   -- Revisi 15: filter PIC juga cocok lewat PIC sub task. Dua EXISTS, jadi task yang cocok lewat dua jalur
   -- tetap satu baris. Blok ini sama di ListBoardTasks dan ListArchiveTasks.
   AND ((cardinality(@pic_ids::bigint[]) = 0 AND cardinality(@pic_usernames::text[]) = 0)

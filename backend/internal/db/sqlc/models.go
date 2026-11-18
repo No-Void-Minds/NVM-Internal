@@ -54,6 +54,49 @@ func (ns NullAttachmentKind) Value() (driver.Value, error) {
 	return string(ns.AttachmentKind), nil
 }
 
+type RecurrenceFreq string
+
+const (
+	RecurrenceFreqDaily   RecurrenceFreq = "daily"
+	RecurrenceFreqWeekly  RecurrenceFreq = "weekly"
+	RecurrenceFreqMonthly RecurrenceFreq = "monthly"
+)
+
+func (e *RecurrenceFreq) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = RecurrenceFreq(s)
+	case string:
+		*e = RecurrenceFreq(s)
+	default:
+		return fmt.Errorf("unsupported scan type for RecurrenceFreq: %T", src)
+	}
+	return nil
+}
+
+type NullRecurrenceFreq struct {
+	RecurrenceFreq RecurrenceFreq
+	Valid          bool // Valid is true if RecurrenceFreq is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullRecurrenceFreq) Scan(value interface{}) error {
+	if value == nil {
+		ns.RecurrenceFreq, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.RecurrenceFreq.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullRecurrenceFreq) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.RecurrenceFreq), nil
+}
+
 type TaskStatus string
 
 const (
@@ -238,6 +281,8 @@ type Task struct {
 	IsDeleted      bool
 	CreatedAt      pgtype.Timestamptz
 	UpdatedAt      pgtype.Timestamptz
+	SeriesID       pgtype.Int8
+	OccurrenceDate pgtype.Date
 }
 
 type TaskAssignee struct {
@@ -264,6 +309,21 @@ type TaskAttachment struct {
 type TaskLabel struct {
 	TaskID  string
 	LabelID int64
+}
+
+type TaskSeries struct {
+	ID          int64
+	Freq        RecurrenceFreq
+	SkipWeekend bool
+	Weekdays    []int16
+	MonthDay    pgtype.Int2
+	StartDate   pgtype.Date
+	EndDate     pgtype.Date
+	Active      bool
+	Template    []byte
+	CreatedBy   int64
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
 }
 
 type TaskSubtask struct {

@@ -3,6 +3,8 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import BaseDialog from './BaseDialog.vue'
 import FileDropzone from './FileDropzone.vue'
 import SubtaskEditor from './SubtaskEditor.vue'
+import ScheduleFields from './ScheduleFields.vue'
+import type { ScheduleForm } from '../utils/recurrence'
 import PicPicker from './PicPicker.vue'
 import {
   draftsFromTask,
@@ -13,7 +15,14 @@ import {
 } from '../utils/subtask'
 import { ApiError } from '../api/client'
 import { uploadAttachment } from '../api/attachments'
-import { createTask, setTaskLabels, updateTask, type TaskDetail } from '../api/tasks'
+import {
+  createTask,
+  setTaskLabels,
+  stopSeries,
+  updateTask,
+  type ScheduleBody,
+  type TaskDetail,
+} from '../api/tasks'
 import type { UserItem } from '../api/users'
 import type { LabelItem } from '../api/labels'
 import { formatBytes, precheck } from '../utils/attachment'
@@ -42,6 +51,14 @@ const dueDate = ref('')
 const deliverableUrl = ref('')
 const submitting = ref(false)
 const error = ref<string | null>(null)
+// Jadwal (revisi 19). applySeries hanya untuk Ubah task yang termasuk seri, bawaan menyala (keputusan 4).
+const schedule = ref<ScheduleForm>(emptySchedule())
+const applySeries = ref(true)
+const stopping = ref(false)
+
+function emptySchedule(): ScheduleForm {
+  return { freq: 'none', skip_weekend: false, weekdays: [], month_day: 0, end_date: '' }
+}
 // Berkas brief ditahan di browser sampai task tersimpan, karena unggahan butuh ID task.
 const pending = ref<File[]>([])
 const pendingError = ref<string | null>(null)
@@ -94,6 +111,17 @@ watch(
     startDate.value = t?.start_date ?? ''
     dueDate.value = t?.due_date ?? ''
     deliverableUrl.value = t?.deliverable_url ?? ''
+    const sr = t?.series
+    schedule.value = sr
+      ? {
+          freq: sr.freq,
+          skip_weekend: sr.skip_weekend,
+          weekdays: [...sr.weekdays],
+          month_day: sr.month_day ?? 0,
+          end_date: sr.end_date ?? '',
+        }
+      : emptySchedule()
+    applySeries.value = true
     pending.value = []
     pendingError.value = null
     detailsOpen.value = isEdit.value
@@ -216,7 +244,35 @@ function validate(): string | null {
   }
   const url = deliverableUrl.value.trim()
   if (url && !/^https?:\/\//i.test(url)) return 'Tautan deliverable harus diawali http:// atau https://.'
+  const sc = schedule.value
+  if (sc.freq === 'weekly' && sc.weekdays.length === 0)
+    return 'Pilih minimal satu hari untuk pengulangan mingguan.'
   return null
+}
+
+function scheduleBody(): ScheduleBody {
+  return { ...schedule.value, apply_to_series: applySeries.value }
+}
+
+// Seri yang sudah dihentikan tidak dikirim lagi: bagiannya hanya baca, dan kirimannya akan ditolak server.
+function scheduleForUpdate(t: TaskDetail): ScheduleBody | undefined {
+  if (t.series && !t.series.active) return undefined
+  return scheduleBody()
+}
+
+async function onStopSeries() {
+  const t = props.task
+  if (!t || stopping.value) return
+  stopping.value = true
+  error.value = null
+  try {
+    await stopSeries(t.id)
+    emit('saved', t.id, `Pengulangan ${t.id} dihentikan. Kemunculan yang sudah ada tidak berubah.`, false)
+  } catch (err) {
+    error.value = err instanceof ApiError ? err.message : 'Terjadi kesalahan yang tidak terduga. Coba lagi.'
+  } finally {
+    stopping.value = false
+  }
 }
 
 function sameIds(a: number[], b: number[]) {
@@ -247,6 +303,7 @@ async function submit() {
       const { version } = await updateTask(t.id, t.version, {
         ...fields,
         subtasks: toPayload(subtasks.value),
+        schedule: scheduleForUpdate(t),
       })
       // Label punya endpoint sendiri karena Staf PIC juga boleh mengubahnya; dikirim hanya bila berubah.
       if (
@@ -263,6 +320,7 @@ async function submit() {
         ...fields,
         label_ids: labelIds.value,
         subtasks: toCreatePayload(subtasks.value),
+        schedule: schedule.value.freq === 'none' ? undefined : scheduleBody(),
       })
       id = created.id
       subtaskIds = created.subtask_ids
@@ -378,6 +436,18 @@ const optionClass =
           class="mt-1 block w-full rounded-card border border-line bg-surface px-3 py-2"
         />
       </div>
+
+      <ScheduleFields
+        v-model="schedule"
+        v-model:apply="applySeries"
+        :start-date="startDate"
+        :due-date="dueDate"
+        :in-series="!!task?.series"
+        :series-active="task?.series?.active ?? false"
+        :occurrence-date="task?.occurrence_date ?? null"
+        :stopping="stopping"
+        @stop="onStopSeries"
+      />
 
       <details class="rounded-card border border-line" :open="detailsOpen" @toggle="onDetailsToggle">
         <summary class="flex min-h-11 cursor-pointer items-center px-3 font-medium">Detail tambahan</summary>

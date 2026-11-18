@@ -29,6 +29,9 @@ func (s *Server) archive(c *gin.Context) {
 	if f.LabelID, ok = queryID(c, "label"); !ok {
 		return
 	}
+	if f.SeriesID, ok = queryID(c, "series"); !ok {
+		return
+	}
 	if raw := c.Query("page"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		// Batas atas menjaga offset tetap muat di int32.

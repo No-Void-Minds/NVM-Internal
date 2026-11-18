@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import RecurrenceBadge from './RecurrenceBadge.vue'
 import SubtaskPicLine from './SubtaskPicLine.vue'
 import { computed } from 'vue'
 import type { BoardTask } from '../api/board'
@@ -30,7 +31,10 @@ const percent = computed(() =>
   >
     <div class="flex items-center justify-between gap-2 text-sm">
       <span class="specimen-tag">{{ task.id }}</span>
-      <UrgencyLabel :urgency="task.urgency" />
+      <span class="flex items-center gap-3">
+        <RecurrenceBadge v-if="task.series_freq" :freq="task.series_freq" />
+        <UrgencyLabel :urgency="task.urgency" />
+      </span>
     </div>
 
     <h3 class="mt-2 font-medium">

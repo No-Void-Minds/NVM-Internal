@@ -31,8 +31,10 @@ type ArchiveFilter struct {
 	PICUsernames []string
 	DivisionID   *int64
 	LabelID      *int64
-	Urgency      string
-	Keyword      string
+	// SeriesID: hanya kemunculan seri ini ("Lihat kemunculan lain", revisi 19).
+	SeriesID *int64
+	Urgency  string
+	Keyword  string
 	// SolvedFrom dan SolvedTo berupa tanggal WIB (YYYY-MM-DD), keduanya inklusif.
 	SolvedFrom string
 	SolvedTo   string
@@ -77,6 +79,7 @@ func (s *Service) Archive(ctx context.Context, f ArchiveFilter) (ArchivePage, er
 			ID: r.ID, Title: r.Title, Status: r.Status, Urgency: r.Urgency,
 			DivisionID: r.DivisionID, DivisionName: r.DivisionName,
 			StartDate: r.StartDate, DueDate: r.DueDate, SolvedDate: r.SolvedDate, Version: r.Version,
+			SeriesID: r.SeriesID, OccurrenceDate: r.OccurrenceDate, SeriesFreq: r.SeriesFreq,
 		}
 	}
 	if len(rows) > 0 {
@@ -157,6 +160,9 @@ func (f ArchiveFilter) params() (sqlc.ListArchiveTasksParams, error) {
 	if to != nil {
 		// Batas atas eksklusif di tengah malam berikutnya, supaya seluruh hari terakhir ikut.
 		p.SolvedTo = pgtype.Timestamptz{Time: to.AddDate(0, 0, 1), Valid: true}
+	}
+	if f.SeriesID != nil {
+		p.SeriesID = pgtype.Int8{Int64: *f.SeriesID, Valid: true}
 	}
 	return p, nil
 }

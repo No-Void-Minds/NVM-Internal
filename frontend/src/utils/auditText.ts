@@ -98,6 +98,14 @@ export function describeAudit(e: AuditEntry, divisionName: (id: number) => strin
       return `Menonaktifkan label ${target}`
     case 'task_created':
       return `Membuat task ${e.target?.id ?? ''}`
+    case 'series_created':
+      return `Menjadikan task ${e.target?.id ?? ''} berulang`
+    case 'series_updated':
+      return `Mengubah jadwal task berulang dari ${e.target?.id ?? ''}`
+    case 'series_stopped':
+      return `Menghentikan pengulangan task ${e.target?.id ?? ''}`
+    case 'occurrence_created':
+      return `Membuat kemunculan task berulang ${e.target?.id ?? ''}`
     case 'task_updated':
       return `Mengubah task ${e.target?.id ?? ''}`
     case 'task_deleted':

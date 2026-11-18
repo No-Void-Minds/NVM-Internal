@@ -16,6 +16,8 @@ export type ArchiveQuery = {
   to?: string
   sort?: ArchiveSort
   page?: number
+  // Revisi 19: hanya kemunculan satu seri ("Lihat kemunculan lain").
+  series?: number
 }
 
 export type ArchiveResult = { tasks: BoardTask[]; total: number; page: number; page_size: number }

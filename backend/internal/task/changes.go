@@ -26,6 +26,8 @@ type UpdateInput struct {
 	StartDate      string
 	DueDate        string
 	DeliverableURL string
+	// Schedule nil berarti klien tidak mengirim bagian Jadwal: seri tidak disentuh (revisi 19).
+	Schedule *ScheduleInput
 }
 
 // lockTask mengunci baris task sampai transaksi selesai dan memastikan versi yang dibaca klien masih
@@ -78,104 +80,112 @@ func (s *Service) Update(ctx context.Context, actor Actor, id string, in UpdateI
 	version := in.Version
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := sqlc.New(tx)
-		cur, err := lockTask(ctx, q, id, in.Version)
-		if err != nil {
-			return err
-		}
-		if _, err := eligiblePICs(ctx, q, picIDs); err != nil {
-			return err
-		}
-		oldPICs, err := q.ListAssigneeIDs(ctx, id)
-		if err != nil {
-			return err
-		}
-		oldSubs, err := loadSubtasks(ctx, q, id)
-		if err != nil {
-			return err
-		}
+		// Jadwal diterapkan sesudah isi task tertulis, di transaksi dan kunci versi yang sama, karena templat
+		// seri dibaca dari task yang sudah diubah. Fungsi dalam dipakai supaya "tidak ada perubahan" pada isi
+		// task tidak ikut melewati perubahan jadwal.
+		if err := func() error {
+			cur, err := lockTask(ctx, q, id, in.Version)
+			if err != nil {
+				return err
+			}
+			if _, err := eligiblePICs(ctx, q, picIDs); err != nil {
+				return err
+			}
+			oldPICs, err := q.ListAssigneeIDs(ctx, id)
+			if err != nil {
+				return err
+			}
+			oldSubs, err := loadSubtasks(ctx, q, id)
+			if err != nil {
+				return err
+			}
 
-		// Divisi dibaca dari database setelah PIC ditulis, bukan dari urutan form, supaya
-		// "PIC pertama" selalu sama dengan urutan pemasangan yang tersimpan.
-		division := cur.DivisionID
-		picChanged := len(without(picIDs, oldPICs)) > 0 || len(without(oldPICs, picIDs)) > 0
-		if picChanged {
-			if removed := without(oldPICs, picIDs); len(removed) > 0 {
-				if err := q.RemoveTaskAssignees(ctx, sqlc.RemoveTaskAssigneesParams{TaskID: id, UserIds: removed}); err != nil {
+			// Divisi dibaca dari database setelah PIC ditulis, bukan dari urutan form, supaya
+			// "PIC pertama" selalu sama dengan urutan pemasangan yang tersimpan.
+			division := cur.DivisionID
+			picChanged := len(without(picIDs, oldPICs)) > 0 || len(without(oldPICs, picIDs)) > 0
+			if picChanged {
+				if removed := without(oldPICs, picIDs); len(removed) > 0 {
+					if err := q.RemoveTaskAssignees(ctx, sqlc.RemoveTaskAssigneesParams{TaskID: id, UserIds: removed}); err != nil {
+						return err
+					}
+					// Sub task yang ditugaskan ke orang yang baru dilepas ikut dilepas, supaya tidak ada
+					// sub task yang menunggu orang yang sudah tidak ada di task ini (revisi 7).
+					if err := q.DropSubtaskAssigneesOfUsers(ctx, sqlc.DropSubtaskAssigneesOfUsersParams{
+						TaskID: id, UserIds: removed,
+					}); err != nil {
+						return err
+					}
+				}
+				if err := addTaskPICs(ctx, q, actor.ID, id, without(picIDs, oldPICs)); err != nil {
 					return err
 				}
-				// Sub task yang ditugaskan ke orang yang baru dilepas ikut dilepas, supaya tidak ada
-				// sub task yang menunggu orang yang sudah tidak ada di task ini (revisi 7).
-				if err := q.DropSubtaskAssigneesOfUsers(ctx, sqlc.DropSubtaskAssigneesOfUsersParams{
-					TaskID: id, UserIds: removed,
-				}); err != nil {
+				if d, err := q.FirstPICDivision(ctx, id); err == nil {
+					division = d
+				} else if !errors.Is(err, pgx.ErrNoRows) {
 					return err
 				}
 			}
-			if err := addTaskPICs(ctx, q, actor.ID, id, without(picIDs, oldPICs)); err != nil {
-				return err
+			subChanged := subtasksChanged(oldSubs, subs)
+			var newSubs []subtaskSnapshot
+			if subChanged {
+				if newSubs, err = syncSubtasks(ctx, q, id, actor.ID, oldSubs, subs); err != nil {
+					return err
+				}
 			}
-			if d, err := q.FirstPICDivision(ctx, id); err == nil {
-				division = d
-			} else if !errors.Is(err, pgx.ErrNoRows) {
-				return err
-			}
-		}
-		subChanged := subtasksChanged(oldSubs, subs)
-		var newSubs []subtaskSnapshot
-		if subChanged {
-			if newSubs, err = syncSubtasks(ctx, q, id, actor.ID, oldSubs, subs); err != nil {
-				return err
-			}
-		}
 
-		before, after := map[string]any{}, map[string]any{}
-		diff := func(key string, old, next any) {
-			if old != next {
-				before[key], after[key] = old, next
+			before, after := map[string]any{}, map[string]any{}
+			diff := func(key string, old, next any) {
+				if old != next {
+					before[key], after[key] = old, next
+				}
 			}
-		}
-		diff("title", cur.Title, f.title)
-		diff("description", cur.Description.String, f.description.String)
-		diff("urgency", string(cur.Urgency), string(f.urgency))
-		diff("start_date", dateOf(cur.StartDate), dateOf(f.startDate))
-		diff("due_date", dateOf(cur.DueDate), dateOf(f.dueDate))
-		diff("deliverable_url", cur.DeliverableUrl.String, f.deliverableURL.String)
-		diff("division_id", cur.DivisionID, division)
+			diff("title", cur.Title, f.title)
+			diff("description", cur.Description.String, f.description.String)
+			diff("urgency", string(cur.Urgency), string(f.urgency))
+			diff("start_date", dateOf(cur.StartDate), dateOf(f.startDate))
+			diff("due_date", dateOf(cur.DueDate), dateOf(f.dueDate))
+			diff("deliverable_url", cur.DeliverableUrl.String, f.deliverableURL.String)
+			diff("division_id", cur.DivisionID, division)
 
-		if len(after) == 0 && !subChanged && !picChanged {
+			if len(after) == 0 && !subChanged && !picChanged {
+				return nil
+			}
+
+			version, err = q.UpdateTaskFields(ctx, sqlc.UpdateTaskFieldsParams{
+				ID:             id,
+				Title:          f.title,
+				Description:    f.description,
+				Urgency:        f.urgency,
+				DivisionID:     division,
+				StartDate:      f.startDate,
+				DueDate:        f.dueDate,
+				DeliverableUrl: f.deliverableURL,
+			})
+			if err != nil {
+				return err
+			}
+			if len(after) > 0 {
+				if err := audit.Change(ctx, q, actor.auditActor(), "task_updated", "task", id, before, after); err != nil {
+					return err
+				}
+			}
+			if picChanged {
+				if err := audit.Change(ctx, q, actor.auditActor(), "task_pics_changed", "task", id,
+					map[string]any{"pic_ids": oldPICs}, map[string]any{"pic_ids": picIDs}); err != nil {
+					return err
+				}
+			}
+			for _, ev := range subtaskEvents(oldSubs, newSubs) {
+				if err := audit.Change(ctx, q, actor.auditActor(), ev.action, "task", id, ev.oldVal, ev.newVal); err != nil {
+					return err
+				}
+			}
 			return nil
-		}
-
-		version, err = q.UpdateTaskFields(ctx, sqlc.UpdateTaskFieldsParams{
-			ID:             id,
-			Title:          f.title,
-			Description:    f.description,
-			Urgency:        f.urgency,
-			DivisionID:     division,
-			StartDate:      f.startDate,
-			DueDate:        f.dueDate,
-			DeliverableUrl: f.deliverableURL,
-		})
-		if err != nil {
+		}(); err != nil {
 			return err
 		}
-		if len(after) > 0 {
-			if err := audit.Change(ctx, q, actor.auditActor(), "task_updated", "task", id, before, after); err != nil {
-				return err
-			}
-		}
-		if picChanged {
-			if err := audit.Change(ctx, q, actor.auditActor(), "task_pics_changed", "task", id,
-				map[string]any{"pic_ids": oldPICs}, map[string]any{"pic_ids": picIDs}); err != nil {
-				return err
-			}
-		}
-		for _, ev := range subtaskEvents(oldSubs, newSubs) {
-			if err := audit.Change(ctx, q, actor.auditActor(), ev.action, "task", id, ev.oldVal, ev.newVal); err != nil {
-				return err
-			}
-		}
-		return nil
+		return s.applySchedule(ctx, q, actor, id, in.Schedule)
 	})
 	return version, err
 }

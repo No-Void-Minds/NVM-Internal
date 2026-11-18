@@ -126,6 +126,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	managerOnly := requireRole(sqlc.UserRoleManager)
 	app.PUT("/tasks/:id", managerOnly, s.updateTask)
 	app.DELETE("/tasks/:id", managerOnly, s.deleteTask)
+	app.POST("/tasks/:id/stop-series", managerOnly, s.stopSeries)
 	app.PUT("/tasks/:id/labels", s.setTaskLabels)
 	app.PUT("/tasks/:id/deliverable", s.setTaskDeliverable)
 	app.POST("/tasks/:id/move", s.moveTask)

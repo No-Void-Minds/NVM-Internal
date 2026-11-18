@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/netip"
 	"regexp"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -48,14 +49,25 @@ type CreateInput struct {
 	StartDate      string
 	DueDate        string
 	DeliverableURL string
+	// Schedule nil atau Freq kosong berarti tidak berulang (revisi 19).
+	Schedule *ScheduleInput
 }
 
 type Service struct {
 	pool *pgxpool.Pool
+	// now bisa diganti di test supaya "hari ini" (officeTZ) tidak bergantung pada jam sistem (revisi 19).
+	now func() time.Time
 }
 
 func NewService(pool *pgxpool.Pool) *Service {
-	return &Service{pool: pool}
+	return &Service{pool: pool, now: time.Now}
+}
+
+func (s *Service) clock() time.Time {
+	if s.now == nil {
+		return time.Now()
+	}
+	return s.now()
 }
 
 // Create membuat task baru berstatus Requested. Hanya Manajer (BR-01). Sejak revisi 6 Manajer wajib memilih
@@ -124,15 +136,25 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (stri
 				return err
 			}
 		}
-		return audit.Change(ctx, q, actor.auditActor(), "task_created", "task", id, nil, map[string]any{
+		if err := audit.Change(ctx, q, actor.auditActor(), "task_created", "task", id, nil, map[string]any{
 			"title": f.title, "urgency": f.urgency, "pic_ids": picIDs, "subtasks": snaps, "label_ids": labels,
-		})
+		}); err != nil {
+			return err
+		}
+		// Task dari form adalah kemunculan pertama seri (revisi 19). Dibuat di transaksi yang sama, jadi aturan
+		// yang tidak sah membatalkan task-nya juga.
+		if in.Schedule.recurring() {
+			return s.startSeries(ctx, q, actor, id, in.Schedule)
+		}
+		return nil
 	})
 	return id, err
 }
 
 type Detail struct {
-	Task      sqlc.GetTaskDetailRow
+	Task sqlc.GetTaskDetailRow
+	// Series terisi bila task ini kemunculan sebuah seri (revisi 19).
+	Series    *sqlc.GetSeriesRow
 	Assignees []sqlc.ListTaskAssigneesRow
 	Subtasks  []SubtaskView
 	Labels    []sqlc.ListTaskLabelsRow
@@ -172,6 +194,13 @@ func (s *Service) Get(ctx context.Context, id string) (Detail, error) {
 	}
 	if d.History, err = q.ListTaskHistory(ctx, id); err != nil {
 		return Detail{}, err
+	}
+	if d.Task.SeriesID.Valid {
+		sr, err := q.GetSeries(ctx, d.Task.SeriesID.Int64)
+		if err != nil {
+			return d, err
+		}
+		d.Series = &sr
 	}
 	return d, nil
 }
