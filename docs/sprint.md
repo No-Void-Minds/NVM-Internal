@@ -62,6 +62,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 11j | Manajer membagi, bukan menerima | Sub task hanya bisa ditugaskan ke Staf (dibatalkan revisi 13) |
 | 11k | Manajer kembali boleh menjadi PIC sub task | Daftar "Dikerjakan" memuat Staf dan Manajer aktif |
 | 11l | Popover profil | Klik foto atau nama orang membuka kartu profil kecil |
+| 11m | Filter PIC ikut PIC sub task | Filter PIC, Arsip, dan Task saya memuat task yang sub task-nya dipegang orang itu |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -795,7 +796,7 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 
 **Keputusan:**
 - Yang boleh menyusun sub task tidak berubah: PIC task dan Manajer. Kalau orang luar juga boleh menambah sub task, daftar pekerjaan sebuah task bisa bertambah tanpa sepengetahuan siapa pun yang bertanggung jawab atasnya.
-- Orang luar yang ditugaskan tidak ikut menjadi PIC task. Daftar PIC task tetap keputusan Manajer, dan papan, filter PIC, serta divisi task tetap membacanya. Konsekuensinya: task itu tidak muncul di "Task saya" milik orang luar tadi, dan dia menemukannya lewat papan atau tautan langsung. Dicatat di sini supaya Sprint 13 tahu ini memang disengaja, bukan bug.
+- Orang luar yang ditugaskan tidak ikut menjadi PIC task. Daftar PIC task tetap keputusan Manajer, dan papan, filter PIC, serta divisi task tetap membacanya. Konsekuensinya: task itu tidak muncul di "Task saya" milik orang luar tadi, dan dia menemukannya lewat papan atau tautan langsung. Dicatat di sini supaya Sprint 13 tahu ini memang disengaja, bukan bug. **Diganti revisi 15 (Sprint 11m):** filter PIC dan "Task saya" sekarang ikut menghitung PIC sub task. Yang tetap: orang luar tidak menjadi PIC task.
 - Orang luar yang ditugaskan tetap boleh mencentang sub task-nya (aturan `canToggle` tidak berubah, dia PIC sub task), mengisi tautan hasil, dan mengurus berkas sub task itu. Tanpa itu penugasannya tidak ada gunanya.
 - Kandidatnya akun aktif berperan Staf atau Manajer, aturan yang sama dengan PIC task (`GetEligiblePICs`). Akun Admin tetap di luar, karena Admin mengelola sistem, bukan mengerjakan task.
 
@@ -867,6 +868,26 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 **Selesai kalau:** `./scripts/check.sh` lolos, curl `GET /api/people/:id` sebagai Staf, Manajer, dan Admin membalas tanpa field terlarang dan 404 untuk id yang tidak ada, dan `E2E_ONLY=popover node uji13.mjs` lolos di 360 dan 1280 px.
 
 **Hasil:** kode selesai 2026-11-17, `./scripts/check.sh` lolos. Tidak ada migrasi. Perlu restart backend; curl dan e2e popover menunggu backend jalan.
+
+## Sprint 11m: Filter PIC ikut PIC sub task
+
+**Tujuan:** revisi 15 Manajer. Filter PIC = X menampilkan task yang PIC task induknya X, atau yang punya sub task dengan PIC X. Berlaku di papan, Arsip, dan "Task saya". Keputusan revisi 11 soal "Task saya" (Sprint 11i) diganti.
+
+- [x] S11m-01 `ListBoardTasks` dan `ListArchiveTasks`: kondisi filter PIC menjadi EXISTS ke `task_assignees` OR EXISTS ke `task_subtasks` + `subtask_assignees`, untuk id maupun username. `ListTasks` (`GET /api/tasks?scope=mine`) ikut aturan yang sama.
+- [x] S11m-02 Query `ListSubtaskPICMatches`: PIC sub task yang cocok dengan filter dan bukan PIC task induk. Dikirim per task sebagai `subtask_pic_matches` (id dan nama) di papan dan Arsip; kosong bila filter PIC tidak aktif.
+- [x] S11m-03 Frontend: kartu papan dan baris Arsip menampilkan "Sub task: <nama>" (`SubtaskPicLine`, nama berupa `PersonChip`). Filter PIC di papan dan Arsip punya teks bantuan "Termasuk task yang sub task-nya dipegang orang ini.", terlihat saat filter dipakai dan selalu terbaca pembaca layar lewat `aria-describedby`.
+- [x] S11m-04 Test DB `TestBoardPICFilterIncludesSubtaskPIC` dan `TestArchivePICFilterIncludesSubtaskPIC` (Sprint 13 bagian B).
+
+**Keputusan:**
+- Dua EXISTS dalam satu OR, bukan JOIN. Task yang cocok lewat dua jalur tetap satu baris, jadi hitungan kolom papan (panjang tiap kolom) dan `total_count` Arsip (`count(*) OVER ()`) otomatis ikut aturan baru tanpa DISTINCT.
+- "Task saya" memakai jalur yang sama dengan filter PIC (`BoardFilter.PICIDs` berisi akun sendiri), jadi angka di kartu profil (`/me/task-counts`) ikut menghitung task yang sub task-nya dipegang orang itu.
+- Tidak ada migrasi. `subtask_assignees` sudah punya index `subtask_assignees_user_id_idx (user_id)` dan primary key `(subtask_id, user_id)`; `task_subtasks` dicari per task lewat unique `(task_id, position)`. EXISTS sub task masuk daftar `EXPLAIN ANALYZE` S13-06.
+- Hak akses tidak berubah. Task yang masuk hasil filter lewat sub task tetap hanya bisa diubah sesuai hak yang dihitung backend: orang luar yang hanya PIC sub task tetap bukan PIC task, jadi tidak bisa memindah status atau mengubah isi task induk.
+- Baris "Sub task: <nama>" tidak muncul untuk orang yang juga PIC task induk, karena namanya sudah ada di daftar PIC. Di "Task saya" baris ini juga muncul (berisi nama sendiri), sebagai penjelasan kenapa task itu ada di daftar.
+
+**Selesai kalau:** `./scripts/check.sh` lolos, test DB di atas lolos, dan curl papan dengan `pic=<username>` untuk orang yang hanya memegang sub task mengembalikan task itu dengan `subtask_pic_matches` berisi orang tersebut.
+
+**Hasil:** kode selesai 2026-11-18, `./scripts/check.sh` lolos. Tidak ada migrasi. Perlu restart backend. Test DB menunggu `TEST_DATABASE_URL`.
 
 ## Sprint 12: Persiapan deploy dan migrasi data
 
@@ -963,7 +984,7 @@ Revisi 5 (kode, dikerjakan 2026-11-16 di luar urutan karena dibutuhkan sebelum p
 - [ ] S13-03 Prompt Claude Code: perbaiki test lama yang rusak karena Sprint 7, lalu tulis test backend untuk izin, transisi status, sub task dan PIC turunan, profil dan foto, arsip dan pencarian, lampiran, centang sub task beserta syarat Ready.
 - [ ] S13-04 Test frontend untuk komponen dengan logika (pemilih PIC ganda, filter di URL, kartu profil).
 - [ ] S13-05 Peta AC-01 sampai AC-15 ke test atau langkah uji manual, dengan hasil PASS atau FAIL.
-- [ ] S13-06 Data dummy sekitar 2.000 task, ukur p95 dari dalam VM (bukan dari PC), cek `EXPLAIN ANALYZE` bahwa index pencarian terpakai. Target p95 di bawah 1 detik. Blok kata kunci di `ListArchiveTasks` dan `ListBoardTasks` memakai `OR` dengan banyak `EXISTS`, yang kemungkinan membuat index trigram tidak terpakai. Kalau lambat atau tidak memakai index, tulis ulang jadi `t.id IN (SELECT ... UNION SELECT ...)` di kedua query sekaligus.
+- [ ] S13-06 Data dummy sekitar 2.000 task, ukur p95 dari dalam VM (bukan dari PC), cek `EXPLAIN ANALYZE` bahwa index pencarian terpakai. Target p95 di bawah 1 detik. Blok kata kunci di `ListArchiveTasks` dan `ListBoardTasks` memakai `OR` dengan banyak `EXISTS`, yang kemungkinan membuat index trigram tidak terpakai. Kalau lambat atau tidak memakai index, tulis ulang jadi `t.id IN (SELECT ... UNION SELECT ...)` di kedua query sekaligus. Sejak revisi 15 daftar `EXPLAIN ANALYZE` juga memuat filter PIC (`pic=<username>`) di papan dan Arsip, karena kondisinya kini dua EXISTS (PIC task dan PIC sub task), serta `ListSubtaskPICMatches`.
 - [ ] S13-07 Review hasil bersama, perbaiki temuan, commit.
 - [ ] S13-08 Uji yang tidak bisa otomatis: ponsel sungguhan (kamera atau galeri, Safari, tempel gambar), pembaca layar, cek keyboard saja.
 - [ ] S13-09 Audit visual dan aksesibilitas hasil Sprint 10, Sprint 11, dan tombol Dashboard (dipindah dari S11-07), dengan Playwright dan `VITE_DASHBOARD_URL` terisi: `document.documentElement.scrollWidth <= window.innerWidth` di 360, 768, 1280, dan 1920 px untuk Admin, Manajer, dan Staf di semua halaman (perhatikan top bar 768 px: tombol Dashboard menambah sekitar 60 px), Tab dan Escape di panel, dialog, dan menu Lainnya, emulasi `prefers-reduced-motion` (tidak ada transisi), kontras dihitung, galat console 0, dan screenshot untuk dibandingkan dengan versi sebelum Sprint 11 (commit `8b36389`).
@@ -1036,9 +1057,10 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 12 | 2026-11-17 | Manajer tidak bisa ditugaskan di sub task. Dia tetap bisa membuat sub task dan menugaskannya ke orang lain | Sprint 11j |
 | 13 | 2026-11-17 | Revisi 12 dibatalkan. Manajer kembali boleh menjadi PIC sub task, dan tetap boleh membuat sub task serta menugaskan orang, sama seperti PIC task | Sprint 11k |
 | 14 | 2026-11-17 | Popover profil: klik foto atau nama orang membuka kartu kecil berisi foto, nama, divisi, jabatan, peran, dan tautan ke task-nya di papan | Sprint 11l |
+| 15 | 2026-11-18 | Filter PIC, Arsip, dan Task saya ikut menghitung PIC sub task. Mengganti keputusan revisi 11 soal Task saya | Sprint 11m |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat keempat belas revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat kelima belas revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

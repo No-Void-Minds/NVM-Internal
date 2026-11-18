@@ -40,6 +40,8 @@ export type TaskSummary = {
   labels: TaskLabel[]
   subtask_total: number
   subtask_done: number
+  // Revisi 15: PIC sub task yang cocok dengan filter PIC dan bukan PIC task. Kosong tanpa filter PIC.
+  subtask_pic_matches: { id: number; name: string }[]
 }
 
 export type TaskCan = {

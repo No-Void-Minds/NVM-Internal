@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SubtaskPicLine from './SubtaskPicLine.vue'
 import { computed } from 'vue'
 import type { BoardTask } from '../api/board'
 import { formatDay, formatMoment, isOverdue, statusLabel } from '../utils/task'
@@ -62,6 +63,8 @@ const percent = computed(() =>
         <div class="h-full bg-mark transition-[width] duration-200" :style="{ width: `${percent}%` }" />
       </div>
     </div>
+
+    <SubtaskPicLine :people="task.subtask_pic_matches" overlay class="mt-2" />
 
     <div class="mt-3 flex items-center justify-between gap-2 border-t border-line pt-2">
       <!-- Bulatan tidak lagi bertumpuk: area klik 44 px tiap bulatan butuh jarak 12 px di antara bulatan 32 px,

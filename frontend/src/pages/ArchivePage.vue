@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SubtaskPicLine from '../components/SubtaskPicLine.vue'
 import PersonChip from '../components/PersonChip.vue'
 import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import { computed, onMounted, ref, watch } from 'vue'
@@ -253,6 +254,7 @@ const buttonSecondary =
         <label for="archive-pic" class="sr-only">PIC</label>
         <select
           id="archive-pic"
+          aria-describedby="archive-pic-hint"
           :class="filterControl"
           :value="query.pic ?? ''"
           @change="setQuery({ pic: selected($event) || undefined })"
@@ -262,6 +264,10 @@ const buttonSecondary =
             {{ p.name }} ({{ p.username === staffUsername ? 'kamu' : p.division_name }})
           </option>
         </select>
+        <!-- Revisi 15: selalu dibaca pembaca layar; terlihat saat filter PIC dipakai. -->
+        <p id="archive-pic-hint" :class="query.pic ? 'mt-1 text-sm text-ink-muted' : 'sr-only'">
+          Termasuk task yang sub task-nya dipegang orang ini.
+        </p>
       </div>
       <div class="min-w-0">
         <label for="archive-division" class="sr-only">Divisi</label>
@@ -449,6 +455,7 @@ const buttonSecondary =
                   </li>
                 </ul>
                 <template v-else>Tanpa PIC</template>
+                <SubtaskPicLine :people="t.subtask_pic_matches" class="mt-1" />
               </td>
               <td class="py-3 px-4">{{ t.division.name }}</td>
               <td class="py-3 px-4"><UrgencyLabel :urgency="t.urgency" /></td>
@@ -488,6 +495,7 @@ const buttonSecondary =
                   </li>
                 </ul>
                 <template v-else>Tanpa PIC</template>
+                <SubtaskPicLine :people="t.subtask_pic_matches" class="mt-1" />
               </dd>
               <dt class="text-ink-muted">Divisi</dt>
               <dd>{{ t.division.name }}</dd>

@@ -86,6 +86,9 @@ func (s *Service) Archive(ctx context.Context, f ArchiveFilter) (ArchivePage, er
 	if err != nil {
 		return ArchivePage{}, err
 	}
+	if err := attachSubtaskPICs(ctx, q, summaries, params.PicIds, params.PicUsernames); err != nil {
+		return ArchivePage{}, err
+	}
 	return ArchivePage{Tasks: summaries, Total: total, Page: page}, nil
 }
 

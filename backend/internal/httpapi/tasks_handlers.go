@@ -52,6 +52,8 @@ type taskSummary struct {
 	Labels       []taskLabel  `json:"labels"`
 	SubtaskTotal int          `json:"subtask_total"`
 	SubtaskDone  int          `json:"subtask_done"`
+	// PIC sub task yang membuat task ini masuk hasil filter PIC (revisi 15). Kosong tanpa filter PIC.
+	SubtaskPICMatches []idName `json:"subtask_pic_matches"`
 }
 
 type subtaskItem struct {

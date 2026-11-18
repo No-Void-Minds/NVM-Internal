@@ -441,6 +441,7 @@ const buttonSecondary =
             <label for="filter-pic" class="sr-only">PIC</label>
             <select
               id="filter-pic"
+              aria-describedby="filter-pic-hint"
               :class="filterControl"
               :value="query.pic ?? ''"
               @change="setQuery({ pic: selected($event) || undefined })"
@@ -450,6 +451,10 @@ const buttonSecondary =
                 {{ p.name }} ({{ p.username === staffUsername ? 'kamu' : p.division_name }})
               </option>
             </select>
+            <!-- Revisi 15: selalu dibaca pembaca layar; terlihat saat filter PIC dipakai. -->
+            <p id="filter-pic-hint" :class="query.pic ? 'mt-1 text-sm text-ink-muted' : 'sr-only'">
+              Termasuk task yang sub task-nya dipegang orang ini.
+            </p>
           </div>
           <div class="min-w-0">
             <label for="filter-division" class="sr-only">Divisi</label>

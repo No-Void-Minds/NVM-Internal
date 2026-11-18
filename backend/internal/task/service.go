@@ -173,6 +173,9 @@ type Summary struct {
 	Labels       []sqlc.ListTaskLabelsRow
 	SubtaskTotal int
 	SubtaskDone  int
+	// SubtaskPICs: PIC sub task yang cocok dengan filter PIC dan bukan PIC task induk (revisi 15).
+	// Kosong bila filter PIC tidak aktif.
+	SubtaskPICs []sqlc.ListSubtaskPICMatchesRow
 }
 
 // List mengambil task yang belum dihapus. assigneeID diisi untuk tampilan "Task saya".
@@ -207,7 +210,10 @@ func attachPeopleAndLabels(ctx context.Context, q *sqlc.Queries, rows []sqlc.Lis
 	byTask := make(map[string]*Summary, len(rows))
 	out := make([]Summary, len(rows))
 	for i, r := range rows {
-		out[i] = Summary{Task: r, Assignees: []sqlc.ListTaskAssigneesRow{}, Labels: []sqlc.ListTaskLabelsRow{}}
+		out[i] = Summary{
+			Task: r, Assignees: []sqlc.ListTaskAssigneesRow{}, Labels: []sqlc.ListTaskLabelsRow{},
+			SubtaskPICs: []sqlc.ListSubtaskPICMatchesRow{},
+		}
 		byTask[r.ID] = &out[i]
 	}
 	for _, a := range assignees {

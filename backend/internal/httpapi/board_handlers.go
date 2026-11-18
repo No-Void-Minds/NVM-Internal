@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"nvm-internal/internal/db/sqlc"
 	"nvm-internal/internal/task"
 )
 
@@ -135,18 +136,27 @@ func queryID(c *gin.Context, key string) (*int64, bool) {
 func summaryOf(r task.Summary) taskSummary {
 	t := r.Task
 	return taskSummary{
-		ID:           t.ID,
-		Title:        t.Title,
-		Status:       string(t.Status),
-		Urgency:      string(t.Urgency),
-		Division:     idName{ID: t.DivisionID, Name: t.DivisionName},
-		StartDate:    dateString(t.StartDate),
-		DueDate:      dateString(t.DueDate),
-		SolvedDate:   timePtr(t.SolvedDate),
-		Version:      t.Version,
-		Assignees:    people(r.Assignees),
-		Labels:       labelsOf(r.Labels),
-		SubtaskTotal: r.SubtaskTotal,
-		SubtaskDone:  r.SubtaskDone,
+		ID:                t.ID,
+		Title:             t.Title,
+		Status:            string(t.Status),
+		Urgency:           string(t.Urgency),
+		Division:          idName{ID: t.DivisionID, Name: t.DivisionName},
+		StartDate:         dateString(t.StartDate),
+		DueDate:           dateString(t.DueDate),
+		SolvedDate:        timePtr(t.SolvedDate),
+		Version:           t.Version,
+		Assignees:         people(r.Assignees),
+		Labels:            labelsOf(r.Labels),
+		SubtaskTotal:      r.SubtaskTotal,
+		SubtaskDone:       r.SubtaskDone,
+		SubtaskPICMatches: subtaskPICMatches(r.SubtaskPICs),
 	}
+}
+
+func subtaskPICMatches(rows []sqlc.ListSubtaskPICMatchesRow) []idName {
+	out := make([]idName, 0, len(rows))
+	for _, p := range rows {
+		out = append(out, idName{ID: p.ID, Name: p.Name})
+	}
+	return out
 }

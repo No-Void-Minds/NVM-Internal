@@ -34,7 +34,11 @@ JOIN divisions d ON d.id = t.division_id
 WHERE NOT t.is_deleted
   AND (sqlc.narg(assignee_id)::bigint IS NULL
        OR EXISTS (SELECT 1 FROM task_assignees tas
-                  WHERE tas.task_id = t.id AND tas.user_id = sqlc.narg(assignee_id)::bigint))
+                  WHERE tas.task_id = t.id AND tas.user_id = sqlc.narg(assignee_id)::bigint)
+       -- Revisi 15: "Task saya" juga memuat task yang sub task-nya dipegang orang ini.
+       OR EXISTS (SELECT 1 FROM task_subtasks st
+                  JOIN subtask_assignees sa ON sa.subtask_id = st.id
+                  WHERE st.task_id = t.id AND sa.user_id = sqlc.narg(assignee_id)::bigint))
 ORDER BY t.created_at DESC;
 
 -- name: ListTaskAssignees :many
@@ -68,11 +72,18 @@ FROM tasks t
 JOIN divisions d ON d.id = t.division_id
 WHERE NOT t.is_deleted
   AND (t.status <> 'completed' OR t.solved_date >= @completed_since::timestamptz)
+  -- Revisi 15: filter PIC juga cocok lewat PIC sub task. Dua EXISTS, jadi task yang cocok lewat dua jalur
+  -- tetap satu baris. Blok ini sama di ListBoardTasks dan ListArchiveTasks.
   AND ((cardinality(@pic_ids::bigint[]) = 0 AND cardinality(@pic_usernames::text[]) = 0)
        OR EXISTS (SELECT 1 FROM task_assignees tas
                   JOIN users u ON u.id = tas.user_id
                   WHERE tas.task_id = t.id
-                    AND (tas.user_id = ANY(@pic_ids::bigint[]) OR lower(u.username) = ANY(@pic_usernames::text[]))))
+                    AND (tas.user_id = ANY(@pic_ids::bigint[]) OR lower(u.username) = ANY(@pic_usernames::text[])))
+       OR EXISTS (SELECT 1 FROM task_subtasks st
+                  JOIN subtask_assignees sa ON sa.subtask_id = st.id
+                  JOIN users u ON u.id = sa.user_id
+                  WHERE st.task_id = t.id
+                    AND (sa.user_id = ANY(@pic_ids::bigint[]) OR lower(u.username) = ANY(@pic_usernames::text[]))))
   AND (sqlc.narg(division_id)::bigint IS NULL OR t.division_id = sqlc.narg(division_id)::bigint)
   AND (sqlc.narg(label_id)::bigint IS NULL
        OR EXISTS (SELECT 1 FROM task_labels tl WHERE tl.task_id = t.id AND tl.label_id = sqlc.narg(label_id)::bigint))
@@ -118,11 +129,18 @@ SELECT t.id, t.title, t.status, t.urgency, t.division_id, d.name AS division_nam
 FROM tasks t
 JOIN divisions d ON d.id = t.division_id
 WHERE NOT t.is_deleted AND t.status = 'completed'
+  -- Revisi 15: filter PIC juga cocok lewat PIC sub task. Dua EXISTS, jadi task yang cocok lewat dua jalur
+  -- tetap satu baris. Blok ini sama di ListBoardTasks dan ListArchiveTasks.
   AND ((cardinality(@pic_ids::bigint[]) = 0 AND cardinality(@pic_usernames::text[]) = 0)
        OR EXISTS (SELECT 1 FROM task_assignees tas
                   JOIN users u ON u.id = tas.user_id
                   WHERE tas.task_id = t.id
-                    AND (tas.user_id = ANY(@pic_ids::bigint[]) OR lower(u.username) = ANY(@pic_usernames::text[]))))
+                    AND (tas.user_id = ANY(@pic_ids::bigint[]) OR lower(u.username) = ANY(@pic_usernames::text[])))
+       OR EXISTS (SELECT 1 FROM task_subtasks st
+                  JOIN subtask_assignees sa ON sa.subtask_id = st.id
+                  JOIN users u ON u.id = sa.user_id
+                  WHERE st.task_id = t.id
+                    AND (sa.user_id = ANY(@pic_ids::bigint[]) OR lower(u.username) = ANY(@pic_usernames::text[]))))
   AND (sqlc.narg(division_id)::bigint IS NULL OR t.division_id = sqlc.narg(division_id)::bigint)
   AND (sqlc.narg(label_id)::bigint IS NULL
        OR EXISTS (SELECT 1 FROM task_labels tl WHERE tl.task_id = t.id AND tl.label_id = sqlc.narg(label_id)::bigint))
@@ -153,3 +171,14 @@ ORDER BY
   t.id DESC
 LIMIT @row_limit::int OFFSET @row_offset::int;
 
+-- name: ListSubtaskPICMatches :many
+-- Revisi 15: PIC sub task yang membuat task masuk hasil filter PIC, untuk baris "Sub task: <nama>" di kartu.
+-- Orang yang juga PIC task induk tidak ikut, karena kartu sudah menampilkannya di daftar PIC.
+SELECT DISTINCT st.task_id, u.id, u.name
+FROM task_subtasks st
+JOIN subtask_assignees sa ON sa.subtask_id = st.id
+JOIN users u ON u.id = sa.user_id
+WHERE st.task_id = ANY(@task_ids::text[])
+  AND (sa.user_id = ANY(@pic_ids::bigint[]) OR lower(u.username) = ANY(@pic_usernames::text[]))
+  AND NOT EXISTS (SELECT 1 FROM task_assignees tas WHERE tas.task_id = st.task_id AND tas.user_id = sa.user_id)
+ORDER BY st.task_id, u.name;

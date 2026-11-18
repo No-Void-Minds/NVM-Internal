@@ -74,6 +74,9 @@ func (s *Service) Board(ctx context.Context, f BoardFilter, now time.Time) ([]Bo
 	if err != nil {
 		return nil, err
 	}
+	if err := attachSubtaskPICs(ctx, q, summaries, params.PicIds, params.PicUsernames); err != nil {
+		return nil, err
+	}
 
 	cols := make([]BoardColumn, len(boardOrder))
 	index := make(map[Status]int, len(boardOrder))
@@ -135,6 +138,29 @@ func (f BoardFilter) params(now time.Time) (sqlc.ListBoardTasksParams, error) {
 	}
 	p.Pattern = pattern
 	return p, nil
+}
+
+// attachSubtaskPICs mengisi Summary.SubtaskPICs, hanya bila filter PIC aktif.
+func attachSubtaskPICs(ctx context.Context, q *sqlc.Queries, list []Summary, picIDs []int64, picUsernames []string) error {
+	if len(list) == 0 || (len(picIDs) == 0 && len(picUsernames) == 0) {
+		return nil
+	}
+	ids := make([]string, len(list))
+	byTask := make(map[string]*Summary, len(list))
+	for i := range list {
+		ids[i] = list[i].Task.ID
+		byTask[ids[i]] = &list[i]
+	}
+	rows, err := q.ListSubtaskPICMatches(ctx, sqlc.ListSubtaskPICMatchesParams{
+		TaskIds: ids, PicIds: picIDs, PicUsernames: picUsernames,
+	})
+	if err != nil {
+		return err
+	}
+	for _, r := range rows {
+		byTask[r.TaskID].SubtaskPICs = append(byTask[r.TaskID].SubtaskPICs, r)
+	}
+	return nil
 }
 
 // People mengembalikan calon PIC untuk filter papan dan form task.
