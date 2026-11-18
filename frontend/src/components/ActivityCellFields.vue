@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, useId, watch } from 'vue'
-import { outputLink, saveLabel } from '../utils/activity'
+import { saveLabel } from '../utils/activity'
+import { outputLink } from '../utils/outputLink'
 
 // Dua isian satu slot jam: Aktivitas dan Output, dengan status simpan di bawahnya. Dipakai kartu di papan
 // task dan halaman Aktivitas, jadi aturan simpan otomatis dan teks statusnya hanya ada di satu tempat.

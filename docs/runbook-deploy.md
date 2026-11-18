@@ -176,7 +176,7 @@ Keadaan setelah deploy 2026-11-17 (Zero Trust, Networks, Tunnels):
    ```
 
    Dari komputer lain di LAN, `http://192.168.68.69:8094` harus gagal tersambung (port hanya di 127.0.0.1).
-6. Console browser bersih dari galat Content-Security-Policy di halaman Papan, Arsip, Profil (unggah foto), Pengguna, dan detail task (pratinjau lampiran gambar dan PDF, yang memakai `blob:`).
+6. Console browser bersih dari galat Content-Security-Policy di halaman Papan, Arsip, Profil (unggah foto), Pengguna, dan detail task (pratinjau lampiran gambar dan PDF, yang memakai `blob:`), serta dialog sel di Aktivitas yang Output-nya tautan file Drive (thumbnail dari `drive.google.com` dan `*.googleusercontent.com`).
 7. `https://novoidminds.xyz/api/board` tanpa login: 401 dengan `Cache-Control: no-store`.
 
 ## 8. Backup, restore, dan job harian

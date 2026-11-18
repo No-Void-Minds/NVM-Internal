@@ -13,7 +13,8 @@ const props = withDefaults(
   }>(),
   { variant: 'modal', tag: false, wide: false },
 )
-const emit = defineEmits<{ close: [] }>()
+// reason 'escape' membedakan tombol Escape dari tombol Tutup, untuk dialog yang Escape-nya bertahap.
+const emit = defineEmits<{ close: [reason?: 'escape'] }>()
 
 const el = ref<HTMLDialogElement | null>(null)
 const titleId = useId()
@@ -32,7 +33,7 @@ onMounted(sync)
 // Escape memicu event cancel; ditangkap supaya status buka-tutup tetap dikendalikan parent.
 function onCancel(e: Event) {
   e.preventDefault()
-  emit('close')
+  emit('close', 'escape')
 }
 
 const shape = computed(() =>

@@ -7,11 +7,11 @@ import PersonChip from '../components/PersonChip.vue'
 import UserAvatar from '../components/UserAvatar.vue'
 import BaseDialog from '../components/BaseDialog.vue'
 import ActivityCellView from '../components/ActivityCellView.vue'
+import ActivityOutputView from '../components/ActivityOutputView.vue'
 import { ApiError } from '../api/client'
 import { activityExportUrl, getActivityRange, saveActivity, type ActivityPerson } from '../api/activities'
 import { listDivisions, type DivisionItem } from '../api/divisions'
 import { useSessionStore } from '../stores/session'
-import { outputLink } from '../utils/activity'
 import {
   dayLabel,
   isDay,
@@ -137,7 +137,8 @@ function togglePerson(id: number) {
   setQuery({ orang: next.join(',') })
 }
 
-// Dialog sel: isi penuh satu sel, dan bagi Manajer sekaligus form ubahnya.
+// Dialog sel: selalu dibuka dalam mode lihat untuk semua peran. Manajer (can_edit dari server) bisa pindah ke
+// mode ubah lewat tombol Ubah; Batal dan simpan yang berhasil kembali ke mode lihat dengan isi terbaru.
 type CellDialog = {
   personId: number
   personName: string
@@ -151,13 +152,28 @@ type CellDialog = {
 const cellDialog = ref<CellDialog | null>(null)
 const cellSaving = ref(false)
 const cellError = ref('')
+const editing = ref(false)
+const draft = ref({ activity: '', output: '' })
+const editButton = ref<HTMLButtonElement | null>(null)
+const activityInput = ref<HTMLTextAreaElement | null>(null)
 let lastTrigger: HTMLElement | null = null
+
+const dirty = computed(
+  () =>
+    !!cellDialog.value &&
+    (draft.value.activity !== cellDialog.value.activity || draft.value.output !== cellDialog.value.output),
+)
+// Petunjuk ke papan task hanya berguna bagi Staf yang melihat isiannya sendiri.
+const ownCell = computed(
+  () => session.user?.role === 'staff' && cellDialog.value?.personId === session.user.id,
+)
 
 function openCell(p: ActivityPerson, date: string, slot: number, e: Event) {
   const cell = p.days[date]?.[slot - 1]
   if (!cell) return
   lastTrigger = e.currentTarget instanceof HTMLElement ? e.currentTarget : null
   cellError.value = ''
+  editing.value = false
   cellDialog.value = {
     personId: p.id,
     personName: p.name,
@@ -170,8 +186,34 @@ function openCell(p: ActivityPerson, date: string, slot: number, e: Event) {
   }
 }
 
+function startEdit() {
+  const d = cellDialog.value
+  if (!d) return
+  draft.value = { activity: d.activity, output: d.output }
+  cellError.value = ''
+  editing.value = true
+  void nextTick(() => activityInput.value?.focus())
+}
+
+function stopEdit() {
+  editing.value = false
+  cellError.value = ''
+  void nextTick(() => editButton.value?.focus())
+}
+
+// Escape bertahap di mode ubah: perubahan yang belum disimpan dibuang dulu dengan kembali ke mode lihat, baru
+// Escape berikutnya menutup dialog. Tombol Tutup selalu langsung menutup.
+function onCellClose(reason?: 'escape') {
+  if (reason === 'escape' && editing.value && dirty.value) {
+    stopEdit()
+    return
+  }
+  closeCell()
+}
+
 function closeCell() {
   cellDialog.value = null
+  editing.value = false
   // Fokus kembali ke sel yang dibuka, supaya posisi di tabel tidak hilang.
   void nextTick(() => lastTrigger?.focus())
 }
@@ -186,8 +228,8 @@ async function saveCell() {
       user_id: d.personId,
       date: d.date,
       slot: d.slot,
-      activity: d.activity,
-      output: d.output,
+      activity: draft.value.activity,
+      output: draft.value.output,
     })
     const person = people.value.find((p) => p.id === d.personId)
     const cells = person?.days[d.date]
@@ -199,7 +241,12 @@ async function saveCell() {
       // Ringkasan kolom ikut berubah tanpa memuat ulang seluruh tabel.
       if (terisiSebelum !== terisiSesudah) person.filled += terisiSesudah ? 1 : -1
     }
-    closeCell()
+    if (fresh) {
+      d.activity = fresh.activity
+      d.output = fresh.output
+      d.updatedBy = fresh.updated_by
+    }
+    stopEdit()
   } catch (err) {
     cellError.value = err instanceof ApiError ? err.message : 'Tidak bisa menyimpan. Coba lagi.'
   } finally {
@@ -257,11 +304,12 @@ const navButton =
 // Pola segmented sama dengan "Task saya" dan "Semua task" di papan (Sprint 11c).
 const segment =
   'inline-flex min-h-11 items-center px-4 font-medium first:rounded-l-card last:rounded-r-card aria-pressed:bg-accent aria-pressed:text-on-accent aria-pressed:outline aria-pressed:outline-1 aria-pressed:-outline-offset-1 aria-pressed:outline-mark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark'
-const headCell = 'sticky top-0 z-20 bg-surface px-3 py-2 text-left align-bottom'
-// Sudut kiri atas harus lengket ke dua arah sekaligus, jadi kelasnya ditulis sendiri: dua utility z-*
-// di satu elemen tidak pasti yang mana yang menang.
-const cornerCell = 'sticky top-0 left-0 z-30 w-28 bg-surface px-3 py-2 text-left align-bottom'
-const timeCell = 'sticky left-0 z-10 w-28 px-3 py-2 text-left font-medium whitespace-nowrap'
+// Tangga lapisan saat tabel digulir ke dua arah: sudut kiri atas (40) di atas kepala nama (30), kepala di atas
+// kolom jam (20), kolom jam di atas label hari (10). Semuanya berlatar opak supaya isi di belakangnya tidak
+// tembus. Kelas sudut ditulis sendiri: dua utility z-* di satu elemen tidak pasti yang mana yang menang.
+const headCell = 'sticky top-0 z-30 bg-surface px-3 py-2 text-left align-bottom'
+const cornerCell = 'sticky top-0 left-0 z-40 w-28 bg-surface px-3 py-2 text-left align-bottom'
+const timeCell = 'sticky left-0 z-20 w-28 px-3 py-2 text-left font-medium whitespace-nowrap'
 </script>
 
 <template>
@@ -410,7 +458,7 @@ const timeCell = 'sticky left-0 z-10 w-28 px-3 py-2 text-left font-medium whites
     </div>
 
     <p class="mt-3 font-medium">{{ label }}</p>
-    <p v-if="loadState === 'ready' && !canEdit" class="mt-1 text-sm text-ink-muted">
+    <p v-if="loadState === 'ready' && session.user?.role === 'staff'" class="mt-1 text-sm text-ink-muted">
       Ubah isianmu lewat tabel di papan task.
     </p>
 
@@ -484,14 +532,21 @@ const timeCell = 'sticky left-0 z-10 w-28 px-3 py-2 text-left font-medium whites
         </thead>
         <tbody v-for="date in dates" :key="date" :class="date === today ? 'bg-canvas' : ''">
           <tr>
+            <!-- Sel ini selebar tabel, jadi ia sendiri ikut bergulir ke samping. Yang lengket adalah isinya,
+                 dengan latar opak yang sama dengan barisnya. -->
             <th
               :colspan="1 + visible.length"
               scope="colgroup"
-              class="sticky left-0 border-y border-line px-3 py-2 text-left font-semibold"
-              :class="date === today ? 'border-l-4 border-l-mark bg-canvas' : 'bg-surface'"
+              class="border-y border-line py-2 text-left font-semibold"
+              :class="date === today ? 'bg-canvas' : 'bg-surface'"
             >
-              {{ dayLabel(date) }}
-              <span v-if="date === today" class="ml-2 font-normal text-ink-muted">hari ini</span>
+              <span
+                class="sticky left-0 z-10 inline-block px-3"
+                :class="date === today ? 'border-l-4 border-l-mark bg-canvas' : 'bg-surface'"
+              >
+                {{ dayLabel(date) }}
+                <span v-if="date === today" class="ml-2 font-normal text-ink-muted">hari ini</span>
+              </span>
             </th>
           </tr>
           <tr v-for="(time, i) in slots" :key="time" class="border-b border-line last:border-b-0">
@@ -506,7 +561,7 @@ const timeCell = 'sticky left-0 z-10 w-28 px-3 py-2 text-left font-medium whites
               <ActivityCellView
                 v-if="p.days[date]?.[i]"
                 :cell="p.days[date][i]"
-                :open-label="`${canEdit ? 'Ubah' : 'Lihat'} aktivitas ${p.name}, ${time}, ${dayLabel(date)}`"
+                :open-label="`Lihat aktivitas ${p.name}, ${time}, ${dayLabel(date)}`"
                 @open="openCell(p, date, i + 1, $event)"
               />
             </td>
@@ -518,16 +573,17 @@ const timeCell = 'sticky left-0 z-10 w-28 px-3 py-2 text-left font-medium whites
     <BaseDialog
       :open="!!cellDialog"
       :title="cellDialog ? `${cellDialog.personName}, ${cellDialog.time}` : ''"
-      @close="closeCell"
+      @close="onCellClose"
     >
       <div v-if="cellDialog" class="grid gap-4">
         <p class="text-sm text-ink-muted">{{ dayLabel(cellDialog.date) }}</p>
-        <form v-if="canEdit" class="grid gap-4" @submit.prevent="saveCell">
+        <form v-if="editing" class="grid gap-4" @submit.prevent="saveCell">
           <div class="grid gap-2">
             <label for="sel-aktivitas" class="font-medium">Aktivitas</label>
             <textarea
               id="sel-aktivitas"
-              v-model="cellDialog.activity"
+              ref="activityInput"
+              v-model="draft.activity"
               rows="4"
               maxlength="1000"
               class="field-sizing-content min-h-11 rounded-card border border-line bg-surface px-3 py-2"
@@ -537,20 +593,17 @@ const timeCell = 'sticky left-0 z-10 w-28 px-3 py-2 text-left font-medium whites
             <label for="sel-output" class="font-medium">Output</label>
             <textarea
               id="sel-output"
-              v-model="cellDialog.output"
+              v-model="draft.output"
               rows="4"
               maxlength="1000"
               class="field-sizing-content min-h-11 rounded-card border border-line bg-surface px-3 py-2"
             ></textarea>
           </div>
-          <p v-if="cellDialog.updatedBy" class="text-sm text-ink-muted">
-            Terakhir diubah {{ cellDialog.updatedBy }}.
-          </p>
           <p v-if="cellError" role="alert" class="rounded-card bg-danger-bg p-3 text-danger">
             {{ cellError }}
           </p>
           <div class="flex flex-wrap justify-end gap-2">
-            <button type="button" :class="navButton" @click="closeCell">Batal</button>
+            <button type="button" :class="navButton" @click="stopEdit">Batal</button>
             <button
               type="submit"
               :disabled="cellSaving"
@@ -567,23 +620,13 @@ const timeCell = 'sticky left-0 z-10 w-28 px-3 py-2 text-left font-medium whites
           </div>
           <div>
             <h3 class="font-medium">Output</h3>
-            <p class="mt-1 break-words whitespace-pre-line">
-              <a
-                v-if="outputLink(cellDialog.output)"
-                :href="outputLink(cellDialog.output) ?? undefined"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
-              >
-                {{ cellDialog.output }}
-              </a>
-              <template v-else>{{ cellDialog.output || 'Kosong' }}</template>
-            </p>
+            <ActivityOutputView :output="cellDialog.output" />
           </div>
-          <p v-if="cellDialog.updatedBy" class="text-sm text-ink-muted">
-            Terakhir diubah {{ cellDialog.updatedBy }}.
-          </p>
-          <p class="text-sm text-ink-muted">Ubah isianmu lewat tabel di papan task.</p>
+          <p v-if="cellDialog.updatedBy" class="text-sm text-ink-muted">diubah {{ cellDialog.updatedBy }}</p>
+          <p v-if="ownCell" class="text-sm text-ink-muted">Ubah isianmu lewat tabel di papan task.</p>
+          <div v-if="canEdit" class="flex flex-wrap justify-end gap-2">
+            <button ref="editButton" type="button" :class="navButton" @click="startEdit">Ubah</button>
+          </div>
         </template>
       </div>
     </BaseDialog>

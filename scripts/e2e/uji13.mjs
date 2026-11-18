@@ -14,7 +14,7 @@
 // ke satu sub task di database dev),
 // E2E_ONLY=schedule (bagian Jadwal di form Buat task, revisi 19; tidak menyimpan apa pun),
 // E2E_ONLY=activity (Aktivitas Harian, revisi 21; menulis satu sel aktivitas hari ini milik akun Staf dan
-// satu sel lewat dialog Manajer di database dev).
+// satu sel lewat dialog Manajer di database dev, output-nya tautan file Drive karangan).
 // Keluar dengan kode 1 bila ada yang gagal.
 import { chromium } from "playwright-core";
 
@@ -921,21 +921,55 @@ async function checkActivity(width) {
     .count();
   expect(baca > 0, "hak", "keterangan hanya baca tidak muncul");
 
-  // Kepala nama dan kolom jam tetap terlihat setelah tabel digulir.
-  const lengket = await page.evaluate(() => {
+  // Kepala nama, kolom jam, dan label hari tetap terlihat setelah tabel digulir 200 px ke bawah dan 300 px ke
+  // kanan. Sel pojok dan sel jam harus menutupi isi di belakangnya: elementFromPoint di tengahnya mengembalikan
+  // sel itu sendiri, bukan kepala nama atau isi sel yang tergulir ke bawahnya.
+  const lengket = await page.evaluate(async () => {
     const wadah = [...document.querySelectorAll("div")].find(
       (d) => d.scrollHeight > d.clientHeight + 40 && d.querySelector("table"),
     );
     if (!wadah) return { missing: true };
     wadah.scrollTop = 200;
-    wadah.scrollLeft = 120;
-    const kepala = wadah.querySelector("thead th:nth-child(2)");
-    const jam = wadah.querySelector("tbody th[scope='row']");
+    wadah.scrollLeft = 300;
+    wadah.scrollIntoView({ block: "start" });
+    await new Promise((r) =>
+      requestAnimationFrame(() => requestAnimationFrame(r)),
+    );
     const box = wadah.getBoundingClientRect();
+    const kepala = wadah.querySelector("thead th:nth-child(2)");
+    const pojok = wadah.querySelector("thead th:first-child");
+    const tampak = (el) => {
+      const b = el.getBoundingClientRect();
+      return (
+        b.top > box.top + pojok.getBoundingClientRect().height &&
+        b.bottom < Math.min(box.bottom, window.innerHeight)
+      );
+    };
+    const jamSemua = [...wadah.querySelectorAll("tbody th[scope='row']")];
+    const jam = jamSemua.find(tampak);
+    const kena = (el) => {
+      if (!el) return "tidak ada";
+      const b = el.getBoundingClientRect();
+      const h = document.elementFromPoint(
+        b.left + b.width / 2,
+        b.top + b.height / 2,
+      );
+      return h === el || el.contains(h)
+        ? "ok"
+        : `${h?.tagName} "${(h?.textContent || "").trim().slice(0, 30)}"`;
+    };
+    const label = [
+      ...wadah.querySelectorAll("th[scope='colgroup'] > span"),
+    ].find(tampak);
     return {
       atas: kepala.getBoundingClientRect().top - box.top,
-      kiri: jam.getBoundingClientRect().left - box.left,
+      kiri: (jam ?? jamSemua[0]).getBoundingClientRect().left - box.left,
       scrollTop: wadah.scrollTop,
+      scrollLeft: wadah.scrollLeft,
+      pojok: kena(pojok),
+      jam: kena(jam),
+      labelKiri: label ? label.getBoundingClientRect().left - box.left : null,
+      labelKena: kena(label),
     };
   });
   expect(
@@ -954,6 +988,26 @@ async function checkActivity(width) {
       "lengket",
       `kolom jam bergeser ${Math.round(lengket.kiri)} px setelah digulir ke samping`,
     );
+    expect(
+      lengket.pojok === "ok",
+      "pojok",
+      `tengah sel pojok tertutup ${lengket.pojok}`,
+    );
+    expect(
+      lengket.jam === "ok",
+      "pojok",
+      `tengah sel jam tertutup ${lengket.jam}`,
+    );
+    // Label hari hanya bisa diuji bila tabelnya memang bergulir ke samping di lebar ini.
+    if (lengket.scrollLeft > 0) {
+      expect(
+        lengket.labelKiri !== null &&
+          Math.abs(lengket.labelKiri) <= 4 &&
+          lengket.labelKena === "ok",
+        "label hari",
+        `label hari di ${lengket.labelKiri} px dari tepi wadah (${lengket.labelKena}) setelah digulir ${lengket.scrollLeft} px`,
+      );
+    }
   }
 
   // Dialog sel dengan keyboard: Enter membuka, Escape menutup, fokus kembali ke sel yang sama.
@@ -971,6 +1025,11 @@ async function checkActivity(width) {
   if (terbuka) {
     const isian = await page.locator("dialog[open] textarea").count();
     expect(isian === 0, "dialog", `Staf dapat ${isian} isian di dialog, mau 0`);
+    const ubah = await page
+      .locator("dialog[open]")
+      .getByRole("button", { name: "Ubah", exact: true })
+      .count();
+    expect(ubah === 0, "dialog", "Staf melihat tombol Ubah");
     await page.keyboard.press("Escape");
     await page
       .waitForFunction(() => !document.querySelector("dialog[open]"), null, {
@@ -987,6 +1046,59 @@ async function checkActivity(width) {
       `fokus kembali ke "${kembali}", mau "${labelSel}"`,
     );
   }
+
+  // Petunjuk "Ubah isianmu..." di dialog hanya untuk isian milik Staf itu sendiri (sel yang diisi di atas).
+  const petunjuk = "Ubah isianmu lewat tabel di papan task.";
+  const tutupDialog = async () => {
+    await page.keyboard.press("Escape");
+    await page
+      .waitForFunction(() => !document.querySelector("dialog[open]"), null, {
+        timeout: 3000,
+      })
+      .catch(() => {});
+  };
+  const selSendiri = page
+    .locator("tbody td", { hasText: teks })
+    .first()
+    .locator("button");
+  const labelSendiri = (await selSendiri.getAttribute("aria-label")) ?? "";
+  await selSendiri.click();
+  await page.waitForSelector("dialog[open]");
+  const adaPetunjuk = await page
+    .locator("dialog[open]")
+    .getByText(petunjuk)
+    .count();
+  expect(
+    adaPetunjuk === 1,
+    "petunjuk",
+    "petunjuk tidak muncul di isian sendiri",
+  );
+  await tutupDialog();
+  const nama = labelSendiri.replace(/^Lihat aktivitas /, "").split(",")[0];
+  const labelLain = await page.evaluate(
+    (n) =>
+      [...document.querySelectorAll("tbody td button")]
+        .map((b) => b.getAttribute("aria-label") ?? "")
+        .find((l) => !l.startsWith(`Lihat aktivitas ${n},`)) ?? "",
+    nama,
+  );
+  if (labelLain) {
+    await page.locator(`tbody td button[aria-label="${labelLain}"]`).click();
+    await page.waitForSelector("dialog[open]");
+    const lainPetunjuk = await page
+      .locator("dialog[open]")
+      .getByText(petunjuk)
+      .count();
+    expect(
+      lainPetunjuk === 0,
+      "petunjuk",
+      "petunjuk muncul di isian orang lain",
+    );
+    await tutupDialog();
+  } else
+    info.push(
+      "aktivitas petunjuk: hanya satu Staf tampil, isian orang lain tidak diuji",
+    );
 
   // Mode Hari: segmented berganti, tombol hari menyala, dan hanya satu kepala hari yang tersisa.
   await page.getByRole("button", { name: "Hari", exact: true }).click();
@@ -1044,38 +1156,177 @@ async function checkActivity(width) {
   await ctx.close();
 }
 
-// Manajer: dialog sel berisi form, dan isian yang disimpan dari dialog langsung terlihat di tabel.
-async function checkActivityManager() {
-  const { ctx, page, errors } = await open("manajer", 1280, "terang");
-  const where = (what) => `aktivitas manajer ${what}`;
+// Manajer: dialog dibuka dalam mode lihat, Ubah membuka form, Batal kembali ke mode lihat, Simpan kembali ke
+// mode lihat dengan isi terbaru, dan Escape di form yang berubah hanya kembali ke mode lihat.
+async function checkActivityManager(width) {
+  const { ctx, page, errors } = await open("manajer", width, "terang");
+  const where = (what) => `aktivitas manajer ${width} ${what}`;
   const expect = (cond, w, msg) => {
     checks++;
     if (!cond) fail(where(w), msg);
   };
   const teks = `E2E manajer ${Date.now()}`;
+  // Id file Drive karangan: thumbnail-nya pasti gagal, jadi yang diuji adalah area gambar yang disembunyikan.
+  const drive =
+    "https://drive.google.com/file/d/1E2EcontohTidakAda/view?usp=sharing";
+  const dialog = page.locator("dialog[open]");
+  const tombol = (name) => dialog.getByRole("button", { name, exact: true });
+  const fokus = () =>
+    page.evaluate(() => {
+      const el = document.activeElement;
+      return el?.id || el?.textContent?.trim() || "";
+    });
+  const textareaCount = () => dialog.locator("textarea").count();
 
   await page.goto(BASE + "/aktivitas");
   await page
     .waitForSelector("tbody td button", { timeout: 8000 })
     .catch(() => {});
   await audit(page, errors, where("halaman"));
-  await page.locator("tbody td button").first().click();
+  const sel = page.locator("tbody td button").first();
+  const labelSel = await sel.getAttribute("aria-label");
+  await sel.click();
   await page.waitForSelector("dialog[open]");
-  const isian = await page.locator("dialog[open] textarea").count();
-  expect(isian === 2, "dialog", `isian di dialog ${isian}, mau 2`);
-  await page.locator("dialog[open] #sel-aktivitas").fill(teks);
-  await page.getByRole("button", { name: "Simpan", exact: true }).click();
-  const tutup = await page
-    .waitForFunction(() => !document.querySelector("dialog[open]"), null, {
-      timeout: 5000,
+  expect(
+    (await textareaCount()) === 0,
+    "lihat",
+    "dialog tidak dibuka dalam mode lihat",
+  );
+  expect(
+    (await tombol("Ubah").count()) === 1,
+    "lihat",
+    "tombol Ubah tidak ada",
+  );
+  const petunjuk = await dialog
+    .getByText("Ubah isianmu lewat tabel di papan task.")
+    .count();
+  expect(petunjuk === 0, "lihat", "petunjuk Staf muncul untuk Manajer");
+
+  await tombol("Ubah").click();
+  expect((await textareaCount()) === 2, "ubah", "Ubah tidak membuka form");
+  expect(
+    (await fokus()) === "sel-aktivitas",
+    "ubah",
+    `fokus di "${await fokus()}", mau sel-aktivitas`,
+  );
+  await audit(page, errors, where("form"));
+  await tombol("Batal").click();
+  expect(
+    (await textareaCount()) === 0,
+    "batal",
+    "Batal tidak kembali ke mode lihat",
+  );
+  expect(
+    (await fokus()) === "Ubah",
+    "batal",
+    `fokus setelah Batal di "${await fokus()}", mau Ubah`,
+  );
+
+  await tombol("Ubah").click();
+  await dialog.locator("#sel-aktivitas").fill(teks);
+  await dialog.locator("#sel-output").fill(drive);
+  await tombol("Simpan").click();
+  const lihatLagi = await page
+    .waitForFunction(
+      () => document.querySelectorAll("dialog[open] textarea").length === 0,
+      null,
+      {
+        timeout: 5000,
+      },
+    )
+    .then(
+      () => true,
+      () => false,
+    );
+  expect(lihatLagi, "simpan", "Simpan tidak kembali ke mode lihat");
+  expect(
+    (await dialog.getByText(teks).count()) === 1,
+    "simpan",
+    "isi terbaru tidak tampil di dialog",
+  );
+  expect(
+    (await fokus()) === "Ubah",
+    "simpan",
+    `fokus setelah Simpan di "${await fokus()}", mau Ubah`,
+  );
+  expect(
+    (await dialog.getByText("File Drive", { exact: true }).count()) === 1,
+    "drive",
+    "label File Drive tidak ada",
+  );
+  const tautan = await dialog.locator(`a[href="${drive}"]`).getAttribute("rel");
+  expect(
+    tautan === "noopener noreferrer",
+    "drive",
+    `URL lengkap tidak tampil sebagai tautan (rel ${tautan})`,
+  );
+  // Thumbnail gagal: area gambarnya hilang, tanpa ikon gambar rusak.
+  const gambarHilang = await page
+    .waitForFunction(() => !document.querySelector("dialog[open] img"), null, {
+      timeout: 10000,
     })
     .then(
       () => true,
       () => false,
     );
-  expect(tutup, "simpan", "dialog tidak tertutup setelah Simpan");
-  const muncul = await page.getByText(teks).first().count();
-  expect(muncul > 0, "simpan", "isian dari dialog tidak muncul di tabel");
+  expect(gambarHilang, "drive", "area thumbnail yang gagal masih tampil");
+  await audit(page, errors, where("lihat drive"));
+
+  // Escape bertahap: form yang sudah berubah kembali ke mode lihat dulu, Escape berikutnya menutup.
+  await tombol("Ubah").click();
+  await dialog.locator("#sel-aktivitas").fill(teks + " belum disimpan");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(150);
+  const masihBuka = await page.locator("dialog[open]").count();
+  expect(
+    masihBuka === 1 && (await textareaCount()) === 0,
+    "escape",
+    "Escape pertama tidak kembali ke mode lihat",
+  );
+  expect(
+    (await dialog.getByText(teks + " belum disimpan").count()) === 0,
+    "escape",
+    "perubahan yang dibatalkan tampil",
+  );
+  await page.keyboard.press("Escape");
+  const tertutup = await page
+    .waitForFunction(() => !document.querySelector("dialog[open]"), null, {
+      timeout: 3000,
+    })
+    .then(
+      () => true,
+      () => false,
+    );
+  expect(tertutup, "escape", "Escape kedua tidak menutup dialog");
+  await page.waitForTimeout(150);
+  const kembali = await page.evaluate(
+    () => document.activeElement?.getAttribute("aria-label") ?? "",
+  );
+  expect(
+    kembali === labelSel,
+    "escape",
+    `fokus kembali ke "${kembali}", mau "${labelSel}"`,
+  );
+
+  const diTabel = await page
+    .locator("tbody td", { hasText: teks })
+    .locator("a", { hasText: "File Drive" })
+    .count();
+  expect(
+    diTabel === 1,
+    "tabel",
+    "sel di tabel tidak menampilkan isi baru dan chip File Drive",
+  );
+
+  const lebar = await page.evaluate(() => [
+    document.documentElement.scrollWidth,
+    window.innerWidth,
+  ]);
+  expect(
+    lebar[0] <= lebar[1],
+    "lebar",
+    `scrollWidth ${lebar[0]} > ${lebar[1]}`,
+  );
 
   checks++;
   if (errors.length)
@@ -1085,7 +1336,7 @@ async function checkActivityManager() {
 
 if (ONLY === "activity") {
   for (const w of [360, 768, 1280, 1920]) await checkActivity(w);
-  await checkActivityManager();
+  for (const w of [360, 1280]) await checkActivityManager(w);
 }
 
 await browser.close();
