@@ -116,6 +116,7 @@ type SubtaskView struct {
 	DoneAt         pgtype.Timestamptz
 	DoneBy         string
 	DueDate        pgtype.Date
+	ResultNote     string
 	Assignees      []sqlc.ListSubtaskAssigneesRow
 }
 
@@ -133,7 +134,8 @@ func loadSubtaskViews(ctx context.Context, q *sqlc.Queries, taskID string) ([]Su
 			ReferenceURL: r.ReferenceUrl, DeliverableURL: r.DeliverableUrl,
 			CreatedBy: r.CreatedBy.Int64, CreatedByName: r.CreatedByName.String,
 			DoneAt: r.DoneAt, DoneBy: r.DoneByName.String, DueDate: r.DueDate,
-			Assignees: []sqlc.ListSubtaskAssigneesRow{},
+			ResultNote: r.ResultNote.String,
+			Assignees:  []sqlc.ListSubtaskAssigneesRow{},
 		}
 		ids[i] = r.ID
 		index[r.ID] = i

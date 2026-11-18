@@ -113,12 +113,17 @@ func (s *Server) uploadSubtaskAttachment(c *gin.Context) {
 	if !ok {
 		return
 	}
-	s.receiveUpload(c, id, task.KindDeliverable, sid)
+	// ?kind=brief untuk berkas acuan, selain itu berkas hasil. Klien lama tanpa kind tetap mengunggah hasil.
+	kind := task.KindDeliverable
+	if c.Query("kind") == string(task.KindBrief) {
+		kind = task.KindBrief
+	}
+	s.receiveUpload(c, id, kind, sid)
 }
 
 func (s *Server) receiveUpload(c *gin.Context, id string, kind task.AttachmentKind, subtaskID int64) {
 	actor := taskActor(c)
-	if err := s.attachments.CheckUpload(c.Request.Context(), actor, id, kind); err != nil {
+	if err := s.attachments.CheckUpload(c.Request.Context(), actor, id, kind, subtaskID); err != nil {
 		s.writeAttachmentError(c, err)
 		return
 	}

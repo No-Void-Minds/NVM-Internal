@@ -195,7 +195,7 @@ func (q *Queries) FirstPICDivision(ctx context.Context, taskID string) (int64, e
 }
 
 const getSubtask = `-- name: GetSubtask :one
-SELECT id, title, description, reference_url, deliverable_url, done_at, created_by, due_date
+SELECT id, title, description, reference_url, deliverable_url, done_at, created_by, due_date, result_note
 FROM task_subtasks WHERE id = $1 AND task_id = $2
 `
 
@@ -213,6 +213,7 @@ type GetSubtaskRow struct {
 	DoneAt         pgtype.Timestamptz
 	CreatedBy      pgtype.Int8
 	DueDate        pgtype.Date
+	ResultNote     pgtype.Text
 }
 
 func (q *Queries) GetSubtask(ctx context.Context, arg GetSubtaskParams) (GetSubtaskRow, error) {
@@ -227,6 +228,7 @@ func (q *Queries) GetSubtask(ctx context.Context, arg GetSubtaskParams) (GetSubt
 		&i.DoneAt,
 		&i.CreatedBy,
 		&i.DueDate,
+		&i.ResultNote,
 	)
 	return i, err
 }
@@ -291,7 +293,7 @@ func (q *Queries) ListSubtaskAssignees(ctx context.Context, subtaskIds []int64) 
 
 const listSubtasks = `-- name: ListSubtasks :many
 SELECT st.id, st.task_id, st.title, st.description, st.reference_url, st.deliverable_url,
-       st.position, st.done_at, st.created_by, st.due_date,
+       st.position, st.done_at, st.created_by, st.due_date, st.result_note,
        u.name AS done_by_name, c.name AS created_by_name
 FROM task_subtasks st
 LEFT JOIN users u ON u.id = st.done_by
@@ -311,6 +313,7 @@ type ListSubtasksRow struct {
 	DoneAt         pgtype.Timestamptz
 	CreatedBy      pgtype.Int8
 	DueDate        pgtype.Date
+	ResultNote     pgtype.Text
 	DoneByName     pgtype.Text
 	CreatedByName  pgtype.Text
 }
@@ -335,6 +338,7 @@ func (q *Queries) ListSubtasks(ctx context.Context, taskIds []string) ([]ListSub
 			&i.DoneAt,
 			&i.CreatedBy,
 			&i.DueDate,
+			&i.ResultNote,
 			&i.DoneByName,
 			&i.CreatedByName,
 		); err != nil {
@@ -431,8 +435,8 @@ func (q *Queries) RemoveSubtaskAssignees(ctx context.Context, arg RemoveSubtaskA
 const renameSubtask = `-- name: RenameSubtask :exec
 UPDATE task_subtasks
 SET title = $1, description = $2, reference_url = $3, deliverable_url = $4,
-    due_date = $5
-WHERE id = $6 AND task_id = $7
+    due_date = $5, result_note = $6
+WHERE id = $7 AND task_id = $8
 `
 
 type RenameSubtaskParams struct {
@@ -441,11 +445,13 @@ type RenameSubtaskParams struct {
 	ReferenceUrl   string
 	DeliverableUrl string
 	DueDate        pgtype.Date
+	ResultNote     pgtype.Text
 	ID             int64
 	TaskID         string
 }
 
-// Nama, deskripsi, tautan, dan tenggat; urutan tidak ikut berubah saat PIC atau Manajer memperbaiki isinya.
+// Nama, deskripsi, tautan, tenggat, dan catatan hasil; urutan tidak ikut berubah saat PIC atau Manajer
+// memperbaiki isinya.
 func (q *Queries) RenameSubtask(ctx context.Context, arg RenameSubtaskParams) error {
 	_, err := q.db.Exec(ctx, renameSubtask,
 		arg.Title,
@@ -453,6 +459,7 @@ func (q *Queries) RenameSubtask(ctx context.Context, arg RenameSubtaskParams) er
 		arg.ReferenceUrl,
 		arg.DeliverableUrl,
 		arg.DueDate,
+		arg.ResultNote,
 		arg.ID,
 		arg.TaskID,
 	)

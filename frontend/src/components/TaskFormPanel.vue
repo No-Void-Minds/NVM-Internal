@@ -156,7 +156,7 @@ watch(
 onBeforeUnmount(() => document.removeEventListener('paste', onPaste))
 
 // Lampiran brief task dan lampiran acuan tiap sub task diunggah setelah task jadi, karena butuh id.
-// Lampiran sub task memakai endpoint lampiran sub task yang sudah ada (kind deliverable, Sprint 11f).
+// Lampiran sub task memakai endpoint lampiran sub task yang sudah ada, sebagai berkas acuan (kind brief, revisi 18).
 async function uploadPending(id: string, subtaskIds: number[]): Promise<string[]> {
   const failed: string[] = []
   const jobs: { file: File; subtaskId?: number; where: string }[] = [
@@ -172,7 +172,7 @@ async function uploadPending(id: string, subtaskIds: number[]): Promise<string[]
     try {
       await uploadAttachment(
         id,
-        job.subtaskId ? 'deliverable' : 'brief',
+        'brief',
         job.file,
         (f) => {
           if (progress.value) progress.value.fraction = f

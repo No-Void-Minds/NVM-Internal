@@ -69,6 +69,11 @@ func canAttach(ctx context.Context, q *sqlc.Queries, actor Actor, id string, kin
 // canAttachSubtask menambahkan satu jalan masuk di atas canAttach: orang yang ditugaskan di sub task itu
 // boleh menaruh dan menghapus berkasnya walau dia bukan PIC task (revisi 11).
 func canAttachSubtask(ctx context.Context, q *sqlc.Queries, actor Actor, taskID string, kind AttachmentKind, subtaskID int64) (bool, error) {
+	// Di sub task, berkas acuan (brief) dan berkas hasil (deliverable) memakai hak yang sama (revisi 18): PIC
+	// task, Manajer, dan PIC sub task itu. Brief task induk tetap hanya Manajer (FR-TASK-23).
+	if subtaskID != 0 {
+		kind = KindDeliverable
+	}
 	ok, err := canAttach(ctx, q, actor, taskID, kind)
 	if err != nil || ok || subtaskID == 0 {
 		return ok, err
@@ -76,7 +81,9 @@ func canAttachSubtask(ctx context.Context, q *sqlc.Queries, actor Actor, taskID 
 	return q.IsSubtaskAssignee(ctx, sqlc.IsSubtaskAssigneeParams{SubtaskID: subtaskID, UserID: actor.ID})
 }
 
-func (a *Attachments) CheckUpload(ctx context.Context, actor Actor, taskID string, kind AttachmentKind) error {
+// subtaskID diisi untuk berkas sub task, supaya PIC sub task dari luar task (revisi 11) tidak ditolak di sini
+// sebelum sampai ke Upload. Sebelum Sprint 11p pemeriksaan ini memakai canAttach saja dan menolak mereka.
+func (a *Attachments) CheckUpload(ctx context.Context, actor Actor, taskID string, kind AttachmentKind, subtaskID int64) error {
 	q := sqlc.New(a.pool)
 	active, err := q.TaskIsActive(ctx, taskID)
 	if err != nil {
@@ -85,7 +92,7 @@ func (a *Attachments) CheckUpload(ctx context.Context, actor Actor, taskID strin
 	if !active {
 		return ErrNotFound
 	}
-	ok, err := canAttach(ctx, q, actor, taskID, kind)
+	ok, err := canAttachSubtask(ctx, q, actor, taskID, kind, subtaskID)
 	if err != nil {
 		return err
 	}
@@ -100,7 +107,7 @@ func (a *Attachments) CheckUpload(ctx context.Context, actor Actor, taskID strin
 // subtaskID 0 berarti lampiran task induk. Kalau diisi, berkasnya menempel di sub task itu (revisi 8)
 // dan memakai hak yang sama dengan berkas deliverable: PIC task dan Manajer.
 func (a *Attachments) Upload(ctx context.Context, actor Actor, taskID string, kind AttachmentKind, subtaskID int64, originalName string, r io.Reader) (SavedAttachment, error) {
-	if err := a.CheckUpload(ctx, actor, taskID, kind); err != nil {
+	if err := a.CheckUpload(ctx, actor, taskID, kind, subtaskID); err != nil {
 		return SavedAttachment{}, err
 	}
 	tmp, err := a.store.CreateTemp()

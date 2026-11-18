@@ -27,8 +27,9 @@ export function uploadAttachment(
   subtaskId?: number,
 ): UploadHandle {
   const xhr = new XMLHttpRequest()
+  // Di sub task, brief berarti berkas acuan dan deliverable berkas hasil (revisi 18).
   const url = subtaskId
-    ? `/api/tasks/${taskId}/subtasks/${subtaskId}/attachments`
+    ? `/api/tasks/${taskId}/subtasks/${subtaskId}/attachments?kind=${kind}`
     : `/api/tasks/${taskId}/attachments?kind=${kind}`
   const promise = new Promise<TaskAttachment>((resolve, reject) => {
     xhr.open('POST', url)

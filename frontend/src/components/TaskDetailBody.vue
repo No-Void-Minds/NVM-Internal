@@ -42,6 +42,7 @@ const emit = defineEmits<{ close: []; changed: [message: string]; edit: [task: T
 // supaya urutannya tidak melompat.
 const titleTag = computed(() => (props.wide ? 'h2' : 'h3'))
 const sectionTag = computed(() => (props.wide ? 'h3' : 'h4'))
+const groupTag = computed(() => (props.wide ? 'h4' : 'h5'))
 
 const session = useSessionStore()
 const task = ref<TaskDetail | null>(null)
@@ -71,7 +72,11 @@ const editForm = ref<SubtaskForm>(emptyForm())
 // Tautan hasil diisi langsung di Detail, tanpa masuk mode Ubah, karena itu yang paling sering
 // diperbarui: satu sub task bisa berganti tautan hasil beberapa kali sampai disetujui.
 const resultLink = ref('')
+const resultNote = ref('')
 const savingLink = ref(false)
+// Sama dengan backend (maxResultNote). Penghitung muncul saat isian mendekati batas.
+const maxResultNote = 2000
+const noteNearLimit = computed(() => resultNote.value.length >= maxResultNote - 200)
 // Calon PIC sub task adalah semua akun aktif, bukan hanya PIC task (revisi 11), jadi daftarnya diambil
 // dari /people. Sekali per panel: isinya jarang berubah dan dipakai semua baris sub task.
 const people = ref<Person[]>([])
@@ -255,7 +260,7 @@ async function submitNewSubtask() {
     const failed: string[] = []
     for (const file of f.files) {
       try {
-        await uploadAttachment(t.id, 'deliverable', file, () => {}, id).promise
+        await uploadAttachment(t.id, 'brief', file, () => {}, id).promise
       } catch (err) {
         failed.push(`${file.name} (${messageOf(err)})`)
       }
@@ -481,14 +486,21 @@ const subtaskPercent = computed(() => {
 function toggleDetail(s: TaskSubtask) {
   openSub.value = openSub.value === s.id ? null : s.id
   resultLink.value = s.deliverable_url
+  resultNote.value = s.result_note
   rowErrors.value = { ...rowErrors.value, [s.id]: '' }
 }
 
-// Menyimpan tautan hasil saja; isi lain dikirim ulang apa adanya supaya tidak tertimpa kosong.
-async function saveResultLink(s: TaskSubtask) {
+// Catatan hasil dan tautan hasil disimpan dalam satu permintaan (revisi 18). Isi lain dikirim ulang apa adanya
+// supaya tidak tertimpa kosong.
+async function saveResult(s: TaskSubtask) {
   const t = task.value
   const link = resultLink.value.trim()
-  if (!t || savingLink.value || link === s.deliverable_url) return
+  const note = resultNote.value.trim()
+  if (!t || savingLink.value) return
+  if (link === s.deliverable_url && note === s.result_note) {
+    announce.value = 'Tidak ada perubahan hasil.'
+    return
+  }
   savingLink.value = true
   rowErrors.value = { ...rowErrors.value, [s.id]: '' }
   try {
@@ -499,14 +511,27 @@ async function saveResultLink(s: TaskSubtask) {
       deliverable_url: link,
       pic_id: s.assignees[0]?.id ?? 0,
       due_date: s.due_date ?? '',
+      result_note: note,
     })
-    announce.value = link ? 'Tautan hasil disimpan.' : 'Tautan hasil dihapus.'
+    announce.value = 'Hasil disimpan.'
     await load(true)
   } catch (err) {
     rowErrors.value = { ...rowErrors.value, [s.id]: messageOf(err) }
   } finally {
     savingLink.value = false
   }
+}
+
+function filesOf(s: TaskSubtask, kind: 'brief' | 'deliverable') {
+  return s.attachments.filter((a) => a.kind === kind)
+}
+
+function hasArahan(s: TaskSubtask): boolean {
+  return !!s.description || !!s.reference_url || filesOf(s, 'brief').length > 0
+}
+
+function hasHasil(s: TaskSubtask): boolean {
+  return !!s.result_note || !!s.deliverable_url || filesOf(s, 'deliverable').length > 0
 }
 
 // Dua tautan sub task: acuan dari yang menugaskan, hasil dari yang mengerjakan (revisi 10).
@@ -545,6 +570,8 @@ const linkButton =
   'inline-flex min-h-11 items-center rounded-card px-2 text-sm font-medium hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark'
 const buttonPrimary =
   'inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-on-accent hover:bg-accent-hover active:translate-y-px disabled:opacity-60'
+const linkChip =
+  'inline-flex min-h-11 max-w-full items-center gap-2 rounded-card border border-line bg-surface px-3 text-sm font-medium hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark'
 const buttonSecondary =
   'inline-flex min-h-11 items-center rounded-card border border-line px-4 font-medium hover:bg-canvas active:translate-y-px disabled:opacity-60'
 </script>
@@ -796,62 +823,138 @@ const buttonSecondary =
                 </div>
 
                 <div v-if="openSub === s.id" :id="`sub-detail-${s.id}`" class="mt-3 ml-8 space-y-3">
-                  <p v-if="s.description" class="text-sm whitespace-pre-line break-words">
-                    {{ s.description }}
-                  </p>
-                  <p v-else class="text-sm text-ink-muted">Belum ada deskripsi.</p>
-
-                  <a
-                    v-for="l in subtaskLinks(s)"
-                    :key="l.url"
-                    :href="l.url"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="inline-flex min-h-11 max-w-full items-center gap-2 rounded-card border border-line bg-surface px-3 text-sm font-medium hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
-                  >
-                    <svg
-                      aria-hidden="true"
-                      viewBox="0 0 24 24"
-                      class="size-5 shrink-0"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.75"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
+                  <!-- Revisi 18: arahan dari yang menugaskan dan hasil dari yang mengerjakan dipisah, supaya jelas
+                       mana bahan kerja dan mana keluarannya. Kelompok kosong tetap tampil supaya tempatnya jelas. -->
+                  <section :aria-labelledby="`sub-arahan-${s.id}`" class="space-y-2">
+                    <component :is="groupTag" :id="`sub-arahan-${s.id}`" class="text-sm font-semibold">
+                      Arahan
+                    </component>
+                    <p v-if="s.description" class="text-sm whitespace-pre-line break-words">
+                      {{ s.description }}
+                    </p>
+                    <a
+                      v-if="s.reference_url"
+                      :href="s.reference_url"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      :class="linkChip"
                     >
-                      <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
-                    </svg>
-                    <span class="shrink-0 text-ink-muted">{{ l.label }}</span>
-                    <span class="truncate">{{ l.url }}</span>
-                  </a>
-
-                  <form
-                    v-if="s.can_edit"
-                    class="flex flex-wrap items-center gap-2"
-                    @submit.prevent="saveResultLink(s)"
-                  >
-                    <label :for="`sub-result-${s.id}`" class="sr-only">Tautan hasil sub task</label>
-                    <input
-                      :id="`sub-result-${s.id}`"
-                      v-model="resultLink"
-                      type="url"
-                      maxlength="2000"
-                      inputmode="url"
-                      placeholder="Tautan hasil, misalnya Figma atau Drive"
-                      class="min-h-11 min-w-0 flex-1 rounded-card border border-line bg-surface px-3 text-sm"
+                      <svg
+                        aria-hidden="true"
+                        viewBox="0 0 24 24"
+                        class="size-5 shrink-0"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.75"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path
+                          d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"
+                        />
+                      </svg>
+                      <span class="shrink-0 text-ink-muted">Acuan</span>
+                      <span class="truncate">{{ s.reference_url }}</span>
+                    </a>
+                    <p v-if="!hasArahan(s)" class="text-sm text-ink-muted">Belum ada arahan tambahan.</p>
+                    <SubtaskFiles
+                      :task-id="task.id"
+                      :subtask-id="s.id"
+                      :items="filesOf(s, 'brief')"
+                      :can-manage="s.can_attach"
+                      kind="brief"
+                      group="arahan"
+                      @changed="onSubtaskFiles"
                     />
-                    <button type="submit" :class="buttonSecondary" :disabled="savingLink">
-                      {{ savingLink ? 'Menyimpan...' : 'Simpan tautan' }}
-                    </button>
-                  </form>
+                  </section>
 
-                  <SubtaskFiles
-                    :task-id="task.id"
-                    :subtask-id="s.id"
-                    :items="s.attachments"
-                    :can-manage="task.can.edit_deliverable"
-                    @changed="onSubtaskFiles"
-                  />
+                  <section :aria-labelledby="`sub-hasil-${s.id}`" class="space-y-2">
+                    <component :is="groupTag" :id="`sub-hasil-${s.id}`" class="text-sm font-semibold">
+                      Hasil
+                    </component>
+                    <p v-if="!hasHasil(s)" class="text-sm text-ink-muted">Belum ada hasil.</p>
+                    <!-- Teks biasa dengan baris baru dipertahankan; tidak pernah v-html. -->
+                    <p v-if="s.result_note && !s.can_edit" class="text-sm whitespace-pre-line break-words">
+                      {{ s.result_note }}
+                    </p>
+                    <a
+                      v-if="s.deliverable_url"
+                      :href="s.deliverable_url"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      :class="linkChip"
+                    >
+                      <svg
+                        aria-hidden="true"
+                        viewBox="0 0 24 24"
+                        class="size-5 shrink-0"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.75"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path
+                          d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"
+                        />
+                      </svg>
+                      <span class="shrink-0 text-ink-muted">Hasil</span>
+                      <span class="truncate">{{ s.deliverable_url }}</span>
+                    </a>
+
+                    <form v-if="s.can_edit" class="space-y-2" novalidate @submit.prevent="saveResult(s)">
+                      <div>
+                        <label :for="`sub-note-${s.id}`" class="block text-sm text-ink-muted"
+                          >Catatan hasil</label
+                        >
+                        <textarea
+                          :id="`sub-note-${s.id}`"
+                          v-model="resultNote"
+                          rows="3"
+                          :maxlength="maxResultNote"
+                          placeholder="Contoh: file final di folder Drive Konten/Desember, versi B dipakai."
+                          :aria-describedby="noteNearLimit ? `sub-note-count-${s.id}` : undefined"
+                          class="mt-1 block w-full rounded-card border border-line bg-surface p-3 text-sm"
+                        ></textarea>
+                        <p
+                          v-if="noteNearLimit"
+                          :id="`sub-note-count-${s.id}`"
+                          class="mt-1 text-right text-sm"
+                          :class="resultNote.length >= maxResultNote ? 'text-danger' : 'text-ink-muted'"
+                          aria-live="polite"
+                        >
+                          {{ resultNote.length }} dari {{ maxResultNote }} karakter
+                        </p>
+                      </div>
+                      <div>
+                        <label :for="`sub-result-${s.id}`" class="block text-sm text-ink-muted"
+                          >Tautan hasil</label
+                        >
+                        <input
+                          :id="`sub-result-${s.id}`"
+                          v-model="resultLink"
+                          type="url"
+                          maxlength="2000"
+                          inputmode="url"
+                          placeholder="https://"
+                          class="mt-1 block min-h-11 w-full rounded-card border border-line bg-surface px-3 text-sm"
+                        />
+                      </div>
+                      <button type="submit" :class="buttonSecondary" :disabled="savingLink">
+                        {{ savingLink ? 'Menyimpan...' : 'Simpan hasil' }}
+                      </button>
+                    </form>
+
+                    <SubtaskFiles
+                      :task-id="task.id"
+                      :subtask-id="s.id"
+                      :items="filesOf(s, 'deliverable')"
+                      :can-manage="s.can_attach"
+                      kind="deliverable"
+                      group="hasil"
+                      @changed="onSubtaskFiles"
+                    />
+                  </section>
 
                   <div v-if="s.can_edit" class="flex gap-1">
                     <button type="button" :class="linkButton" @click="startEdit(s)">Ubah</button>

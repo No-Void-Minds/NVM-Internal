@@ -280,6 +280,7 @@ type TaskSubtask struct {
 	DeliverableUrl string
 	ReferenceUrl   string
 	DueDate        pgtype.Date
+	ResultNote     pgtype.Text
 }
 
 type User struct {

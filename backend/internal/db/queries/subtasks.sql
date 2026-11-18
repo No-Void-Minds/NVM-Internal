@@ -1,6 +1,6 @@
 -- name: ListSubtasks :many
 SELECT st.id, st.task_id, st.title, st.description, st.reference_url, st.deliverable_url,
-       st.position, st.done_at, st.created_by, st.due_date,
+       st.position, st.done_at, st.created_by, st.due_date, st.result_note,
        u.name AS done_by_name, c.name AS created_by_name
 FROM task_subtasks st
 LEFT JOIN users u ON u.id = st.done_by
@@ -48,7 +48,7 @@ ORDER BY tas.assigned_at, u.id
 LIMIT 1;
 
 -- name: GetSubtask :one
-SELECT id, title, description, reference_url, deliverable_url, done_at, created_by, due_date
+SELECT id, title, description, reference_url, deliverable_url, done_at, created_by, due_date, result_note
 FROM task_subtasks WHERE id = @id AND task_id = @task_id;
 
 -- name: IsSubtaskAssignee :one
@@ -87,10 +87,11 @@ FROM task_subtasks WHERE task_id = @task_id;
 SELECT count(*)::int FROM subtask_assignees WHERE subtask_id = @subtask_id;
 
 -- name: RenameSubtask :exec
--- Nama, deskripsi, tautan, dan tenggat; urutan tidak ikut berubah saat PIC atau Manajer memperbaiki isinya.
+-- Nama, deskripsi, tautan, tenggat, dan catatan hasil; urutan tidak ikut berubah saat PIC atau Manajer
+-- memperbaiki isinya.
 UPDATE task_subtasks
 SET title = @title, description = @description, reference_url = @reference_url, deliverable_url = @deliverable_url,
-    due_date = sqlc.narg(due_date)
+    due_date = sqlc.narg(due_date), result_note = sqlc.narg(result_note)
 WHERE id = @id AND task_id = @task_id;
 
 -- name: ClearSubtaskAssignees :exec

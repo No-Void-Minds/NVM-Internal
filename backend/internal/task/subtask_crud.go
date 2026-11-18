@@ -3,6 +3,9 @@ package task
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -22,7 +25,7 @@ var ErrSubtaskLocked = errors.New("sub task tidak bisa diubah")
 // subtaskWindow: menambah dan mengubah sub task hanya saat task masih disiapkan atau sedang dikerjakan.
 // Ditutup mulai Ready supaya pekerjaan tidak bertambah saat Manajer sedang mereview, dan supaya syarat
 // "semua sub task tercentang" tidak bisa digoyang setelah task lolos ke Ready.
-func subtaskWindowOpen(status Status) bool {
+func SubtaskWindowOpen(status Status) bool {
 	return status == Requested || status == OnProgress
 }
 
@@ -50,7 +53,7 @@ func lockForSubtask(ctx context.Context, q *sqlc.Queries, actor Actor, taskID st
 	if !ok {
 		return cur, ErrForbidden
 	}
-	if !subtaskWindowOpen(Status(cur.Status)) {
+	if !SubtaskWindowOpen(Status(cur.Status)) {
 		return cur, apperr.Invalid("Sub task hanya bisa diubah saat task berstatus Requested atau On Progress.")
 	}
 	return cur, nil
@@ -93,6 +96,9 @@ type SubtaskFields struct {
 	PICID       int64
 	// DueDate berbentuk YYYY-MM-DD, kosong berarti tanpa tenggat (revisi 16).
 	DueDate string
+	// ResultNote: catatan hasil dari yang mengerjakan (revisi 18). nil berarti tidak dikirim, jadi isi lama
+	// dipertahankan; klien lama dan form Ubah sub task tidak mengirimnya dan tidak boleh menghapusnya.
+	ResultNote *string
 }
 
 type cleanSubtaskFields struct {
@@ -101,6 +107,7 @@ type cleanSubtaskFields struct {
 	reference   string
 	deliverable string
 	due         pgtype.Date
+	resultNote  *pgtype.Text
 }
 
 func cleanFieldsOf(in SubtaskFields) (cleanSubtaskFields, error) {
@@ -125,7 +132,25 @@ func cleanFieldsOf(in SubtaskFields) (cleanSubtaskFields, error) {
 	if out.due, err = parseDate(in.DueDate, "Tenggat sub task"); err != nil {
 		return out, err
 	}
+	if in.ResultNote != nil {
+		note, err := cleanResultNote(*in.ResultNote)
+		if err != nil {
+			return out, err
+		}
+		out.resultNote = &note
+	}
 	return out, nil
+}
+
+const maxResultNote = 2000
+
+// cleanResultNote membuang spasi di tepi dan menyimpan isian kosong sebagai NULL (revisi 18).
+func cleanResultNote(v string) (pgtype.Text, error) {
+	v = strings.TrimSpace(v)
+	if utf8.RuneCountInString(v) > maxResultNote {
+		return pgtype.Text{}, apperr.Invalid(fmt.Sprintf("Catatan hasil maksimal %d karakter.", maxResultNote))
+	}
+	return pgtype.Text{String: v, Valid: v != ""}, nil
 }
 
 func (s *Service) AddSubtask(ctx context.Context, actor Actor, taskID string, in SubtaskFields) (int64, error) {
@@ -228,15 +253,19 @@ func (s *Service) UpdateSubtask(ctx context.Context, actor Actor, taskID string,
 		if len(oldPIC) > 0 {
 			oldPICID = oldPIC[0].ID
 		}
+		note := st.ResultNote
+		if f.resultNote != nil {
+			note = *f.resultNote
+		}
 		sameText := st.Title == f.title && st.Description == f.description &&
-			st.ReferenceUrl == f.reference && st.DeliverableUrl == f.deliverable && sameDue
+			st.ReferenceUrl == f.reference && st.DeliverableUrl == f.deliverable && sameDue && note == st.ResultNote
 		if sameText && oldPICID == in.PICID {
 			return nil
 		}
 		if !sameText {
 			if err := q.RenameSubtask(ctx, sqlc.RenameSubtaskParams{
 				ID: subtaskID, TaskID: taskID, Title: f.title, Description: f.description,
-				ReferenceUrl: f.reference, DeliverableUrl: f.deliverable, DueDate: f.due,
+				ReferenceUrl: f.reference, DeliverableUrl: f.deliverable, DueDate: f.due, ResultNote: note,
 			}); err != nil {
 				return err
 			}
@@ -252,8 +281,10 @@ func (s *Service) UpdateSubtask(ctx context.Context, actor Actor, taskID string,
 		// Satu kejadian audit untuk nama dan PIC sekalian, supaya riwayat tidak terbelah dua
 		// untuk satu kali simpan.
 		return audit.Change(ctx, q, actor.auditActor(), "subtask_renamed", "task", taskID,
-			map[string]any{"id": st.ID, "title": st.Title, "pic_id": oldPICID, "due_date": dateValue(st.DueDate)},
-			map[string]any{"id": st.ID, "title": f.title, "pic_id": in.PICID, "due_date": dateValue(f.due)})
+			map[string]any{"id": st.ID, "title": st.Title, "pic_id": oldPICID, "due_date": dateValue(st.DueDate),
+				"deliverable_url": st.DeliverableUrl, "result_note": textValue(st.ResultNote)},
+			map[string]any{"id": st.ID, "title": f.title, "pic_id": in.PICID, "due_date": dateValue(f.due),
+				"deliverable_url": f.deliverable, "result_note": textValue(note)})
 	})
 }
 

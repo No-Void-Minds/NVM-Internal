@@ -9,7 +9,9 @@
 //   node uji13.mjs
 // Variabel sama dengan yang dipakai scripts/dev-login.sh. Opsional: DEV_ADMIN_USERNAME (bawaan admin),
 // E2E_BASE (bawaan http://localhost:5173), E2E_ONLY=popover (hanya uji popover profil, revisi 14),
-// E2E_ONLY=subtaskform (hanya uji form tambah sub task yang dilipat, revisi 17).
+// E2E_ONLY=subtaskform (hanya uji form tambah sub task yang dilipat, revisi 17),
+// E2E_ONLY=subtaskresult (kelompok Arahan dan Hasil serta simpan catatan hasil, revisi 18; menulis catatan hasil
+// ke satu sub task di database dev).
 // Keluar dengan kode 1 bila ada yang gagal.
 import { chromium } from "playwright-core";
 
@@ -285,7 +287,9 @@ for (const theme of ONLY ? [] : THEMES) {
         await page.waitForTimeout(400);
         await audit(page, errors, `${theme} ${role} ${width} panel detail`);
         await checkActionBar(page, `${theme} ${role} ${width} panel detail`);
-        const sub = page.locator("dialog[open] button[aria-controls^='sub-detail-']").first();
+        const sub = page
+          .locator("dialog[open] button[aria-controls^='sub-detail-']")
+          .first();
         if (await sub.count()) {
           await sub.click();
           await page.waitForTimeout(250);
@@ -454,7 +458,9 @@ async function checkPopover(width) {
   await page.locator("article h3 button").first().click();
   await page.waitForSelector("dialog[open]");
   // Detail dimuat setelah panel terbuka; tunggu pemicunya, bukan jeda tetap.
-  await page.waitForSelector("dialog[open] [data-person-trigger]", { timeout: 5000 }).catch(() => {});
+  await page
+    .waitForSelector("dialog[open] [data-person-trigger]", { timeout: 5000 })
+    .catch(() => {});
   const inPanel = page.locator("dialog[open] [data-person-trigger]").first();
   if (await inPanel.count()) {
     await inPanel.click();
@@ -530,7 +536,9 @@ async function checkSubtaskForm(width) {
   await page.waitForSelector("dialog[open]");
   // Detail dimuat setelah panel terbuka; tunggu tombolnya, bukan jeda tetap.
   await page
-    .waitForSelector("dialog[open] button[aria-controls='sub-new-form']", { timeout: 5000 })
+    .waitForSelector("dialog[open] button[aria-controls='sub-new-form']", {
+      timeout: 5000,
+    })
     .catch(() => {});
 
   const state = () =>
@@ -614,6 +622,97 @@ async function checkSubtaskForm(width) {
 
 if (!ONLY || ONLY === "subtaskform")
   for (const w of [360, 1280]) await checkSubtaskForm(w);
+
+// Detail sub task (revisi 18): kelompok Arahan dan Hasil tampil, dan Simpan hasil menyimpan catatan hasil.
+// Satu-satunya bagian yang menulis data: catatan hasil satu sub task di task Requested atau On Progress.
+async function checkSubtaskResult(width) {
+  const { ctx, page, errors } = await open("manajer", width, "terang");
+  const where = (what) => `hasil sub task ${width} ${what}`;
+  const expect = (cond, w, msg) => {
+    checks++;
+    if (!cond) fail(where(w), msg);
+  };
+  await page.goto(BASE + "/task?scope=all");
+  await page.waitForLoadState("networkidle");
+  const target = await page.evaluate(async () => {
+    const b = await (await fetch("/api/board")).json();
+    const open = b.columns
+      .filter((c) => c.status === "requested" || c.status === "on_progress")
+      .flatMap((c) => c.tasks)
+      .filter((t) => t.subtask_total > 0);
+    for (const t of open) {
+      const d = (await (await fetch(`/api/tasks/${t.id}`)).json()).task;
+      const st = d.subtasks.find((x) => x.can_edit);
+      if (st) return { id: t.id, sid: st.id };
+    }
+    return null;
+  });
+  if (!target) {
+    fail(
+      where("data"),
+      "tidak ada sub task yang bisa diubah di task Requested atau On Progress",
+    );
+    return ctx.close();
+  }
+  await page
+    .locator("article", {
+      has: page.locator(".specimen-tag", { hasText: target.id }),
+    })
+    .locator("h3 button")
+    .click();
+  await page.waitForSelector("dialog[open]");
+  const detailBtn = page.locator(
+    `dialog[open] button[aria-controls='sub-detail-${target.sid}']`,
+  );
+  await detailBtn.waitFor({ timeout: 5000 });
+  await detailBtn.click();
+  const box = page.locator(`#sub-detail-${target.sid}`);
+  await box.waitFor();
+
+  const groups = await box.evaluate((el) =>
+    [...el.querySelectorAll("section > :first-child")].map((h) =>
+      h.textContent.trim(),
+    ),
+  );
+  expect(
+    groups[0] === "Arahan" && groups[1] === "Hasil",
+    "kelompok",
+    `judul kelompok ${JSON.stringify(groups)}`,
+  );
+
+  const note = `Uji e2e revisi 18, ${width} px, ${new Date().toISOString()}`;
+  await page.locator(`#sub-note-${target.sid}`).fill(note);
+  await page.getByRole("button", { name: "Simpan hasil" }).click();
+  await page
+    .waitForFunction(
+      async ([id, sid, text]) => {
+        const d = (await (await fetch(`/api/tasks/${id}`)).json()).task;
+        return d.subtasks.find((x) => x.id === sid)?.result_note === text;
+      },
+      [target.id, target.sid, note],
+      { timeout: 5000, polling: 250 },
+    )
+    .then(
+      () => expect(true, "simpan", ""),
+      () =>
+        expect(false, "simpan", "catatan hasil tidak tersimpan dalam 5 detik"),
+    );
+  const alert = await page.locator(`dialog[open] li [role='alert']`).count();
+  expect(alert === 0, "simpan", "muncul galat setelah Simpan hasil");
+  const sw = await page.evaluate(() => [
+    document.documentElement.scrollWidth,
+    window.innerWidth,
+  ]);
+  expect(sw[0] <= sw[1], "lebar", `scrollWidth ${sw[0]} > ${sw[1]}`);
+
+  checks++;
+  if (errors.length)
+    fail(where("console"), errors.splice(0).join(" | ").slice(0, 300));
+  await ctx.close();
+}
+
+if (ONLY === "subtaskresult")
+  for (const w of [360, 1280]) await checkSubtaskResult(w);
 
 await browser.close();
 console.log(

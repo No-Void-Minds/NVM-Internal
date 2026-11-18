@@ -31,7 +31,7 @@ func PermissionsFor(role Role, isPIC, isSubtaskPIC bool, status Status) Can {
 		EditLabels:      contributor,
 		EditDeliverable: contributor,
 		// Revisi 6: PIC menyusun sendiri sub task yang ia kerjakan, Manajer boleh ikut menambah.
-		AddSubtask: contributor && subtaskWindowOpen(status),
+		AddSubtask: contributor && SubtaskWindowOpen(status),
 		MoveTo:     []Status{},
 		SubtaskPIC: isSubtaskPIC,
 	}

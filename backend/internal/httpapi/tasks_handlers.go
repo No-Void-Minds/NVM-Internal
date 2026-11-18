@@ -64,11 +64,15 @@ type subtaskItem struct {
 	DeliverableURL string `json:"deliverable_url"`
 	CreatedBy      string `json:"created_by"`
 	// ID orang dikirim supaya nama bisa membuka kartu profil (revisi 14). nil bila akunnya tidak tercatat.
-	CreatedByID *int64             `json:"created_by_id"`
-	Done        bool               `json:"done"`
-	DoneAt      *time.Time         `json:"done_at"`
-	DoneBy      string             `json:"done_by"`
-	DueDate     *string            `json:"due_date"`
+	CreatedByID *int64     `json:"created_by_id"`
+	Done        bool       `json:"done"`
+	DoneAt      *time.Time `json:"done_at"`
+	DoneBy      string     `json:"done_by"`
+	DueDate     *string    `json:"due_date"`
+	ResultNote  string     `json:"result_note"`
+	// Boleh mengunggah dan menghapus berkas sub task ini: PIC task, Manajer, dan PIC sub task (sama dengan
+	// canAttachSubtask), supaya tombol berkas mengikuti server, termasuk untuk PIC sub task dari luar task.
+	CanAttach   bool               `json:"can_attach"`
 	CanCheck    bool               `json:"can_check"`
 	CanEdit     bool               `json:"can_edit"`
 	Assignees   []taskPerson       `json:"assignees"`
@@ -224,6 +228,7 @@ func (s *Server) getTask(c *gin.Context) {
 			ReferenceURL: st.ReferenceURL, DeliverableURL: st.DeliverableURL,
 			CreatedBy: st.CreatedByName, CreatedByID: nonZero(st.CreatedBy),
 			Done: st.DoneAt.Valid, DoneAt: timePtr(st.DoneAt), DoneBy: st.DoneBy, DueDate: dateString(st.DueDate),
+			ResultNote:  st.ResultNote,
 			Assignees:   make([]taskPerson, 0, len(st.Assignees)),
 			Attachments: subFiles[st.ID],
 		}
@@ -232,7 +237,15 @@ func (s *Server) getTask(c *gin.Context) {
 		}
 		// can_check berasal dari aturan yang sama dengan SetSubtaskDone, supaya UI tidak menebak.
 		item.CanCheck = checkable[st.ID]
-		item.CanEdit = out.Can.AddSubtask && (actor.Role == task.RoleManager || mySubtask(actor.ID, st))
+		// Sama dengan lockForSubtask + editableSubtask: Manajer, PIC sub task ini (juga dari luar task, revisi 11),
+		// atau pembuatnya selama dia masih PIC task. Sebelumnya disyaratkan PIC task, sehingga PIC sub task dari
+		// luar task tidak pernah melihat tombol Ubah dan kotak hasil walau backend menerima perubahannya.
+		manager := actor.Role == task.RoleManager
+		assigned := isAssigned(actor.ID, st)
+		taskPIC := actor.Role == task.RoleStaff && d.IsPIC(actor.ID)
+		item.CanEdit = task.SubtaskWindowOpen(task.Status(t.Status)) &&
+			(manager || assigned || (taskPIC && st.CreatedBy == actor.ID))
+		item.CanAttach = manager || taskPIC || assigned
 		for _, a := range st.Assignees {
 			item.Assignees = append(item.Assignees, taskPerson{ID: a.ID, Name: a.Name, Username: a.Username, AvatarID: avatarID(a.AvatarID)})
 		}
@@ -311,12 +324,8 @@ func labelsOf(rows []sqlc.ListTaskLabelsRow) []taskLabel {
 	return out
 }
 
-// mySubtask: sub task ini urusan orang ini, entah karena dia yang membuatnya atau dia yang ditugaskan
-// mengerjakannya. Aturan yang sama dipakai backend di editableSubtask.
-func mySubtask(userID int64, st task.SubtaskView) bool {
-	if st.CreatedBy == userID {
-		return true
-	}
+// isAssigned: orang ini PIC sub task ini.
+func isAssigned(userID int64, st task.SubtaskView) bool {
 	for _, a := range st.Assignees {
 		if a.ID == userID {
 			return true

@@ -129,3 +129,11 @@ func dateValue(d pgtype.Date) any {
 	}
 	return d.Time.Format("2006-01-02")
 }
+
+// textValue menulis teks opsional untuk audit log, atau nil bila kosong.
+func textValue(t pgtype.Text) any {
+	if !t.Valid {
+		return nil
+	}
+	return t.String
+}

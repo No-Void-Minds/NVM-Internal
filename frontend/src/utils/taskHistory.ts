@@ -63,7 +63,22 @@ export function describeTaskHistory(h: TaskHistoryItem): string {
           ? `mengubah tenggat sub task "${String(after.title ?? '')}" menjadi ${formatDay(String(after.due_date))}`
           : `menghapus tenggat sub task "${String(after.title ?? '')}"`
       }
-      return `mengubah sub task "${String(after.title ?? '')}"`
+      // Revisi 18: catatan hasil dan tautan hasil, disimpan bersama dari kotak Hasil.
+      const name = String(after.title ?? '')
+      const noteChanged = (prev.result_note ?? null) !== (after.result_note ?? null)
+      const linkChanged = (prev.deliverable_url ?? '') !== (after.deliverable_url ?? '')
+      if (noteChanged && linkChanged) return `mengubah catatan dan tautan hasil sub task "${name}"`
+      if (noteChanged) {
+        return after.result_note
+          ? `mengubah catatan hasil sub task "${name}"`
+          : `menghapus catatan hasil sub task "${name}"`
+      }
+      if (linkChanged) {
+        return after.deliverable_url
+          ? `mengubah tautan hasil sub task "${name}"`
+          : `menghapus tautan hasil sub task "${name}"`
+      }
+      return `mengubah sub task "${name}"`
     }
     case 'task_pics_changed':
       return 'mengubah PIC task'

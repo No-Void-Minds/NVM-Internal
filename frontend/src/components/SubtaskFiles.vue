@@ -12,6 +12,10 @@ const props = defineProps<{
   subtaskId: number
   items: TaskAttachment[]
   canManage: boolean
+  // brief: berkas acuan, deliverable: berkas hasil (revisi 18).
+  kind: 'brief' | 'deliverable'
+  // Nama kelompok untuk label tombol, supaya dua tombol Tambah berkas di satu sub task bisa dibedakan.
+  group: string
 }>()
 const emit = defineEmits<{ changed: [message: string] }>()
 
@@ -42,7 +46,7 @@ async function onPick(e: Event) {
   busy.value = true
   error.value = ''
   try {
-    await uploadAttachment(props.taskId, 'deliverable', file, () => {}, props.subtaskId).promise
+    await uploadAttachment(props.taskId, props.kind, file, () => {}, props.subtaskId).promise
     emit('changed', `${file.name} diunggah.`)
   } catch (err) {
     error.value = messageOf(err)
@@ -138,7 +142,6 @@ const iconButton =
         </button>
       </li>
     </ul>
-    <p v-else class="text-sm text-ink-muted">Belum ada berkas.</p>
 
     <div v-if="canManage" class="mt-2">
       <input
@@ -151,8 +154,9 @@ const iconButton =
       />
       <button
         type="button"
-        class="inline-flex min-h-11 items-center rounded-card border border-line px-3 text-sm font-medium hover:bg-canvas disabled:opacity-60"
+        class="inline-flex min-h-11 items-center rounded-card border border-line px-3 text-sm font-medium hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark disabled:opacity-60"
         :disabled="busy"
+        :aria-label="busy ? undefined : `Tambah berkas ${group}`"
         @click="picker?.click()"
       >
         {{ busy ? 'Mengunggah...' : 'Tambah berkas' }}

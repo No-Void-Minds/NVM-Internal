@@ -19,6 +19,8 @@ type subtaskTitleRequest struct {
 	DeliverableURL string `json:"deliverable_url"`
 	PicID          int64  `json:"pic_id"`
 	DueDate        string `json:"due_date"`
+	// Pointer: tidak dikirim berarti catatan hasil lama dipertahankan (revisi 18).
+	ResultNote *string `json:"result_note"`
 }
 
 func (r subtaskTitleRequest) fields() task.SubtaskFields {
@@ -29,6 +31,7 @@ func (r subtaskTitleRequest) fields() task.SubtaskFields {
 		Deliverable: r.DeliverableURL,
 		PICID:       r.PicID,
 		DueDate:     r.DueDate,
+		ResultNote:  r.ResultNote,
 	}
 }
 

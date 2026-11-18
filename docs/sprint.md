@@ -65,6 +65,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 11m | Filter PIC ikut PIC sub task | Filter PIC, Arsip, dan Task saya memuat task yang sub task-nya dipegang orang itu |
 | 11n | Form Buat task dan tenggat sub task | Sub task punya tenggat; form Buat task mengisi sub task lengkap dalam satu simpan |
 | 11o | PIC sub task memindahkan task, form tambah dilipat | PIC sub task bisa memulai task dan menandai Ready; panel detail tidak langsung panjang |
+| 11p | Catatan hasil sub task | Detail sub task dibagi Arahan dan Hasil; PIC sub task menulis catatan hasil |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -943,6 +944,30 @@ Sisa: S5-02 bagian Nginx (`client_max_body_size 51m`) dipasang di Sprint 12; S5-
 
 **Hasil:** kode selesai 2026-11-18, `./scripts/check.sh` lolos. Unit test `TestEveryTransition` (144 kombinasi), `TestPermissionsFor`, dan `TestTaskPICAndSubtaskPIC` lolos. `TestSubtaskPICMoves` (DB) menunggu `TEST_DATABASE_URL`. E2E 2026-11-18: `subtaskform` 18 pemeriksaan 0 gagal, `popover` 27 pemeriksaan 0 gagal, audit penuh 320 pemeriksaan 0 gagal. Perlu restart backend; curl bagian A menunggu restart.
 
+## Sprint 11p: Catatan hasil sub task
+
+**Tujuan:** revisi 18 Manajer. PIC sub task bisa menulis penjelasan hasil kerjanya (output di mana, dikirim ke mana, versi mana yang dipakai), selain tautan hasil dan berkas. Detail sub task dibagi jadi Arahan dan Hasil.
+
+- [x] S11p-01 Migrasi `000014`: kolom `task_subtasks.result_note` (text, nullable). Hanya kolom, tanpa grants.
+- [x] S11p-02 `PUT /api/tasks/:id/subtasks/:subtaskId` menerima `result_note` opsional (pointer): tidak dikirim berarti isi lama dipertahankan, jadi klien lama dan form Ubah sub task tidak menghapusnya. Maksimal 2000 karakter (per huruf), spasi tepi dibuang, kosong disimpan NULL. Catatan dan tautan hasil tersimpan dalam satu permintaan; `cleanURL` tetap berlaku.
+- [x] S11p-03 Audit `subtask_renamed` mencatat `deliverable_url` dan `result_note` lama dan baru. Riwayat menulis "mengubah catatan hasil", "mengubah tautan hasil", atau keduanya.
+- [x] S11p-04 Detail sub task: kelompok Arahan (deskripsi, tautan acuan, berkas acuan) dan Hasil (catatan hasil, tautan hasil, berkas hasil), masing-masing dengan teks kosong. Yang boleh mengisi mendapat textarea "Catatan hasil" dengan penghitung saat mendekati batas, kotak tautan hasil, dan tombol "Simpan hasil". Yang hanya melihat membaca catatan sebagai teks biasa (`whitespace-pre-line`, tanpa `v-html`).
+- [x] S11p-05 Berkas sub task punya dua jenis: `brief` (acuan) dan `deliverable` (hasil), lewat `?kind=` di endpoint lampiran sub task. Tanpa `kind` tetap deliverable. Lampiran acuan dari form Buat task dan form Tambah sub task (revisi 16) kini diunggah sebagai `brief`.
+- [x] S11p-06 Perbaikan revisi 11 yang ketahuan saat menyusun hak catatan hasil: `CheckUpload` memakai `canAttachSubtask`, detail mengirim `can_edit` dan `can_attach` per sub task dengan aturan backend yang sebenarnya.
+- [x] S11p-07 `uji13.mjs`: bagian `E2E_ONLY=subtaskresult`.
+
+**Keputusan:**
+- Yang boleh mengisi catatan hasil sama dengan yang boleh mengisi tautan hasil, karena lewat jalur yang sama (`UpdateSubtask`: `lockForSubtask` lalu `editableSubtask`): Manajer, PIC sub task ini (juga dari luar task, revisi 11), dan pembuatnya selama dia masih PIC task, saat task Requested atau On Progress. Tidak ada pemeriksaan baru.
+- Endpoint tautan hasil diperluas, bukan endpoint baru: tautan hasil memang disimpan lewat `PUT` sub task. `result_note` dibuat opsional supaya klien yang tidak mengirimnya tidak menghapus catatan.
+- Catatan hasil tidak memengaruhi Ready gate maupun aturan centang.
+- Berkas acuan dan berkas hasil dibedakan lewat `kind` yang sudah ada di `task_attachments`, bukan kolom baru. Di sub task, hak keduanya sama (PIC task, Manajer, PIC sub task); brief task induk tetap hanya Manajer (FR-TASK-23). Berkas acuan dari revisi 16 yang terlanjur tersimpan sebagai deliverable di data dev tampil di kelompok Hasil; produksi belum punya data.
+- Temuan revisi 11, diperbaiki karena revisi ini bergantung padanya: (1) `CheckUpload`, pemeriksaan sebelum isi berkas dibaca, memakai `canAttach` sehingga PIC sub task dari luar task selalu ditolak 403 saat mengunggah berkas sub task-nya, padahal `Upload` sendiri mengizinkan. (2) Detail mengirim `can_edit` hanya bila pelaku PIC task atau Manajer, jadi PIC sub task dari luar task tidak pernah melihat tombol Ubah dan kotak hasil walau backend menerima perubahannya. (3) Tombol berkas sub task mengikuti `can.edit_deliverable` task induk. Sekarang `can_edit` dan `can_attach` dihitung per sub task dengan aturan yang sama dengan backend.
+- Penghitung karakter muncul mulai 1800 karakter dan diumumkan lewat `aria-live`. `maxlength` di textarea mencegah ketikan melewati batas; backend tetap menolak 2001 karakter (400).
+
+**Selesai kalau:** `./scripts/check.sh` lolos, test di bawah lolos, migrasi `000014` jalan di dev, curl simpan hasil sebagai PIC sub task 204, sebagai orang tanpa hak 403, dan dengan 2001 karakter 400, serta `E2E_ONLY=subtaskresult` lolos.
+
+**Hasil:** kode selesai 2026-11-18, `./scripts/check.sh` lolos, `TestCleanResultNote` lolos. `TestSubtaskResultNote` (DB) menunggu `TEST_DATABASE_URL`. Migrasi `000014` belum dijalankan; curl dan e2e menunggu migrasi dan restart backend.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -1114,9 +1139,10 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 15 | 2026-11-18 | Filter PIC, Arsip, dan Task saya ikut menghitung PIC sub task. Mengganti keputusan revisi 11 soal Task saya | Sprint 11m |
 | 16 | 2026-11-18 | Sub task punya tenggat yang tidak boleh melewati tenggat task. Form Buat task: Judul lalu Tenggat, dan sub task diisi lengkap dengan form yang sama dengan Tambah sub task | Sprint 11n |
 | 17 | 2026-11-18 | PIC sub task boleh memindahkan task ke On Progress dan ke Ready (dengan Ready gate). Form tambah sub task di panel detail dilipat di balik satu tombol | Sprint 11o |
+| 18 | 2026-11-18 | PIC sub task menulis catatan hasil (output di mana, dikirim ke mana, versi mana). Detail sub task dibagi Arahan dan Hasil | Sprint 11p |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat ketujuh belas revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat kedelapan belas revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

@@ -18,6 +18,10 @@ export type TaskSubtask = {
   done_by: string
   // Tenggat sub task (revisi 16), YYYY-MM-DD atau null.
   due_date: string | null
+  // Catatan hasil dari yang mengerjakan (revisi 18), kosong bila belum diisi.
+  result_note: string
+  // Boleh mengunggah dan menghapus berkas sub task ini, dihitung server (revisi 18).
+  can_attach: boolean
   // Dihitung backend dengan aturan yang sama dengan penolakan 403, jadi UI tidak menebak siapa yang boleh.
   can_check: boolean
   // Boleh diubah atau dihapus: pembuatnya, PIC-nya, dan Manajer, selama task masih Requested atau On Progress.
@@ -144,10 +148,12 @@ export type SubtaskBody = {
   deliverable_url: string
   pic_id: number
   due_date: string
+  // Tidak dikirim berarti catatan hasil lama dipertahankan server (revisi 18).
+  result_note?: string
 }
 
 // Sub task dari form Buat task (revisi 16): isinya sama dengan Tambah sub task di detail, tanpa tautan hasil.
-export type CreateSubtaskInput = Omit<SubtaskBody, 'deliverable_url'>
+export type CreateSubtaskInput = Omit<SubtaskBody, 'deliverable_url' | 'result_note'>
 
 export function addSubtask(taskId: string, body: SubtaskBody) {
   return apiPost<{ id: number }>(`/tasks/${taskId}/subtasks`, body)
