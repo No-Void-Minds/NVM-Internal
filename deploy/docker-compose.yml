@@ -39,8 +39,9 @@ services:
     # Dimiliki UID 65532 (user nonroot di image distroless), lihat docs/runbook-deploy.md.
     volumes:
       - /srv/nvm-internal/storage:/data/storage
-      # Folder staging salinan Drive. Satu filesystem dengan storage, jadi pohon hardlink-nya tidak memakan
-      # disk, tetapi di luar storage supaya tidak ikut masuk snapshot backup.
+      # Folder staging salinan Drive, di luar storage supaya tidak ikut masuk snapshot backup. Isinya symlink
+      # ke /data/storage, bukan hardlink: storage dan staging adalah dua bind mount berbeda, dan hardlink
+      # antar mount ditolak kernel dengan EXDEV walaupun host-nya satu disk (revisi 25).
       - /srv/nvm-internal/drive-staging:/data/drive-staging
     networks:
       - nvm

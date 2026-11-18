@@ -23,8 +23,9 @@ type fixture struct {
 
 func setup(t *testing.T) fixture {
 	t.Helper()
+	// Pohon staging berisi symlink, jadi test ini juga dilewati di sistem yang tidak mengizinkannya.
+	butuhSymlink(t)
 	pool := testdb.Pool(t)
-	// Storage dan staging di bawah satu folder sementara, supaya hardlink-nya satu filesystem seperti di VM.
 	root := t.TempDir()
 	store, err := storage.Open(filepath.Join(root, "storage"))
 	if err != nil {
@@ -35,7 +36,7 @@ func setup(t *testing.T) fixture {
 	return fixture{pool: pool, svc: svc, store: store}
 }
 
-// file membuat berkas di storage seperti hasil unggahan sungguhan, supaya hardlink-nya bisa dibuat.
+// file membuat berkas di storage seperti hasil unggahan sungguhan, supaya symlink-nya tidak menggantung.
 func (f fixture) file(t *testing.T, id string) {
 	t.Helper()
 	p, err := f.store.PathFor(id)
@@ -127,7 +128,7 @@ func TestStageMenyusunPathSetiapJenis(t *testing.T) {
 	if len(m.Extra) != 1 {
 		t.Fatalf("berkas yang ditimpa %+v, mau satu ekspor bulanan", m.Extra)
 	}
-	// Pohon staging benar-benar ada sebagai hardlink, bukan hanya daftar nama.
+	// Pohon staging benar-benar ada, dan isi berkasnya terbaca lewat symlink-nya (yang dipakai rclone).
 	for _, p := range mau {
 		if _, err := os.Stat(filepath.Join(f.svc.staging, filepath.FromSlash(p))); err != nil {
 			t.Fatalf("berkas staging %q: %v", p, err)

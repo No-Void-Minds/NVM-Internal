@@ -301,7 +301,7 @@ NVM Internal/
   Backup Database/2026-11-18.dump.age
 ```
 
-Yang mengerjakannya: `deploy/drive-export.sh`, tiga langkah. Pertama perintah `backend drive-export stage` menyusun pohon hardlink bernama rapi di `/srv/nvm-internal/drive-staging` (satu filesystem dengan storage, jadi tidak memakan disk), menulis ekspor Excel bulan berjalan, dan mengenkripsi dump dengan age. Kedua container rclone resmi menyalin folder itu ke Drive. Ketiga `backend drive-export record` mencatat berkas yang sudah terunggah di tabel `drive_exports`, menulis baris status untuk halaman Status, lalu membuang staging. Kalau langkah mana pun gagal, tidak ada yang tercatat dan malam berikutnya dicoba lagi.
+Yang mengerjakannya: `deploy/drive-export.sh`, tiga langkah. Pertama perintah `backend drive-export stage` menyusun pohon symlink bernama rapi di `/srv/nvm-internal/drive-staging` (symlink ke berkas di `/data/storage`, jadi tidak ada berkas yang tersalin dan tidak ada disk yang terpakai), menulis ekspor Excel bulan berjalan, dan mengenkripsi dump dengan age. Container rclone ikut memount storage di path yang sama dan dijalankan dengan `--copy-links`, supaya yang terunggah isi berkasnya, bukan symlink-nya. Kedua container rclone resmi menyalin folder itu ke Drive. Ketiga `backend drive-export record` mencatat berkas yang sudah terunggah di tabel `drive_exports`, menulis baris status untuk halaman Status, lalu membuang staging. Kalau langkah mana pun gagal, tidak ada yang tercatat dan malam berikutnya dicoba lagi.
 
 #### 1. Membuat remote rclone dengan scope drive.file
 
@@ -392,10 +392,17 @@ Periksa strukturnya: nama folder task, nama Staf, jam di depan nama berkas, dan 
 
 Barisnya berbentuk `OK berkas=12 ukuran=48M`, atau `GAGAL ... pesan=...`. Lalu cek di Drive akun tim lewat browser, dan di aplikasi buka halaman **Status** (Admin): di bawah pemeriksaan koneksi ada "Salinan Drive terakhir" dengan waktu, OK atau galat, dan jumlah berkas.
 
-Staging setelah run yang berhasil kosong, karena dibuang perintah `record`:
+Staging setelah run yang berhasil kosong isinya, karena dikosongkan perintah `record`. Foldernya sendiri tetap ada, karena itu titik mount container:
 
 ```bash
 ls -la /srv/nvm-internal/drive-staging
+```
+
+Kalau uji kering mencetak daftar path tetapi `rclone copy` gagal dengan "source file not found", berarti symlink di staging menggantung: path storage di dalam container rclone berbeda dari yang dilihat backend. Keduanya harus `/data/storage`:
+
+```bash
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml run --rm -T backend drive-export stage --dry-run </dev/null | head -5
+ls -l /srv/nvm-internal/drive-staging/Task/*/*/Brief 2>/dev/null | head -3   # symlink harus menunjuk /data/storage/attachments/...
 ```
 
 #### 4. Memulihkan dump dari Drive

@@ -67,16 +67,13 @@ func NewService(pool *pgxpool.Pool, store *storage.Store, staging, recipient str
 	}
 }
 
-// Stage menyusun pohon staging: hardlink untuk berkas aplikasi (tidak memakan disk karena satu filesystem
-// dengan storage), ekspor Excel bulan berjalan, dan dump yang datang sebagai tar di stdin.
+// Stage menyusun pohon staging: symlink untuk berkas aplikasi (tidak memakan disk sama sekali), ekspor Excel
+// bulan berjalan, dan dump yang datang sebagai tar di stdin.
 // dryRun tidak menulis apa pun ke database, jadi strukturnya bisa diperiksa dulu tanpa menetapkan nama folder.
 func (s *Service) Stage(ctx context.Context, dumps io.Reader, dryRun bool) (Manifest, error) {
 	var m Manifest
-	if err := os.RemoveAll(s.staging); err != nil {
-		return m, fmt.Errorf("folder staging lama tidak bisa dibuang: %w", err)
-	}
-	if err := os.MkdirAll(s.staging, 0o750); err != nil {
-		return m, fmt.Errorf("folder staging tidak bisa dibuat: %w", err)
+	if err := s.clearStaging(); err != nil {
+		return m, err
 	}
 
 	taken := newTakenCache(s.pool)
@@ -255,12 +252,40 @@ func (s *Service) stageDumps(m *Manifest, r io.Reader) error {
 	}
 }
 
-// link membuat hardlink dari storage ke staging. Berkas yang barisnya ada tetapi berkasnya hilang dari disk
-// dicatat di log dan dilewati, supaya satu berkas hilang tidak membatalkan seluruh salinan malam itu.
+// clearStaging mengosongkan isi folder staging tanpa menghapus foldernya sendiri. Di container, folder itu
+// adalah titik mount dan induknya (/data) ada di root filesystem yang read-only, jadi menghapus foldernya
+// selalu gagal dengan EROFS, bukan karena mount-nya salah.
+func (s *Service) clearStaging() error {
+	if err := os.MkdirAll(s.staging, 0o750); err != nil {
+		return fmt.Errorf("folder staging tidak bisa dibuat: %w", err)
+	}
+	entries, err := os.ReadDir(s.staging)
+	if err != nil {
+		return fmt.Errorf("folder staging tidak bisa dibaca: %w", err)
+	}
+	for _, e := range entries {
+		if err := os.RemoveAll(filepath.Join(s.staging, e.Name())); err != nil {
+			return fmt.Errorf("sisa staging %s tidak bisa dibuang: %w", e.Name(), err)
+		}
+	}
+	return nil
+}
+
+// link menaruh symlink ke berkas di storage, bukan hardlink. Storage dan staging adalah dua bind mount yang
+// berbeda di dalam container, dan hardlink antar mount selalu ditolak kernel dengan EXDEV walaupun host-nya
+// satu disk (do_linkat membandingkan vfsmount, bukan filesystem). Symlink tidak punya batasan itu, dan
+// rclone membacanya dengan --copy-links lalu mengunggah isi berkasnya. Isi symlink adalah path storage di
+// dalam container, jadi container rclone harus memount storage di path yang sama.
+// Berkas yang barisnya ada tetapi berkasnya hilang dari disk dicatat di log dan dilewati, supaya satu berkas
+// hilang tidak membatalkan seluruh salinan malam itu.
 func (s *Service) link(m *Manifest, kind, id, rel string, size int64) {
 	src, err := s.store.PathFor(id)
 	if err != nil {
 		s.log.Warn("id lampiran tidak valid, dilewati", "kind", kind, "id", id, "err", err)
+		return
+	}
+	if _, err := os.Stat(src); err != nil {
+		s.log.Warn("berkas tidak ada di storage, dilewati", "kind", kind, "id", id, "err", err)
 		return
 	}
 	dst := filepath.Join(s.staging, filepath.FromSlash(rel))
@@ -268,8 +293,8 @@ func (s *Service) link(m *Manifest, kind, id, rel string, size int64) {
 		s.log.Warn("folder staging tidak bisa dibuat, dilewati", "path", rel, "err", err)
 		return
 	}
-	if err := os.Link(src, dst); err != nil {
-		s.log.Warn("berkas tidak bisa ditautkan, dilewati", "kind", kind, "id", id, "err", err)
+	if err := os.Symlink(src, dst); err != nil {
+		s.log.Warn("symlink tidak bisa dibuat, dilewati", "kind", kind, "id", id, "err", err)
 		return
 	}
 	m.Files = append(m.Files, ManifestFile{Kind: kind, ID: id, Path: rel, Size: size})
@@ -330,7 +355,7 @@ func (s *Service) Record(ctx context.Context, m Manifest) error {
 	}); err != nil {
 		return err
 	}
-	return os.RemoveAll(s.staging)
+	return s.clearStaging()
 }
 
 // Fail hanya menulis baris status, supaya halaman Status menunjukkan kegagalan tanpa harus membuka log.

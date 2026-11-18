@@ -4,7 +4,7 @@
 # dan keluar dengan kode bukan nol bila ada langkah yang gagal, pola yang sama dengan backup.sh.
 #
 # Tiga langkah, karena unggahannya dikerjakan container rclone di antaranya:
-#   1. backend `drive-export stage`  menyusun pohon hardlink bernama rapi di folder staging, menulis ekspor
+#   1. backend `drive-export stage`  menyusun pohon symlink bernama rapi di folder staging, menulis ekspor
 #      Excel bulan berjalan, dan mengenkripsi dump yang dikirim lewat pipe sebagai tar (age, kunci publik).
 #   2. rclone copy staging ke Drive.
 #   3. backend `drive-export record` mencatat drive_exports, menulis baris status, lalu membuang staging.
@@ -30,6 +30,8 @@ if docker compose --progress quiet version >/dev/null 2>&1; then
 fi
 BACKUP_DIR="${BACKUP_DIR:-/srv/nvm-internal/backup}"
 STAGING_DIR_HOST="${STAGING_DIR_HOST:-/srv/nvm-internal/drive-staging}"
+# Dipakai container rclone untuk membaca berkas yang ditunjuk symlink di staging.
+STORAGE_DIR_HOST="${STORAGE_DIR_HOST:-/srv/nvm-internal/storage}"
 SECRETS_DIR="${SECRETS_DIR:-/srv/nvm-internal/secrets}"
 STORAGE_UID="${STORAGE_UID:-65532}"
 # Versi dipatok, bukan latest: image yang berubah sendiri di tengah malam adalah pelajaran compro.
@@ -81,8 +83,8 @@ trap 'fail "perintah gagal di baris $LINENO: $(last_error)"' ERR
 
 [[ -f "$SECRETS_DIR/rclone.conf" ]] || fail "$SECRETS_DIR/rclone.conf tidak ada, lihat docs/runbook-deploy.md bagian Salinan ke Google Drive"
 
-# Folder staging harus bisa ditulis container yang berjalan sebagai UID pemilik storage, dan harus satu
-# filesystem dengan storage supaya hardlink-nya tidak memakan disk.
+# Folder staging harus bisa ditulis container yang berjalan sebagai UID pemilik storage. Isinya symlink ke
+# storage, jadi tidak ada syarat satu filesystem dan tidak ada disk yang terpakai untuk berkas aplikasi.
 mkdir -p "$STAGING_DIR_HOST"
 if [[ "$(stat -c %u "$STAGING_DIR_HOST")" != "$STORAGE_UID" ]]; then
   docker run --rm --network none -v "$STAGING_DIR_HOST:/s" "$ALPINE_IMAGE" \
@@ -125,7 +127,8 @@ else
     fail "susun staging: $(last_error)"
 fi
 files="$(wc -l <"$err_file.list" | tr -d ' ')"
-size="$(du -sh "$STAGING_DIR_HOST" 2>/dev/null | cut -f1 || echo -)"
+# -L mengikuti symlink: tanpa itu angkanya selalu nol, karena isi staging hanya symlink ke storage.
+size="$(du -shL "$STAGING_DIR_HOST" 2>/dev/null | cut -f1 || echo -)"
 
 if [[ "$dry_run" == 1 ]]; then
   echo "uji kering, tidak diunggah. $files path:"
@@ -135,15 +138,20 @@ if [[ "$dry_run" == 1 ]]; then
   exit 0
 fi
 
-# Langkah 2. rclone sebagai UID pemilik storage, supaya bisa membaca berkas 0600 di staging.
+# Langkah 2. rclone sebagai UID pemilik storage, supaya bisa membaca berkas 0600 di storage. Isi staging
+# adalah symlink ke /data/storage, jadi storage ikut dimount di path yang sama dengan yang dilihat backend,
+# dan --copy-links membuat rclone mengunggah isi berkasnya, bukan symlink-nya. Symlink yang menggantung
+# membuat rclone keluar dengan kode bukan nol, jadi path yang tidak cocok langsung kelihatan, tidak diam-diam
+# mengunggah berkas kosong.
 # Folder secrets di-mount sebagai folder (bukan satu berkas) dan baca-tulis, karena rclone menulis
 # ulang rclone.conf setiap kali token OAuth diperbarui, dan penulisan itu lewat rename di dalam folder.
 # --exclude manifest: berkas itu catatan internal, bukan isi arsip.
 docker run --rm --user "$STORAGE_UID:$STORAGE_UID" -e XDG_CACHE_HOME=/tmp \
-  -v "$STAGING_DIR_HOST:/staging:ro" -v "$SECRETS_DIR:/config/rclone" \
+  -v "$STAGING_DIR_HOST:/staging:ro" -v "$STORAGE_DIR_HOST:/data/storage:ro" \
+  -v "$SECRETS_DIR:/config/rclone" \
   "$RCLONE_IMAGE" copy /staging "$RCLONE_REMOTE:$RCLONE_DEST" \
   --config /config/rclone/rclone.conf \
-  --transfers 2 --checkers 4 --exclude '.nvm-drive-manifest.json' --stats-one-line --stats 5m \
+  --copy-links --transfers 2 --checkers 4 --exclude '.nvm-drive-manifest.json' --stats-one-line --stats 5m \
   2>"$err_file" || fail "rclone copy: $(last_error)"
 
 # Langkah 3. Baru dicatat setelah unggahan berhasil.

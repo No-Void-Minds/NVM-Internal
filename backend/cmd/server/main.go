@@ -56,11 +56,14 @@ func main() {
 }
 
 // Teks lebih enak dibaca saat dev; JSON di produksi supaya log Docker bisa disaring per field.
+// Log selalu ke stderr, bukan stdout. Subperintah seperti `drive-export stage` memakai stdout untuk
+// keluaran yang dibaca skrip (daftar path), jadi satu baris log di stdout akan merusaknya, dan galatnya
+// malah hilang dari stderr yang dipakai skrip sebagai pesan kegagalan.
 func newLogger(appEnv string) *slog.Logger {
 	if appEnv == "production" {
-		return slog.New(slog.NewJSONHandler(os.Stdout, nil))
+		return slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	}
-	return slog.New(slog.NewTextHandler(os.Stdout, nil))
+	return slog.New(slog.NewTextHandler(os.Stderr, nil))
 }
 
 func run(cfg config.Config, log *slog.Logger) error {

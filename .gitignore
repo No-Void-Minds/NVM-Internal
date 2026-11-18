@@ -9,6 +9,11 @@ backend/.data/
 /storage/
 # Cadangan harian di VM (/srv/nvm-internal/backup), berisi dump database. Tidak boleh masuk git.
 /backup/
+# rclone.conf di VM (/srv/nvm-internal/secrets), berisi token Google Drive. Foldernya mode 711 milik UID
+# 65532, jadi git pun tidak bisa membacanya dan memperingatkan kalau tidak diabaikan di sini.
+/secrets/
+# Folder staging salinan Drive di VM, isinya symlink sementara ke storage.
+/drive-staging/
 backend/storage/
 
 node_modules/
