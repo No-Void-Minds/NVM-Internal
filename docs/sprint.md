@@ -1205,9 +1205,16 @@ Keputusan teknis:
 - Halaman Status membaca `drive_export_runs`, bukan `backup/drive.log`. Backend di dalam container tidak punya akses ke folder log host, dan membaca berkas log dari HTTP akan menambah jalan baru ke filesystem host tanpa alasan.
 - Status salinan hanya untuk Admin, mengikuti revisi 23 yang menjadikan halaman Status milik Admin. `/api/health` tidak diubah.
 
+**Keputusan tambahan setelah uji kering pertama di VM gagal (2026-11-18):**
+- Pemilihan dump memakai `find`, bukan `ls` dengan glob. Pola yang tidak cocok dengan apa pun (belum ada backup mingguan) membuat `ls` keluar dengan kode bukan nol, dan dengan `pipefail` plus `set -E` itu memanggil `fail()` di dalam process substitution. Pemotongan jumlah memakai `awk`, bukan `head`, karena `head` menutup pipa lebih awal sehingga `find` kena SIGPIPE dan pipeline-nya gagal juga.
+- `fail()` berhenti di awal bila dipanggil dari subshell (`$BASHPID` berbeda dari `$$`): hanya melaporkan ke stderr lalu keluar, tanpa menghapus berkas sementara, tanpa menulis log, dan tanpa menulis baris status. Tanpa itu, satu kegagalan di process substitution menghapus `$err_file` lebih dulu, sehingga pesan galat langkah berikutnya hilang dan yang tersisa hanya log Compose.
+- Pesan galat langkah "susun staging" harus pesan asli perintah Go. Compose menulis baris "Container ... Creating" dan "Created" ke stderr, jadi ikut tersimpan. Sekarang `--progress quiet` dipakai bila Compose mendukungnya (v2.17 ke atas, dicoba dulu supaya versi lama tetap jalan), dan `last_error()` menyaring sisa baris progres apa pun.
+- Folder `/srv/nvm-internal/secrets` mode 711, bukan 700. Isinya milik UID 65532, sedangkan skrip berjalan sebagai user VM dan memeriksa dulu apakah `rclone.conf` ada; dengan 700 pemeriksaan itu selalu gagal. 711 memberi hak menelusuri tanpa hak membaca daftar isi, dan berkasnya tetap 600 milik 65532.
+- Izin eksekusi `deploy/*.sh` diperiksa `scripts/check.sh` dari indeks git (harus 100755). Di Windows git tidak merekam bit itu sendiri, dan `drive-export.sh` ter-commit 100644 sehingga cron tidak bisa menjalankannya. Perilaku skripnya diuji `scripts/uji-drive-export.sh`, yang mengganti `docker` dengan stub dan menjalankan empat kasus: tanpa berkas `weekly-*`, tanpa `db-*` sama sekali, keduanya ada, dan satu kegagalan buatan di langkah stage.
+
 **Selesai kalau:** `./scripts/check.sh` lolos, migrasi 000018 jalan di dev, `drive-export.sh --dry-run` di VM mencetak struktur yang sesuai, unggahan pertama muncul di Drive akun tim, halaman Status (Admin) menampilkan hasilnya, dan dump yang diunduh dari Drive bisa didekripsi dengan kunci privat age di laptop.
 
-**Hasil:** kode selesai 2026-11-18, `./scripts/check.sh` lolos, `go vet ./...` bersih, test unit dan test DB baru lolos. Satu dependensi Go baru: `filippo.io/age v1.2.1`. Migrasi, langkah persiapan (rclone authorize, kunci age, secrets, cron), uji kering, dan unggah pertama menunggu Rifky.
+**Hasil:** kode selesai 2026-11-18, `./scripts/check.sh` lolos, `go vet ./...` bersih, test unit dan test DB baru lolos. Satu dependensi Go baru: `filippo.io/age v1.2.1`. Uji kering pertama di VM gagal karena tiga hal di skripnya (pemilihan dump, `fail()` di subshell, dan log Compose yang menutupi pesan galat), ketiganya diperbaiki dan diuji ulang di laptop lewat `scripts/uji-drive-export.sh`. Migrasi, langkah persiapan (rclone authorize, kunci age, secrets, cron), uji kering ulang, dan unggah pertama menunggu Rifky.
 
 ## Sprint 12: Persiapan deploy dan migrasi data
 

@@ -22,6 +22,12 @@ source "$deploy_dir/.env"
 set +a
 
 compose=(docker compose --env-file "$deploy_dir/.env" -f "$deploy_dir/docker-compose.yml")
+# Baris "Container ... Creating/Created" ditulis Compose ke stderr, jadi ikut tersimpan sebagai pesan galat
+# langkah berikutnya. --progress quiet mematikannya, tetapi hanya ada di Compose v2.17 ke atas, jadi dicoba
+# dulu; versi lama tetap jalan dan barisnya disaring last_error().
+if docker compose --progress quiet version >/dev/null 2>&1; then
+  compose=(docker compose --progress quiet --env-file "$deploy_dir/.env" -f "$deploy_dir/docker-compose.yml")
+fi
 BACKUP_DIR="${BACKUP_DIR:-/srv/nvm-internal/backup}"
 STAGING_DIR_HOST="${STAGING_DIR_HOST:-/srv/nvm-internal/drive-staging}"
 SECRETS_DIR="${SECRETS_DIR:-/srv/nvm-internal/secrets}"
@@ -47,11 +53,23 @@ files="-"
 size="-"
 
 log_line() { printf '%s %s berkas=%s ukuran=%s%s\n' "$(date -Iseconds)" "$1" "$files" "$size" "${2:+ pesan=$2}" >>"$log"; }
-last_error() { tr -s '\n\t' '  ' <"$err_file" | sed 's/ *$//'; }
+# Baris progres Compose (Container/Network/Volume ... Creating, Created, dan seterusnya) dibuang, supaya yang
+# tersisa benar-benar pesan galat dari perintah yang gagal.
+last_error() {
+  # grep keluar dengan kode 1 bila semua baris tersaring atau stderr-nya kosong; itu bukan kegagalan di sini.
+  { grep -avE '^ *(Container|Network|Volume|Image) .* (Creat|Start|Stopp|Remov|Recreat|Built|Pull)' "$err_file" || true; } |
+    tr -s '\n\t' '  ' | sed 's/ *$//'
+}
 
 fail() {
-  trap - ERR
   local pesan="$1"
+  # set -E membuat trap ERR ikut berlaku di subshell dan process substitution. Di sana $err_file dan log
+  # bukan milik kita: cukup laporkan ke stderr dan keluar, biar shell utama yang mencatat kegagalannya.
+  if [[ "$BASHPID" != "$$" ]]; then
+    echo "salinan Drive GAGAL (subshell): $pesan" >&2
+    exit 1
+  fi
+  trap - ERR
   # Baris status ditulis lewat backend supaya halaman Status menunjukkan kegagalan tanpa membuka log ini.
   "${compose[@]}" run --rm -T backend drive-export fail "$pesan" >/dev/null 2>&1 || true
   rm -f "$err_file" "$err_file.list"
@@ -72,11 +90,22 @@ if [[ "$(stat -c %u "$STAGING_DIR_HOST")" != "$STORAGE_UID" ]]; then
 fi
 
 # Dump yang diunggah: 3 terbaru, ditambah satu per minggu (salinan weekly-) sebanyak 8.
-mapfile -t dumps < <(
+# find, bukan ls dengan glob: pola yang tidak cocok dengan apa pun (mis. belum ada backup mingguan) membuat
+# ls keluar dengan kode bukan nol, dan dengan pipefail plus set -E itu memanggil fail() di dalam process
+# substitution. awk, bukan head: head menutup pipa lebih awal sehingga find kena SIGPIPE, yang juga gagal.
+pilih_dump() {
+  local pola="$1" n="$2"
+  find "$BACKUP_DIR" -maxdepth 1 -type f -name "$pola" -printf '%T@ %p\n' |
+    sort -rn | awk -v n="$n" 'NR <= n { print substr($0, index($0, " ") + 1) }'
+}
+dumps=()
+while IFS= read -r berkas; do
+  [[ -n "$berkas" ]] && dumps+=("$berkas")
+done < <(
   {
-    ls -t "$BACKUP_DIR"/db-*.dump 2>/dev/null | head -n "$DRIVE_DUMP_DAILY"
-    ls -t "$BACKUP_DIR"/weekly-db-*.dump 2>/dev/null | head -n "$DRIVE_DUMP_WEEKLY"
-  } | sort -u
+    pilih_dump 'db-*.dump' "$DRIVE_DUMP_DAILY"
+    pilih_dump 'weekly-db-*.dump' "$DRIVE_DUMP_WEEKLY"
+  } | sort -u || true
 )
 if [[ -z "${DRIVE_BACKUP_AGE_RECIPIENT:-}" ]]; then
   echo "DRIVE_BACKUP_AGE_RECIPIENT kosong: dump tidak diunggah, hanya berkas aplikasi" >&2

@@ -318,9 +318,14 @@ Browser terbuka, masuk dengan akun Google tim, izinkan. `scope=drive.file` berar
 Di VM, buat folder secrets dan berkas konfigurasinya:
 
 ```bash
-sudo install -d -o 65532 -g 65532 -m 700 /srv/nvm-internal/secrets
-sudoedit /srv/nvm-internal/secrets/rclone.conf
+sudo install -d -o 65532 -g 65532 -m 711 /srv/nvm-internal/secrets
+sudo nano /srv/nvm-internal/secrets/rclone.conf
 ```
+
+Dua catatan yang menghabiskan waktu kalau tidak disebut:
+
+- **Mode folder 711, bukan 700.** Isinya milik UID 65532 (container rclone), sedangkan `drive-export.sh` berjalan sebagai user VM dan memeriksa dulu apakah `rclone.conf` ada. Dengan 700, user VM bahkan tidak bisa menelusuri folder itu, jadi pemeriksaannya selalu gagal dan skripnya berhenti sebelum mulai. 711 memberi hak menelusuri (`x`) tanpa hak membaca daftar isi (`r`), dan berkasnya tetap 600 milik 65532, jadi isinya tetap tidak bisa dibaca user VM.
+- **`sudoedit` menolak berkas di sini.** `sudoedit` menolak path yang induknya bisa ditulis user biasa, dan `/srv/nvm-internal` memang begitu. Pakai `sudo nano` (atau `sudo tee`) untuk berkas di bawah `/srv/nvm-internal`.
 
 Isinya, dengan `<token JSON dari laptop>` diganti baris tadi:
 
@@ -335,6 +340,7 @@ Lalu kunci izinnya. Folder di-mount sebagai folder, bukan satu berkas, karena rc
 
 ```bash
 sudo chown -R 65532:65532 /srv/nvm-internal/secrets
+sudo chmod 711 /srv/nvm-internal/secrets
 sudo chmod 600 /srv/nvm-internal/secrets/rclone.conf
 ```
 
@@ -361,10 +367,10 @@ Berkas itu memuat dua hal: baris `# public key: age1...` dan kunci privat `AGE-S
 - Kunci privat disimpan di **dua tempat di luar VM**, misalnya hard disk eksternal yang disimpan di kantor dan satu lagi di pengelola password (sebagai catatan aman), atau di volume BitLocker atau VeraCrypt. Tanpa kunci ini dump di Drive tidak bisa dipulihkan, jadi kehilangan kunci sama dengan kehilangan cadangan itu.
 - Kunci privat tidak pernah ditaruh di VM, di repo, atau dikirim lewat chat.
 
-Kunci publiknya dimasukkan ke `deploy/.env` di VM:
+Kunci publiknya dimasukkan ke `deploy/.env` di VM (`sudo nano`, bukan `sudoedit`, dengan alasan yang sama seperti di atas):
 
 ```bash
-sudoedit /srv/nvm-internal/deploy/.env
+sudo nano /srv/nvm-internal/deploy/.env
 # DRIVE_BACKUP_AGE_RECIPIENT=age1contohkuncipublikyangpanjang...
 ```
 
@@ -403,6 +409,14 @@ age --decrypt -i nvm-backup-key.txt -o 2026-11-18.dump 2026-11-18.dump.age
 Setelah itu pindahkan `.dump` ke VM dan ikuti langkah di bagian **Uji restore pertama** di atas, dengan `$DUMP` menunjuk berkas itu. Berkas lampiran di Drive tidak terenkripsi, jadi bisa disalin langsung ke `/srv/nvm-internal/storage` bila perlu, tetapi namanya di Drive adalah nama yang dibaca orang, bukan UUID yang dipakai aplikasi: untuk pemulihan penuh pakai snapshot storage di VM, bukan Drive.
 
 #### 5. Cron
+
+Cron memanggil skripnya lewat path lengkap, jadi izin eksekusinya harus ada. Izin itu ikut di git (mode 100755),
+dan `scripts/check.sh` memeriksanya untuk semua `deploy/*.sh`, karena di Windows git tidak merekam bit itu
+sendiri dan `drive-export.sh` pernah ter-commit tanpa izin eksekusi. Setelah `git pull` di VM, pastikan:
+
+```bash
+ls -l /srv/nvm-internal/deploy/drive-export.sh   # harus -rwxr-xr-x
+```
 
 ```cron
 # 20.45 UTC = 03.45 WIB: salinan berkas ke Google Drive, setelah backup (20.00) dan job harian (20.30)
