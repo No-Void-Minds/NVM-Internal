@@ -207,7 +207,7 @@ func TestManajerDanAdminBukanKolom(t *testing.T) {
 	if err := f.svc.Save(ctx, f.dina, SaveInput{UserID: f.dina.ID, Date: hariIni, Slot: 1, Activity: "Edit video"}); err != nil {
 		t.Fatal(err)
 	}
-	day, err := f.svc.Day(ctx, hariIni)
+	day, err := f.svc.Range(ctx, hariIni, hariIni)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,19 +218,58 @@ func TestManajerDanAdminBukanKolom(t *testing.T) {
 	if day.People[0].Name != "rio" || day.People[1].Name != "dina" {
 		t.Fatalf("urutan kolom %s, %s", day.People[0].Name, day.People[1].Name)
 	}
+	if len(day.Dates) != 1 || day.Dates[0] != hariIni {
+		t.Fatalf("tanggal yang tampil %+v", day.Dates)
+	}
 	for _, p := range day.People {
 		if p.ID == f.manajer.ID || p.ID == f.admin.ID {
 			t.Fatalf("Manajer atau Admin ikut jadi kolom: %+v", p)
 		}
-		if len(p.Cells) != len(Slots) {
-			t.Fatalf("%s punya %d sel, mau %d", p.Name, len(p.Cells), len(Slots))
+		if len(p.Days[hariIni]) != len(Slots) {
+			t.Fatalf("%s punya %d sel, mau %d", p.Name, len(p.Days[hariIni]), len(Slots))
+		}
+		if p.Total != len(Slots) {
+			t.Fatalf("%s total %d, mau %d", p.Name, p.Total, len(Slots))
 		}
 	}
-	if day.People[1].Cells[0].Activity != "Edit video" || !day.People[1].Filled {
+	if day.People[1].Days[hariIni][0].Activity != "Edit video" || day.People[1].Filled != 1 {
 		t.Fatalf("isian Dina tidak masuk kolomnya: %+v", day.People[1])
 	}
-	if day.People[0].Filled {
-		t.Fatal("Rio belum mengisi apa pun, filled harus false")
+	if day.People[0].Filled != 0 {
+		t.Fatal("Rio belum mengisi apa pun, filled harus 0")
+	}
+}
+
+// Minggu dengan isian Sabtu: Senin sampai Jumat selalu tampil, Sabtu ikut karena ada isinya, Minggu tidak.
+func TestRangeMingguMelewatiAkhirPekanKosong(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	if err := f.svc.Save(ctx, f.manajer, SaveInput{UserID: f.dina.ID, Date: "2026-11-21", Slot: 1, Activity: "Sabtu lembur"}); err != nil {
+		t.Fatal(err)
+	}
+	r, err := f.svc.Range(ctx, "2026-11-16", "2026-11-22")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"2026-11-16", "2026-11-17", "2026-11-18", "2026-11-19", "2026-11-20", "2026-11-21"}
+	if len(r.Dates) != len(want) {
+		t.Fatalf("tanggal yang tampil %+v, mau %+v", r.Dates, want)
+	}
+	for i, d := range want {
+		if r.Dates[i] != d {
+			t.Fatalf("tanggal ke-%d %q, mau %q", i, r.Dates[i], d)
+		}
+	}
+	dina := r.People[1]
+	if dina.Name != "dina" || dina.Filled != 1 || dina.Total != len(want)*len(Slots) {
+		t.Fatalf("ringkasan Dina %+v", dina)
+	}
+	// Minggu yang tersaring tidak boleh ikut terkirim.
+	if _, ada := dina.Days["2026-11-22"]; ada {
+		t.Fatal("tanggal yang tidak tampil masih terkirim")
+	}
+	if _, err := f.svc.Range(ctx, "2026-01-01", "2026-03-01"); err == nil {
+		t.Fatal("rentang lebih dari 31 hari harus ditolak")
 	}
 }
 

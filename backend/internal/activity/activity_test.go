@@ -106,6 +106,36 @@ func TestParseDay(t *testing.T) {
 	}
 }
 
+func TestWeekRange(t *testing.T) {
+	cases := []struct{ date, from, to string }{
+		// Minggu biasa: Senin 16 sampai Jumat 20 November 2026, dari tanggal mana pun di minggu itu.
+		{"2026-11-16", "2026-11-16", "2026-11-20"},
+		{"2026-11-18", "2026-11-16", "2026-11-20"},
+		{"2026-11-20", "2026-11-16", "2026-11-20"},
+		// Sabtu dan Minggu masih masuk minggu Senin yang sudah lewat, bukan minggu berikutnya.
+		{"2026-11-21", "2026-11-16", "2026-11-20"},
+		{"2026-11-22", "2026-11-16", "2026-11-20"},
+		// Pergantian bulan: Senin 30 November 2026, Jumat jatuh di Desember.
+		{"2026-12-02", "2026-11-30", "2026-12-04"},
+		// Pergantian tahun: Senin 28 Desember 2026, Jumat 1 Januari 2027.
+		{"2026-12-31", "2026-12-28", "2027-01-01"},
+		// Tahun kabisat: 29 Februari 2028 jatuh hari Selasa.
+		{"2028-03-01", "2028-02-28", "2028-03-03"},
+	}
+	for _, c := range cases {
+		from, to, err := WeekRange(c.date)
+		if err != nil {
+			t.Fatalf("%s: %v", c.date, err)
+		}
+		if from != c.from || to != c.to {
+			t.Errorf("%s: dapat %s sampai %s, mau %s sampai %s", c.date, from, to, c.from, c.to)
+		}
+	}
+	if _, _, err := WeekRange("16-11-2026"); err == nil {
+		t.Fatal("tanggal tidak sah harus ditolak")
+	}
+}
+
 func TestExportRows(t *testing.T) {
 	people := []Person{{ID: 4, Name: "Dina"}, {ID: 5, Name: "Rio"}}
 	cells := emptyCells()

@@ -113,7 +113,12 @@ const gutter = 'px-4 md:px-8'
 // Papan butuh seluruh lebar layar untuk empat kolom. Halaman lain ditengahkan dan dibatasi lebarnya,
 // karena tabel dan form yang direntang sampai 1920 px menyisakan ruang kosong besar di kanan.
 // Top bar tetap selebar layar di semua rute, jadi logo dan menu tidak pernah berpindah (Sprint 11c).
-const contentWidth = computed(() => (route.name === 'tasks' ? 'w-full' : 'mx-auto w-full max-w-6xl'))
+// Lebar penuh hanya untuk halaman yang kolomnya memang butuh seluruh layar: papan (empat kolom status) dan
+// Aktivitas Harian (satu kolom per Staf, revisi 21). Sisanya ditengahkan, lihat Keputusan Sprint 11c.
+const fullWidth = ['tasks', 'activity']
+const contentWidth = computed(() =>
+  fullWidth.includes(String(route.name)) ? 'w-full' : 'mx-auto w-full max-w-6xl',
+)
 </script>
 
 <template>

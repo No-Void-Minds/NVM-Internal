@@ -19,6 +19,18 @@ export function outputLink(value: string): string | null {
   }
 }
 
+// Nama host tautan output, dipakai sebagai label chip di halaman Aktivitas supaya URL panjang tidak
+// merusak lebar kolom.
+export function outputHost(value: string): string {
+  const href = outputLink(value)
+  if (!href) return ''
+  try {
+    return new URL(href).host
+  } catch {
+    return ''
+  }
+}
+
 // Status simpan per sel, dipakai kartu di papan task dan halaman Aktivitas.
 export const saveLabel: Record<'saving' | 'saved' | 'error', string> = {
   saving: 'Menyimpan...',

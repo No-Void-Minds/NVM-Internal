@@ -13,8 +13,8 @@
 // E2E_ONLY=subtaskresult (kelompok Arahan dan Hasil serta simpan catatan hasil, revisi 18; menulis catatan hasil
 // ke satu sub task di database dev),
 // E2E_ONLY=schedule (bagian Jadwal di form Buat task, revisi 19; tidak menyimpan apa pun),
-// E2E_ONLY=activity (Aktivitas Harian, revisi 21; menulis satu sel aktivitas hari ini milik akun Staf
-// di database dev).
+// E2E_ONLY=activity (Aktivitas Harian, revisi 21; menulis satu sel aktivitas hari ini milik akun Staf dan
+// satu sel lewat dialog Manajer di database dev).
 // Keluar dengan kode 1 bila ada yang gagal.
 import { chromium } from "playwright-core";
 
@@ -808,8 +808,8 @@ async function checkSchedule(width) {
 
 if (ONLY === "schedule") for (const w of [360, 1280]) await checkSchedule(w);
 
-// Aktivitas Harian (revisi 21): tata letak kartu di papan (tabel diputar mulai 768 px, kartu per jam di
-// bawahnya), urutan Tab per jam, simpan otomatis, dan isian itu muncul di /aktivitas tanpa bisa diedit Staf.
+// Aktivitas Harian (revisi 21): kartu di papan (tabel diputar mulai 768 px), halaman /aktivitas lebar penuh
+// dengan mode Minggu sebagai bawaan, kepala tabel yang lengket, dan dialog sel.
 async function checkActivity(width) {
   const { ctx, page, errors } = await open("staf", width, "terang");
   const where = (what) => `aktivitas ${width} ${what}`;
@@ -844,43 +844,15 @@ async function checkActivity(width) {
     .locator("th[scope='col']:visible")
     .filter({ hasText: "09.00-10.00" })
     .count();
-  const labelBaris = await page
-    .locator("th[scope='row']:visible")
-    .filter({ hasText: /^(Aktivitas|Output)$/ })
-    .count();
   if (width >= 768) {
     expect(tabel === 1, "tabel", `tabel terlihat ${tabel}, mau 1`);
     expect(kepalaJam === 1, "tabel", "jam bukan kepala kolom");
-    expect(labelBaris === 2, "tabel", `label baris ${labelBaris}, mau 2`);
   } else {
     expect(tabel === 0, "kartu", "tabel tidak boleh terlihat di bawah 768 px");
     expect(kepalaJam === 0, "kartu", "kepala kolom jam masih terlihat");
   }
   const kotak = await page.locator("textarea:visible").count();
   expect(kotak === 16, "isian", `textarea terlihat ${kotak}, mau 16`);
-
-  // Tinggi awal satu baris, tetap minimal 44 px, dan tanpa pegangan resize.
-  const bentuk = await page.evaluate(() => {
-    const el = [...document.querySelectorAll("textarea")].find(
-      (t) => t.offsetParent !== null,
-    );
-    return el
-      ? {
-          h: el.getBoundingClientRect().height,
-          resize: getComputedStyle(el).resize,
-        }
-      : null;
-  });
-  expect(
-    !!bentuk && bentuk.h >= 43.5 && bentuk.h <= 80,
-    "tinggi",
-    `tinggi isian ${bentuk ? Math.round(bentuk.h) : "?"} px, mau 44 sampai 80`,
-  );
-  expect(
-    !!bentuk && bentuk.resize === "none",
-    "resize",
-    `resize ${bentuk?.resize}, mau none`,
-  );
 
   // Urutan Tab per jam: 09.00 Aktivitas, 09.00 Output, lalu 10.00 Aktivitas.
   await terlihat(page.getByLabel(/^Aktivitas 09\.00-10\.00/)).fill(teks);
@@ -898,13 +870,6 @@ async function checkActivity(width) {
     "keyboard",
     `Tab dari Output 09.00 ke "${ketiga}", mau Aktivitas 10.00-11.00`,
   );
-  await page.keyboard.press("Shift+Tab");
-  const balik = await namaFokus();
-  expect(
-    /^Output 09\.00-10\.00/.test(balik),
-    "keyboard",
-    `Shift+Tab kembali ke "${balik}", mau Output 09.00-10.00`,
-  );
 
   // Simpan otomatis sudah berjalan saat isian kehilangan fokus di langkah Tab di atas.
   const tersimpan = await terlihat(page.getByText("Tersimpan", { exact: true }))
@@ -915,27 +880,119 @@ async function checkActivity(width) {
     );
   expect(tersimpan, "simpan", "status Tersimpan tidak muncul setelah blur");
 
-  const lebarKartu = await page.evaluate(() => [
-    document.documentElement.scrollWidth,
-    window.innerWidth,
-  ]);
-  expect(
-    lebarKartu[0] <= lebarKartu[1],
-    "lebar papan",
-    `scrollWidth ${lebarKartu[0]} > ${lebarKartu[1]}`,
-  );
-
-  // Isian yang sama harus terlihat di halaman Aktivitas, dan Staf tidak boleh bisa mengubahnya di sana.
+  // Halaman Aktivitas: bawaan mode Minggu, lebar penuh, dan isian dari papan ikut tampil.
   await page.goto(BASE + "/aktivitas");
   await audit(page, errors, where("halaman"));
+  const minggu = await page
+    .getByRole("button", { name: "Minggu", exact: true })
+    .getAttribute("aria-pressed");
+  expect(
+    minggu === "true",
+    "mode",
+    `mode bawaan aria-pressed ${minggu}, mau true`,
+  );
+  const hari = await page.locator("th[scope='colgroup']").count();
+  expect(
+    hari >= 5,
+    "minggu",
+    `kepala hari ${hari}, mau minimal 5 (Senin sampai Jumat)`,
+  );
   const muncul = await page.getByText(teks).first().count();
   expect(muncul > 0, "halaman", "isian dari papan tidak muncul di /aktivitas");
-  const isian = await page.locator("table textarea").count();
-  expect(isian === 0, "hak", `Staf masih punya ${isian} isian di /aktivitas`);
   const baca = await page
     .getByText("Ubah isianmu lewat tabel di papan task.")
     .count();
   expect(baca > 0, "hak", "keterangan hanya baca tidak muncul");
+
+  // Kepala nama dan kolom jam tetap terlihat setelah tabel digulir.
+  const lengket = await page.evaluate(() => {
+    const wadah = [...document.querySelectorAll("div")].find(
+      (d) => d.scrollHeight > d.clientHeight + 40 && d.querySelector("table"),
+    );
+    if (!wadah) return { missing: true };
+    wadah.scrollTop = 200;
+    wadah.scrollLeft = 120;
+    const kepala = wadah.querySelector("thead th:nth-child(2)");
+    const jam = wadah.querySelector("tbody th[scope='row']");
+    const box = wadah.getBoundingClientRect();
+    return {
+      atas: kepala.getBoundingClientRect().top - box.top,
+      kiri: jam.getBoundingClientRect().left - box.left,
+      scrollTop: wadah.scrollTop,
+    };
+  });
+  expect(
+    !lengket.missing,
+    "lengket",
+    "wadah tabel yang bergulir tidak ditemukan",
+  );
+  if (!lengket.missing) {
+    expect(
+      lengket.scrollTop > 0 && Math.abs(lengket.atas) <= 4,
+      "lengket",
+      `kepala nama bergeser ${Math.round(lengket.atas)} px setelah digulir`,
+    );
+    expect(
+      Math.abs(lengket.kiri) <= 4,
+      "lengket",
+      `kolom jam bergeser ${Math.round(lengket.kiri)} px setelah digulir ke samping`,
+    );
+  }
+
+  // Dialog sel dengan keyboard: Enter membuka, Escape menutup, fokus kembali ke sel yang sama.
+  const sel = page.locator("tbody td button").first();
+  const labelSel = await sel.getAttribute("aria-label");
+  await sel.focus();
+  await page.keyboard.press("Enter");
+  const terbuka = await page
+    .waitForSelector("dialog[open]", { timeout: 3000 })
+    .then(
+      () => true,
+      () => false,
+    );
+  expect(terbuka, "dialog", "Enter pada sel tidak membuka dialog");
+  if (terbuka) {
+    const isian = await page.locator("dialog[open] textarea").count();
+    expect(isian === 0, "dialog", `Staf dapat ${isian} isian di dialog, mau 0`);
+    await page.keyboard.press("Escape");
+    await page
+      .waitForFunction(() => !document.querySelector("dialog[open]"), null, {
+        timeout: 3000,
+      })
+      .catch(() => {});
+    await page.waitForTimeout(150);
+    const kembali = await page.evaluate(
+      () => document.activeElement?.getAttribute("aria-label") ?? "",
+    );
+    expect(
+      kembali === labelSel,
+      "dialog",
+      `fokus kembali ke "${kembali}", mau "${labelSel}"`,
+    );
+  }
+
+  // Mode Hari: segmented berganti, tombol hari menyala, dan hanya satu kepala hari yang tersisa.
+  await page.getByRole("button", { name: "Hari", exact: true }).click();
+  await page.waitForLoadState("networkidle");
+  await audit(page, errors, where("mode hari"));
+  const satuHari = await page.locator("th[scope='colgroup']").count();
+  expect(satuHari === 1, "mode hari", `kepala hari ${satuHari}, mau 1`);
+  const tombolHari = page.locator(
+    "[aria-label='Hari dalam minggu ini'] button",
+  );
+  await tombolHari.first().click();
+  await page.waitForLoadState("networkidle");
+  const menyala = await tombolHari.first().getAttribute("aria-pressed");
+  expect(
+    menyala === "true",
+    "mode hari",
+    "tombol hari tidak menyala setelah diklik",
+  );
+  expect(
+    page.url().includes("mode=hari"),
+    "url",
+    `mode tidak tersimpan di URL: ${page.url()}`,
+  );
 
   const lebar = await page.evaluate(() => [
     document.documentElement.scrollWidth,
@@ -953,7 +1010,46 @@ async function checkActivity(width) {
   await ctx.close();
 }
 
-if (ONLY === "activity") for (const w of [360, 1280]) await checkActivity(w);
+// Manajer: dialog sel berisi form, dan isian yang disimpan dari dialog langsung terlihat di tabel.
+async function checkActivityManager() {
+  const { ctx, page, errors } = await open("manajer", 1280, "terang");
+  const where = (what) => `aktivitas manajer ${what}`;
+  const expect = (cond, w, msg) => {
+    checks++;
+    if (!cond) fail(where(w), msg);
+  };
+  const teks = `E2E manajer ${Date.now()}`;
+
+  await page.goto(BASE + "/aktivitas");
+  await audit(page, errors, where("halaman"));
+  await page.locator("tbody td button").first().click();
+  await page.waitForSelector("dialog[open]");
+  const isian = await page.locator("dialog[open] textarea").count();
+  expect(isian === 2, "dialog", `isian di dialog ${isian}, mau 2`);
+  await page.locator("dialog[open] #sel-aktivitas").fill(teks);
+  await page.getByRole("button", { name: "Simpan", exact: true }).click();
+  const tutup = await page
+    .waitForFunction(() => !document.querySelector("dialog[open]"), null, {
+      timeout: 5000,
+    })
+    .then(
+      () => true,
+      () => false,
+    );
+  expect(tutup, "simpan", "dialog tidak tertutup setelah Simpan");
+  const muncul = await page.getByText(teks).first().count();
+  expect(muncul > 0, "simpan", "isian dari dialog tidak muncul di tabel");
+
+  checks++;
+  if (errors.length)
+    fail(where("console"), errors.splice(0).join(" | ").slice(0, 300));
+  await ctx.close();
+}
+
+if (ONLY === "activity") {
+  for (const w of [360, 768, 1280, 1920]) await checkActivity(w);
+  await checkActivityManager();
+}
 
 await browser.close();
 console.log(

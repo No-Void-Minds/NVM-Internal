@@ -32,26 +32,54 @@ func (s *Server) myActivities(c *gin.Context) {
 	c.JSON(http.StatusOK, out)
 }
 
-// dayActivities bisa dibaca semua pengguna yang login; yang membatasi hanya hak mengubah.
-func (s *Server) dayActivities(c *gin.Context) {
-	date, err := s.activities.ParseDay(c.Query("date"))
+// listActivities bisa dibaca semua pengguna yang login; yang membatasi hanya hak mengubah. Rentangnya bisa
+// diminta tiga cara: week (Senin sampai Jumat minggu tanggal itu), from dan to, atau date untuk satu hari.
+// Satu panggilan sudah memuat seluruh minggu, jadi halaman mingguan tidak memanggil API per hari.
+func (s *Server) listActivities(c *gin.Context) {
+	from, to, err := s.activityRange(c)
 	if err != nil {
 		s.writeActivityError(c, err)
 		return
 	}
-	out, err := s.activities.Day(c.Request.Context(), date)
+	out, err := s.activities.Range(c.Request.Context(), from, to)
 	if err != nil {
 		s.writeActivityError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"date":   out.Date,
+		"from":   out.From,
+		"to":     out.To,
+		"dates":  out.Dates,
 		"today":  s.activities.Today(),
 		"slots":  out.Slots,
 		"people": out.People,
 		// Manajer boleh mengubah isian siapa pun di tanggal mana pun; peran lain hanya membaca di halaman ini.
 		"can_edit": currentUser(c).Role == sqlc.UserRoleManager,
 	})
+}
+
+func (s *Server) activityRange(c *gin.Context) (string, string, error) {
+	if week := c.Query("week"); week != "" {
+		day, err := s.activities.ParseDay(week)
+		if err != nil {
+			return "", "", err
+		}
+		return activity.WeekRange(day)
+	}
+	if from := c.Query("from"); from != "" {
+		start, err := s.activities.ParseDay(from)
+		if err != nil {
+			return "", "", err
+		}
+		end, err := s.activities.ParseDay(c.Query("to"))
+		if err != nil {
+			return "", "", err
+		}
+		return start, end, nil
+	}
+	// Tanpa parameter: satu hari, hari ini.
+	day, err := s.activities.ParseDay(c.Query("date"))
+	return day, day, err
 }
 
 type saveActivityRequest struct {

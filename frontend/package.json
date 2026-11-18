@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "format": "prettier --write src/",
     "format:check": "prettier --check src/",
-    "check": "vue-tsc -b && eslint . && prettier --check src/"
+    "check": "vue-tsc -b && eslint . && prettier --check src/",
+    "test:unit": "node --test \"tests/*.test.ts\""
   },
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.3.0",

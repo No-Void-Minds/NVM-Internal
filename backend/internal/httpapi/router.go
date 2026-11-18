@@ -143,7 +143,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	app.DELETE("/tasks/:id/subtasks/:subtaskId", s.deleteSubtask)
 	app.POST("/tasks/:id/subtasks/:subtaskId/attachments", s.uploadSubtaskAttachment)
 	// Aktivitas Harian (revisi 21). Tabel harian bisa dibaca semua peran; hak mengubah dicek di service.
-	app.GET("/activities", s.dayActivities)
+	app.GET("/activities", s.listActivities)
 	app.GET("/activities/me", s.myActivities)
 	app.PUT("/activities", s.saveActivity)
 	app.GET("/activities/export", managerOnly, s.exportActivities)

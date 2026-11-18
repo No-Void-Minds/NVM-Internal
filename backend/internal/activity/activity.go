@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -30,8 +31,9 @@ var Slots = []string{
 // MaxFieldLen membatasi satu kolom isian. Sama dengan CHECK di migrasi 000016.
 const MaxFieldLen = 1000
 
-// MaxExportDays membatasi rentang ekspor, supaya satu permintaan tidak membentuk sheet raksasa.
-const MaxExportDays = 31
+// MaxRangeDays membatasi rentang yang bisa dibaca atau diekspor sekali jalan, supaya satu permintaan tidak
+// membentuk tabel atau sheet raksasa.
+const MaxRangeDays = 31
 
 // officeTZ menentukan "hari ini": server bisa berjalan dalam UTC, sedangkan hari kerja dihitung tim dalam WIB.
 var officeTZ = func() *time.Location {
@@ -63,19 +65,26 @@ type Cell struct {
 	UpdatedBy string `json:"updated_by"`
 }
 
+// Person adalah satu kolom tabel Aktivitas: isinya seluruh sel orang itu di rentang yang diminta, dikelompokkan
+// per tanggal, supaya halaman mingguan cukup satu panggilan API.
 type Person struct {
 	ID           int64   `json:"id"`
 	Name         string  `json:"name"`
 	DivisionName string  `json:"division_name"`
 	AvatarID     *string `json:"avatar_id"`
 	IsActive     bool    `json:"is_active"`
-	// Filled false berarti orang itu belum mengisi apa pun di tanggal ini.
-	Filled bool   `json:"filled"`
-	Cells  []Cell `json:"cells"`
+	// Filled dan Total mengisi ringkasan "n dari N jam terisi" untuk rentang yang tampil.
+	Filled int               `json:"filled"`
+	Total  int               `json:"total"`
+	Days   map[string][]Cell `json:"days"`
 }
 
-type Day struct {
-	Date   string   `json:"date"`
+type Range struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+	// Dates adalah tanggal yang benar-benar ditampilkan: hari kerja selalu ada, Sabtu dan Minggu hanya bila
+	// ada isinya (keputusan revisi 21).
+	Dates  []string `json:"dates"`
 	Slots  []string `json:"slots"`
 	People []Person `json:"people"`
 }
@@ -228,57 +237,130 @@ func (s *Service) Mine(ctx context.Context, userID int64, date string) (Mine, er
 	return out, nil
 }
 
-// Day mengembalikan satu kolom per orang: semua Staf aktif, ditambah akun yang punya isian di tanggal itu.
-func (s *Service) Day(ctx context.Context, date string) (Day, error) {
-	out := Day{Date: date, Slots: Slots, People: []Person{}}
-	people, err := s.people(ctx, date, date)
+// WeekRange mengembalikan Senin sampai Jumat dari minggu tanggal itu. Minggu kerja dihitung mulai Senin,
+// jadi tanggal hari Minggu masuk minggu yang Seninnya besok, bukan yang sudah lewat.
+func WeekRange(date string) (string, string, error) {
+	d, err := time.Parse(dayLayout, date)
+	if err != nil {
+		return "", "", apperr.Invalid("Tanggal tidak valid. Pakai bentuk 2026-11-18.")
+	}
+	// Weekday: 0 Minggu sampai 6 Sabtu. Senin jadi titik nol.
+	back := (int(d.Weekday()) + 6) % 7
+	monday := d.AddDate(0, 0, -back)
+	return monday.Format(dayLayout), monday.AddDate(0, 0, 4).Format(dayLayout), nil
+}
+
+// Range mengembalikan satu kolom per orang beserta seluruh selnya di rentang tanggal, cukup untuk tampilan
+// harian (from sama dengan to) maupun mingguan dalam satu panggilan.
+func (s *Service) Range(ctx context.Context, from, to string) (Range, error) {
+	out := Range{From: from, To: to, Slots: Slots, Dates: []string{}, People: []Person{}}
+	people, dates, err := s.collect(ctx, from, to)
 	if err != nil {
 		return out, err
 	}
-	rows, err := s.rows(ctx, date, date)
+	out.Dates, out.People = dates, people
+	return out, nil
+}
+
+// collect adalah isi tabel untuk satu rentang: kolom orang, sel per tanggal, dan daftar tanggal yang tampil.
+// Dipakai halaman Aktivitas dan ekspor, supaya aturan akhir pekan dan aturan kolom hanya ada di satu tempat.
+func (s *Service) collect(ctx context.Context, from, to string) ([]Person, []string, error) {
+	start, end, err := parseSpan(from, to)
 	if err != nil {
-		return out, err
+		return nil, nil, err
 	}
-	index := make(map[int64]int, len(people))
-	for i, p := range people {
-		index[p.ID] = i
+	fromDay, toDay := pgtype.Date{Time: start, Valid: true}, pgtype.Date{Time: end, Valid: true}
+	q := sqlc.New(s.pool)
+	rows, err := q.ListActivityPeople(ctx, sqlc.ListActivityPeopleParams{FromDate: fromDay, ToDate: toDay})
+	if err != nil {
+		return nil, nil, err
 	}
-	for _, r := range rows {
+	cells, err := q.ListDailyActivities(ctx, sqlc.ListDailyActivitiesParams{FromDate: fromDay, ToDate: toDay})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	people := make([]Person, 0, len(rows))
+	index := make(map[int64]int, len(rows))
+	for i, r := range rows {
+		index[r.ID] = i
+		people = append(people, Person{
+			ID: r.ID, Name: r.Name, DivisionName: r.DivisionName, IsActive: r.IsActive,
+			AvatarID: avatarID(r.AvatarID), Days: map[string][]Cell{},
+		})
+	}
+	// Sel diisi lebih dulu, karena daftar tanggal butuh tahu akhir pekan mana yang ada isinya.
+	for _, r := range cells {
 		i, ok := index[r.UserID]
 		if !ok {
 			continue
 		}
-		fill(people[i].Cells, r)
-		if r.Activity.String != "" || r.Output.String != "" {
-			people[i].Filled = true
+		key := r.ActivityDate.Time.Format(dayLayout)
+		if people[i].Days[key] == nil {
+			people[i].Days[key] = emptyCells()
 		}
+		fill(people[i].Days[key], r)
 	}
-	out.People = people
-	return out, nil
+
+	dates := []string{}
+	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+		key := d.Format(dayLayout)
+		if weekend(d) && !dayHasContent(people, key) {
+			continue
+		}
+		dates = append(dates, key)
+	}
+	// Setiap orang punya sel lengkap di setiap tanggal yang tampil, jadi frontend tidak perlu menebak sel kosong.
+	for i := range people {
+		for _, key := range dates {
+			if people[i].Days[key] == nil {
+				people[i].Days[key] = emptyCells()
+			}
+			for _, c := range people[i].Days[key] {
+				if c.Activity != "" || c.Output != "" {
+					people[i].Filled++
+				}
+			}
+		}
+		// Tanggal di luar daftar (akhir pekan kosong yang tersaring) dibuang supaya tidak terkirim sia-sia.
+		for key := range people[i].Days {
+			if !slices.Contains(dates, key) {
+				delete(people[i].Days, key)
+			}
+		}
+		people[i].Total = len(dates) * len(Slots)
+	}
+	return people, dates, nil
 }
 
-// people adalah kolom tabel: dipakai halaman harian (from sama dengan to) dan ekspor rentang tanggal.
-func (s *Service) people(ctx context.Context, from, to string) ([]Person, error) {
-	fromDay, err := pgDate(from)
+// parseSpan memeriksa bentuk tanggal, urutannya, dan batas panjang rentang.
+func parseSpan(from, to string) (time.Time, time.Time, error) {
+	start, err := time.Parse(dayLayout, from)
 	if err != nil {
-		return nil, err
+		return start, start, apperr.Invalid("Tanggal awal tidak valid. Pakai bentuk 2026-11-18.")
 	}
-	toDay, err := pgDate(to)
+	end, err := time.Parse(dayLayout, to)
 	if err != nil {
-		return nil, err
+		return start, end, apperr.Invalid("Tanggal akhir tidak valid. Pakai bentuk 2026-11-18.")
 	}
-	rows, err := sqlc.New(s.pool).ListActivityPeople(ctx, sqlc.ListActivityPeopleParams{FromDate: fromDay, ToDate: toDay})
-	if err != nil {
-		return nil, err
+	if end.Before(start) {
+		return start, end, apperr.Invalid("Tanggal akhir tidak boleh lebih awal dari tanggal awal.")
 	}
-	people := make([]Person, 0, len(rows))
-	for _, r := range rows {
-		people = append(people, Person{
-			ID: r.ID, Name: r.Name, DivisionName: r.DivisionName, IsActive: r.IsActive,
-			AvatarID: avatarID(r.AvatarID), Cells: emptyCells(),
-		})
+	if int(end.Sub(start).Hours()/24)+1 > MaxRangeDays {
+		return start, end, apperr.Invalid(fmt.Sprintf("Rentang maksimal %d hari.", MaxRangeDays))
 	}
-	return people, nil
+	return start, end, nil
+}
+
+func dayHasContent(people []Person, date string) bool {
+	for _, p := range people {
+		for _, c := range p.Days[date] {
+			if c.Activity != "" || c.Output != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *Service) rows(ctx context.Context, from, to string) ([]sqlc.ListDailyActivitiesRow, error) {

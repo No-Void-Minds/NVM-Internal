@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"time"
-
-	"nvm-internal/internal/apperr"
 )
 
 // exportDay adalah satu hari di sheet ekspor: tanggalnya dan isian setiap orang, satu Cell per slot.
@@ -17,50 +15,27 @@ type exportDay struct {
 // Export menyusun .xlsx dengan tata letak spreadsheet lama: kolom Week, Date, dan Time di kiri, lalu dua
 // kolom Activity dan Output per orang. Nama hari dan bulan memakai bahasa Inggris seperti spreadsheet itu.
 func (s *Service) Export(ctx context.Context, from, to string) ([]byte, string, error) {
-	start, err := time.Parse(dayLayout, from)
-	if err != nil {
-		return nil, "", apperr.Invalid("Tanggal awal tidak valid. Pakai bentuk 2026-11-18.")
-	}
-	end, err := time.Parse(dayLayout, to)
-	if err != nil {
-		return nil, "", apperr.Invalid("Tanggal akhir tidak valid. Pakai bentuk 2026-11-18.")
-	}
-	if end.Before(start) {
-		return nil, "", apperr.Invalid("Tanggal akhir tidak boleh lebih awal dari tanggal awal.")
-	}
-	days := int(end.Sub(start).Hours()/24) + 1
-	if days > MaxExportDays {
-		return nil, "", apperr.Invalid(fmt.Sprintf("Rentang ekspor maksimal %d hari.", MaxExportDays))
-	}
-
-	people, err := s.people(ctx, from, to)
+	start, end, err := parseSpan(from, to)
 	if err != nil {
 		return nil, "", err
 	}
-	cells, err := s.rows(ctx, from, to)
+	// Isi, aturan kolom, dan aturan akhir pekan sama dengan halaman Aktivitas, jadi ekspor memakai collect.
+	people, dates, err := s.collect(ctx, from, to)
 	if err != nil {
 		return nil, "", err
 	}
-	byDate := map[string]map[int64][]Cell{}
-	for _, r := range cells {
-		key := r.ActivityDate.Time.Format(dayLayout)
-		if byDate[key] == nil {
-			byDate[key] = map[int64][]Cell{}
-		}
-		if byDate[key][r.UserID] == nil {
-			byDate[key][r.UserID] = emptyCells()
-		}
-		fill(byDate[key][r.UserID], r)
-	}
 
-	list := make([]exportDay, 0, days)
-	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
-		day := exportDay{Date: d, Cells: byDate[d.Format(dayLayout)]}
-		// Sabtu dan Minggu boleh diisi, tetapi baru muncul di ekspor kalau memang ada isinya (keputusan revisi 21).
-		if weekend(d) && !hasContent(day.Cells) {
-			continue
+	list := make([]exportDay, 0, len(dates))
+	for _, key := range dates {
+		d, err := time.Parse(dayLayout, key)
+		if err != nil {
+			return nil, "", err
 		}
-		list = append(list, day)
+		cells := map[int64][]Cell{}
+		for _, p := range people {
+			cells[p.ID] = p.Days[key]
+		}
+		list = append(list, exportDay{Date: d, Cells: cells})
 	}
 
 	name := fmt.Sprintf("aktivitas-harian-%s-sampai-%s.xlsx", from, to)
@@ -70,17 +45,6 @@ func (s *Service) Export(ctx context.Context, from, to string) ([]byte, string, 
 
 func weekend(d time.Time) bool {
 	return d.Weekday() == time.Saturday || d.Weekday() == time.Sunday
-}
-
-func hasContent(cells map[int64][]Cell) bool {
-	for _, list := range cells {
-		for _, c := range list {
-			if c.Activity != "" || c.Output != "" {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func exportTitle(start, end time.Time) string {

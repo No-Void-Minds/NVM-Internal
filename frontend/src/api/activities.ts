@@ -10,20 +10,26 @@ export type ActivityCell = {
   updated_by: string
 }
 
+// Satu kolom tabel Aktivitas: seluruh sel orang itu di rentang yang diminta, dikelompokkan per tanggal.
 export type ActivityPerson = {
   id: number
   name: string
   division_name: string
   avatar_id: string | null
   is_active: boolean
-  filled: boolean
-  cells: ActivityCell[]
+  // filled dan total mengisi ringkasan "n dari N jam terisi" untuk rentang yang tampil.
+  filled: number
+  total: number
+  days: Record<string, ActivityCell[]>
 }
 
 export type MyActivities = { date: string; slots: string[]; cells: ActivityCell[] }
 
-export type ActivityDay = {
-  date: string
+export type ActivityRange = {
+  from: string
+  to: string
+  // Tanggal yang benar-benar ditampilkan: hari kerja selalu ada, Sabtu dan Minggu hanya bila ada isinya.
+  dates: string[]
   today: string
   slots: string[]
   people: ActivityPerson[]
@@ -42,8 +48,15 @@ export function getMyActivities(signal?: AbortSignal): Promise<MyActivities> {
   return apiGet<MyActivities>('/activities/me', signal)
 }
 
-export function getActivityDay(date: string, signal?: AbortSignal): Promise<ActivityDay> {
-  return apiGet<ActivityDay>(`/activities?date=${encodeURIComponent(date)}`, signal)
+// Satu panggilan memuat seluruh rentang: week (Senin sampai Jumat minggu tanggal itu), from dan to, atau
+// date untuk satu hari. Halaman mingguan tidak pernah memanggil API per hari.
+export function getActivityRange(
+  q: { week?: string; from?: string; to?: string; date?: string },
+  signal?: AbortSignal,
+): Promise<ActivityRange> {
+  const params = new URLSearchParams()
+  for (const [k, v] of Object.entries(q)) if (v) params.set(k, v)
+  return apiGet<ActivityRange>(`/activities?${params}`, signal)
 }
 
 export function saveActivity(input: SaveActivityInput): Promise<MyActivities> {
