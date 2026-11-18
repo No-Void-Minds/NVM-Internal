@@ -302,10 +302,14 @@ func (s *Service) collect(ctx context.Context, from, to string) ([]Person, []str
 		fill(people[i].Days[key], r)
 	}
 
+	// Satu tanggal yang diminta tegas (mode Hari) selalu ditampilkan, termasuk Sabtu dan Minggu yang kosong:
+	// tanpa itu Manajer tidak punya sel untuk diisi di akhir pekan. Aturan "akhir pekan hanya bila ada isinya"
+	// berlaku untuk rentang, yaitu tampilan mingguan dan ekspor.
+	single := from == to
 	dates := []string{}
 	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
 		key := d.Format(dayLayout)
-		if weekend(d) && !dayHasContent(people, key) {
+		if !single && weekend(d) && !dayHasContent(people, key) {
 			continue
 		}
 		dates = append(dates, key)

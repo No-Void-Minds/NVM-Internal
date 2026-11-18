@@ -271,6 +271,26 @@ func TestRangeMingguMelewatiAkhirPekanKosong(t *testing.T) {
 	if _, err := f.svc.Range(ctx, "2026-01-01", "2026-03-01"); err == nil {
 		t.Fatal("rentang lebih dari 31 hari harus ditolak")
 	}
+
+	// Mode Hari: satu tanggal yang diminta tegas tetap tampil walau Sabtu dan kosong, supaya ada sel untuk diisi.
+	satu, err := f.svc.Range(ctx, "2026-11-28", "2026-11-28")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(satu.Dates) != 1 || satu.Dates[0] != "2026-11-28" {
+		t.Fatalf("Sabtu kosong di mode Hari harus tetap tampil, dapat %+v", satu.Dates)
+	}
+	if len(satu.People[0].Days["2026-11-28"]) != len(Slots) {
+		t.Fatal("sel di tanggal itu harus lengkap walau kosong")
+	}
+	// Rentang: Sabtu kosong tetap disaring.
+	minggu, err := f.svc.Range(ctx, "2026-11-23", "2026-11-29")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(minggu.Dates) != 5 {
+		t.Fatalf("akhir pekan kosong di rentang harus disaring, dapat %+v", minggu.Dates)
+	}
 }
 
 func TestManajerTidakBisaMenitipkanKeManajer(t *testing.T) {

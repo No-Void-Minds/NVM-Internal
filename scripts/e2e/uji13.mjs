@@ -819,6 +819,22 @@ async function checkActivity(width) {
   };
   const teks = `E2E ${Date.now()}`;
   const terlihat = (l) => l.locator("visible=true").first();
+  // Tabel Aktivitas diganti kerangka memuat setiap kali mode atau tanggal berubah, jadi pemeriksaan
+  // menunggu jumlah kepala harinya, bukan menunggu jeda.
+  const tungguKepala = (want, minimal = false) =>
+    page
+      .waitForFunction(
+        (arg) => {
+          const n = document.querySelectorAll("th[scope='colgroup']").length;
+          return arg.minimal ? n >= arg.want : n === arg.want;
+        },
+        { want, minimal },
+        { timeout: 8000 },
+      )
+      .then(
+        () => true,
+        () => false,
+      );
   // Nama isian: tabel yang diputar memakai aria-label, kartu per jam memakai label sr-only.
   const namaFokus = () =>
     page.evaluate(() => {
@@ -891,9 +907,10 @@ async function checkActivity(width) {
     "mode",
     `mode bawaan aria-pressed ${minggu}, mau true`,
   );
+  const adaMinggu = await tungguKepala(5, true);
   const hari = await page.locator("th[scope='colgroup']").count();
   expect(
-    hari >= 5,
+    adaMinggu,
     "minggu",
     `kepala hari ${hari}, mau minimal 5 (Senin sampai Jumat)`,
   );
@@ -973,16 +990,33 @@ async function checkActivity(width) {
 
   // Mode Hari: segmented berganti, tombol hari menyala, dan hanya satu kepala hari yang tersisa.
   await page.getByRole("button", { name: "Hari", exact: true }).click();
-  await page.waitForLoadState("networkidle");
-  await audit(page, errors, where("mode hari"));
+  await page.waitForURL(/mode=hari/, { timeout: 8000 });
+  const adaSatuHari = await tungguKepala(1);
   const satuHari = await page.locator("th[scope='colgroup']").count();
-  expect(satuHari === 1, "mode hari", `kepala hari ${satuHari}, mau 1`);
+  expect(adaSatuHari, "mode hari", `kepala hari ${satuHari}, mau 1`);
+  await audit(page, errors, where("mode hari"));
   const tombolHari = page.locator(
     "[aria-label='Hari dalam minggu ini'] button",
   );
+  const tanggalHari = await tombolHari.first().textContent();
   await tombolHari.first().click();
-  await page.waitForLoadState("networkidle");
+  await page
+    .waitForFunction(
+      () =>
+        document
+          .querySelector("[aria-label='Hari dalam minggu ini'] button")
+          ?.getAttribute("aria-pressed") === "true",
+      null,
+      { timeout: 8000 },
+    )
+    .catch(() => {});
+  await tungguKepala(1);
   const menyala = await tombolHari.first().getAttribute("aria-pressed");
+  expect(
+    !!tanggalHari?.trim(),
+    "mode hari",
+    "tombol hari tidak memuat nama hari dan tanggalnya",
+  );
   expect(
     menyala === "true",
     "mode hari",
@@ -1021,6 +1055,9 @@ async function checkActivityManager() {
   const teks = `E2E manajer ${Date.now()}`;
 
   await page.goto(BASE + "/aktivitas");
+  await page
+    .waitForSelector("tbody td button", { timeout: 8000 })
+    .catch(() => {});
   await audit(page, errors, where("halaman"));
   await page.locator("tbody td button").first().click();
   await page.waitForSelector("dialog[open]");

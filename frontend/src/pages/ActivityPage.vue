@@ -442,6 +442,12 @@ const timeCell = 'sticky left-0 z-10 w-28 px-3 py-2 text-left font-medium whites
       }}
     </p>
 
+    <!-- Bisa terjadi bila rentang di URL hanya memuat Sabtu dan Minggu yang kosong: keduanya disaring,
+         jadi tidak ada baris yang bisa ditampilkan. -->
+    <p v-else-if="dates.length === 0" class="mt-4 rounded-card border border-line bg-surface p-6 text-center">
+      Tidak ada hari yang bisa ditampilkan di rentang ini. Sabtu dan Minggu hanya tampil kalau ada isinya.
+    </p>
+
     <!-- Tabel bergulir di dalam wadahnya sendiri, ke samping dan ke bawah, jadi halaman tidak pernah
          bergulir horizontal. Kepala nama lengket di atas, kolom jam lengket di kiri. -->
     <div
