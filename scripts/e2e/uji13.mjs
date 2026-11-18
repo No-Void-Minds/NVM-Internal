@@ -808,8 +808,8 @@ async function checkSchedule(width) {
 
 if (ONLY === "schedule") for (const w of [360, 1280]) await checkSchedule(w);
 
-// Aktivitas Harian (revisi 21): Staf mengisi satu sel di papan, isian itu muncul di /aktivitas, Staf tidak
-// bisa mengedit di sana, halaman tidak bergulir horizontal, dan Tab pindah antar sel.
+// Aktivitas Harian (revisi 21): tata letak kartu di papan (tabel diputar mulai 768 px, kartu per jam di
+// bawahnya), urutan Tab per jam, simpan otomatis, dan isian itu muncul di /aktivitas tanpa bisa diedit Staf.
 async function checkActivity(width) {
   const { ctx, page, errors } = await open("staf", width, "terang");
   const where = (what) => `aktivitas ${width} ${what}`;
@@ -818,6 +818,18 @@ async function checkActivity(width) {
     if (!cond) fail(where(w), msg);
   };
   const teks = `E2E ${Date.now()}`;
+  const terlihat = (l) => l.locator("visible=true").first();
+  // Nama isian: tabel yang diputar memakai aria-label, kartu per jam memakai label sr-only.
+  const namaFokus = () =>
+    page.evaluate(() => {
+      const el = document.activeElement;
+      if (!el) return "";
+      return (
+        el.getAttribute("aria-label") ||
+        document.querySelector(`label[for="${el.id}"]`)?.textContent ||
+        ""
+      ).trim();
+    });
 
   await page.goto(BASE + "/task");
   await page.waitForLoadState("networkidle");
@@ -826,27 +838,76 @@ async function checkActivity(width) {
     await judul.click();
   await audit(page, errors, where("kartu papan"));
 
-  const isian = page.getByLabel(/^Aktivitas 09\.00-10\.00/).first();
-  await isian.fill(teks);
-  // Simpan otomatis terjadi saat sel kehilangan fokus; Tab sekaligus menguji pindah ke kolom Output.
-  await page.keyboard.press("Tab");
-  const fokus = await page.evaluate(() => {
-    const el = document.activeElement;
-    return {
-      tag: el?.tagName,
-      label:
-        document.querySelector(`label[for="${el?.id}"]`)?.textContent ?? "",
-    };
+  // Mulai 768 px: tabel tiga baris dengan jam sebagai kepala kolom. Di bawahnya: kartu per jam, tanpa tabel.
+  const tabel = await page.locator("table:visible").count();
+  const kepalaJam = await page
+    .locator("th[scope='col']:visible")
+    .filter({ hasText: "09.00-10.00" })
+    .count();
+  const labelBaris = await page
+    .locator("th[scope='row']:visible")
+    .filter({ hasText: /^(Aktivitas|Output)$/ })
+    .count();
+  if (width >= 768) {
+    expect(tabel === 1, "tabel", `tabel terlihat ${tabel}, mau 1`);
+    expect(kepalaJam === 1, "tabel", "jam bukan kepala kolom");
+    expect(labelBaris === 2, "tabel", `label baris ${labelBaris}, mau 2`);
+  } else {
+    expect(tabel === 0, "kartu", "tabel tidak boleh terlihat di bawah 768 px");
+    expect(kepalaJam === 0, "kartu", "kepala kolom jam masih terlihat");
+  }
+  const kotak = await page.locator("textarea:visible").count();
+  expect(kotak === 16, "isian", `textarea terlihat ${kotak}, mau 16`);
+
+  // Tinggi awal satu baris, tetap minimal 44 px, dan tanpa pegangan resize.
+  const bentuk = await page.evaluate(() => {
+    const el = [...document.querySelectorAll("textarea")].find(
+      (t) => t.offsetParent !== null,
+    );
+    return el
+      ? {
+          h: el.getBoundingClientRect().height,
+          resize: getComputedStyle(el).resize,
+        }
+      : null;
   });
   expect(
-    fokus.tag === "TEXTAREA" &&
-      /^Output 09\.00-10\.00/.test(fokus.label.trim()),
-    "keyboard",
-    `Tab dari Aktivitas tidak sampai ke Output, dapat ${fokus.tag} "${fokus.label.trim()}"`,
+    !!bentuk && bentuk.h >= 43.5 && bentuk.h <= 80,
+    "tinggi",
+    `tinggi isian ${bentuk ? Math.round(bentuk.h) : "?"} px, mau 44 sampai 80`,
   );
-  const tersimpan = await page
-    .getByText("Tersimpan", { exact: true })
-    .first()
+  expect(
+    !!bentuk && bentuk.resize === "none",
+    "resize",
+    `resize ${bentuk?.resize}, mau none`,
+  );
+
+  // Urutan Tab per jam: 09.00 Aktivitas, 09.00 Output, lalu 10.00 Aktivitas.
+  await terlihat(page.getByLabel(/^Aktivitas 09\.00-10\.00/)).fill(teks);
+  await page.keyboard.press("Tab");
+  const kedua = await namaFokus();
+  expect(
+    /^Output 09\.00-10\.00/.test(kedua),
+    "keyboard",
+    `Tab dari Aktivitas 09.00 ke "${kedua}", mau Output 09.00-10.00`,
+  );
+  await page.keyboard.press("Tab");
+  const ketiga = await namaFokus();
+  expect(
+    /^Aktivitas 10\.00-11\.00/.test(ketiga),
+    "keyboard",
+    `Tab dari Output 09.00 ke "${ketiga}", mau Aktivitas 10.00-11.00`,
+  );
+  await page.keyboard.press("Shift+Tab");
+  const balik = await namaFokus();
+  expect(
+    /^Output 09\.00-10\.00/.test(balik),
+    "keyboard",
+    `Shift+Tab kembali ke "${balik}", mau Output 09.00-10.00`,
+  );
+
+  // Simpan otomatis sudah berjalan saat isian kehilangan fokus di langkah Tab di atas.
+  const tersimpan = await terlihat(page.getByText("Tersimpan", { exact: true }))
     .waitFor({ timeout: 5000 })
     .then(
       () => true,
@@ -854,19 +915,28 @@ async function checkActivity(width) {
     );
   expect(tersimpan, "simpan", "status Tersimpan tidak muncul setelah blur");
 
+  const lebarKartu = await page.evaluate(() => [
+    document.documentElement.scrollWidth,
+    window.innerWidth,
+  ]);
+  expect(
+    lebarKartu[0] <= lebarKartu[1],
+    "lebar papan",
+    `scrollWidth ${lebarKartu[0]} > ${lebarKartu[1]}`,
+  );
+
   // Isian yang sama harus terlihat di halaman Aktivitas, dan Staf tidak boleh bisa mengubahnya di sana.
   await page.goto(BASE + "/aktivitas");
   await audit(page, errors, where("halaman"));
   const muncul = await page.getByText(teks).first().count();
   expect(muncul > 0, "halaman", "isian dari papan tidak muncul di /aktivitas");
-  const kotak = await page.locator("table textarea").count();
-  expect(kotak === 0, "hak", `Staf masih punya ${kotak} isian di /aktivitas`);
+  const isian = await page.locator("table textarea").count();
+  expect(isian === 0, "hak", `Staf masih punya ${isian} isian di /aktivitas`);
   const baca = await page
     .getByText("Ubah isianmu lewat tabel di papan task.")
     .count();
   expect(baca > 0, "hak", "keterangan hanya baca tidak muncul");
 
-  // Tabel boleh bergulir di dalam wadahnya, halamannya tidak.
   const lebar = await page.evaluate(() => [
     document.documentElement.scrollWidth,
     window.innerWidth,

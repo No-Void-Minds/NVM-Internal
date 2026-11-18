@@ -25,6 +25,7 @@ const navItems: NavItem[] = [
     iconPath:
       'M3 3h18a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4',
   },
+  { to: '/aktivitas', label: 'Aktivitas', iconPath: 'M12 8v4l3 2M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18' },
   {
     to: '/pengguna',
     label: 'Pengguna',
@@ -169,7 +170,11 @@ const contentWidth = computed(() => (route.name === 'tasks' ? 'w-full' : 'mx-aut
             <span class="hidden lg:inline">Dashboard</span>
           </a>
           <ThemeToggle variant="icon" />
+          <!-- Di lebar md foto disembunyikan: tujuh item navigasi, Dashboard, dan tombol mode tidak muat bersamanya di 768 px
+
+               (terukur meluap 12 px, Sprint 13). Foto ini dekoratif; nama tetap ada untuk pembaca layar. -->
           <UserAvatar
+            class="max-lg:hidden"
             :user-id="session.user.id"
             :name="session.user.name"
             :avatar-id="session.user.avatar_id"

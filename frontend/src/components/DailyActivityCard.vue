@@ -3,6 +3,7 @@ import { computed, onMounted, ref, useId } from 'vue'
 import { RouterLink } from 'vue-router'
 import LoadingSkeleton from './LoadingSkeleton.vue'
 import ActivityCellFields from './ActivityCellFields.vue'
+import ActivityBox from './ActivityBox.vue'
 import { getMyActivities, type ActivityCell } from '../api/activities'
 import { ApiError } from '../api/client'
 import { useActivitySave } from '../composables/useActivitySave'
@@ -52,6 +53,27 @@ function blur(cell: ActivityCell) {
   const before = saved.value[cell.slot]
   if (before && before.activity === cell.activity && before.output === cell.output) return
   void save(0, date.value, cell.slot, cell.activity, cell.output)
+}
+
+// Urutan Tab di tabel yang diputar: per jam, Aktivitas lalu Output, bukan seluruh baris Aktivitas dulu.
+// Tabel selalu row-major di DOM, jadi urutannya diatur di sini. Tanpa tabindex positif: Tab dari sel
+// terakhir dibiarkan keluar dari tabel seperti biasa.
+const tableEl = ref<HTMLElement | null>(null)
+
+function onTab(e: KeyboardEvent) {
+  const el = e.target
+  if (!(el instanceof HTMLTextAreaElement) || !tableEl.value) return
+  const order = [...tableEl.value.querySelectorAll<HTMLTextAreaElement>('textarea')].sort(
+    (a, b) => tabRank(a) - tabRank(b),
+  )
+  const next = order[order.indexOf(el) + (e.shiftKey ? -1 : 1)]
+  if (!next) return
+  e.preventDefault()
+  next.focus()
+}
+
+function tabRank(el: HTMLTextAreaElement): number {
+  return Number(el.dataset.slot) * 2 + (el.dataset.kind === 'output' ? 1 : 0)
 }
 
 function toggle() {
@@ -125,16 +147,80 @@ onMounted(() => {
           Belum ada jam yang terisi. Tulis apa yang kamu kerjakan dan hasilnya, lalu klik di luar kotak untuk
           menyimpan.
         </p>
-        <!-- Di bawah 640 px tiap jam jadi kartu bertumpuk; mulai 640 px barisnya sejajar jadi tiga kolom. -->
+        <!-- Mulai 768 px tabelnya diputar: jam jadi kepala kolom, jadi kartu ini hanya tiga baris tinggi
+             (revisi 21). Wadahnya yang bergulir ke samping bila delapan kolom tidak muat, bukan halamannya;
+             kolom label tetap terlihat karena lengket di kiri. -->
+        <div ref="tableEl" class="hidden overflow-x-auto md:block" @keydown.tab="onTab">
+          <table class="w-full table-fixed border-collapse text-left min-w-[87rem]">
+            <thead>
+              <tr>
+                <th scope="col" class="sticky left-0 z-10 w-28 bg-surface px-2 pb-2">
+                  <span class="sr-only">Isian</span>
+                </th>
+                <th
+                  v-for="c in cells"
+                  :key="c.slot"
+                  scope="col"
+                  class="px-2 pb-2 text-sm font-medium whitespace-nowrap"
+                >
+                  {{ c.time }}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="align-top">
+                <th scope="row" class="sticky left-0 z-10 bg-surface px-2 py-1 text-left font-medium">
+                  Aktivitas
+                </th>
+                <td v-for="c in cells" :key="c.slot" class="px-2 py-1">
+                  <ActivityBox
+                    v-model="c.activity"
+                    :num="c.slot"
+                    :time="c.time"
+                    kind="activity"
+                    label="Aktivitas"
+                    placeholder="Apa yang dikerjakan"
+                    :status-id="`${id}-status-${c.slot}`"
+                    @blur="blur(c)"
+                  />
+                </td>
+              </tr>
+              <tr class="align-top">
+                <th scope="row" class="sticky left-0 z-10 bg-surface px-2 py-1 text-left font-medium">
+                  Output
+                </th>
+                <td v-for="c in cells" :key="c.slot" class="px-2 py-1">
+                  <ActivityBox
+                    v-model="c.output"
+                    :num="c.slot"
+                    :time="c.time"
+                    kind="output"
+                    label="Output"
+                    placeholder="Hasil atau tautan"
+                    :status-id="`${id}-status-${c.slot}`"
+                    show-status
+                    :status="status[`0:${c.slot}`]"
+                    :message="message[`0:${c.slot}`]"
+                    :updated-by="c.updated_by"
+                    @blur="blur(c)"
+                    @retry="retry(0, c.slot)"
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Di bawah 768 px tiap jam tetap jadi kartu bertumpuk; mulai 640 px barisnya sejajar jadi tiga kolom. -->
         <div
-          class="mb-2 hidden gap-3 px-1 text-sm font-medium text-ink-muted sm:grid sm:grid-cols-[7rem_minmax(0,1fr)_minmax(0,1fr)]"
+          class="mb-2 hidden gap-3 px-1 text-sm font-medium text-ink-muted sm:grid sm:grid-cols-[7rem_minmax(0,1fr)_minmax(0,1fr)] md:hidden"
           aria-hidden="true"
         >
           <span>Jam</span>
           <span>Aktivitas</span>
           <span>Output</span>
         </div>
-        <ul class="grid gap-3">
+        <ul class="grid gap-3 md:hidden">
           <li
             v-for="c in cells"
             :key="c.slot"
