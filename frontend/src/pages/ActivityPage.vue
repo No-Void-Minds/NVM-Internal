@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PageHeader from '../components/PageHeader.vue'
 import LoadingSkeleton from '../components/LoadingSkeleton.vue'
@@ -129,6 +129,24 @@ const peopleChoices = computed(() => {
   const q = peopleSearch.value.trim().toLowerCase()
   return people.value.filter((p) => !q || p.name.toLowerCase().includes(q))
 })
+
+const peopleBox = ref<HTMLElement | null>(null)
+const peopleButton = ref<HTMLButtonElement | null>(null)
+
+function closePeople(returnFocus: boolean) {
+  peopleOpen.value = false
+  if (returnFocus) peopleButton.value?.focus()
+}
+
+// Klik di luar tombol dan panel menutup panel. Fokus tidak dipindah, karena pengguna sedang menuju tempat lain.
+function onOutsidePointer(e: PointerEvent) {
+  if (peopleBox.value && !peopleBox.value.contains(e.target as Node)) closePeople(false)
+}
+watch(peopleOpen, (open) => {
+  if (open) document.addEventListener('pointerdown', onOutsidePointer)
+  else document.removeEventListener('pointerdown', onOutsidePointer)
+})
+onBeforeUnmount(() => document.removeEventListener('pointerdown', onOutsidePointer))
 
 function togglePerson(id: number) {
   const next = personFilter.value.includes(id)
@@ -381,15 +399,21 @@ const timeCell = 'sticky left-0 z-20 w-28 px-3 py-2 text-left font-medium whites
         </select>
       </div>
 
-      <div class="relative w-full sm:w-auto">
+      <!-- Escape dipasang di pembungkus, bukan di panel, supaya juga bekerja saat fokus masih di tombol. -->
+      <div
+        ref="peopleBox"
+        class="relative w-full sm:w-auto"
+        @keydown.escape="peopleOpen && closePeople(true)"
+      >
         <button
+          ref="peopleButton"
           type="button"
           :class="navButton"
           :aria-expanded="peopleOpen"
           aria-controls="aktivitas-orang"
           @click="peopleOpen = !peopleOpen"
         >
-          Orang<span v-if="personFilter.length" class="ml-1 font-mono">({{ personFilter.length }})</span>
+          {{ personFilter.length ? `Orang (${personFilter.length})` : 'Orang' }}
         </button>
         <div
           v-if="peopleOpen"
@@ -397,7 +421,6 @@ const timeCell = 'sticky left-0 z-20 w-28 px-3 py-2 text-left font-medium whites
           role="group"
           aria-label="Filter orang"
           class="z-30 mt-1 w-full rounded-card border border-line bg-surface p-3 shadow-dialog sm:absolute sm:w-72"
-          @keydown.escape="peopleOpen = false"
         >
           <label for="aktivitas-cari-orang" class="sr-only">Cari nama</label>
           <input
@@ -432,7 +455,7 @@ const timeCell = 'sticky left-0 z-20 w-28 px-3 py-2 text-left font-medium whites
             >
               Semua orang
             </button>
-            <button type="button" :class="navButton" @click="peopleOpen = false">Tutup</button>
+            <button type="button" :class="navButton" @click="closePeople(true)">Tutup</button>
           </div>
         </div>
       </div>
@@ -498,9 +521,11 @@ const timeCell = 'sticky left-0 z-20 w-28 px-3 py-2 text-left font-medium whites
 
     <!-- Tabel bergulir di dalam wadahnya sendiri, ke samping dan ke bawah, jadi halaman tidak pernah
          bergulir horizontal. Kepala nama lengket di atas, kolom jam lengket di kiri. -->
+    <!-- isolate membuat wadah tabel jadi stacking context sendiri: tangga z-index sel lengket di dalamnya
+         (sampai z-40) hanya berlaku di dalam tabel, jadi panel filter Orang (z-30) tetap di atas seluruh tabel. -->
     <div
       v-else
-      class="mt-4 max-h-[calc(100dvh-20rem)] overflow-auto rounded-card border border-line bg-surface"
+      class="isolate mt-4 max-h-[calc(100dvh-20rem)] overflow-auto rounded-card border border-line bg-surface"
     >
       <table class="w-full border-collapse text-left align-top text-sm">
         <thead>

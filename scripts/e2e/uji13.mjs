@@ -1012,6 +1012,48 @@ async function checkActivity(width) {
     }
   }
 
+  // Panel filter Orang di atas kepala tabel yang lengket: dibuka setelah tabel digulir ke bawah, item pertamanya
+  // harus menjadi elemen teratas di titik tengahnya. Lalu Escape menutup dan fokus kembali ke tombol, dan klik
+  // di luar panel menutupnya.
+  if (width === 360 || width === 1280) {
+    const tombolOrang = page.locator("button[aria-controls='aktivitas-orang']");
+    await tombolOrang.click();
+    const item = page.locator("#aktivitas-orang li label").first();
+    await item.waitFor({ timeout: 3000 });
+    await item.scrollIntoViewIfNeeded();
+    const atas = await item.evaluate((el) => {
+      const b = el.getBoundingClientRect();
+      const h = document.elementFromPoint(
+        b.left + b.width / 2,
+        b.top + b.height / 2,
+      );
+      return h === el || el.contains(h)
+        ? "ok"
+        : `${h?.tagName} "${(h?.textContent || "").trim().slice(0, 30)}"`;
+    });
+    expect(atas === "ok", "panel orang", `item pertama panel tertutup ${atas}`);
+    await page.keyboard.press("Escape");
+    const tertutup = (await page.locator("#aktivitas-orang").count()) === 0;
+    const fokusTombol = await tombolOrang.evaluate(
+      (b) => document.activeElement === b,
+    );
+    expect(
+      tertutup && fokusTombol,
+      "panel orang",
+      `Escape: tertutup ${tertutup}, fokus di tombol ${fokusTombol}`,
+    );
+    await tombolOrang.click();
+    await page.locator("h1").first().click();
+    const klikLuar = (await page.locator("#aktivitas-orang").count()) === 0;
+    expect(klikLuar, "panel orang", "klik di luar panel tidak menutupnya");
+    const label = (await tombolOrang.textContent())?.trim();
+    expect(
+      label === "Orang",
+      "panel orang",
+      `label tombol tanpa pilihan "${label}", mau "Orang"`,
+    );
+  }
+
   // Dialog sel dengan keyboard: Enter membuka, Escape menutup, fokus kembali ke sel yang sama.
   const sel = page.locator("tbody td button").first();
   const labelSel = await sel.getAttribute("aria-label");
