@@ -240,6 +240,17 @@ type AuditLog struct {
 	OccurredAt pgtype.Timestamptz
 }
 
+type DailyActivity struct {
+	ID           int64
+	UserID       int64
+	ActivityDate pgtype.Date
+	Slot         int16
+	Activity     pgtype.Text
+	Output       pgtype.Text
+	UpdatedBy    int64
+	UpdatedAt    pgtype.Timestamptz
+}
+
 type Division struct {
 	ID        int64
 	Name      string

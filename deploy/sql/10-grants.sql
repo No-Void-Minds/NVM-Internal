@@ -17,6 +17,9 @@ GRANT DELETE ON
   audit_logs          -- job maintenance: audit log login lebih dari 1 tahun
 TO nvm_internal_app;
 
+-- daily_activities (migrasi 000016, revisi 21) sengaja tidak ada di daftar DELETE: sel yang dikosongkan
+-- disimpan sebagai NULL lewat UPDATE, barisnya tidak pernah dihapus.
+
 -- task_series (migrasi 000015, revisi 19) sengaja tidak ada di daftar DELETE: seri hanya dihentikan
 -- (active = false) dan templatnya JSONB yang diganti utuh lewat UPDATE. SELECT, INSERT, dan UPDATE-nya datang dari
 -- ALTER DEFAULT PRIVILEGES di 00-bootstrap.sql, termasuk sequence identity-nya.

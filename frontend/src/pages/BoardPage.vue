@@ -38,6 +38,7 @@ import ProfileForm from '../components/ProfileForm.vue'
 import { getTaskCounts, type TaskCounts } from '../api/profile'
 import { readyBlock } from '../utils/subtaskGate'
 import PageHeader from '../components/PageHeader.vue'
+import DailyActivityCard from '../components/DailyActivityCard.vue'
 import FilterToolbar from '../components/FilterToolbar.vue'
 import { filterControl } from '../utils/ui'
 
@@ -419,6 +420,9 @@ const buttonSecondary =
             Semua task
           </button>
         </div>
+
+        <!-- Hanya Staf yang punya tabel aktivitas harian (revisi 21). -->
+        <DailyActivityCard v-if="isStaff" />
 
         <FilterToolbar
           label="Filter papan"

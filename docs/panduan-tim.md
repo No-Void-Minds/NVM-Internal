@@ -36,6 +36,14 @@ Alamat: **https://novoidminds.xyz**. Bisa dibuka dari laptop dan HP, di kantor m
 - Jenis berkas: PDF, CSV, TXT, DOC dan DOCX, XLS dan XLSX, PPT dan PPTX, JPG, PNG. Maksimal 50 MB per berkas. Berkas ber-macro ditolak.
 - Screenshot bisa langsung ditempel dengan Ctrl+V di area unggah.
 
+## Aktivitas Harian
+
+- Kartu **Aktivitas hari ini** di atas kolom cari papan task berisi delapan jam kerja (09.00 sampai 18.00, istirahat 12.00 sampai 13.00 tidak diisi). Tulis **Aktivitas** dan **Output** per jam.
+- Isian tersimpan sendiri begitu kamu klik di luar kotak. Statusnya muncul di bawah baris itu: Menyimpan, Tersimpan, atau Gagal disimpan dengan tombol **Coba lagi**.
+- Kamu hanya bisa mengisi hari ini. Kalau ada yang terlewat, minta Manajer mengubahnya; sel yang diubah Manajer bertanda "diubah" beserta namanya.
+- Menu **Aktivitas** memuat isian semua orang per tanggal. Semua peran boleh membaca, hanya Manajer yang bisa mengubah dan mengunduh **Ekspor Excel** (maksimal 31 hari sekali unduh).
+- Sabtu dan Minggu boleh diisi kalau memang bekerja.
+
 ## Arsip dan pencarian
 
 - **Arsip** memuat semua task Completed. Cari dengan minimal 3 huruf: ID, judul, deskripsi, nama PIC, sub task, label, atau nama berkas.

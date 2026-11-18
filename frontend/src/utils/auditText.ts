@@ -104,6 +104,11 @@ export function describeAudit(e: AuditEntry, divisionName: (id: number) => strin
       return `Mengubah jadwal task berulang dari ${e.target?.id ?? ''}`
     case 'series_stopped':
       return `Menghentikan pengulangan task ${e.target?.id ?? ''}`
+    case 'activity_updated': {
+      // Hanya perubahan Manajer pada isian orang lain yang tercatat (revisi 21).
+      const nama = str(after.name) || target
+      return `Mengubah aktivitas ${nama} ${str(after.date)} jam ${str(after.time)}`
+    }
     case 'occurrence_created':
       return `Membuat kemunculan task berulang ${e.target?.id ?? ''}`
     case 'task_updated':

@@ -12,7 +12,9 @@
 // E2E_ONLY=subtaskform (hanya uji form tambah sub task yang dilipat, revisi 17),
 // E2E_ONLY=subtaskresult (kelompok Arahan dan Hasil serta simpan catatan hasil, revisi 18; menulis catatan hasil
 // ke satu sub task di database dev),
-// E2E_ONLY=schedule (bagian Jadwal di form Buat task, revisi 19; tidak menyimpan apa pun).
+// E2E_ONLY=schedule (bagian Jadwal di form Buat task, revisi 19; tidak menyimpan apa pun),
+// E2E_ONLY=activity (Aktivitas Harian, revisi 21; menulis satu sel aktivitas hari ini milik akun Staf
+// di database dev).
 // Keluar dengan kode 1 bila ada yang gagal.
 import { chromium } from "playwright-core";
 
@@ -35,6 +37,7 @@ const ROLES = {
     pages: [
       "/task",
       "/arsip",
+      "/aktivitas",
       "/pengguna",
       "/audit-log",
       "/pengaturan",
@@ -50,6 +53,7 @@ const ROLES = {
     pages: [
       "/task",
       "/arsip",
+      "/aktivitas",
       "/pengguna",
       "/audit-log",
       "/pengaturan",
@@ -62,7 +66,15 @@ const ROLES = {
   staf: {
     user: env("DEV_STAFF_USERNAME"),
     pass: env("DEV_STAFF_PASSWORD"),
-    pages: ["/task", "/arsip", "/profil", "/status", "TASK", "/tidak-ada"],
+    pages: [
+      "/task",
+      "/arsip",
+      "/aktivitas",
+      "/profil",
+      "/status",
+      "TASK",
+      "/tidak-ada",
+    ],
   },
 };
 const WIDTHS = [360, 768, 1280, 1920];
@@ -795,6 +807,83 @@ async function checkSchedule(width) {
 }
 
 if (ONLY === "schedule") for (const w of [360, 1280]) await checkSchedule(w);
+
+// Aktivitas Harian (revisi 21): Staf mengisi satu sel di papan, isian itu muncul di /aktivitas, Staf tidak
+// bisa mengedit di sana, halaman tidak bergulir horizontal, dan Tab pindah antar sel.
+async function checkActivity(width) {
+  const { ctx, page, errors } = await open("staf", width, "terang");
+  const where = (what) => `aktivitas ${width} ${what}`;
+  const expect = (cond, w, msg) => {
+    checks++;
+    if (!cond) fail(where(w), msg);
+  };
+  const teks = `E2E ${Date.now()}`;
+
+  await page.goto(BASE + "/task");
+  await page.waitForLoadState("networkidle");
+  const judul = page.getByRole("button", { name: /Aktivitas hari ini/ });
+  if ((await judul.getAttribute("aria-expanded")) === "false")
+    await judul.click();
+  await audit(page, errors, where("kartu papan"));
+
+  const isian = page.getByLabel(/^Aktivitas 09\.00-10\.00/).first();
+  await isian.fill(teks);
+  // Simpan otomatis terjadi saat sel kehilangan fokus; Tab sekaligus menguji pindah ke kolom Output.
+  await page.keyboard.press("Tab");
+  const fokus = await page.evaluate(() => {
+    const el = document.activeElement;
+    return {
+      tag: el?.tagName,
+      label:
+        document.querySelector(`label[for="${el?.id}"]`)?.textContent ?? "",
+    };
+  });
+  expect(
+    fokus.tag === "TEXTAREA" &&
+      /^Output 09\.00-10\.00/.test(fokus.label.trim()),
+    "keyboard",
+    `Tab dari Aktivitas tidak sampai ke Output, dapat ${fokus.tag} "${fokus.label.trim()}"`,
+  );
+  const tersimpan = await page
+    .getByText("Tersimpan", { exact: true })
+    .first()
+    .waitFor({ timeout: 5000 })
+    .then(
+      () => true,
+      () => false,
+    );
+  expect(tersimpan, "simpan", "status Tersimpan tidak muncul setelah blur");
+
+  // Isian yang sama harus terlihat di halaman Aktivitas, dan Staf tidak boleh bisa mengubahnya di sana.
+  await page.goto(BASE + "/aktivitas");
+  await audit(page, errors, where("halaman"));
+  const muncul = await page.getByText(teks).first().count();
+  expect(muncul > 0, "halaman", "isian dari papan tidak muncul di /aktivitas");
+  const kotak = await page.locator("table textarea").count();
+  expect(kotak === 0, "hak", `Staf masih punya ${kotak} isian di /aktivitas`);
+  const baca = await page
+    .getByText("Ubah isianmu lewat tabel di papan task.")
+    .count();
+  expect(baca > 0, "hak", "keterangan hanya baca tidak muncul");
+
+  // Tabel boleh bergulir di dalam wadahnya, halamannya tidak.
+  const lebar = await page.evaluate(() => [
+    document.documentElement.scrollWidth,
+    window.innerWidth,
+  ]);
+  expect(
+    lebar[0] <= lebar[1],
+    "lebar",
+    `scrollWidth ${lebar[0]} > ${lebar[1]}`,
+  );
+
+  checks++;
+  if (errors.length)
+    fail(where("console"), errors.splice(0).join(" | ").slice(0, 300));
+  await ctx.close();
+}
+
+if (ONLY === "activity") for (const w of [360, 1280]) await checkActivity(w);
 
 await browser.close();
 console.log(

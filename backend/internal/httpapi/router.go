@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"nvm-internal/internal/account"
+	"nvm-internal/internal/activity"
 	"nvm-internal/internal/auth"
 	"nvm-internal/internal/config"
 	"nvm-internal/internal/db/sqlc"
@@ -25,6 +26,7 @@ type Server struct {
 	cookieDomain string
 	loginLimiter *ipLimiter
 	accounts     *account.Service
+	activities   *activity.Service
 	labels       *label.Service
 	tasks        *task.Service
 	files        *storage.Store
@@ -59,6 +61,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 		now:          time.Now,
 		loginLimiter: newIPLimiter(30*time.Second, 10),
 		accounts:     account.NewService(pool),
+		activities:   activity.NewService(pool),
 		labels:       label.NewService(pool),
 		tasks:        task.NewService(pool),
 		files:        files,
@@ -139,6 +142,11 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	app.PUT("/tasks/:id/subtasks/:subtaskId", s.updateSubtask)
 	app.DELETE("/tasks/:id/subtasks/:subtaskId", s.deleteSubtask)
 	app.POST("/tasks/:id/subtasks/:subtaskId/attachments", s.uploadSubtaskAttachment)
+	// Aktivitas Harian (revisi 21). Tabel harian bisa dibaca semua peran; hak mengubah dicek di service.
+	app.GET("/activities", s.dayActivities)
+	app.GET("/activities/me", s.myActivities)
+	app.PUT("/activities", s.saveActivity)
+	app.GET("/activities/export", managerOnly, s.exportActivities)
 
 	return r, nil
 }

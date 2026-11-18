@@ -37,6 +37,7 @@ const categories: { value: AuditCategory; label: string }[] = [
   { value: 'division', label: 'Perubahan divisi' },
   { value: 'label', label: 'Perubahan label' },
   { value: 'task', label: 'Task' },
+  { value: 'activity', label: 'Aktivitas' },
 ]
 
 const monthFilter = ref('')

@@ -68,6 +68,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 11p | Catatan hasil sub task | Detail sub task dibagi Arahan dan Hasil; PIC sub task menulis catatan hasil |
 | 11q | Task berulang | Task harian, mingguan, atau bulanan muncul sendiri sebagai task baru |
 | 11r | Filter Hari ini dan istilah Deadline | Filter deadline hari ini di papan; kata Tenggat diganti Deadline |
+| 11s | Aktivitas Harian | Tabel aktivitas per jam di papan task, halaman Aktivitas, dan ekspor Excel |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -1024,6 +1025,32 @@ Keputusan teknis:
 
 **Hasil:** kode selesai 2026-11-18, `./scripts/check.sh` lolos. Tidak ada migrasi. Uji curl dan uji browser menunggu Rifky.
 
+## Sprint 11s: Aktivitas Harian
+
+**Tujuan:** revisi 21 Manajer. Mengganti spreadsheet "Daily Activity Monitoring" dengan tabel di aplikasi: Staf mengisi aktivitas dan output per jam kerja, Manajer melihat semua orang dalam satu tanggal dan mengekspor rentang tanggal ke Excel.
+
+- [x] S11s-01 Migrasi 000016: tabel `daily_activities` (user_id, activity_date, slot, activity, output, updated_by, updated_at), unique (user_id, activity_date, slot), index (activity_date), CHECK panjang 1000 karakter. Sel yang dikosongkan disimpan NULL, tidak pernah dihapus, jadi daftar DELETE di `deploy/sql/10-grants.sql` tidak bertambah.
+- [x] S11s-02 Daftar slot tetap di `internal/activity` (09.00-10.00 sampai 17.00-18.00, tanpa 12.00-13.00). Frontend mengambilnya dari API.
+- [x] S11s-03 Hak akses di backend: Staf hanya isian miliknya sendiri untuk hari ini (`officeTZ`), Manajer isian siapa pun di tanggal berapa pun, Admin hanya membaca.
+- [x] S11s-04 API: `GET /api/activities/me`, `GET /api/activities?date=`, `PUT /api/activities`, dan `GET /api/activities/export?from=&to=` (Manajer, maksimal 31 hari).
+- [x] S11s-05 Kartu "Aktivitas hari ini" di papan task untuk Staf: bisa dilipat (status lipat di localStorage), ringkasan "n dari 8 jam terisi", simpan otomatis saat sel kehilangan fokus dengan status Menyimpan, Tersimpan, atau Gagal disimpan beserta tombol Coba lagi.
+- [x] S11s-06 Halaman `/aktivitas`: navigasi tanggal di query URL, filter divisi, kolom Jam lengket, nama orang sebagai PersonChip, tanda "Belum diisi", output berupa URL jadi tautan, dan tombol Ekspor Excel untuk Manajer.
+- [x] S11s-07 Test: unit (daftar slot, pembersihan teks, batas karakter, hak akses, pembentukan kolom ekspor), DB (aturan simpan per peran, upsert satu baris, Manajer dan Admin bukan kolom, akhir pekan di ekspor), dan bagian `E2E_ONLY=activity` di `scripts/e2e/uji13.mjs`.
+
+**Keputusan:**
+- Yang punya tabel aktivitas hanya akun aktif berperan Staf. Manajer dan Admin tidak punya kolom sendiri, dan isian tidak bisa dititipkan ke mereka: Manajer membagi dan menilai pekerjaan, tidak menerimanya, sama dengan aturan sub task di revisi 12.
+- Staf hanya bisa mengisi dan mengubah isian miliknya untuk hari ini menurut `officeTZ`. Manajer bisa mengubah isian siapa pun di tanggal berapa pun. Keduanya diperiksa backend (`activity.CanEdit`), frontend hanya mengikuti `can_edit` dari server.
+- Perubahan Manajer pada isian orang lain dicatat di Audit Log kategori baru "Aktivitas" (`activity_updated`), dan sel itu menampilkan "diubah <nama Manajer>". Isian Staf sendiri tidak dicatat, supaya audit log tidak penuh oleh pekerjaan harian biasa.
+- Sabtu dan Minggu boleh diisi. Halaman Aktivitas menampilkan tanggal apa pun yang dibuka, sedangkan ekspor melewati Sabtu dan Minggu yang tidak ada isinya, supaya sheet-nya sependek spreadsheet lama.
+- Baris "Evaluation Week" dari spreadsheet tidak dibuat. Belum ada aturan siapa yang mengisinya dan apa artinya, jadi menambahkannya sekarang hanya menyisakan kolom kosong.
+- Isian kosong disimpan sebagai NULL dan barisnya dibiarkan, bukan dihapus. Dengan begitu app tidak butuh hak DELETE di tabel baru ini, dan "diubah <nama>" tetap terbaca setelah Manajer mengosongkan sebuah sel.
+- Ekspor .xlsx ditulis sendiri sebagai zip berisi XML dengan pustaka standar, mengikuti cara `internal/excelimport` membaca .xlsx. Tidak ada dependensi baru. Nama hari dan bulan di sheet memakai bahasa Inggris seperti spreadsheet lama ("Monday - 2", "Daily Activity Monitoring - November 2026"), dan kolom Week memakai nomor minggu ISO.
+- Batas 1000 karakter per kolom berlaku di backend dan di CHECK migrasi. Spasi di tepi dibuang dan akhir baris diseragamkan ke LF sebelum disimpan.
+
+**Selesai kalau:** `./scripts/check.sh` lolos, migrasi 000016 jalan di dev, Staf bisa mengisi kartu di papan task dan isiannya muncul di `/aktivitas`, Manajer bisa mengubah isian orang lain (tercatat di Audit Log) dan mengunduh .xlsx, serta tidak ada gulir horizontal halaman di 360 dan 1280 px.
+
+**Hasil:** kode selesai 2026-11-18, `./scripts/check.sh` lolos. Migrasi 000016 dan `10-grants.sql` menunggu Rifky. Menu "Aktivitas" di navbar belum dipasang: `frontend/src/components/AppShell.vue` sedang dipakai perubahan Sprint 13 yang belum di-commit, jadi baris navigasinya diberikan ke Rifky untuk ditempel.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -1198,9 +1225,10 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 18 | 2026-11-18 | PIC sub task menulis catatan hasil (output di mana, dikirim ke mana, versi mana). Detail sub task dibagi Arahan dan Hasil | Sprint 11p |
 | 19 | 2026-11-18 | Task berulang harian, mingguan, atau bulanan. Setiap kemunculan task biasa dengan ID sendiri, dibuat otomatis pada harinya | Sprint 11q |
 | 20 | 2026-11-18 | Papan punya filter deadline "Hari ini". Kata "Tenggat" diganti "Deadline" di seluruh teks pengguna | Sprint 11r |
+| 21 | 2026-11-18 | Aktivitas Harian, pengganti spreadsheet "Daily Activity Monitoring": Staf mengisi aktivitas dan output per jam, Manajer melihat semua orang per tanggal dan bisa mengekspor ke Excel | Sprint 11s |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat kedua puluh revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat kedua puluh satu revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

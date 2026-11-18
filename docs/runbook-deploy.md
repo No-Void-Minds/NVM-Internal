@@ -270,6 +270,9 @@ docker run --rm --network "$PG_NETWORK" -v "$PWD/backend/migrations:/migrations:
 # jadi tidak perlu grants ulang.
 # Migrasi 000015 (revisi 19, task berulang) menambah tabel task_series: 10-grants.sql WAJIB dijalankan ulang
 # sesudahnya, lalu cek daftar DELETE di keluarannya tetap enam tabel (task_series tidak boleh ada di sana).
+# Migrasi 000016 (revisi 21, Aktivitas Harian) menambah tabel daily_activities: 10-grants.sql WAJIB dijalankan
+# ulang sesudahnya, lalu cek daftar DELETE di keluarannya tetap enam tabel (daily_activities tidak boleh ada
+# di sana, karena sel yang dikosongkan disimpan NULL lewat UPDATE).
 docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
 curl -s http://127.0.0.1:8094/api/health
 ```
