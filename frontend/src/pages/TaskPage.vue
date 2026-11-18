@@ -29,7 +29,11 @@ onMounted(async () => {
   }
 })
 
-const notice = ref<{ kind: 'success' | 'error'; text: string } | null>(null)
+// Halaman Buat task mengirim pesan hasilnya lewat history.state saat berpindah ke sini.
+const fromCreate = window.history.state as { notice?: string; partial?: boolean } | null
+const notice = ref<{ kind: 'success' | 'error'; text: string } | null>(
+  fromCreate?.notice ? { kind: fromCreate.partial ? 'error' : 'success', text: fromCreate.notice } : null,
+)
 // Kunci berubah setelah form tersimpan, supaya isi task dimuat ulang dari server.
 const reloadKey = ref(0)
 const formOpen = ref(false)

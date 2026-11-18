@@ -73,6 +73,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 11u | Halaman Status hanya untuk Admin | Menu dan rute Status hanya untuk Admin; peran lain melihat 404 |
 | 11v | Lampiran Aktivitas Harian | Berkas per jam di papan dan di halaman Aktivitas; backup storage jadi snapshot inkremental |
 | 11w | Salinan ke Google Drive | Job malam menyalin berkas ke Drive akun tim dengan struktur yang dibaca orang |
+| 11x | Panel Buat task: dua bug pemilih berkas dan halaman penuh | Batal memilih berkas tidak menutup panel, panel tidak melompat, dan rute /task/baru |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -1232,6 +1233,28 @@ Keputusan teknis:
 
 **Hasil:** kode selesai 2026-11-18, `./scripts/check.sh` lolos, `go vet ./...` bersih, test unit dan test DB baru lolos. Satu dependensi Go baru: `filippo.io/age v1.2.1`. Uji kering pertama di VM gagal karena tiga hal di skripnya (pemilihan dump, `fail()` di subshell, dan log Compose yang menutupi pesan galat), ketiganya diperbaiki dan diuji ulang di laptop lewat `scripts/uji-drive-export.sh`. Migrasi, langkah persiapan (rclone authorize, kunci age, secrets, cron), uji kering ulang, dan unggah pertama menunggu Rifky.
 
+## Sprint 11x: Panel Buat task, pemilih berkas, dan halaman penuh
+
+**Tujuan:** revisi 26 Manajer. Dua bug di panel Buat task dan satu fitur: form Buat task bisa dibuka di tab baru sebagai halaman penuh.
+
+- [x] S11x-01 Bug A, pemilih berkas yang dibatalkan menutup panel. Penyebabnya terbukti di browser: input berkas mengirim event `cancel` yang bubble saat pemilih berkas ditutup tanpa memilih, dan `BaseDialog` menangani semua `cancel` yang sampai ke `<dialog>` seolah-olah Escape. Event `cancel` tiruan yang bubble dari input berkas menutup panel di 360 dan 1280 px sebelum perbaikan. Sekarang `onCancel` hanya menangani cancel yang `target`-nya dialog itu sendiri.
+- [x] S11x-02 Bug B, isi panel melompat naik saat "pilih berkas" diklik. Diukur di panel sungguhan, 1280 px: wadah gulir isian tetap di `scrollTop` 736, tetapi `<dialog>` sendiri bergeser dari `scrollTop` 48 ke 287. Input berkas `sr-only` (absolute) induknya `<dialog>`, bukan wadah gulir, jadi posisinya tidak ikut tergulir (top 1138 px, padahal label-nya di 339 px). Klik label memfokuskan input itu, dan browser menggulir dialog supaya input terlihat, walau dialognya `overflow-hidden`. Di 360 px sama: 200 ke 439. Sesudah perbaikan, dialog tetap 0 dan wadah gulir tidak berubah di kedua lebar.
+- [x] S11x-03 Fitur C: isi form dipisah ke `TaskForm.vue`, dipakai `TaskFormPanel` dan halaman baru `/task/baru` (`TaskNewPage.vue`). Panel Buat task punya tombol "Buka di tab baru" di kepala panel, sama dengan panel detail. Halaman penuh punya PageHeader "Buat task" dan bar aksi Batal dan Buat task di bawah form.
+- [x] S11x-04 E2E `E2E_ONLY=createtask` di `scripts/e2e/uji13.mjs`, plus penyesuaian urutan Tab di bagian `activity`.
+
+**Keputusan:**
+- Bug B diperbaiki di akarnya, di dua tempat. Wadah gulir `BaseDialog` diberi `relative`, jadi semua elemen absolute di isian dialog (input berkas, radio Urgency dan Jadwal yang `sr-only`) berinduk wadah gulir dan ikut tergulir. Komponen unggah (`FileDropzone`, `ActivityFiles`, `SubtaskFiles`, `ProfileForm`) juga membawa induk `relative` sendiri, supaya aman di wadah gulir mana pun, termasuk di luar dialog. Ini kelanjutan catatan bug bar aksi Sprint 11j: `overflow-hidden` di panel menghentikan gulir oleh pengguna, tetapi tidak menghentikan gulir oleh fokus.
+- Bug A diperbaiki di `BaseDialog`, bukan di tiap input, jadi semua input berkas di dalam dialog ikut aman: form Buat task, lampiran di detail task, berkas sub task, dan berkas Aktivitas di dialog `/aktivitas`. Berkas Aktivitas di papan tidak berada di dalam dialog. Escape tetap menutup dialog, dan Escape bertahap di dialog Aktivitas (`close('escape')`) tetap bekerja, karena event cancel dari Escape memang ber-`target` dialog. Efek sampingnya baik: dialog yang bersarang di dalam dialog lain tidak ikut menutup induknya.
+- Input berkas tersembunyi di `ActivityFiles` dan `SubtaskFiles` diberi `tabindex="-1"` dan `aria-hidden`, sama dengan `ProfileForm`. Input itu dibuka lewat tombol di bawahnya, jadi dulu ia tab stop tanpa nama dan tanpa fokus terlihat: E2E `activity` menemukan Tab dari Output 09.00 berhenti di elemen tanpa nama. Input di `FileDropzone` tetap bisa di-Tab, karena di sanalah fokusnya (label pembungkus menampilkan focus ring lewat `has-[:focus-visible]`).
+- Membuka tab baru dari panel yang sudah terisi tidak membawa isian. Tab baru membuka form kosong, dan panelnya tidak ditutup, jadi isian di panel tidak hilang. Membawa isian butuh jalur penyimpanan sementara (termasuk berkas brief yang belum terunggah), dan itu tidak sebanding dengan kebutuhannya.
+- `/task/baru` hanya untuk Manajer, sama dengan `POST /api/tasks`. Peran lain melihat halaman 404 dengan URL tetap (`hideFromOthers`, pola revisi 23). Rute statis selalu menang atas `/task/:id` di vue-router, jadi "baru" tidak pernah terbaca sebagai ID task.
+- Setelah task dibuat di halaman penuh, aplikasi pindah ke `/task/<id>` dengan `replace`, supaya tombol Kembali tidak membuka lagi form yang sudah terkirim. Pesan hasilnya (termasuk lampiran yang gagal diunggah) ikut lewat `history.state` dan muncul di halaman task. Batal kembali ke `/task`.
+- Halaman penuh memuat daftar akun dan label sebelum form tampil, karena PIC harus dipilih dari daftar itu. Ada state memuat dan state galat dengan tombol Muat ulang.
+
+**Selesai kalau:** `./scripts/check.sh` lolos dan E2E `createtask` lolos.
+
+**Hasil:** selesai 2026-11-18. `./scripts/check.sh` lolos. E2E `createtask` 26 pemeriksaan 0 gagal. Regresi: `activity` 179/0, `activityfiles` 22/0, `schedule` 20/0, `subtaskform` 18/0, `subtaskresult` 10/0. Tanpa perubahan backend dan migrasi.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -1411,9 +1434,10 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 23 | 2026-11-18 | Halaman Status hanya untuk Admin. Peran lain tidak melihat menunya, dan membuka URL-nya langsung menampilkan 404 | Sprint 11u |
 | 24 | 2026-11-18 | Lampiran di Aktivitas Harian: berkas menempel pada satu jam, maksimal 95 MB dan 10 berkas per jam, dengan gambar, video, PDF, dokumen Office, TXT, CSV, dan ZIP. Bisa ditarik, ditempel dari papan ketik, dipratinjau, dan dihapus | Sprint 11v |
 | 25 | 2026-11-18 | Salinan rapi semua berkas ke Google Drive akun tim setiap malam: Aktivitas per bulan, hari, dan orang; Task per bulan dengan Brief, Deliverable, dan sub task; dump database terenkripsi age. Satu arah dan tidak menghapus | Sprint 11w |
+| 26 | 2026-11-18 | Panel Buat task: batal memilih berkas tidak lagi menutup panel, isi panel tidak melompat saat pilih berkas diklik, dan form Buat task bisa dibuka di tab baru sebagai halaman /task/baru | Sprint 11x |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat kedua puluh lima revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat kedua puluh enam revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

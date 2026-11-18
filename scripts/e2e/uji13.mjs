@@ -21,6 +21,9 @@
 // membuat satu task uji per lebar di database dev lewat API, dengan Manajer sebagai PIC task).
 // E2E_ONLY=status (revisi 23: halaman Status hanya untuk Admin; Manajer dan Staf melihat 404 di /status dan tidak
 // punya menu Status; tidak menyimpan apa pun).
+// E2E_ONLY=createtask (revisi 26: pemilih berkas yang dibatalkan tidak menutup panel Buat task, panel tidak
+// melompat saat pilih berkas diklik, Escape tetap menutup, dan halaman /task/baru; membuat satu task uji per lebar
+// di database dev lewat form, dengan Manajer sebagai PIC).
 // Keluar dengan kode 1 bila ada yang gagal.
 import { chromium } from "playwright-core";
 
@@ -876,12 +879,25 @@ async function checkActivity(width) {
     "keyboard",
     `Tab dari Aktivitas 09.00 ke "${kedua}", mau Output 09.00-10.00`,
   );
-  await page.keyboard.press("Tab");
-  const ketiga = await namaFokus();
+  // Sejak revisi 24 berkas jam 09.00 (pratinjau, hapus, tambah) ada di antaranya. Itu boleh, asal setiap
+  // tab stop punya nama: input berkas tersembunyi tanpa nama dulu ikut jadi tab stop (revisi 26).
+  let ketiga = "";
+  const lewat = [];
+  for (let i = 0; i < 12; i++) {
+    await page.keyboard.press("Tab");
+    ketiga = await namaFokus();
+    if (/^Aktivitas 10\.00-11\.00/.test(ketiga)) break;
+    lewat.push(ketiga);
+  }
   expect(
     /^Aktivitas 10\.00-11\.00/.test(ketiga),
     "keyboard",
-    `Tab dari Output 09.00 ke "${ketiga}", mau Aktivitas 10.00-11.00`,
+    `Tab dari Output 09.00 tidak sampai ke Aktivitas 10.00-11.00 (lewat: ${lewat.join(" | ")})`,
+  );
+  expect(
+    lewat.every((n) => n.trim() !== ""),
+    "keyboard",
+    `tab stop tanpa nama di antara Output 09.00 dan Aktivitas 10.00 (lewat: ${lewat.join(" | ")})`,
   );
 
   // Simpan otomatis sudah berjalan saat isian kehilangan fokus di langkah Tab di atas.
@@ -1786,6 +1802,123 @@ async function checkActivityFiles(width) {
 
 if (ONLY === "activityfiles")
   for (const w of [360, 1280]) await checkActivityFiles(w);
+
+// Revisi 26. Dialog pemilih berkas OS tidak bisa diklik Playwright, jadi pembatalannya ditiru dengan event cancel
+// yang bubble dari input berkas, sama seperti yang dikirim browser.
+async function checkCreateTask(width) {
+  const { ctx, page, errors } = await open("manajer", width, "terang");
+  const where = (what) => `buat task ${width} ${what}`;
+  const expect = (cond, w, msg) => {
+    checks++;
+    if (!cond) fail(where(w), msg);
+  };
+  await page.goto(BASE + "/task");
+  await page.waitForLoadState("networkidle");
+  await page.getByRole("button", { name: "Buat task" }).first().click();
+  await page.waitForSelector("dialog[open]");
+  expect(
+    (await page
+      .getByRole("link", { name: "Buka form Buat task di tab baru" })
+      .count()) === 1,
+    "tab baru",
+    "tombol Buka di tab baru tidak ada di kepala panel",
+  );
+  await page
+    .locator("dialog[open] summary", { hasText: "Detail tambahan" })
+    .click();
+  const zone = page.locator("dialog[open] label:has(input[type=file])");
+  await zone.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(150);
+  const scrolls = () =>
+    page.evaluate(() => {
+      const d = document.querySelector("dialog[open]");
+      return [d.scrollTop, d.querySelector(".overflow-y-auto").scrollTop];
+    });
+  const before = await scrolls();
+  const chooser = page.waitForEvent("filechooser");
+  await zone.locator("span.underline").click();
+  await chooser;
+  await page.waitForTimeout(200);
+  const after = await scrolls();
+  expect(
+    before.join() === after.join(),
+    "pilih berkas",
+    `scrollTop dialog dan wadah gulir ${before.join("/")} jadi ${after.join("/")}`,
+  );
+
+  await page.evaluate(() =>
+    document
+      .querySelector("dialog[open] input[type=file]")
+      .dispatchEvent(new Event("cancel", { bubbles: true })),
+  );
+  await page.waitForTimeout(150);
+  expect(
+    (await page.locator("dialog[open]").count()) === 1,
+    "batal pilih",
+    "panel ikut tertutup",
+  );
+  await audit(page, errors, where("panel"));
+
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(150);
+  expect(
+    (await page.locator("dialog[open]").count()) === 0,
+    "escape",
+    "Escape tidak menutup panel",
+  );
+
+  // Halaman penuh: isi judul dan satu PIC, kirim, lalu harus pindah ke halaman task baru.
+  await page.goto(BASE + "/task/baru");
+  await page.waitForLoadState("networkidle");
+  expect(
+    (await page.locator("h1").first().textContent())?.trim() === "Buat task",
+    "halaman",
+    "judul halaman bukan Buat task",
+  );
+  await audit(page, errors, where("halaman"));
+  const judul = `[DUMMY] E2E halaman Buat task ${width}`;
+  await page.locator("#task-title").fill(judul);
+  await page
+    .getByRole("button", { name: /Pilih PIC/ })
+    .first()
+    .click();
+  await page.locator("input[type=checkbox]").first().check();
+  await page.getByRole("button", { name: "Buat task", exact: true }).click();
+  await page.waitForURL(/\/task\/T-\d+$/, { timeout: 10000 }).catch(() => {});
+  const path = new URL(page.url()).pathname;
+  expect(/^\/task\/T-\d+$/.test(path), "kirim", `URL setelah kirim ${path}`);
+  expect(
+    (await page
+      .locator("[role=status]")
+      .filter({ hasText: "dibuat" })
+      .count()) > 0,
+    "pesan",
+    "pesan task dibuat tidak muncul di halaman task",
+  );
+  await audit(page, errors, where("hasil"));
+  await ctx.close();
+
+  // Staf tidak boleh membuat task: 404 dengan URL tetap.
+  const staf = await open("staf", width, "terang");
+  await staf.page.goto(BASE + "/task/baru");
+  await staf.page.waitForLoadState("networkidle");
+  expect(
+    (await staf.page.locator("h1").first().textContent())?.trim() ===
+      "Halaman tidak ditemukan",
+    "staf",
+    "Staf tidak melihat 404 di /task/baru",
+  );
+  expect(
+    new URL(staf.page.url()).pathname === "/task/baru",
+    "staf",
+    "URL Staf berubah",
+  );
+  await audit(staf.page, staf.errors, where("staf"));
+  await staf.ctx.close();
+}
+
+if (ONLY === "createtask")
+  for (const w of [360, 1280]) await checkCreateTask(w);
 
 await browser.close();
 console.log(

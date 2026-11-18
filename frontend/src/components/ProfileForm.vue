@@ -121,7 +121,7 @@ const buttonSecondary =
       <h3 id="profile-photo-title" class="font-semibold">Foto profil</h3>
       <div class="mt-3 flex flex-wrap items-center gap-4">
         <UserAvatar :user-id="user.id" :name="user.name" :avatar-id="user.avatar_id" size="xl" />
-        <div class="flex min-w-0 flex-wrap gap-2">
+        <div class="relative flex min-w-0 flex-wrap gap-2">
           <input
             ref="fileEl"
             type="file"

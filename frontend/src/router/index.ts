@@ -14,6 +14,7 @@ import SettingsPage from '../pages/SettingsPage.vue'
 import AuditLogPage from '../pages/AuditLogPage.vue'
 import BoardPage from '../pages/BoardPage.vue'
 import TaskPage from '../pages/TaskPage.vue'
+import TaskNewPage from '../pages/TaskNewPage.vue'
 import ArchivePage from '../pages/ArchivePage.vue'
 import ActivityPage from '../pages/ActivityPage.vue'
 
@@ -77,6 +78,14 @@ export const router = createRouter({
       meta: { title: 'Audit Log', roles: ['admin', 'manager'] },
     },
     { path: '/task', name: 'tasks', component: BoardPage, meta: { title: 'Papan Task' } },
+    // Rute statis selalu menang atas /task/:id di vue-router, jadi "baru" tidak pernah terbaca sebagai ID task.
+    // Hanya Manajer yang boleh membuat task (POST /api/tasks), peran lain melihat 404 (pola revisi 23).
+    {
+      path: '/task/baru',
+      name: 'task-new',
+      component: TaskNewPage,
+      meta: { title: 'Buat task', roles: ['manager'], hideFromOthers: true },
+    },
     { path: '/task/:id', name: 'task-detail', component: TaskPage, meta: { title: 'Detail task' } },
     { path: '/arsip', name: 'archive', component: ArchivePage, meta: { title: 'Arsip' } },
     { path: '/aktivitas', name: 'activity', component: ActivityPage, meta: { title: 'Aktivitas Harian' } },

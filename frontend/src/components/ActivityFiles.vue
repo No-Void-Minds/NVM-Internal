@@ -242,12 +242,14 @@ const smallButton =
 
     <p v-if="listError" role="alert" class="mt-1 text-sm text-danger">{{ listError }}</p>
 
-    <div v-if="canManage" class="mt-1">
+    <div v-if="canManage" class="relative mt-1">
       <input
         ref="picker"
         type="file"
         multiple
         class="sr-only"
+        tabindex="-1"
+        aria-hidden="true"
         :accept="activityAcceptAttr"
         @change="onPick"
       />

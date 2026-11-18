@@ -143,11 +143,13 @@ const iconButton =
       </li>
     </ul>
 
-    <div v-if="canManage" class="mt-2">
+    <div v-if="canManage" class="relative mt-2">
       <input
         ref="picker"
         type="file"
         class="sr-only"
+        tabindex="-1"
+        aria-hidden="true"
         :accept="acceptAttr"
         :disabled="busy"
         @change="onPick"

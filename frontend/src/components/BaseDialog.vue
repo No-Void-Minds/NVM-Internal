@@ -31,7 +31,10 @@ watch(() => props.open, sync)
 onMounted(sync)
 
 // Escape memicu event cancel; ditangkap supaya status buka-tutup tetap dikendalikan parent.
+// Hanya cancel milik dialog ini sendiri: input berkas juga mengirim event cancel yang bubble saat pemilih berkas
+// ditutup tanpa memilih, dan dulu itu ikut menutup panel (revisi 26). Dialog bersarang juga tidak saling tutup.
 function onCancel(e: Event) {
+  if (e.target !== e.currentTarget) return
   e.preventDefault()
   emit('close', 'escape')
 }
@@ -81,7 +84,10 @@ const shape = computed(() =>
         </button>
       </div>
     </div>
-    <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+    <!-- relative membuat wadah gulir ini induk elemen absolute di dalamnya (input berkas dan radio sr-only).
+         Tanpa itu induknya <dialog>, posisinya tidak ikut tergulir, dan fokus ke input itu menggulir dialognya
+         sendiri walau overflow-hidden: terukur dialog scrollTop 48 ke 287 saat pilih berkas diklik (revisi 26). -->
+    <div class="relative min-h-0 flex-1 overflow-y-auto px-5 py-4">
       <slot />
     </div>
     <div v-if="$slots.footer" class="flex justify-end gap-2 border-t border-line px-5 py-3">
