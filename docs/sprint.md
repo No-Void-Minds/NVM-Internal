@@ -74,6 +74,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 11v | Lampiran Aktivitas Harian | Berkas per jam di papan dan di halaman Aktivitas; backup storage jadi snapshot inkremental |
 | 11w | Salinan ke Google Drive | Job malam menyalin berkas ke Drive akun tim dengan struktur yang dibaca orang |
 | 11x | Panel Buat task: dua bug pemilih berkas dan halaman penuh | Batal memilih berkas tidak menutup panel, panel tidak melompat, dan rute /task/baru |
+| 11y | Semua anggota membuat task, To Do pribadi, dan perbaikan task berulang | Staf boleh membuat task; To Do pribadi di papan; detail task berulang menampilkan kemunculan dan sub task templat |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -1261,6 +1262,71 @@ Keputusan teknis:
 
 **Hasil:** selesai 2026-11-18. `./scripts/check.sh` lolos. E2E `createtask` 26 pemeriksaan 0 gagal. Regresi: `activity` 179/0, `activityfiles` 22/0, `schedule` 20/0, `subtaskform` 18/0, `subtaskresult` 10/0. Tanpa perubahan backend dan migrasi.
 
+## Sprint 11y: Semua anggota membuat task, To Do pribadi, dan perbaikan task berulang
+
+**Tujuan:** revisi 27 dan 28 Manajer, ditambah tiga perbaikan bug revisi 19 yang terlihat di produksi.
+
+- [x] S11y-01 Revisi 27: `Create` menerima Staf dan Manajer dengan aturan yang sama persis (PIC, sub task lengkap, jadwal berulang, label, lampiran brief, deadline). Admin ditolak. Middleware peran di rute `POST /api/tasks`, `PUT /api/tasks/:id`, dan `DELETE /api/tasks/:id` dilepas, dan haknya dicek di service yang memegang status serta pembuat task.
+- [x] S11y-02 Revisi 27: pembuat task boleh mengubah dan menghapus task buatannya selama status masih Requested (`CanEditOwn`), dicek dari baris yang sudah dikunci di dalam transaksi. `Can.edit` dan `Can.delete` di detail ikut aturan itu.
+- [x] S11y-03 Revisi 27: `can_create_task` dikirim server di `/api/auth/me`. Tombol "Buat task" dan rute `/task/baru` memakai nilai itu, bukan daftar peran di frontend. Admin tetap melihat 404 di `/task/baru`. Form task memakai `/api/people` untuk kandidat PIC bila pemakainya bukan pengelola.
+- [x] S11y-04 Revisi 28: migrasi 000019 `user_todos` (user_id, title maksimal 200, done_at, position, created_at, updated_at), index (user_id, position), batas 100 item per akun. Tabel ini perlu hak DELETE, jadi daftar DELETE di `deploy/sql/10-grants.sql` jadi delapan tabel.
+- [x] S11y-05 Revisi 28: tujuh endpoint `/api/todos` (daftar, tambah, ubah judul, centang, hapus, urutkan ulang, bersihkan yang selesai). Semuanya memakai akun yang login; id milik orang lain dijawab 404.
+- [x] S11y-06 Revisi 28: kartu To Do di kolom kiri papan, tombol "To Do (n)" dengan panel di lebar yang memakai bar, dan lembar dari bawah di bawah 640 px. Tambah lewat Enter, ubah di tempat, centang, urutkan dengan drag dan dengan tombol naik dan turun, hapus dengan toast Urungkan 6 detik, bersihkan yang selesai, dan pembaruan optimistis.
+- [x] S11y-07 Bug revisi 19 nomor 1: detail task kini mengirim `occurrence_date` dan `series_freq`, jadi "Kemunculan" tidak lagi selalu "-".
+- [x] S11y-08 Bug revisi 19 nomor 2: detail seri membawa `template_subtasks` (judul dan PIC dari templat) dan `template_matches`, dan bagian Jadwal menampilkan keduanya.
+- [x] S11y-09 Test: DB untuk revisi 27 (Staf membuat task dengan sub task dan jadwal, Admin ditolak, pembuat mengubah dan menghapus task Requested, ditolak setelah On Progress, Staf lain ditolak), DB untuk To Do (hanya pemilik, 404 untuk id orang lain, batas 100, urutkan ulang hanya id sendiri, bersihkan hanya milik sendiri), DB untuk bug revisi 19 (jadwal lewat Ubah mengisi occurrence_date, ticker tidak dobel, sub task templat di detail), dan bagian `E2E_ONLY=todo`.
+
+**Keputusan:**
+- Hak membuat task ditentukan satu fungsi, `task.CanCreateTask`, yang dipakai service dan `/api/auth/me`. Frontend tidak pernah menulis daftar perannya sendiri, jadi aturan baru cukup diubah di satu tempat.
+- Pengecualian pembuat task sengaja sempit: hanya ubah dan hapus, hanya selama Requested, dan statusnya dibaca dari baris yang sudah dikunci di dalam transaksi. Permintaan yang datang tepat setelah task pindah status tetap ditolak, bukan lolos karena memakai status dari permintaan.
+- Pengecualian itu juga dibatasi peran yang boleh membuat task. Task hasil impor Excel bisa punya `requested_by` milik Admin, dan Admin tetap tidak boleh mengubah task; tanpa batasan ini Admin akan mendapat tombol Ubah di task impor yang masih Requested.
+- `stop-series` tetap hanya Manajer. Menghentikan pengulangan mengubah kemunculan yang akan datang untuk semua orang, bukan hanya task yang sedang dilihat, jadi itu bukan bagian dari "mengubah task buatannya". Pembuat task yang masih Requested tetap bisa mengganti atau mematikan jadwalnya lewat form Ubah.
+- Kartu papan dan Arsip tidak ikut mengirim hak ubah dan hapus per kartu: keduanya hanya memakai `move_to`, dan tombol Ubah serta Hapus ada di detail, yang sudah membaca pembuat task. Dengan begitu query papan tidak perlu menambah kolom.
+- Staf memakai `/api/people` untuk kandidat PIC, karena `/api/users` hanya untuk pengelola. Satu tipe `PicCandidate` dipakai form, dan isinya hanya kolom yang benar-benar dipakai, jadi tidak ada kolom karangan untuk menyamakan dua bentuk data.
+- To Do memakai tabel sendiri, bukan task dengan penanda. To Do tidak punya PIC, status, divisi, riwayat, atau audit, dan menempelkannya ke tabel tasks akan membuat setiap query papan dan Arsip harus menyaringnya.
+- To Do tidak dicatat di audit log, karena ini catatan pribadi. Konsekuensinya item yang dihapus benar-benar hilang, dan itu sebabnya hapus memberi enam detik untuk Urungkan alih-alih meminta konfirmasi.
+- Id milik orang lain dijawab 404, bukan 403, dan semua query memakai `WHERE id = ... AND user_id = ...`, jadi jawabannya sama untuk item yang tidak ada dan item milik orang lain. Tidak ada endpoint untuk membaca To Do orang lain, Manajer dan Admin tidak terkecuali.
+- Urutkan ulang menolak seluruh permintaan bila ada satu id yang bukan milik pengirim, bukan melewati id itu saja. Melewatinya diam-diam akan membuat urutan berubah separuh dan menjadi cara menebak id orang lain.
+- Daftar To Do dipakai bersama satu composable (`useTodos`) dengan state di tingkat modul. Kartu kolom kiri dan panel bar sama-sama ada di DOM di lebar tertentu; tanpa state bersama keduanya akan memuat sendiri dan bisa menampilkan daftar yang berbeda setelah jendela diubah ukurannya.
+- Pembaruan optimistis selalu menyimpan salinan daftar sebelum berubah dan mengembalikannya bila server menolak, lalu menampilkan pesan galatnya. Tanpa salinan itu, kegagalan jaringan akan meninggalkan daftar yang berbeda dari database tanpa pemakai tahu.
+- Tombol naik dan turun ada di barisnya sendiri, bukan di samping judul. Di kolom kiri papan yang hanya 17rem, tiga tombol 44 px di samping judul membuat judulnya tinggal beberapa karakter, dan menyembunyikan tombol sampai disorot membuatnya tidak bisa dipakai di layar sentuh.
+
+**Keputusan tampilan kartu To Do (revisi 28 lanjutan, 2026-11-19):**
+- Kartu memakai permukaan krem dengan teks tinta, token `tag` dan `tag-ink` yang sama dengan label ID task, karena itu satu-satunya aksen identitas yang sudah ada dan nilainya tidak berganti antara mode terang dan gelap.
+- Semua warna di kartu itu diturunkan dari `tag-ink`, bukan dari `ink-muted`, `line`, `danger`, atau `mark`, karena token mode-peka dirancang untuk latar yang ikut berganti dan kontrasnya jatuh di atas krem yang tetap terang (`ink-muted` mode gelap di atas krem hanya 1,9:1).
+- Angkanya: teks tinta di atas krem 13,31:1; teks redup `tag-ink/70` 5,56:1; garis dan bingkai kotak centang `tag-ink/60` 4,16:1 (ambang non-teks 3:1); cincin fokus `tag-ink` 13,31:1. Semuanya sama di kedua mode karena kreamnya sama.
+- Galat dan toast di dalam kartu memakai teks tinta dengan garis kiri tebal, bukan warna `danger`, dengan alasan yang sama; kata "Gagal" dan `role="alert"` yang membawa artinya, bukan warnanya.
+- Item jadi baris yang dipisah garis tipis, bukan kotak sendiri, karena dua kotak dengan kontrolnya memakan setengah kolom kiri papan yang hanya 17rem.
+- Kontrol baris (pegangan seret, naik, turun, hapus) tersembunyi sampai barisnya disorot atau difokus, dan hanya di pointer presisi (`pointer-fine`), karena layar sentuh tidak punya hover. Di layar sentuh jalannya tombol "Atur" di kepala kartu, yang menampilkan kontrol di semua baris sekaligus (`aria-pressed`).
+- Pegangan seret adalah penanda visual (`aria-hidden`, bukan tombol), karena urutan sudah bisa diubah lewat tombol naik dan turun yang masuk urutan Tab; tombol yang tidak melakukan apa-apa hanya menambah perhentian Tab yang membingungkan.
+- Baris tambah menjadi baris terakhir daftar dengan isian tanpa kotak, supaya kartunya terbaca sebagai satu lembar, bukan form di atas daftar. Tombol kirim berikon tetap ada karena di layar sentuh tidak ada tombol Enter yang nyaman.
+- Item selesai pindah ke kelompok "Selesai (n)" yang bisa ditutup, bawaan tertutup kalau lebih dari tiga, supaya daftar yang aktif tidak terdorong ke bawah oleh pekerjaan yang sudah lewat. Tombol "Bersihkan" ada di kepala kelompok itu, di tempat yang jelas miliknya.
+- Centang digambar 150 ms lewat `stroke-dashoffset` yang terikat ke keadaan itemnya, dan pemindahan ke kelompok Selesai ditunda 180 ms supaya goresannya sempat terlihat di tempatnya. Dengan `prefers-reduced-motion` transisinya mati dan centangnya langsung tampil.
+- Kontrol baris tidak boleh mengubah lebar atau tinggi baris saat muncul. Di mode biasa kontrolnya adalah lapisan `absolute` di sisi kanan baris dengan latar krem yang sama dan gradasi ke kiri, jadi judul di bawahnya tetap mendapat seluruh lebar baris dan tingginya tetap 44 px. Di mode "Atur" kontrolnya pindah ke barisnya sendiri di bawah judul, karena di situ semua baris menampilkannya sekaligus dan lapisan akan menutupi akhir judul terus-menerus.
+- Judul memakai `min-w-0` dan `overflow-wrap: anywhere`, supaya judul yang isinya URL panjang tanpa spasi patah di lebar baris, bukan memaksa barisnya melebar dan memunculkan gulir horizontal.
+- Judul yang memuat URL tetap teks biasa, bukan tautan: mengkliknya membuka mode ubah, yang merupakan aksi utama baris itu. Tautannya dibuka lewat ikon 44 px terpisah dengan nama aksesibel "Buka tautan <judul>", jadi tidak ada satu target yang punya dua arti. Ikon itu ikut kelompok kontrol baris, bukan berdiri di samping judul, karena di mode biasa kontrolnya lapisan di sisi kanan baris dan ikon di luar kelompok itu akan tertutup lapisannya saat barisnya disorot. Di layar sentuh jalannya sama dengan kontrol lain, lewat tombol "Atur".
+- Centang hanya tampak kalau itemnya selesai. `stroke-dasharray` dan `stroke-dashoffset` sekarang nilai terikat (24 dan 24 atau 0), bukan `path-length="1"`: atribut SVG-nya `pathLength` dengan huruf besar di tengah, jadi versi sebelumnya diabaikan browser dan `stroke-dasharray: 1` justru menggambar centang bertitik yang terlihat terus di item yang belum selesai.
+- Kosong: hanya kepala kartu, satu kalimat "Belum ada to do.", dan baris isian. Tanpa garis kosong, karena garis yang tidak bisa diklik terbaca seperti baris isian yang rusak. Kalimatnya adalah `<label>` untuk isian tambah, jadi mengkliknya memfokuskan isian itu; `aria-label` isian tetap menang sebagai nama aksesibelnya.
+- Saat kosong, ringkasan dan tombol "Atur" tidak ditampilkan, karena tidak ada yang bisa diringkas atau diatur. Ringkasannya "<n> tersisa" bila masih ada yang belum selesai, dan "Semua selesai" bila semuanya sudah dicentang, bukan "0 tersisa".
+
+**Keputusan perbaikan E2E To Do:**
+- Uji pertama gagal dengan timeout 30 detik di isian, karena kartu To Do hanya muncul sendiri di lebar yang punya kolom kiri; di 360 dan 1280 px panelnya harus dibuka dulu. Sekarang test memeriksa apakah tombol To Do terlihat, mengkliknya, lalu menunggu `role="dialog"` bernama To Do benar-benar terlihat sebelum menyentuh isian.
+- Semua locator memakai role dan nama aksesibel, bukan placeholder atau teks tampilan, supaya test tidak pecah lagi setiap tampilannya berubah. Kalau isiannya tetap tidak terlihat, test berhenti dengan pesan yang menyebut apakah panel dipakai, bukan menggantung 30 detik.
+- Tidak ada `waitForTimeout` di bagian ini: setiap langkah menunggu keadaan yang ditunggu (`waitFor` pada locator yang terlihat, atau `waitForFunction` untuk urutan dan coretan).
+- Seluruh badan test ada di dalam `try`, dan `finally` selalu membersihkan item yang judulnya mulai dengan "E2E " lewat `DELETE /api/todos/:id` memakai `ctx.request` (cookie-nya ikut dari context, Origin dikirim manual). Lari yang mati di tengah jalan tidak lagi meninggalkan sampah di akun staf, yang sebelumnya membuat uji keadaan kosong gagal di lari berikutnya.
+- Uji keadaan kosong hanya dijalankan kalau setelah pembersihan akun stafnya memang tidak punya to do sungguhan, supaya test tidak gagal karena data orang.
+- Tambahan yang diuji sekarang: centang item baru harus tersembunyi (dibaca dari `stroke-dashoffset` dibanding `getTotalLength`, bukan dari ada atau tidaknya elemennya), dan baris berisi URL panjang harus tetap setinggi semula saat disorot dan difokus dengan judul minimal separuh lebar kartu.
+
+**Keputusan perbaikan bug revisi 19:**
+- "Kemunculan: -" bukan soal data. Kolom `occurrence_date` memang terisi di database, dan tidak mungkin kosong untuk task berseri karena CHECK `tasks_series_pair` menuntut `(series_id IS NULL) = (occurrence_date IS NULL)`. Yang hilang adalah dua kolom di jawaban detail: `getTask` menyusun `taskSummary` tanpa `occurrence_date` dan `series_freq`. Jadi gejalanya muncul untuk semua task berulang, bukan hanya yang dijadwalkan lewat Ubah.
+- Karena itu tidak ada UPDATE data yang perlu dijalankan di produksi. SELECT pemeriksanya tetap diberikan ke Rifky, dan hasilnya seharusnya nol baris; UPDATE-nya hanya disiapkan untuk kalau hasilnya tidak nol.
+- Jadwal yang ditambahkan lewat Ubah sudah menjadikan task itu kemunculan pertama di transaksi yang sama (`startSeries`, `SetTaskSeries`), dengan occurrence_date sama dengan tanggal mulai atau hari ini menurut `officeTZ`. Ticker tidak membuat kemunculan dobel karena unique (series_id, occurrence_date). Keduanya sekarang dijaga test DB, yang sebelumnya tidak ada.
+- Sub task templat dikirim server sebagai bagian dari detail seri, beserta nama PIC-nya, dan server juga yang memutuskan apakah daftarnya berbeda dari sub task task ini (`template_matches`). Frontend tidak membandingkan dua daftar sendiri, supaya aturan "apa yang ikut diulang" hanya ada di satu tempat.
+
+**Selesai kalau:** `./scripts/check.sh` lolos, migrasi 000019 dan `10-grants.sql` jalan di dev (daftar DELETE delapan tabel), Staf bisa membuat task lengkap dengan sub task dan jadwal, pembuat bisa mengubah task Requested miliknya, To Do jalan di kolom kiri dan di panel serta lembar, detail task berulang menampilkan kemunculan dan sub task templat, dan `E2E_ONLY=todo` lolos.
+
+**Hasil:** kode selesai 2026-11-19, `./scripts/check.sh` lolos, `go vet ./...` bersih, test unit dan test DB baru terkompilasi dan vet-bersih (test DB skip di laptop karena `TEST_DATABASE_URL` kosong). Migrasi, grants, uji curl, uji browser, dan `E2E_ONLY=todo` menunggu Rifky.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -1441,9 +1507,11 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 24 | 2026-11-18 | Lampiran di Aktivitas Harian: berkas menempel pada satu jam, maksimal 95 MB dan 10 berkas per jam, dengan gambar, video, PDF, dokumen Office, TXT, CSV, dan ZIP. Bisa ditarik, ditempel dari papan ketik, dipratinjau, dan dihapus | Sprint 11v |
 | 25 | 2026-11-18 | Salinan rapi semua berkas ke Google Drive akun tim setiap malam: Aktivitas per bulan, hari, dan orang; Task per bulan dengan Brief, Deliverable, dan sub task; dump database terenkripsi age. Satu arah dan tidak menghapus | Sprint 11w |
 | 26 | 2026-11-18 | Panel Buat task: batal memilih berkas tidak lagi menutup panel, isi panel tidak melompat saat pilih berkas diklik, dan form Buat task bisa dibuka di tab baru sebagai halaman /task/baru | Sprint 11x |
+| 27 | 2026-11-19 | Staf dan Manajer boleh membuat task dengan aturan yang sama persis. Admin tidak. Pembuat task boleh mengubah dan menghapus task buatannya selama masih Requested | Sprint 11y |
+| 28 | 2026-11-19 | To Do pribadi di papan: daftar catatan per akun, hanya bisa dibaca dan diubah pemiliknya, dengan centang, ubah di tempat, urutkan, hapus dengan Urungkan, dan bersihkan yang selesai | Sprint 11y |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat kedua puluh enam revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat kedua puluh delapan revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

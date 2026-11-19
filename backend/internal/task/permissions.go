@@ -20,14 +20,28 @@ type Can struct {
 	SubtaskPIC bool `json:"subtask_pic"`
 }
 
+// CanCreateTask: Staf dan Manajer boleh membuat task dengan aturan yang sama (revisi 27). Admin tidak.
+func CanCreateTask(role Role) bool {
+	return role == RoleManager || role == RoleStaff
+}
+
+// CanEditOwn: pembuat task boleh mengubah dan menghapus task buatannya selama masih Requested (revisi 27).
+// Setelah keluar dari Requested, berlaku aturan biasa, yaitu hanya Manajer.
+func CanEditOwn(isCreator bool, status Status) bool {
+	return isCreator && status == Requested
+}
+
 // PermissionsFor menghitung hak pelaku. isSubtaskPIC hanya menambah perpindahan status (revisi 17);
-// hak lain tetap milik PIC task dan Manajer.
-func PermissionsFor(role Role, isPIC, isSubtaskPIC bool, status Status) Can {
+// isCreator menambah ubah dan hapus selama task masih Requested (revisi 27).
+func PermissionsFor(role Role, isPIC, isSubtaskPIC, isCreator bool, status Status) Can {
 	manager := role == RoleManager
 	contributor := manager || (role == RoleStaff && isPIC)
+	// Hanya peran yang boleh membuat task yang bisa memakai pengecualian pembuat. Task hasil impor Excel
+	// bisa punya requested_by milik Admin, dan Admin tetap tidak boleh mengubah task.
+	own := CanCreateTask(role) && CanEditOwn(isCreator, status)
 	c := Can{
-		Edit:            manager,
-		Delete:          manager,
+		Edit:            manager || own,
+		Delete:          manager || own,
 		EditLabels:      contributor,
 		EditDeliverable: contributor,
 		// Revisi 6: PIC menyusun sendiri sub task yang ia kerjakan, Manajer boleh ikut menambah.
@@ -54,8 +68,8 @@ type SubtaskRef struct {
 // dibuka lagi bila pelaku memakai jalur revisi PIC sub task (revisi 22). Jalur itu butuh minimal satu sub task
 // miliknya yang tercentang; tanpa itu On Progress dibuang dari MoveTo, supaya move_to cocok dengan yang
 // diterima Move.
-func MoveOptions(role Role, isPIC bool, mine []sqlc.ListMySubtasksRow, status Status) (Can, []SubtaskRef) {
-	can := PermissionsFor(role, isPIC, len(mine) > 0, status)
+func MoveOptions(role Role, isPIC, isCreator bool, mine []sqlc.ListMySubtasksRow, status Status) (Can, []SubtaskRef) {
+	can := PermissionsFor(role, isPIC, len(mine) > 0, isCreator, status)
 	choices := []SubtaskRef{}
 	if !IsSubtaskRevision(role, isPIC, len(mine) > 0, status, OnProgress) {
 		return can, choices

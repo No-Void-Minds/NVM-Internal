@@ -730,3 +730,34 @@ func (q *Queries) ListTasks(ctx context.Context, assigneeID pgtype.Int8) ([]List
 	}
 	return items, nil
 }
+
+const listUserNames = `-- name: ListUserNames :many
+SELECT id, name FROM users WHERE id = ANY($1::bigint[])
+`
+
+type ListUserNamesRow struct {
+	ID   int64
+	Name string
+}
+
+// Nama untuk id yang sudah diketahui, mis. PIC di templat seri (revisi 19). Akun nonaktif ikut, supaya
+// templat lama tetap bisa ditampilkan.
+func (q *Queries) ListUserNames(ctx context.Context, ids []int64) ([]ListUserNamesRow, error) {
+	rows, err := q.db.Query(ctx, listUserNames, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUserNamesRow{}
+	for rows.Next() {
+		var i ListUserNamesRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

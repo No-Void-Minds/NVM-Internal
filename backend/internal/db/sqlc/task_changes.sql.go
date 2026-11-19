@@ -49,7 +49,7 @@ func (q *Queries) DeleteTaskLabels(ctx context.Context, taskID string) error {
 }
 
 const getTaskForUpdate = `-- name: GetTaskForUpdate :one
-SELECT id, title, description, status, urgency, division_id, start_date, due_date, deliverable_url, version
+SELECT id, title, description, status, urgency, division_id, requested_by, start_date, due_date, deliverable_url, version
 FROM tasks
 WHERE id = $1 AND NOT is_deleted
 FOR UPDATE
@@ -62,12 +62,15 @@ type GetTaskForUpdateRow struct {
 	Status         TaskStatus
 	Urgency        TaskUrgency
 	DivisionID     int64
+	RequestedBy    int64
 	StartDate      pgtype.Date
 	DueDate        pgtype.Date
 	DeliverableUrl pgtype.Text
 	Version        int32
 }
 
+// requested_by ikut dibaca: pembuat task boleh mengubah dan menghapus task buatannya selama masih
+// Requested (revisi 27).
 func (q *Queries) GetTaskForUpdate(ctx context.Context, id string) (GetTaskForUpdateRow, error) {
 	row := q.db.QueryRow(ctx, getTaskForUpdate, id)
 	var i GetTaskForUpdateRow
@@ -78,6 +81,7 @@ func (q *Queries) GetTaskForUpdate(ctx context.Context, id string) (GetTaskForUp
 		&i.Status,
 		&i.Urgency,
 		&i.DivisionID,
+		&i.RequestedBy,
 		&i.StartDate,
 		&i.DueDate,
 		&i.DeliverableUrl,

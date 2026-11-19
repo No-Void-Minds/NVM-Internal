@@ -1,5 +1,7 @@
 -- name: GetTaskForUpdate :one
-SELECT id, title, description, status, urgency, division_id, start_date, due_date, deliverable_url, version
+-- requested_by ikut dibaca: pembuat task boleh mengubah dan menghapus task buatannya selama masih
+-- Requested (revisi 27).
+SELECT id, title, description, status, urgency, division_id, requested_by, start_date, due_date, deliverable_url, version
 FROM tasks
 WHERE id = @id AND NOT is_deleted
 FOR UPDATE;

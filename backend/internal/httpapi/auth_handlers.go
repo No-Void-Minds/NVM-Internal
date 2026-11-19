@@ -35,6 +35,9 @@ type sessionUser struct {
 	JobTitle           *string `json:"job_title"`
 	AvatarID           *string `json:"avatar_id"`
 	MustChangePassword bool    `json:"must_change_password"`
+	// CanCreateTask: Staf dan Manajer boleh membuat task (revisi 27). Dikirim server supaya tombol
+	// "Buat task" dan rute /task/baru tidak memakai daftar peran yang ditulis di frontend.
+	CanCreateTask bool `json:"can_create_task"`
 }
 
 func (s *Server) login(c *gin.Context) {

@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useId } from 'vue'
-import type { UserItem } from '../api/users'
+import type { PicCandidate } from '../api/people'
 import UserAvatar from './UserAvatar.vue'
 
 const props = defineProps<{
-  candidates: UserItem[]
+  candidates: PicCandidate[]
   names: Map<number, string>
   // Dipakai di label tombol supaya pembaca layar tahu ini PIC untuk sub task yang mana, mis. "sub task 2".
   subject: string

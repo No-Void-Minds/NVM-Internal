@@ -20,9 +20,9 @@ var statusName = map[Status]string{
 
 // Pesan per aksi. Hanya aksi atas sub task yang menyebut sub task.
 var (
-	errCreateForbidden      = forbidden("Hanya Manajer yang bisa membuat task.")
-	errUpdateForbidden      = forbidden("Hanya Manajer yang bisa mengubah task ini.")
-	errDeleteForbidden      = forbidden("Hanya Manajer yang bisa menghapus task ini.")
+	errCreateForbidden      = forbidden("Hanya Staf dan Manajer yang bisa membuat task.")
+	errUpdateForbidden      = forbidden("Task ini hanya bisa diubah Manajer, atau pembuatnya selama masih Requested.")
+	errDeleteForbidden      = forbidden("Task ini hanya bisa dihapus Manajer, atau pembuatnya selama masih Requested.")
 	errLabelsForbidden      = forbidden("Hanya PIC task ini dan Manajer yang bisa mengubah labelnya.")
 	errDeliverableForbidden = forbidden("Hanya PIC task ini dan Manajer yang bisa mengubah tautan deliverable.")
 	errStopSeriesForbidden  = forbidden("Hanya Manajer yang bisa menghentikan pengulangan task.")

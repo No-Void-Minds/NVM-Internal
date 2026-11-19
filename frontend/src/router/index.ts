@@ -25,6 +25,8 @@ declare module 'vue-router' {
     layout?: 'auth' | 'app'
     // Kosong berarti semua peran boleh membuka. Backend tetap menolak dengan 403 bila URL dipanggil langsung.
     roles?: Role[]
+    // needsCreateTask: hanya akun yang boleh membuat task (can_create_task dari server).
+    needsCreateTask?: boolean
     // Peran di luar roles melihat halaman 404, bukan dialihkan ke beranda, supaya keberadaan halaman ini tidak
     // terungkap (revisi 23).
     hideFromOthers?: boolean
@@ -79,12 +81,13 @@ export const router = createRouter({
     },
     { path: '/task', name: 'tasks', component: BoardPage, meta: { title: 'Papan Task' } },
     // Rute statis selalu menang atas /task/:id di vue-router, jadi "baru" tidak pernah terbaca sebagai ID task.
-    // Hanya Manajer yang boleh membuat task (POST /api/tasks), peran lain melihat 404 (pola revisi 23).
+    // Yang boleh membuka ditentukan can_create_task dari server (revisi 27), bukan daftar peran di sini.
+    // Yang tidak boleh melihat 404 dengan URL tetap sama (pola revisi 23).
     {
       path: '/task/baru',
       name: 'task-new',
       component: TaskNewPage,
-      meta: { title: 'Buat task', roles: ['manager'], hideFromOthers: true },
+      meta: { title: 'Buat task', needsCreateTask: true, hideFromOthers: true },
     },
     { path: '/task/:id', name: 'task-detail', component: TaskPage, meta: { title: 'Detail task' } },
     { path: '/arsip', name: 'archive', component: ArchivePage, meta: { title: 'Arsip' } },
@@ -121,6 +124,13 @@ router.beforeEach(async (to) => {
   if (user.must_change_password && to.name !== 'force-password')
     return { name: 'force-password', query: keepKembali(to.fullPath) }
   if (!user.must_change_password && to.name === 'force-password') return homeFor(user)
+  if (to.meta.needsCreateTask && !user.can_create_task) {
+    return {
+      name: 'not-found',
+      params: { pathMatch: to.path.slice(1).split('/') },
+      query: to.query,
+    }
+  }
   if (to.meta.roles && !to.meta.roles.includes(user.role)) {
     if (!to.meta.hideFromOthers) return homeFor(user)
     // Tampilkan 404 yang sudah ada dengan URL tetap sama, seperti alamat yang memang tidak ada.

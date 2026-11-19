@@ -14,6 +14,7 @@ GRANT DELETE ON
   task_assignees,        -- RemoveTaskAssignees saat Manajer mengganti PIC task (revisi 6)
   task_labels,           -- DeleteTaskLabels
   activity_attachments,  -- DeleteActivityAttachment: lampiran aktivitas dihapus permanen (revisi 24)
+  user_todos,            -- DeleteTodo dan DeleteDoneTodos: To Do pribadi dihapus permanen (revisi 28)
   user_sessions,         -- job maintenance: sesi kedaluwarsa
   audit_logs             -- job maintenance: audit log login lebih dari 1 tahun
 TO nvm_internal_app;
@@ -21,7 +22,8 @@ TO nvm_internal_app;
 -- daily_activities (migrasi 000016, revisi 21) sengaja tidak ada di daftar DELETE: sel yang dikosongkan
 -- disimpan sebagai NULL lewat UPDATE, barisnya tidak pernah dihapus. Lampiran aktivitas (migrasi 000017,
 -- revisi 24) justru sebaliknya: berkasnya bisa 95 MB, jadi hapus berarti baris dan berkasnya ikut hilang,
--- dan tabelnya masuk daftar DELETE di atas. Daftar itu sekarang tujuh tabel.
+-- dan tabelnya masuk daftar DELETE di atas. user_todos (migrasi 000019, revisi 28) juga: To Do pribadi
+-- dihapus permanen, tanpa jejak, karena itu catatan pribadi. Daftar itu sekarang delapan tabel.
 
 -- task_series (migrasi 000015, revisi 19) sengaja tidak ada di daftar DELETE: seri hanya dihentikan
 -- (active = false) dan templatnya JSONB yang diganti utuh lewat UPDATE. SELECT, INSERT, dan UPDATE-nya datang dari

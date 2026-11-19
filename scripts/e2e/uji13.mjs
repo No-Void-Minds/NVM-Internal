@@ -13,6 +13,8 @@
 // E2E_ONLY=subtaskresult (kelompok Arahan dan Hasil serta simpan catatan hasil, revisi 18; menulis catatan hasil
 // ke satu sub task di database dev),
 // E2E_ONLY=schedule (bagian Jadwal di form Buat task, revisi 19; tidak menyimpan apa pun),
+// E2E_ONLY=todo (To Do pribadi di papan, revisi 28; menambah, mengubah, dan menghapus beberapa item
+// To Do milik akun Staf di database dev, lalu membersihkannya),
 // E2E_ONLY=activityfiles (lampiran Aktivitas Harian, revisi 24; mengunggah dua berkas kecil ke jam pertama
 // milik akun Staf di database dev, lalu menghapusnya lagi),
 // E2E_ONLY=activity (Aktivitas Harian, revisi 21; menulis satu sel aktivitas hari ini milik akun Staf dan
@@ -1919,6 +1921,351 @@ async function checkCreateTask(width) {
 
 if (ONLY === "createtask")
   for (const w of [360, 768, 1280]) await checkCreateTask(w);
+
+// Jejak uji To Do dibersihkan lewat API, bukan lewat UI: kalau lari sebelumnya mati di tengah jalan,
+// itemnya tetap tertinggal di akun staf dan membuat uji keadaan kosong gagal. Mengembalikan jumlah item
+// milik pengguna yang bukan jejak uji, atau null kalau API-nya tidak bisa dibaca.
+async function bersihkanTodoApi(ctx) {
+  try {
+    const r = await ctx.request.get(BASE + "/api/todos");
+    if (!r.ok()) return null;
+    const items = (await r.json()).todos ?? [];
+    for (const it of items)
+      if (String(it.title).startsWith("E2E "))
+        await ctx.request.delete(`${BASE}/api/todos/${it.id}`, {
+          headers: { Origin: BASE },
+        });
+    return items.filter((it) => !String(it.title).startsWith("E2E ")).length;
+  } catch {
+    return null;
+  }
+}
+
+// To Do pribadi di papan (revisi 28): keadaan kosong, tambah lewat Enter, centang, ubah dengan keyboard,
+// hapus lalu Urungkan, urutkan dengan tombol, baris berisi URL panjang, panel di lebar sedang, lembar di
+// 360 px, tanpa gulir horizontal halaman. Semua locator memakai role dan nama aksesibel, bukan placeholder,
+// supaya tetap berlaku setelah tampilannya berubah. Kartu To Do hanya muncul sendiri di lebar yang punya
+// kolom kiri; di lebar lain panelnya harus dibuka dulu, dan itu yang membuat uji pertama gagal dengan
+// timeout 30 detik di isian.
+async function checkTodo(width) {
+  const { ctx, page, errors } = await open("staf", width, "terang");
+  const where = (what) => `todo ${width} ${what}`;
+  const expect = (cond, w, msg) => {
+    checks++;
+    if (!cond) fail(where(w), msg);
+  };
+  const tag = `E2E ${Date.now()}`;
+  const satu = `${tag} satu`;
+  const dua = `${tag} dua`;
+  const panjang = `${tag} tautan https://novoidminds.xyz/task?due=hari-ini&status=dikerjakan&pic=staf.uji&urut=deadline`;
+  const vis = (l) => l.locator("visible=true").first();
+  const ada = (l, ms = 8000) =>
+    vis(l)
+      .waitFor({ timeout: ms })
+      .then(
+        () => true,
+        () => false,
+      );
+  const terlihat = async (l) => (await l.locator("visible=true").count()) > 0;
+
+  try {
+    const sisaMilikSendiri = await bersihkanTodoApi(ctx);
+
+    await page.goto(BASE + "/task");
+    await page.waitForLoadState("networkidle");
+
+    // Tombol To Do hanya ada di lebar yang memakai bar. Kalau ada, panelnya dibuka dulu dan ditunggu
+    // sampai benar-benar terlihat, bukan ditunggu dengan jeda.
+    const tombolPanel = page.getByRole("button", { name: /^To Do/ });
+    const pakaiPanel = await terlihat(tombolPanel);
+    if (pakaiPanel) {
+      await vis(tombolPanel).click();
+      const dialog = page.getByRole("dialog", { name: "To Do" });
+      const terbuka = await ada(dialog);
+      expect(
+        terbuka,
+        "panel",
+        "panel To Do tidak terbuka setelah tombolnya diklik",
+      );
+      if (!terbuka) return;
+      if (width < 640) {
+        // Lembar dari bawah: menempel di tepi bawah layar.
+        const box = await vis(dialog).boundingBox();
+        const vh = await page.evaluate(() => window.innerHeight);
+        expect(
+          !!box && Math.abs(box.y + box.height - vh) <= 2,
+          "lembar",
+          `lembar tidak menempel di bawah (bawah ${box ? Math.round(box.y + box.height) : "?"} dari ${vh})`,
+        );
+      }
+    }
+
+    // Isian tambah: dicari lewat nama aksesibelnya. Kalau tidak ada, kartunya memang tidak tampil, dan
+    // itu dilaporkan sebagai kegagalan, bukan dibiarkan jadi timeout.
+    const isian = page.getByRole("textbox", { name: "Tulis to do" });
+    const adaIsian = await ada(isian);
+    expect(
+      adaIsian,
+      "kartu",
+      `isian To Do tidak terlihat (panel dipakai: ${pakaiPanel})`,
+    );
+    if (!adaIsian) return;
+    await audit(page, errors, where("kartu"));
+
+    // Keputusan Sprint 11y: kartu kosong hanya menampilkan kepala, satu kalimat, dan isian. Diuji hanya
+    // kalau akun stafnya memang tidak punya to do sungguhan, supaya uji ini tidak ikut gagal karena data.
+    if (sisaMilikSendiri === 0) {
+      expect(
+        await terlihat(page.getByText("Belum ada to do.", { exact: true })),
+        "kosong",
+        "kalimat keadaan kosong tidak muncul",
+      );
+      expect(
+        !(await terlihat(
+          page.getByRole("button", { name: "Atur", exact: true }),
+        )),
+        "kosong",
+        "tombol Atur tampil padahal belum ada item",
+      );
+      expect(
+        !(await terlihat(page.getByText(/tersisa|Semua selesai/))),
+        "kosong",
+        "ringkasan tampil padahal belum ada item",
+      );
+    }
+
+    // Tambah dua item lewat Enter. Isian dikosongkan dan tetap fokus, jadi item kedua cukup diketik lagi.
+    await vis(isian).fill(satu);
+    await vis(isian).press("Enter");
+    expect(
+      await ada(page.getByRole("button", { name: `Ubah ${satu}` })),
+      "tambah",
+      "item pertama tidak muncul",
+    );
+    const sisaIsian = await page.evaluate(() => {
+      const el = document.activeElement;
+      return {
+        label: el?.getAttribute("aria-label") ?? "",
+        value: el instanceof HTMLInputElement ? el.value : "?",
+      };
+    });
+    expect(
+      sisaIsian.label === "Tulis to do",
+      "tambah",
+      `fokus pindah ke "${sisaIsian.label}"`,
+    );
+    expect(
+      sisaIsian.value === "",
+      "tambah",
+      `isian tidak dikosongkan, isinya "${sisaIsian.value}"`,
+    );
+
+    // Centang item baru harus kosong. Centangnya digambar dengan stroke-dashoffset penuh, jadi yang
+    // diperiksa offsetnya, bukan ada atau tidaknya elemennya.
+    const centangTersembunyi = await page.evaluate((t) => {
+      const li = [...document.querySelectorAll("li")].find(
+        (el) => el.querySelector(`button[aria-label="Ubah ${t}"]`) !== null,
+      );
+      const path = li?.querySelector("label svg path");
+      if (!path) return "tidak ada path centang";
+      const st = getComputedStyle(path);
+      if (
+        st.visibility === "hidden" ||
+        st.display === "none" ||
+        st.opacity === "0"
+      )
+        return "";
+      const off = parseFloat(st.strokeDashoffset) || 0;
+      const len = path.getTotalLength();
+      return off >= len - 1
+        ? ""
+        : `stroke-dashoffset ${off} dari panjang ${Math.round(len)}`;
+    }, satu);
+    expect(
+      centangTersembunyi === "",
+      "centang baru",
+      `centang tampil di item yang belum selesai: ${centangTersembunyi}`,
+    );
+
+    await page.keyboard.type(dua);
+    await page.keyboard.press("Enter");
+    expect(
+      await ada(page.getByRole("button", { name: `Ubah ${dua}` })),
+      "tambah",
+      "item kedua tidak muncul",
+    );
+
+    // Baris dengan URL panjang: kontrol baris muncul sebagai lapisan, jadi tinggi barisnya tidak boleh
+    // berubah saat hover atau focus, dan judulnya tetap dapat lebih dari separuh lebar kartu.
+    await page.keyboard.type(panjang);
+    await page.keyboard.press("Enter");
+    const judulPanjang = page.getByRole("button", { name: `Ubah ${panjang}` });
+    expect(
+      await ada(judulPanjang),
+      "panjang",
+      "item dengan URL panjang tidak muncul",
+    );
+    const ukur = async () =>
+      await page.evaluate((t) => {
+        const b = document.querySelector(`button[aria-label="Ubah ${t}"]`);
+        const li = b?.closest("li");
+        const daftar = li?.closest("ol, ul");
+        if (!b || !li || !daftar) return null;
+        return {
+          tinggi: Math.round(li.getBoundingClientRect().height),
+          judul: Math.round(b.getBoundingClientRect().width),
+          kartu: Math.round(daftar.getBoundingClientRect().width),
+        };
+      }, panjang);
+    const sebelum = await ukur();
+    await vis(judulPanjang).hover();
+    const saatHover = await ukur();
+    await vis(judulPanjang).focus();
+    const saatFokus = await ukur();
+    expect(
+      !!sebelum && !!saatHover && !!saatFokus,
+      "panjang",
+      "baris URL panjang tidak bisa diukur",
+    );
+    if (sebelum && saatHover && saatFokus) {
+      expect(
+        Math.abs(saatHover.tinggi - sebelum.tinggi) <= 1 &&
+          Math.abs(saatFokus.tinggi - sebelum.tinggi) <= 1,
+        "panjang",
+        `tinggi baris berubah: ${sebelum.tinggi} lalu hover ${saatHover.tinggi} lalu fokus ${saatFokus.tinggi}`,
+      );
+      expect(
+        sebelum.judul * 2 >= sebelum.kartu,
+        "panjang",
+        `judul hanya ${sebelum.judul} px dari kartu ${sebelum.kartu} px`,
+      );
+    }
+
+    // Mode Atur: kontrol urut dan hapus tampil di semua baris, termasuk di layar sentuh yang tanpa hover.
+    const atur = page.getByRole("button", { name: "Atur", exact: true });
+    expect(await ada(atur), "atur", "tombol Atur tidak ada");
+    await vis(atur).click();
+    expect(
+      (await vis(atur).getAttribute("aria-pressed")) === "true",
+      "atur",
+      "tombol Atur tidak menandai dirinya aktif",
+    );
+    const tombolNaik = page.getByRole("button", { name: `Naikkan ${dua}` });
+    expect(
+      await ada(tombolNaik),
+      "atur",
+      "kontrol baris tidak muncul di mode Atur",
+    );
+
+    // Urutkan dengan tombol, lalu urutannya dibaca dari DOM.
+    await vis(tombolNaik).click();
+    const urut = await page
+      .waitForFunction(
+        (t) => {
+          const judul = [
+            ...document.querySelectorAll("li button[aria-label^='Ubah ']"),
+          ]
+            .filter((b) => b.textContent?.includes(t))
+            .map((b) => b.textContent?.trim() ?? "");
+          return judul.length >= 2 && judul[0].includes("dua") ? judul : null;
+        },
+        tag,
+        { timeout: 8000 },
+      )
+      .then(
+        () => true,
+        () => false,
+      );
+    expect(
+      urut,
+      "urutkan",
+      "item kedua tidak naik ke atas setelah tombol Naikkan",
+    );
+
+    // Ubah dengan keyboard: Enter membuka isian, Escape membatalkan, Enter kedua menyimpan.
+    const judulSatu = page.getByRole("button", { name: `Ubah ${satu}` });
+    await vis(judulSatu).focus();
+    await page.keyboard.press("Enter");
+    expect(
+      await ada(page.getByRole("textbox", { name: "Ubah to do" })),
+      "ubah",
+      "isian ubah tidak terbuka",
+    );
+    await page.keyboard.press("Escape");
+    expect(await ada(judulSatu), "ubah", "Escape tidak membatalkan perubahan");
+    await vis(judulSatu).focus();
+    await page.keyboard.press("Enter");
+    await page.keyboard.type(" diubah");
+    await page.keyboard.press("Enter");
+    expect(
+      await ada(page.getByRole("button", { name: `Ubah ${satu} diubah` })),
+      "ubah",
+      "judul tidak tersimpan setelah Enter",
+    );
+
+    // Centang: item pindah ke kelompok Selesai, judulnya dicoret.
+    await vis(
+      page.getByRole("checkbox", { name: `Tandai selesai ${satu} diubah` }),
+    ).check();
+    expect(
+      await ada(page.getByRole("button", { name: /^Selesai \(/ })),
+      "centang",
+      "kelompok Selesai tidak muncul",
+    );
+    const dicoret = await page
+      .waitForFunction(
+        (t) => {
+          const el = [...document.querySelectorAll("li p")].find(
+            (p) => p.textContent?.trim() === t,
+          );
+          return el
+            ? getComputedStyle(el).textDecorationLine.includes("line-through")
+            : false;
+        },
+        `${satu} diubah`,
+        { timeout: 8000 },
+      )
+      .then(
+        () => true,
+        () => false,
+      );
+    expect(dicoret, "centang", "judul item selesai tidak dicoret");
+
+    // Hapus lalu Urungkan: itemnya kembali.
+    await vis(page.getByRole("button", { name: `Hapus ${dua}` })).click();
+    expect(
+      await ada(page.getByText("To do dihapus.")),
+      "hapus",
+      "pesan hapus tidak muncul",
+    );
+    await vis(page.getByRole("button", { name: "Urungkan" })).click();
+    expect(
+      await ada(page.getByRole("button", { name: `Ubah ${dua}` })),
+      "urungkan",
+      "item tidak kembali setelah Urungkan",
+    );
+
+    await audit(page, errors, where("setelah diisi"));
+    const lebar = await page.evaluate(() => [
+      document.documentElement.scrollWidth,
+      window.innerWidth,
+    ]);
+    expect(
+      lebar[0] <= lebar[1],
+      "lebar",
+      `scrollWidth ${lebar[0]} > ${lebar[1]}`,
+    );
+  } finally {
+    // Dijalankan juga saat ujinya berhenti di tengah jalan, supaya akun staf tidak menumpuk item "E2E ".
+    await bersihkanTodoApi(ctx);
+    checks++;
+    if (errors.length)
+      fail(where("console"), errors.splice(0).join(" | ").slice(0, 300));
+    await ctx.close();
+  }
+}
+
+if (ONLY === "todo") for (const w of [360, 1280]) await checkTodo(w);
 
 await browser.close();
 console.log(

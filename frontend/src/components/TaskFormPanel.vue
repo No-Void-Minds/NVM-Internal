@@ -4,13 +4,13 @@ import { useRouter } from 'vue-router'
 import BaseDialog from './BaseDialog.vue'
 import TaskForm from './TaskForm.vue'
 import type { TaskDetail } from '../api/tasks'
-import type { UserItem } from '../api/users'
+import type { PicCandidate } from '../api/people'
 import type { LabelItem } from '../api/labels'
 
 defineProps<{
   open: boolean
   task: TaskDetail | null
-  users: UserItem[]
+  users: PicCandidate[]
   labels: LabelItem[]
 }>()
 // partial true berarti task tersimpan, tetapi ada lampiran yang gagal diunggah.

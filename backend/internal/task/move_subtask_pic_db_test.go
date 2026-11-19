@@ -30,7 +30,7 @@ func TestSubtaskPICMoves(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		c, _ := MoveOptions(actor.Role, d.IsPIC(actor.ID), d.MySubtasks(actor.ID), Status(d.Task.Status))
+		c, _ := MoveOptions(actor.Role, d.IsPIC(actor.ID), false, d.MySubtasks(actor.ID), Status(d.Task.Status))
 		return c.MoveTo, d.Task.Version
 	}
 	move := func(actor Actor, to Status, note string, subs ...int64) error {

@@ -13,6 +13,9 @@ export type SessionUser = {
   job_title: string | null
   avatar_id: string | null
   must_change_password: boolean
+  // Dihitung server (revisi 27): Staf dan Manajer boleh membuat task, Admin tidak. Frontend tidak menulis
+  // sendiri daftar perannya.
+  can_create_task: boolean
 }
 
 export const useSessionStore = defineStore('session', () => {

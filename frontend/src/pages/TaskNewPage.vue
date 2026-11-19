@@ -5,18 +5,26 @@ import PageHeader from '../components/PageHeader.vue'
 import TaskForm from '../components/TaskForm.vue'
 import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import { listLabels, type LabelItem } from '../api/labels'
-import { listUsers, type UserItem } from '../api/users'
+import { listUsers } from '../api/users'
+import { listPeople } from '../api/board'
+import type { PicCandidate } from '../api/people'
+import { useSessionStore } from '../stores/session'
 
 const router = useRouter()
+const session = useSessionStore()
 const labels = ref<LabelItem[]>([])
-const users = ref<UserItem[]>([])
+const users = ref<PicCandidate[]>([])
 const state = ref<'loading' | 'ready' | 'error'>('loading')
 const form = ref<InstanceType<typeof TaskForm> | null>(null)
 
 async function load() {
   state.value = 'loading'
   try {
-    const [l, u] = await Promise.all([listLabels(), listUsers()])
+    // Daftar akun hanya bisa dibaca pengelola; Staf memakai /api/people, yang isinya kandidat PIC saja.
+    const [l, u] = await Promise.all([
+      listLabels(),
+      session.user?.role === 'manager' ? listUsers() : listPeople(),
+    ])
     labels.value = l.labels
     users.value = u
     state.value = 'ready'

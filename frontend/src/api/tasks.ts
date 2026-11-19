@@ -69,6 +69,10 @@ export type SeriesInfo = {
   // Dihitung server dengan aturan pembuat kemunculan; null bila seri berhenti atau habis.
   next_date: string | null
   due_offset_days: number | null
+  // Sub task yang ikut di kemunculan berikutnya, dari templat seri (perbaikan revisi 19).
+  template_subtasks: { title: string; pic: string }[]
+  // false berarti sub task task ini sudah berbeda dengan templat. Dihitung server.
+  template_matches: boolean
 }
 
 // Bagian Jadwal yang dikirim ke server. Tidak dikirim berarti seri tidak disentuh.

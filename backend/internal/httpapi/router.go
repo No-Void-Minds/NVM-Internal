@@ -15,6 +15,7 @@ import (
 	"nvm-internal/internal/label"
 	"nvm-internal/internal/storage"
 	"nvm-internal/internal/task"
+	"nvm-internal/internal/todo"
 )
 
 type Server struct {
@@ -28,6 +29,7 @@ type Server struct {
 	accounts     *account.Service
 	activities   *activity.Service
 	labels       *label.Service
+	todos        *todo.Service
 	tasks        *task.Service
 	files        *storage.Store
 	avatars      *account.Avatars
@@ -63,6 +65,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 		accounts:     account.NewService(pool),
 		activities:   activity.NewService(pool, files),
 		labels:       label.NewService(pool),
+		todos:        todo.NewService(pool),
 		tasks:        task.NewService(pool),
 		files:        files,
 		attachments:  task.NewAttachments(pool, files),
@@ -127,10 +130,13 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	app.GET("/people", s.listPeople)
 	app.GET("/people/:id", s.getPerson)
 	app.GET("/tasks/:id", s.getTask)
-	app.POST("/tasks", requireRole(sqlc.UserRoleManager), s.createTask)
+	// Tanpa middleware peran: Staf dan Manajer boleh membuat task (revisi 27), dan pembuat task boleh
+	// mengubah serta menghapus task buatannya selama masih Requested. Keduanya dicek di service, yang
+	// memegang status dan pembuat task.
+	app.POST("/tasks", s.createTask)
 	managerOnly := requireRole(sqlc.UserRoleManager)
-	app.PUT("/tasks/:id", managerOnly, s.updateTask)
-	app.DELETE("/tasks/:id", managerOnly, s.deleteTask)
+	app.PUT("/tasks/:id", s.updateTask)
+	app.DELETE("/tasks/:id", s.deleteTask)
 	app.POST("/tasks/:id/stop-series", managerOnly, s.stopSeries)
 	app.PUT("/tasks/:id/labels", s.setTaskLabels)
 	app.PUT("/tasks/:id/deliverable", s.setTaskDeliverable)
@@ -149,6 +155,15 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	app.GET("/activities/me", s.myActivities)
 	app.PUT("/activities", s.saveActivity)
 	app.GET("/activities/export", managerOnly, s.exportActivities)
+	// To Do pribadi (revisi 28). Semua rute memakai akun yang login; tidak ada rute untuk To Do orang lain,
+	// dan id milik orang lain dijawab 404 supaya keberadaannya tidak bocor.
+	app.GET("/todos", s.listTodos)
+	app.POST("/todos", s.addTodo)
+	app.PUT("/todos/order", s.reorderTodos)
+	app.POST("/todos/clear-done", s.clearDoneTodos)
+	app.PUT("/todos/:todoId", s.renameTodo)
+	app.PUT("/todos/:todoId/done", s.setTodoDone)
+	app.DELETE("/todos/:todoId", s.deleteTodo)
 	// Lampiran per jam (revisi 24). Haknya sama dengan isian aktivitas dan dicek di service.
 	app.POST("/activities/files", s.uploadActivityFile)
 	app.GET("/activities/files/:fileId", s.downloadActivityFile)

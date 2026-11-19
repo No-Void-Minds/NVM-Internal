@@ -61,7 +61,7 @@ func TestSubtaskPICRevision(t *testing.T) {
 
 	// move_to dan pilihan dari data yang sama dengan handler.
 	d := get()
-	can, choices := MoveOptions(f.stafC.Role, d.IsPIC(f.stafC.ID), d.MySubtasks(f.stafC.ID), Status(d.Task.Status))
+	can, choices := MoveOptions(f.stafC.Role, d.IsPIC(f.stafC.ID), false, d.MySubtasks(f.stafC.ID), Status(d.Task.Status))
 	if !slices.Equal(can.MoveTo, []Status{OnProgress}) || len(choices) != 2 || choices[0].ID != naskah || choices[1].ID != desain {
 		t.Fatalf("stafC di Ready: move_to %v, pilihan %v, mau [on_progress] dan [Naskah Desain]", can.MoveTo, choices)
 	}
@@ -120,7 +120,7 @@ func TestSubtaskPICRevision(t *testing.T) {
 	}
 
 	// Setelah kembali ke On Progress, move_to stafC kembali ke Ready seperti revisi 17.
-	can, _ = MoveOptions(f.stafC.Role, d.IsPIC(f.stafC.ID), d.MySubtasks(f.stafC.ID), Status(d.Task.Status))
+	can, _ = MoveOptions(f.stafC.Role, d.IsPIC(f.stafC.ID), false, d.MySubtasks(f.stafC.ID), Status(d.Task.Status))
 	if !slices.Equal(can.MoveTo, []Status{Ready}) {
 		t.Fatalf("stafC di On Progress: move_to %v, mau [ready]", can.MoveTo)
 	}

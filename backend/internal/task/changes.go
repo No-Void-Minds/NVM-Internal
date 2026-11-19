@@ -58,10 +58,11 @@ func canContribute(ctx context.Context, q *sqlc.Queries, actor Actor, id string)
 	}
 }
 
-// Update mengubah atribut task, daftar PIC, dan daftar sub task sekaligus. Hanya Manajer. Kedua daftar
-// yang dikirim menggantikan daftar lama secara utuh. Divisi ikut PIC pertama sesudah perubahan.
+// Update mengubah atribut task, daftar PIC, dan daftar sub task sekaligus. Manajer selalu boleh; pembuat task
+// boleh selama task masih Requested (revisi 27). Kedua daftar yang dikirim menggantikan daftar lama secara
+// utuh. Divisi ikut PIC pertama sesudah perubahan.
 func (s *Service) Update(ctx context.Context, actor Actor, id string, in UpdateInput) (int32, error) {
-	if actor.Role != RoleManager {
+	if actor.Role != RoleManager && actor.Role != RoleStaff {
 		return 0, errUpdateForbidden
 	}
 	f, err := cleanFields(in.Title, in.Description, in.Urgency, in.StartDate, in.DueDate, in.DeliverableURL)
@@ -87,6 +88,11 @@ func (s *Service) Update(ctx context.Context, actor Actor, id string, in UpdateI
 			cur, err := lockTask(ctx, q, id, in.Version)
 			if err != nil {
 				return err
+			}
+			// Status dan pembuat dibaca dari baris yang sudah dikunci, bukan dari permintaan, jadi task yang
+			// baru saja pindah status tidak bisa diubah pembuatnya lewat permintaan yang menyusul.
+			if actor.Role != RoleManager && !CanEditOwn(cur.RequestedBy == actor.ID, Status(cur.Status)) {
+				return errUpdateForbidden
 			}
 			if _, err := eligiblePICs(ctx, q, picIDs); err != nil {
 				return err
@@ -313,7 +319,7 @@ func (s *Service) SetDeliverable(ctx context.Context, actor Actor, id string, ve
 
 // Delete menandai task terhapus (FR-TASK-16). Datanya tetap ada untuk audit, tetapi hilang dari semua daftar.
 func (s *Service) Delete(ctx context.Context, actor Actor, id string, version int32) error {
-	if actor.Role != RoleManager {
+	if actor.Role != RoleManager && actor.Role != RoleStaff {
 		return errDeleteForbidden
 	}
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -321,6 +327,9 @@ func (s *Service) Delete(ctx context.Context, actor Actor, id string, version in
 		cur, err := lockTask(ctx, q, id, version)
 		if err != nil {
 			return err
+		}
+		if actor.Role != RoleManager && !CanEditOwn(cur.RequestedBy == actor.ID, Status(cur.Status)) {
+			return errDeleteForbidden
 		}
 		if err := q.SoftDeleteTask(ctx, id); err != nil {
 			return err

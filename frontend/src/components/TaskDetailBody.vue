@@ -691,6 +691,19 @@ const buttonSecondary =
                   : previewSentence(task.series.next_date, task.series.due_offset_days)
               }}
             </p>
+            <!-- Perbaikan revisi 19: sub task yang ikut diulang dibaca dari templat seri, bukan dari sub
+                 task task ini, karena keduanya bisa berbeda. -->
+            <p class="text-ink-muted">Sub task yang ikut diulang:</p>
+            <ul v-if="task.series.template_subtasks.length" class="list-inside list-disc">
+              <li v-for="(st, i) in task.series.template_subtasks" :key="i">
+                {{ st.title }}<template v-if="st.pic"> ({{ st.pic }})</template>
+              </li>
+            </ul>
+            <p v-else class="text-ink-muted">Tidak ada sub task di templat.</p>
+            <p v-if="!task.series.template_matches" class="text-ink-muted">
+              Sub task di task ini berbeda dengan templat. Simpan lewat Ubah dengan centang "Pakai perubahan
+              ini" untuk memperbarui.
+            </p>
             <RouterLink
               :to="{ name: 'archive', query: { series: String(task.series.id) } }"
               class="inline-flex min-h-11 items-center font-medium underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"

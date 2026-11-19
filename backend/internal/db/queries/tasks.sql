@@ -190,3 +190,8 @@ JOIN users u ON u.id = sa.user_id
 WHERE st.task_id = ANY(@task_ids::text[])
 GROUP BY st.task_id, u.id
 ORDER BY st.task_id, first_position, u.id;
+
+-- name: ListUserNames :many
+-- Nama untuk id yang sudah diketahui, mis. PIC di templat seri (revisi 19). Akun nonaktif ikut, supaya
+-- templat lama tetap bisa ditampilkan.
+SELECT id, name FROM users WHERE id = ANY(@ids::bigint[]);

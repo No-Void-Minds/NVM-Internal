@@ -2,6 +2,18 @@ import { apiGet } from './client'
 import { listPeople } from './board'
 import type { Role } from '../utils/roles'
 
+// Kandidat PIC di form task: hanya kolom yang benar-benar dipakai formnya. Manajer memakai daftar dari
+// /api/users, Staf memakai /api/people yang terbuka untuk semua yang login (revisi 27). status opsional,
+// karena /api/people hanya berisi akun aktif.
+export type PicCandidate = {
+  id: number
+  name: string
+  role: string
+  division_name: string
+  avatar_id: string | null
+  status?: string
+}
+
 // Isi kartu profil dari GET /api/people/:id. Sengaja tanpa username: endpoint ini terbuka untuk semua yang login.
 export type PersonCard = {
   id: number

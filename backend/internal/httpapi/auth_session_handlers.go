@@ -8,6 +8,7 @@ import (
 
 	"nvm-internal/internal/audit"
 	"nvm-internal/internal/db/sqlc"
+	"nvm-internal/internal/task"
 )
 
 func (s *Server) me(c *gin.Context) {
@@ -22,6 +23,7 @@ func (s *Server) me(c *gin.Context) {
 		JobTitle:           textPtr(u.JobTitle),
 		AvatarID:           avatarID(u.AvatarID),
 		MustChangePassword: u.MustChangePassword,
+		CanCreateTask:      task.CanCreateTask(task.Role(u.Role)),
 	}})
 }
 

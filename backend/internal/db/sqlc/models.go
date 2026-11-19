@@ -419,3 +419,13 @@ type UserSession struct {
 	CreatedAt  pgtype.Timestamptz
 	LastSeenAt pgtype.Timestamptz
 }
+
+type UserTodo struct {
+	ID        int64
+	UserID    int64
+	Title     string
+	DoneAt    pgtype.Timestamptz
+	Position  int32
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
+}

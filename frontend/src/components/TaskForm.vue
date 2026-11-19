@@ -22,7 +22,7 @@ import {
   type ScheduleBody,
   type TaskDetail,
 } from '../api/tasks'
-import type { UserItem } from '../api/users'
+import type { PicCandidate } from '../api/people'
 import type { LabelItem } from '../api/labels'
 import { formatBytes, precheck } from '../utils/attachment'
 import { urgencies, urgencyLabel, type Urgency } from '../utils/task'
@@ -31,7 +31,7 @@ const props = defineProps<{
   // Isian diisi ulang setiap kali open menjadi true. Halaman penuh memberi true sejak awal.
   open: boolean
   task: TaskDetail | null
-  users: UserItem[]
+  users: PicCandidate[]
   labels: LabelItem[]
 }>()
 // partial true berarti task tersimpan, tetapi ada lampiran yang gagal diunggah.

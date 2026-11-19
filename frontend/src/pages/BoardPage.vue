@@ -34,6 +34,8 @@ import type { DueFilter } from '../api/board'
 import MoveDialog from '../components/MoveDialog.vue'
 import BaseDialog from '../components/BaseDialog.vue'
 import ProfileCard from '../components/ProfileCard.vue'
+import TodoCard from '../components/TodoCard.vue'
+import TodoPanel from '../components/TodoPanel.vue'
 import ProfileForm from '../components/ProfileForm.vue'
 import { getTaskCounts, type TaskCounts } from '../api/profile'
 import { readyBlock } from '../utils/subtaskGate'
@@ -46,6 +48,8 @@ const route = useRoute()
 const router = useRouter()
 const session = useSessionStore()
 const isManager = computed(() => session.user?.role === 'manager')
+// Revisi 27: Staf juga boleh membuat task. Nilainya dari server, bukan dihitung dari peran di sini.
+const canCreateTask = computed(() => session.user?.can_create_task === true)
 const isStaff = computed(() => session.user?.role === 'staff')
 const staffUsername = computed(() => (isStaff.value ? (session.user?.username ?? null) : null))
 
@@ -362,7 +366,9 @@ const buttonSecondary =
   <!-- Container query: kartu profil jadi kolom kiri hanya bila kontainer papan selebar 80rem atau lebih. -->
   <section class="@container/board">
     <div class="grid items-start gap-6 @min-[90rem]/board:grid-cols-[17rem_minmax(0,1fr)]">
-      <aside class="sticky top-4 hidden @min-[90rem]/board:block">
+      <!-- Kolom kiri: kartu profil, lalu kartu To Do. Lebarnya tetap 17rem dan kolom papan memakai
+           minmax(0,1fr), jadi daftar yang panjang tidak pernah menyempitkan papan (revisi 28). -->
+      <aside class="sticky top-4 hidden space-y-4 @min-[90rem]/board:block">
         <ProfileCard
           variant="card"
           :counts="counts"
@@ -372,10 +378,11 @@ const buttonSecondary =
           @pick="pickCount"
           @retry="loadCounts"
         />
+        <TodoCard />
       </aside>
       <div class="min-w-0">
         <PageHeader title="Papan Task">
-          <template v-if="isManager" #actions>
+          <template v-if="canCreateTask" #actions>
             <button
               type="button"
               class="inline-flex min-h-11 items-center rounded-card bg-accent px-4 font-medium text-on-accent hover:bg-accent-hover active:translate-y-px"
@@ -386,8 +393,10 @@ const buttonSecondary =
           </template>
         </PageHeader>
 
-        <div class="mt-4 @min-[90rem]/board:hidden">
+        <div class="mt-4 flex flex-wrap items-start gap-2 @min-[90rem]/board:hidden">
+          <TodoPanel />
           <ProfileCard
+            class="min-w-0 flex-1"
             variant="bar"
             :counts="counts"
             :counts-state="countsState"
@@ -653,10 +662,10 @@ const buttonSecondary =
     />
 
     <TaskFormPanel
-      v-if="isManager"
+      v-if="canCreateTask"
       :open="formOpen"
       :task="editing"
-      :users="users"
+      :users="isManager ? users : people"
       :labels="labels"
       @close="formOpen = false"
       @saved="onSaved"

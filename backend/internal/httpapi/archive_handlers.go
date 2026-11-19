@@ -73,7 +73,9 @@ func withMoveTo(actor task.Actor, r task.Summary, mine []sqlc.ListMySubtasksRow)
 			break
 		}
 	}
-	can, choices := task.MoveOptions(actor.Role, isPIC, mine, task.Status(r.Task.Status))
+	// isCreator false: kartu papan dan Arsip hanya memakai move_to, sedangkan tombol Ubah dan Hapus ada di
+	// detail task, yang membaca pembuatnya sendiri (revisi 27).
+	can, choices := task.MoveOptions(actor.Role, isPIC, false, mine, task.Status(r.Task.Status))
 	return boardTask{taskSummary: summaryOf(r), MoveTo: can.MoveTo, RevisionSubtasks: choices}
 }
 

@@ -181,6 +181,10 @@ func (s *Server) getTask(c *gin.Context) {
 			Version:    t.Version,
 			Assignees:  people(d.Assignees),
 			Labels:     labelsOf(d.Labels),
+			// Revisi 19: tanpa dua baris ini detail task berulang selalu menampilkan "Kemunculan: -",
+			// padahal kolomnya terisi di database (CHECK tasks_series_pair menjamin itu).
+			SeriesFreq:     detailSeriesFreq(d),
+			OccurrenceDate: dateString(t.OccurrenceDate),
 		},
 		Description:    t.Description.String,
 		RequestedBy:    idName{ID: t.RequestedBy, Name: t.RequestedByName},
@@ -190,7 +194,8 @@ func (s *Server) getTask(c *gin.Context) {
 		Series:         seriesOf(d, time.Now()),
 		History:        make([]historyItem, 0, len(d.History)),
 	}
-	out.Can, out.RevisionSubtasks = task.MoveOptions(actor.Role, d.IsPIC(actor.ID), d.MySubtasks(actor.ID), task.Status(t.Status))
+	out.Can, out.RevisionSubtasks = task.MoveOptions(actor.Role, d.IsPIC(actor.ID), t.RequestedBy == actor.ID,
+		d.MySubtasks(actor.ID), task.Status(t.Status))
 	out.SubtaskPICs = detailSubtaskPICs(d)
 	for _, h := range d.History {
 		out.History = append(out.History, historyItem{
@@ -428,6 +433,18 @@ type seriesItem struct {
 	NextDate *string `json:"next_date"`
 	// Tenggat kemunculan berikutnya dari templat, untuk kalimat pratinjau. null berarti tanpa tenggat.
 	DueOffsetDays *int `json:"due_offset_days"`
+	// TemplateSubtasks: sub task yang akan ikut di kemunculan berikutnya, dari templat seri. Sub task yang
+	// ditambahkan lewat panel detail tidak masuk templat sampai disimpan lewat Ubah dengan centang
+	// "Pakai perubahan ini", dan tanpa daftar ini pemakai tidak tahu mana yang ikut diulang (revisi 19).
+	TemplateSubtasks []templateSubtaskItem `json:"template_subtasks"`
+	// TemplateMatches: false berarti sub task task ini berbeda dengan templat. Dihitung server, jadi
+	// frontend tidak membandingkan dua daftar sendiri.
+	TemplateMatches bool `json:"template_matches"`
+}
+
+type templateSubtaskItem struct {
+	Title string `json:"title"`
+	PIC   string `json:"pic"`
 }
 
 func seriesOf(d task.Detail, now time.Time) *seriesItem {
@@ -450,7 +467,22 @@ func seriesOf(d task.Detail, now time.Time) *seriesItem {
 		v := next.Format("2006-01-02")
 		out.NextDate = &v
 	}
+	out.TemplateSubtasks = []templateSubtaskItem{}
+	for _, st := range d.TemplateSubtasks {
+		out.TemplateSubtasks = append(out.TemplateSubtasks, templateSubtaskItem{Title: st.Title, PIC: st.PIC})
+	}
+	out.TemplateMatches = d.TemplateMatchesTask()
 	return out
+}
+
+// detailSeriesFreq membaca frekuensi dari seri yang sudah dimuat Detail, bukan dari kolom task, karena
+// GetTaskDetail tidak ikut membaca task_series.
+func detailSeriesFreq(d task.Detail) *string {
+	if d.Series == nil {
+		return nil
+	}
+	v := string(d.Series.Freq)
+	return &v
 }
 
 func seriesFreq(f sqlc.NullRecurrenceFreq) *string {

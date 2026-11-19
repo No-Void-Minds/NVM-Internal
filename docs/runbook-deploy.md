@@ -107,7 +107,7 @@ docker exec "$PG_CONTAINER" psql -U nvm_internal_migrator -d nvm_internal_prod -
 docker exec "$PG_CONTAINER" rm /tmp/10-grants.sql
 ```
 
-Hasil query terakhir di `10-grants.sql` harus tepat tujuh tabel: `activity_attachments`, `audit_logs`, `subtask_assignees`, `task_assignees`, `task_labels`, `task_subtasks`, `user_sessions`.
+Hasil query terakhir di `10-grants.sql` harus tepat delapan tabel: `activity_attachments`, `audit_logs`, `subtask_assignees`, `task_assignees`, `task_labels`, `task_subtasks`, `user_sessions`, `user_todos`.
 
 Cek bahwa role aplikasi tidak bisa mengubah skema (harus `permission denied`):
 
@@ -561,12 +561,14 @@ docker run --rm --network "$PG_NETWORK" -v "$PWD/backend/migrations:/migrations:
 # Migrasi 000013 (revisi 16, tenggat sub task) dan 000014 (revisi 18, catatan hasil) hanya menambah kolom,
 # jadi tidak perlu grants ulang.
 # Migrasi 000015 (revisi 19, task berulang) menambah tabel task_series: 10-grants.sql WAJIB dijalankan ulang
-# sesudahnya, lalu cek daftar DELETE di keluarannya tetap tujuh tabel (task_series tidak boleh ada di sana).
+# sesudahnya, lalu cek daftar DELETE di keluarannya tetap delapan tabel (task_series tidak boleh ada di sana).
 # Migrasi 000016 (revisi 21, Aktivitas Harian) menambah tabel daily_activities: 10-grants.sql WAJIB dijalankan
-# ulang sesudahnya, lalu cek daftar DELETE di keluarannya tetap tujuh tabel (daily_activities tidak boleh ada
+# ulang sesudahnya, lalu cek daftar DELETE di keluarannya tetap delapan tabel (daily_activities tidak boleh ada
 # di sana, karena sel yang dikosongkan disimpan NULL lewat UPDATE).
 # Migrasi 000017 (revisi 24, lampiran Aktivitas Harian) menambah tabel activity_attachments: 10-grants.sql WAJIB
-# dijalankan ulang sesudahnya, dan tabel itu MEMANG harus ada di daftar DELETE, jadi keluarannya tujuh tabel.
+# dijalankan ulang sesudahnya, dan tabel itu MEMANG harus ada di daftar DELETE, jadi keluarannya delapan tabel.
+# Migrasi 000019 (revisi 28, To Do pribadi) menambah tabel user_todos, yang juga perlu DELETE: 10-grants.sql
+# WAJIB dijalankan ulang sesudahnya, dan keluarannya jadi delapan tabel.
 docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
 curl -s http://127.0.0.1:8094/api/health
 ```

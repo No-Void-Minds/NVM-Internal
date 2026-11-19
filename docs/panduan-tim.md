@@ -17,6 +17,14 @@ Alamat: **https://novoidminds.xyz**. Bisa dibuka dari laptop dan HP, di kantor m
 - Klik judul kartu untuk membuka detail. Tombol **Buka di tab baru** membuka halaman task penuh.
 - Kartu dengan tanda **Terlambat** sudah lewat deadline-nya.
 
+## Membuat task dan To Do
+
+- **Buat task** bisa dipakai Staf dan Manajer, dengan isian yang sama: PIC, sub task, jadwal berulang, label, lampiran brief, dan deadline. Admin tidak membuat task.
+- Task yang kamu buat masih bisa kamu ubah atau hapus selama statusnya masih **Requested**. Setelah pindah ke On Progress, yang boleh mengubah hanya Manajer.
+- **To Do** di papan adalah catatan pribadi: hanya kamu yang bisa melihat dan mengubahnya, Manajer dan Admin tidak. Isinya tidak masuk Audit Log.
+- Tambah to do dengan Enter, klik judulnya untuk mengubah (Escape membatalkan), centang kalau sudah selesai, dan atur urutannya dengan menariknya atau dengan tombol naik dan turun. Item yang dihapus bisa dikembalikan dengan **Urungkan** selama enam detik.
+- Maksimal 100 to do per akun. Kalau penuh, hapus atau pakai **Bersihkan yang selesai**.
+
 ## Memindahkan task
 
 - Di laptop, seret kartu ke kolom lain. Kolom yang boleh dituju bergaris putus-putus. Di HP, pakai tombol **Pindahkan** di kartu.

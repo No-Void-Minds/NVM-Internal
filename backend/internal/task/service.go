@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -70,10 +71,12 @@ func (s *Service) clock() time.Time {
 	return s.now()
 }
 
-// Create membuat task baru berstatus Requested. Hanya Manajer (BR-01). Sejak revisi 6 Manajer wajib memilih
-// PIC task, dan sub task boleh dikosongkan karena PIC yang akan mengisinya sendiri. Divisi task mengikuti PIC pertama.
+// Create membuat task baru berstatus Requested. Staf dan Manajer boleh, dengan aturan yang sama persis
+// (revisi 27); Admin tidak, karena Admin mengelola sistem dan tidak mengerjakan task. Pembuatnya tersimpan di
+// requested_by. Sejak revisi 6 PIC task wajib dipilih, dan sub task boleh dikosongkan karena PIC yang akan
+// mengisinya sendiri. Divisi task mengikuti PIC pertama.
 func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (string, error) {
-	if actor.Role != RoleManager {
+	if !CanCreateTask(actor.Role) {
 		return "", errCreateForbidden
 	}
 	f, err := cleanFields(in.Title, in.Description, in.Urgency, in.StartDate, in.DueDate, in.DeliverableURL)
@@ -159,6 +162,36 @@ type Detail struct {
 	Subtasks  []SubtaskView
 	Labels    []sqlc.ListTaskLabelsRow
 	History   []sqlc.ListTaskHistoryRow
+	// TemplateSubtasks: sub task di templat seri, nama PIC-nya sudah dicarikan. Kosong bila task ini tidak
+	// berulang (revisi 19).
+	TemplateSubtasks []TemplateSubtask
+}
+
+// TemplateSubtask adalah satu sub task di templat seri, siap ditampilkan.
+type TemplateSubtask struct {
+	Title string
+	PIC   string
+}
+
+// TemplateMatchesTask membandingkan sub task task ini dengan templat: judul dan PIC, berurutan. Dipakai
+// detail untuk memberi tahu bahwa perubahan sub task belum masuk templat (revisi 19).
+func (d Detail) TemplateMatchesTask() bool {
+	if d.Series == nil {
+		return true
+	}
+	if len(d.Subtasks) != len(d.TemplateSubtasks) {
+		return false
+	}
+	for i, st := range d.Subtasks {
+		pic := ""
+		if len(st.Assignees) > 0 {
+			pic = st.Assignees[0].Name
+		}
+		if st.Title != d.TemplateSubtasks[i].Title || pic != d.TemplateSubtasks[i].PIC {
+			return false
+		}
+	}
+	return true
 }
 
 // IsPIC menjawab apakah akun ini salah satu PIC task.
@@ -201,8 +234,45 @@ func (s *Service) Get(ctx context.Context, id string) (Detail, error) {
 			return d, err
 		}
 		d.Series = &sr
+		if d.TemplateSubtasks, err = templateSubtasks(ctx, q, sr.Template); err != nil {
+			return d, err
+		}
 	}
 	return d, nil
+}
+
+// templateSubtasks membaca sub task dari templat seri dan mencarikan nama PIC-nya, supaya detail bisa
+// menampilkan sub task mana yang ikut diulang (revisi 19).
+func templateSubtasks(ctx context.Context, q *sqlc.Queries, raw []byte) ([]TemplateSubtask, error) {
+	var tmpl SeriesTemplate
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	if err := json.Unmarshal(raw, &tmpl); err != nil {
+		// Templat yang tidak terbaca tidak boleh membuat detail task gagal dimuat; daftarnya saja yang kosong.
+		return nil, nil
+	}
+	ids := []int64{}
+	for _, st := range tmpl.Subtasks {
+		if st.PICID != 0 {
+			ids = append(ids, st.PICID)
+		}
+	}
+	names := map[int64]string{}
+	if len(ids) > 0 {
+		rows, err := q.ListUserNames(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			names[r.ID] = r.Name
+		}
+	}
+	out := make([]TemplateSubtask, 0, len(tmpl.Subtasks))
+	for _, st := range tmpl.Subtasks {
+		out = append(out, TemplateSubtask{Title: st.Title, PIC: names[st.PICID]})
+	}
+	return out, nil
 }
 
 type Summary struct {
