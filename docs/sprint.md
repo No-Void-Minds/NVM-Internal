@@ -76,6 +76,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 11x | Panel Buat task: dua bug pemilih berkas dan halaman penuh | Batal memilih berkas tidak menutup panel, panel tidak melompat, dan rute /task/baru |
 | 11y | Semua anggota membuat task, To Do pribadi, dan perbaikan task berulang | Staf boleh membuat task; To Do pribadi di papan; detail task berulang menampilkan kemunculan dan sub task templat |
 | 11z | Sub task otomatis masuk templat seri | Perubahan sub task di kemunculan terbaru seri aktif langsung dipakai kemunculan berikutnya |
+| 12a | Halaman Timeline | Kalender bersama launching, produksi, dan kehadiran, plus Important Notes; hanya Manajer yang menulis |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -1360,6 +1361,38 @@ Keputusan teknis:
 
 **Hasil:** `./scripts/check.sh` lolos. `go test ./internal/task/` lolos, test DB terlewati karena `TEST_DATABASE_URL` kosong di terminal Claude; test DB revisi 29 menunggu dijalankan Rifky. Tanpa migrasi; backend perlu build ulang.
 
+## Sprint 12a: Halaman Timeline
+
+**Tujuan:** revisi 30 Manajer. Satu kalender bersama untuk launching, produksi, dan kehadiran tim, plus kartu Important Notes. Semua peran membaca; hanya Manajer yang menulis.
+
+- [x] S12a-01 Migrasi `000020_timeline`: tabel `timeline_events` dan `timeline_notes`, enum `timeline_category` dan `absence_type`, CHECK rentang dan jenis kartu, index `(start_date, end_date)`, trigger `updated_at`.
+- [x] S12a-02 Paket `internal/timeline` dan rute `GET/POST /api/timeline/events`, `PUT/DELETE /api/timeline/events/:id`, `GET/POST /api/timeline/notes`, `PUT /api/timeline/notes/order`, `PUT/DELETE /api/timeline/notes/:id`. Kategori Audit Log baru "Timeline".
+- [x] S12a-03 Halaman `/timeline` (menu "Timeline", semua peran, lebar penuh): grid bulan dengan roving tabindex, agenda di bawah 768 px, popover tanggal, panel Buat kartu dan Ubah, Important Notes.
+- [x] S12a-04 Test DB `internal/httpapi/timeline_db_test.go` (hak, rentang, privasi, query bulan), test unit `internal/timeline/timeline_test.go` dan `frontend/tests/timeline.test.ts`, E2E `E2E_ONLY=timeline`.
+
+**Keputusan:**
+- Hak tulis hanya Manajer, diperiksa satu tempat (`timeline.Service`), jadi rutenya di grup `app` dan jawaban 403 sama untuk Staf dan Admin. Admin tidak ikut menulis walau grup `manage` memberi Admin hak yang sama dengan Manajer: Timeline adalah jadwal kerja tim, bukan pengelolaan sistem. Respons daftar membawa `can_write`, frontend hanya mengikutinya.
+- Rentang paling panjang 62 hari termasuk hari pertama dan terakhir (`end_date - start_date <= 61`), dijaga di service dan di CHECK migrasi. Sampai yang sama dengan tanggal mulai disimpan sebagai satu hari (`end_date` NULL).
+- Kehadiran memakai `description` sebagai kolom Keterangan, dan `title` dibiarkan NULL. CHECK `timeline_events_kind` memastikan kehadiran selalu punya orang dan alasan, sedangkan launching dan produksi selalu punya judul dan tidak punya orang.
+- Pilihan Nama di form memakai `/api/people` (Staf dan Manajer aktif, sama dengan kandidat PIC), dalam `<select>` biasa karena satu kartu satu orang; `PicPicker` dirancang untuk banyak pilihan. Backend menerima akun aktif mana pun. Saat mengubah kartu lama milik akun yang sudah nonaktif, namanya tetap tampil sebagai pilihan dengan tanda "(nonaktif)", tetapi menyimpan tetap ditolak sampai diganti akun aktif.
+- Hapus memakai `is_deleted`, jadi daftar DELETE di `10-grants.sql` tetap delapan tabel. Tidak ada pemulihan dari aplikasi; baris yang dihapus tetap ada untuk audit.
+- Audit Log kategori "Timeline": buat, ubah, dan hapus kartu dan catatan. Urutan catatan tidak dicatat, karena isinya tidak berubah. Kartu kehadiran dicatat dengan nama orangnya saja, tanpa alasan dan keterangan, karena Audit Log juga dibaca Admin.
+- Endpoint daftar menerima satu bulan (`month=YYYY-MM`) dan mengembalikan semua event yang beririsan dengan bulan itu. Tanggal bulan sebelah di grid tampil redup tanpa isi, dan mengkliknya membawa ke bulan itu; event rentang yang melintasi bulan tampil di setiap hari dalam rentangnya di kedua bulan.
+- Grid mulai 768 px, dua kolom (kalender dan kolom kanan) mulai 1024 px. Di 768 sampai 1023 px kolom kanan pindah ke bawah kalender, karena tujuh kolom di samping kolom 20rem menyisakan sel sekitar 55 px. Di bawah 768 px grid diganti agenda lewat `matchMedia`, bukan CSS saja, supaya hanya satu daftar tanggal yang bisa difokus ada di DOM.
+- Penanda kategori berupa bentuk dan selalu berdampingan dengan teks: Launching kotak penuh `ink`, Produksi kotak garis `ink`, Kehadiran bulatan inisial `tag` dengan teks `tag-ink`. Tidak ada warna baru. Kontras: `ink` di atas `surface` dan `canvas` di atas 14:1 di kedua mode (non-teks, ambang 3:1); inisial `tag-ink` di atas `tag` 13,31:1. Inisial 10 px bersifat dekoratif (`aria-hidden`), nama lengkapnya tertulis di sebelahnya.
+- Filter kategori hanya menyaring grid dan agenda. Popover tanggal selalu menampilkan semua entri hari itu. Status toggle ditunjukkan `aria-pressed`, garis `mark`, dan ikon centang, bukan warna saja.
+- Hari ini: angka dalam lingkaran `ink` dengan teks `surface`. Sabtu dan Minggu berlatar `canvas`, hari kerja `surface`, sama dengan sorotan hari ini di Aktivitas (Sprint 11s). Tanggal bulan lain memakai `ink-muted` (5,73:1 di atas `canvas` mode terang).
+- Popover tanggal mengikuti pola `PersonPopover` (Sprint 11l): `popover="manual"`, menempel di sel mulai 640 px dan lembar dari bawah di bawahnya, Escape dan klik luar menutup lalu fokus kembali ke sel. Escape bertahap: konfirmasi hapus ditutup dulu. Hapus memakai konfirmasi di dalam popover, bukan dialog kedua.
+- Membuka Ubah atau Tambah dari popover menutup popover dulu, lalu panel form terbuka. Setelah Batal atau simpan, fokus kembali ke tanggal asalnya, atau ke tombol Buat kartu bila dibuka dari sana.
+- Important Notes sengaja dibedakan dari kartu krem To Do (permintaan Rifky 2026-11-19), supaya terbaca sebagai pengumuman penting: garis `urgent` tebal (kiri 8 px), latar `danger-bg`, ikon peringatan dan klip kertas `urgent`, judul `danger`, dan chip "Penting" `on-urgent` di atas `urgent`. Tidak ada warna baru. Kontras terang dan gelap: teks `ink` 14,08:1 dan 14,55:1, `ink-muted` 5,30:1 dan 5,42:1, judul `danger` 6,81:1 dan 8,67:1, chip 6,93:1 dan 7,83:1, garis `urgent` 5,72:1 dan 7,99:1, pemisah `line` 3,19:1 dan 3,54:1. Urutan lewat tombol naik dan turun, tanpa seret. Urutkan mengirim seluruh daftar dan ditolak bila daftarnya sudah berubah di tempat lain. Paling banyak 50 catatan.
+- Bulan yang dibuka tersimpan di query `?bulan=YYYY-MM` (kosong untuk bulan ini), supaya tautan dan tombol Kembali membuka bulan yang sama.
+
+**Menunggu jawaban Manajer:** privasi alasan kehadiran, lihat bagian "Menunggu jawaban Manajer".
+
+**Selesai kalau:** `./scripts/check.sh` lolos, migrasi 000020 jalan di dev, test DB Timeline lolos, dan `E2E_ONLY=timeline` lolos di 360 dan 1280 px.
+
+**Hasil:** kode selesai 2026-11-19, `./scripts/check.sh` lolos, test unit backend dan frontend lolos. Migrasi 000020, restart backend, test DB, dan E2E menunggu Rifky.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -1543,9 +1576,10 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 27 | 2026-11-19 | Staf dan Manajer boleh membuat task dengan aturan yang sama persis. Admin tidak. Pembuat task boleh mengubah dan menghapus task buatannya selama masih Requested | Sprint 11y |
 | 28 | 2026-11-19 | To Do pribadi di papan: daftar catatan per akun, hanya bisa dibaca dan diubah pemiliknya, dengan centang, ubah di tempat, urutkan, hapus dengan Urungkan, dan bersihkan yang selesai | Sprint 11y |
 | 29 | 2026-11-19 | Sub task di kemunculan terbaru task berulang otomatis masuk templat seri: tambah, ubah, hapus, dan urutkan sub task langsung dipakai kemunculan berikutnya; kemunculan lama dan seri yang dihentikan tidak | Sprint 11z |
+| 30 | 2026-11-19 | Halaman Timeline: kalender bulan bersama untuk launching, produksi, dan kehadiran, plus Important Notes. Manajer menulis, peran lain membaca; alasan kehadiran pribadi hanya untuk Manajer dan orangnya | Sprint 12a |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat kedua puluh sembilan revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat ketiga puluh revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 
@@ -1556,6 +1590,7 @@ SRS v1.0 belum memuat kedua puluh sembilan revisi (revisi 5 di S14-17). SRS dipe
 - Jabatan diisi sendiri oleh tiap orang atau hanya pengelola.
 - Aturan centang: Manajer boleh mencentang sub task siapa pun kecuali yang dipegang Manajer lain. Sejak revisi 6 sub task tanpa pemilik (buatan Manajer) juga boleh dicentang PIC task mana pun. Setuju?
 - Revisi 6: apakah PIC boleh menandai task Ready tanpa membuat sub task sama sekali? Sekarang boleh, karena syarat Ready hanya "tidak ada sub task yang belum tercentang".
+- Revisi 30, privasi kehadiran: alasan sakit, izin pribadi, cuti pribadi, dan cuti khusus beserta keterangannya hanya dikirim server ke Manajer dan orang yang bersangkutan. Staf lain dan Admin menerima "Tidak hadir" tanpa alasan dan keterangan. Tukar libur dan tukar shift tampil apa adanya untuk semua. Dipakai pilihan yang paling aman sambil menunggu konfirmasi.
 
 ## Setelah go-live (belum dijadwalkan)
 

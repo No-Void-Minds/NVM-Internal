@@ -154,6 +154,21 @@ export function describeAudit(e: AuditEntry, divisionName: (id: number) => strin
       return `Melepas centang sub task "${str(after.title)}" di ${e.target?.id ?? ''}`
     case 'subtask_reordered':
       return `Mengubah urutan sub task ${e.target?.id ?? ''}`
+    // Revisi 30. Kehadiran dicatat dengan nama orangnya saja, tanpa alasan: Admin juga membaca audit log.
+    case 'timeline_event_created':
+    case 'timeline_event_updated':
+    case 'timeline_event_deleted': {
+      const v = e.action === 'timeline_event_deleted' ? before : after
+      const verb = { created: 'Membuat', updated: 'Mengubah', deleted: 'Menghapus' }[e.action.slice(15)]
+      const what = v.category === 'kehadiran' ? `kehadiran ${str(v.name)}` : `"${str(v.title)}"`
+      return `${verb} kartu Timeline ${what} (${str(v.start_date)})`
+    }
+    case 'timeline_note_created':
+      return `Menambah catatan penting "${str(after.title)}"`
+    case 'timeline_note_updated':
+      return `Mengubah catatan penting "${str(after.title)}"`
+    case 'timeline_note_deleted':
+      return `Menghapus catatan penting "${str(before.title)}"`
     default:
       return e.action
   }
