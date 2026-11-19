@@ -22,6 +22,19 @@ const error = ref('')
 const undoable = ref<{ item: TodoItem; index: number } | null>(null)
 let undoTimer: ReturnType<typeof setTimeout> | null = null
 let loading: Promise<void> | null = null
+// Tambah yang masih jalan, dan peta id sementara ke id dari server. Baris hasil tambah sudah tampil
+// sebelum jawabannya datang, jadi tanpa keduanya perubahan berikutnya bisa mengirim id sementara yang
+// negatif ke server dan dijawab 404 (lihat Keputusan Sprint 11y).
+const adding = new Set<Promise<unknown>>()
+const swapped = new Map<number, number>()
+
+async function settled() {
+  if (adding.size) await Promise.allSettled([...adding])
+}
+
+function real(id: number): number {
+  return swapped.get(id) ?? id
+}
 
 function messageOf(err: unknown): string {
   return err instanceof ApiError ? err.message : 'Terjadi kesalahan yang tidak terduga. Coba lagi.'
@@ -68,39 +81,47 @@ export function useTodos() {
   const doneCount = computed(() => items.value.filter((i) => i.done).length)
   const full = computed(() => items.value.length >= max.value)
 
-  async function add(title: string) {
+  function add(title: string) {
     const clean = title.trim()
-    if (!clean || full.value) return
+    if (!clean || full.value) return Promise.resolve()
     // Id sementara negatif: diganti id dari server begitu jawabannya datang.
     const temp: TodoItem = { id: -Date.now(), title: clean, done: false }
     const before = items.value.map((i) => ({ ...i }))
     error.value = ''
     items.value = [...items.value, temp]
     sortLocal()
-    try {
-      const res = await addTodo(clean)
-      items.value = items.value.map((i) => (i.id === temp.id ? res.todo : i))
-    } catch (err) {
-      items.value = before
-      error.value = messageOf(err)
-    }
+    const p = (async () => {
+      try {
+        const res = await addTodo(clean)
+        swapped.set(temp.id, res.todo.id)
+        items.value = items.value.map((i) => (i.id === temp.id ? res.todo : i))
+      } catch (err) {
+        items.value = before
+        error.value = messageOf(err)
+      }
+    })()
+    adding.add(p)
+    return p.finally(() => adding.delete(p))
   }
 
-  function rename(id: number, title: string) {
+  async function rename(id: number, title: string) {
     const clean = title.trim()
-    const cur = items.value.find((i) => i.id === id)
-    if (!cur || !clean || clean === cur.title) return Promise.resolve()
+    if (!clean) return
+    await settled()
+    const cur = items.value.find((i) => i.id === real(id))
+    if (!cur || clean === cur.title) return
     return optimistic(
       () => {
         cur.title = clean
       },
-      () => renameTodo(id, clean),
+      () => renameTodo(cur.id, clean),
     )
   }
 
-  function toggle(id: number) {
-    const cur = items.value.find((i) => i.id === id)
-    if (!cur) return Promise.resolve()
+  async function toggle(id: number) {
+    await settled()
+    const cur = items.value.find((i) => i.id === real(id))
+    if (!cur) return
     const done = !cur.done
     return optimistic(
       () => {
@@ -110,7 +131,7 @@ export function useTodos() {
         if (done) setTimeout(sortLocal, 180)
         else sortLocal()
       },
-      () => setTodoDone(id, done),
+      () => setTodoDone(cur.id, done),
     )
   }
 
@@ -121,14 +142,16 @@ export function useTodos() {
   }
 
   async function remove(id: number) {
-    const index = items.value.findIndex((i) => i.id === id)
+    await settled()
+    const nyata = real(id)
+    const index = items.value.findIndex((i) => i.id === nyata)
     if (index === -1) return
     const item = { ...items.value[index] }
     await optimistic(
       () => {
-        items.value = items.value.filter((i) => i.id !== id)
+        items.value = items.value.filter((i) => i.id !== nyata)
       },
-      () => deleteTodo(id),
+      () => deleteTodo(nyata),
     )
     if (error.value) return
     // Toast Urungkan hidup 6 detik. Id-nya berganti setelah diurungkan, karena barisnya dibuat ulang.
@@ -141,6 +164,8 @@ export function useTodos() {
     const saved = undoable.value
     clearUndo()
     if (!saved) return
+    await settled()
+    await settled()
     error.value = ''
     try {
       const res = await addTodo(saved.item.title)
@@ -171,26 +196,29 @@ export function useTodos() {
   }
 
   // move dipakai tombol naik dan turun, supaya urutan bisa diubah tanpa drag (keyboard).
-  function move(id: number, delta: number) {
+  async function move(id: number, delta: number) {
+    await settled()
     const open = items.value.filter((i) => !i.done)
-    const from = open.findIndex((i) => i.id === id)
+    const from = open.findIndex((i) => i.id === real(id))
     const to = from + delta
-    if (from === -1 || to < 0 || to >= open.length) return Promise.resolve()
+    if (from === -1 || to < 0 || to >= open.length) return
     const next = [...open]
     const [moved] = next.splice(from, 1)
     next.splice(to, 0, moved)
     return reorder([...next, ...items.value.filter((i) => i.done)].map((i) => i.id))
   }
 
-  function reorder(ids: number[]) {
+  async function reorder(ids: number[]) {
+    await settled()
+    const nyata = ids.map(real)
     const byId = new Map(items.value.map((i) => [i.id, i]))
-    const next = ids.map((id) => byId.get(id)).filter((i): i is TodoItem => !!i)
-    if (next.length !== items.value.length) return Promise.resolve()
+    const next = nyata.map((id) => byId.get(id)).filter((i): i is TodoItem => !!i)
+    if (next.length !== items.value.length) return
     return optimistic(
       () => {
         items.value = next
       },
-      () => reorderTodos(ids),
+      () => reorderTodos(nyata),
     )
   }
 

@@ -36,7 +36,13 @@ const draft = ref('')
 const input = ref<HTMLInputElement | null>(null)
 const editingId = ref<number | null>(null)
 const editDraft = ref('')
+// Function ref, bukan ref bernama: isian ini ada di dalam v-for, dan ref bernama di dalam v-for
+// dikumpulkan Vue menjadi array, jadi editInput.value.focus bukan fungsi.
 const editInput = ref<HTMLInputElement | null>(null)
+
+function setEditInput(el: unknown) {
+  editInput.value = el instanceof HTMLInputElement ? el : null
+}
 const dragId = ref<number | null>(null)
 // Mode Atur: kontrol urut dan hapus tampil di semua baris. Satu-satunya cara memunculkannya di layar sentuh,
 // yang tidak punya hover.
@@ -64,13 +70,25 @@ async function startEdit(item: TodoItem) {
   editDraft.value = item.title
   await nextTick()
   editInput.value?.focus()
+  // Seluruh teks terseleksi, supaya mengganti judul tidak perlu menghapus dulu.
   editInput.value?.select()
 }
 
 async function commitEdit(item: TodoItem) {
+  // Dipanggil juga dari blur. Setelah Escape mode ubah sudah tertutup, jadi di situ tidak ada yang disimpan.
+  if (editingId.value !== item.id) return
   const title = editDraft.value
   editingId.value = null
   await rename(item.id, title)
+}
+
+// Escape: judul semula kembali (editDraft tidak pernah dikirim), keluar dari mode ubah, dan fokus kembali
+// ke tombol judul. Perambatannya dihentikan di template, supaya Escape ini tidak sampai ke pendengar
+// keydown di document milik TodoPanel dan menutup panelnya. Escape berikutnya baru menutup panel.
+async function cancelEdit(item: TodoItem) {
+  editingId.value = null
+  await nextTick()
+  document.getElementById(`${uid}-title-${item.id}`)?.focus()
 }
 
 function onDrop(target: TodoItem) {
@@ -89,7 +107,8 @@ const rule = 'border-tag-ink/60'
 const muted = 'text-tag-ink/70'
 const focusRing = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-tag-ink'
 const iconButton = `inline-flex size-11 shrink-0 items-center justify-center rounded-card hover:bg-tag-ink/10 ${focusRing} disabled:opacity-40`
-const headButton = `inline-flex min-h-11 items-center rounded-card px-2 text-sm font-medium hover:bg-tag-ink/10 ${focusRing}`
+// min-w-11: "Atur" dengan px-2 hanya 41 px lebarnya, di bawah tap target 44 px.
+const headButton = `inline-flex min-h-11 min-w-11 items-center justify-center rounded-card px-2 text-sm font-medium hover:bg-tag-ink/10 ${focusRing}`
 // Kontrol baris: tersembunyi, lalu muncul saat baris disorot atau difokus (hanya pointer presisi), atau saat
 // mode Atur aktif. Di layar sentuh hover tidak pernah terjadi, jadi mode Atur yang menjadi jalannya.
 // Kontrol baris punya dua tempat. Mode Atur: baris sendiri di bawah judul, sama untuk semua item, jadi
@@ -200,13 +219,13 @@ function titleUrl(title: string): string | null {
               <label :for="`${uid}-edit-${item.id}`" class="sr-only">Ubah to do</label>
               <input
                 :id="`${uid}-edit-${item.id}`"
-                ref="editInput"
+                :ref="setEditInput"
                 v-model="editDraft"
                 type="text"
                 maxlength="200"
                 class="min-h-11 w-full min-w-0 border-b bg-transparent px-1 outline-none"
                 :class="rule"
-                @keydown.esc.prevent="editingId = null"
+                @keydown.esc.stop.prevent="cancelEdit(item)"
                 @blur="commitEdit(item)"
               />
             </form>
@@ -214,6 +233,7 @@ function titleUrl(title: string): string | null {
                bukan memaksa barisnya melebar. -->
             <button
               v-else
+              :id="`${uid}-title-${item.id}`"
               type="button"
               class="min-w-0 flex-1 py-3 text-left [overflow-wrap:anywhere]"
               :class="focusRing"

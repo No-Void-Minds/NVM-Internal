@@ -1967,6 +1967,13 @@ async function checkTodo(width) {
         () => false,
       );
   const terlihat = async (l) => (await l.locator("visible=true").count()) > 0;
+  // Permintaan yang gagal dicatat beserta metode dan URL-nya. Pesan console browser untuk ini hanya
+  // "Failed to load resource", tanpa URL, jadi tanpa catatan ini galat 404 tidak bisa dilacak.
+  const gagalReq = [];
+  page.on("response", (r) => {
+    if (r.status() >= 400)
+      gagalReq.push(`${r.request().method()} ${r.url()} ${r.status()}`);
+  });
 
   try {
     const sisaMilikSendiri = await bersihkanTodoApi(ctx);
@@ -2100,11 +2107,9 @@ async function checkTodo(width) {
     await page.keyboard.type(panjang);
     await page.keyboard.press("Enter");
     const judulPanjang = page.getByRole("button", { name: `Ubah ${panjang}` });
-    expect(
-      await ada(judulPanjang),
-      "panjang",
-      "item dengan URL panjang tidak muncul",
-    );
+    const adaPanjang = await ada(judulPanjang);
+    expect(adaPanjang, "panjang", "item dengan URL panjang tidak muncul");
+    if (!adaPanjang) return;
     const ukur = async () =>
       await page.evaluate((t) => {
         const b = document.querySelector(`button[aria-label="Ubah ${t}"]`);
@@ -2192,21 +2197,65 @@ async function checkTodo(width) {
       "isian ubah tidak terbuka",
     );
     await page.keyboard.press("Escape");
-    expect(await ada(judulSatu), "ubah", "Escape tidak membatalkan perubahan");
+    const kembali = await ada(judulSatu);
+    expect(
+      kembali,
+      "ubah",
+      "Escape tidak membatalkan perubahan: judul tidak kembali, panelnya ikut tertutup",
+    );
+    if (!kembali) return;
+    if (pakaiPanel)
+      expect(
+        await terlihat(page.getByRole("dialog", { name: "To Do" })),
+        "ubah",
+        "Escape di isian ubah ikut menutup panel To Do",
+      );
+    // Fokus kembali ke tombol judul, bukan hilang ke body.
+    const fokusSetelahEsc = await page.evaluate(
+      () => document.activeElement?.getAttribute("aria-label") ?? "",
+    );
+    expect(
+      fokusSetelahEsc === `Ubah ${satu}`,
+      "ubah",
+      `fokus setelah Escape ada di "${fokusSetelahEsc}"`,
+    );
     await vis(judulSatu).focus();
     await page.keyboard.press("Enter");
+    // Isian ubah membuka dengan seluruh teks terseleksi, supaya judul bisa diganti tanpa menghapus dulu.
+    const seleksi = await page.evaluate(() => {
+      const el = document.activeElement;
+      if (!(el instanceof HTMLInputElement))
+        return `fokus bukan isian: ${el?.tagName}`;
+      return el.selectionStart === 0 && el.selectionEnd === el.value.length
+        ? ""
+        : `seleksi ${el.selectionStart} sampai ${el.selectionEnd} dari ${el.value.length}`;
+    });
+    expect(
+      seleksi === "",
+      "ubah",
+      `teks isian ubah tidak terseleksi: ${seleksi}`,
+    );
+    // End dulu: tanpa itu, mengetik akan mengganti seluruh judul yang terseleksi, bukan menambah di akhir.
+    await page.keyboard.press("End");
     await page.keyboard.type(" diubah");
     await page.keyboard.press("Enter");
-    expect(
-      await ada(page.getByRole("button", { name: `Ubah ${satu} diubah` })),
-      "ubah",
-      "judul tidak tersimpan setelah Enter",
+    const tersimpan = await ada(
+      page.getByRole("button", { name: `Ubah ${satu} diubah` }),
     );
+    expect(tersimpan, "ubah", "judul tidak tersimpan setelah Enter");
+    if (!tersimpan) return;
 
     // Centang: item pindah ke kelompok Selesai, judulnya dicoret.
-    await vis(
-      page.getByRole("checkbox", { name: `Tandai selesai ${satu} diubah` }),
-    ).check();
+    const kotak = page.getByRole("checkbox", {
+      name: `Tandai selesai ${satu} diubah`,
+    });
+    const adaKotak = await ada(kotak);
+    expect(adaKotak, "centang", "kotak centang item tidak ada");
+    if (!adaKotak) return;
+    // Yang diklik labelnya, bukan input-nya: input kotak centang sr-only, jadi kotaknya tertutup label
+    // itu sendiri dan check() pada input selalu tertahan ("label intercepts pointer events"). Klik di
+    // label adalah yang dilakukan pemakai, dan label yang membawa nama aksesibelnya.
+    await vis(kotak.locator("xpath=..")).click();
     expect(
       await ada(page.getByRole("button", { name: /^Selesai \(/ })),
       "centang",
@@ -2232,13 +2281,21 @@ async function checkTodo(width) {
     expect(dicoret, "centang", "judul item selesai tidak dicoret");
 
     // Hapus lalu Urungkan: itemnya kembali.
-    await vis(page.getByRole("button", { name: `Hapus ${dua}` })).click();
+    const tombolHapus = page.getByRole("button", { name: `Hapus ${dua}` });
+    const adaHapus = await ada(tombolHapus);
+    expect(adaHapus, "hapus", "tombol hapus tidak ada");
+    if (!adaHapus) return;
+    await vis(tombolHapus).click();
     expect(
       await ada(page.getByText("To do dihapus.")),
       "hapus",
       "pesan hapus tidak muncul",
     );
-    await vis(page.getByRole("button", { name: "Urungkan" })).click();
+    const urungkan = page.getByRole("button", { name: "Urungkan" });
+    const adaUrungkan = await ada(urungkan);
+    expect(adaUrungkan, "hapus", "toast Urungkan tidak muncul");
+    if (!adaUrungkan) return;
+    await vis(urungkan).click();
     expect(
       await ada(page.getByRole("button", { name: `Ubah ${dua}` })),
       "urungkan",
@@ -2260,7 +2317,16 @@ async function checkTodo(width) {
     await bersihkanTodoApi(ctx);
     checks++;
     if (errors.length)
-      fail(where("console"), errors.splice(0).join(" | ").slice(0, 300));
+      fail(
+        where("console"),
+        [
+          errors.splice(0).join(" | "),
+          gagalReq.length ? `permintaan gagal: ${gagalReq.join(" | ")}` : "",
+        ]
+          .filter(Boolean)
+          .join(" || ")
+          .slice(0, 400),
+      );
     await ctx.close();
   }
 }
