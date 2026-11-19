@@ -1918,7 +1918,7 @@ async function checkCreateTask(width) {
 }
 
 if (ONLY === "createtask")
-  for (const w of [360, 1280]) await checkCreateTask(w);
+  for (const w of [360, 768, 1280]) await checkCreateTask(w);
 
 await browser.close();
 console.log(

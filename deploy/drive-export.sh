@@ -54,7 +54,13 @@ err_file="$(mktemp)"
 files="-"
 size="-"
 
-log_line() { printf '%s %s berkas=%s ukuran=%s%s\n' "$(date -Iseconds)" "$1" "$files" "$size" "${2:+ pesan=$2}" >>"$log"; }
+# Selalu tepat satu baris: baris baru di nilai mana pun diganti spasi, supaya drive.log tetap satu run satu baris
+# dan `tail -1` selalu menunjukkan run terakhir.
+log_line() {
+  local baris
+  baris="$(printf '%s %s berkas=%s ukuran=%s%s' "$(date -Iseconds)" "$1" "$files" "$size" "${2:+ pesan=$2}")"
+  printf '%s\n' "${baris//$'\n'/ }" >>"$log"
+}
 # Baris progres Compose (Container/Network/Volume ... Creating, Created, dan seterusnya) dibuang, supaya yang
 # tersisa benar-benar pesan galat dari perintah yang gagal.
 last_error() {
@@ -143,8 +149,14 @@ else
     fail "susun staging: $(last_error)"
 fi
 files="$(wc -l <"$err_file.list" | tr -d ' ')"
-# -L mengikuti symlink: tanpa itu angkanya selalu nol, karena isi staging hanya symlink ke storage.
-size="$(du -shL "$STAGING_DIR_HOST" 2>/dev/null | cut -f1 || echo -)"
+# Ukuran diambil dari bytes di log "staging siap" perintah Go, bukan dari du. Isi staging adalah symlink ke
+# /data/storage, yaitu path di dalam container, jadi di host semuanya menggantung: du -L tidak menghitung lampiran
+# sama sekali dan keluar bukan nol, lalu dengan pipefail "|| echo -" menambah baris kedua ke ukuran dan membelah
+# baris drive.log (terlihat di VM 2026-11-18).
+bytes="$({ grep -aoE '"?bytes"?[:=][0-9]+' "$err_file" || true; } | tail -1 | grep -oE '[0-9]+$' || true)"
+size="-"
+if [[ -n "$bytes" ]]; then size="$(numfmt --to=iec "$bytes" 2>/dev/null || echo "$bytes")"; fi
+size="${size//[[:space:]]/}"
 
 if [[ "$dry_run" == 1 ]]; then
   echo "uji kering, tidak diunggah. $files path:"

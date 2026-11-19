@@ -303,40 +303,73 @@ NVM Internal/
 
 Yang mengerjakannya: `deploy/drive-export.sh`, tiga langkah. Pertama perintah `backend drive-export stage` menyusun pohon symlink bernama rapi di `/srv/nvm-internal/drive-staging` (symlink ke berkas di `/data/storage`, jadi tidak ada berkas yang tersalin dan tidak ada disk yang terpakai), menulis ekspor Excel bulan berjalan, dan mengenkripsi dump dengan age. Container rclone ikut memount storage di path yang sama dan dijalankan dengan `--copy-links`, supaya yang terunggah isi berkasnya, bukan symlink-nya. Kedua container rclone resmi menyalin folder itu ke Drive. Ketiga `backend drive-export record` mencatat berkas yang sudah terunggah di tabel `drive_exports`, menulis baris status untuk halaman Status, lalu membuang staging. Kalau langkah mana pun gagal, tidak ada yang tercatat dan malam berikutnya dicoba lagi.
 
-#### 1. Membuat remote rclone dengan scope drive.file
+#### 1. Membuat remote rclone dengan client OAuth sendiri
 
-VM tidak punya browser, jadi izin Google diambil di laptop lalu hasilnya dipindah. **Jangan pernah mengirim token lewat chat atau menempelkannya di tempat yang tidak perlu.**
+rclone memakai client OAuth milik tim sendiri, bukan client bersama bawaan rclone. Client bersama itu sedang dipensiunkan Google dan kuotanya dibagi dengan semua pengguna rclone di dunia. VM tidak punya browser, jadi izin Google diambil di laptop lalu hasilnya dipindah. **Jangan pernah mengirim token, client secret, atau isi `rclone.conf` lewat chat, dan jangan menempelkannya di tempat yang tidak perlu.**
 
-Di laptop Windows (rclone dari [rclone.org/downloads](https://rclone.org/downloads/)):
+**a. Project Google Cloud** (sekali saja, di [console.cloud.google.com](https://console.cloud.google.com), masuk dengan akun Google tim):
+
+1. Buat project baru, misalnya `NVM Internal Drive`.
+2. APIs & Services, Library: aktifkan **Google Drive API**.
+3. **Google Auth Platform**:
+   - Audience: **External**.
+   - Data Access: tambah scope `https://www.googleapis.com/auth/drive.file` saja.
+   - Branding: nama aplikasi, email dukungan, home page `https://novoidminds.xyz`, dan privacy policy `https://novoidminds.xyz/privasi/`. **Jangan unggah logo**: logo memicu verifikasi merek oleh Google, sedangkan tanpa logo aplikasi bisa dipakai langsung.
+   - Audience: **Publish app** sampai statusnya **In production**. Di status Testing, token kedaluwarsa setelah 7 hari dan job malam berhenti diam-diam seminggu kemudian.
+4. Clients: buat OAuth client bertipe **Desktop app**, lalu unduh berkas JSON-nya. Berkas ini berisi `client_id` dan `client_secret`; simpan di pengelola password, bukan di repo.
+
+Dua hal di konsol yang terlihat seperti masalah tetapi wajar:
+
+- Status Branding "not shown" (merek tidak ditampilkan) memang hasil dari tidak mengunggah logo dan tidak memverifikasi. Biarkan.
+- **Jangan submit verifikasi.** `drive.file` bukan scope sensitif, jadi aplikasi tetap jalan In production tanpa verifikasi.
+
+**b. Laptop** (rclone dari [rclone.org/downloads](https://rclone.org/downloads/)). `client_id` dan `client_secret` diambil dari berkas JSON tadi (kunci `installed.client_id` dan `installed.client_secret`):
 
 ```powershell
-rclone authorize "drive" "{""scope"":""drive.file""}"
+rclone config create nvmdrive drive scope drive.file client_id <client_id dari JSON> client_secret <client_secret dari JSON>
 ```
 
-Browser terbuka, masuk dengan akun Google tim, izinkan. `scope=drive.file` berarti rclone hanya bisa melihat dan mengubah berkas yang dia buat sendiri, bukan seluruh Drive akun tim. rclone mencetak satu baris token JSON yang panjang; salin baris itu.
+Pakai `rclone config create` dengan nilai tertulis seperti di atas, **bukan** `rclone authorize` dengan argumen JSON: tanda kutip ganda di dalam JSON dimakan PowerShell, dan hasilnya galat yang membingungkan.
 
-Di VM, buat folder secrets dan berkas konfigurasinya:
+Browser terbuka. Masuk dengan akun Google tim, lalu:
+
+- Layar **"Google hasn't verified this app"** wajar untuk aplikasi tanpa verifikasi merek. Pilih Advanced, lalu lanjut ke aplikasinya.
+- Izinkan akses. `drive.file` berarti rclone hanya bisa melihat dan mengubah berkas yang dia buat sendiri, bukan seluruh Drive akun tim.
+- **Biarkan PowerShell menunggu sampai muncul `Got code`.** Menutup jendela PowerShell lebih awal membuat remote tersimpan tanpa token.
+
+Periksa dari laptop bahwa remote-nya jalan:
+
+```powershell
+rclone about nvmdrive:
+rclone ls "nvmdrive:NVM Internal"
+```
+
+Baris kedua kosong sebelum unggahan pertama. Setelah itu, perintah ini cara tercepat memeriksa isi Drive dari laptop. Lokasi berkas konfigurasi laptop dicetak `rclone config file`; blok `[nvmdrive]` di dalamnya yang dipindah ke VM.
+
+**c. VM**: buat folder secrets lalu tempel blok `[nvmdrive]` dari laptop:
 
 ```bash
 sudo install -d -o 65532 -g 65532 -m 711 /srv/nvm-internal/secrets
 sudo nano /srv/nvm-internal/secrets/rclone.conf
 ```
 
-Dua catatan yang menghabiskan waktu kalau tidak disebut:
-
-- **Mode folder 711, bukan 700.** Isinya milik UID 65532 (container rclone), sedangkan `drive-export.sh` berjalan sebagai user VM dan memeriksa dulu apakah `rclone.conf` ada. Dengan 700, user VM bahkan tidak bisa menelusuri folder itu, jadi pemeriksaannya selalu gagal dan skripnya berhenti sebelum mulai. 711 memberi hak menelusuri (`x`) tanpa hak membaca daftar isi (`r`), dan berkasnya tetap 600 milik 65532, jadi isinya tetap tidak bisa dibaca user VM.
-- **`sudoedit` menolak berkas di sini.** `sudoedit` menolak path yang induknya bisa ditulis user biasa, dan `/srv/nvm-internal` memang begitu. Pakai `sudo nano` (atau `sudo tee`) untuk berkas di bawah `/srv/nvm-internal`.
-
-Isinya, dengan `<token JSON dari laptop>` diganti baris tadi:
+Isinya lima baris kunci di bawah satu kepala, dengan nilai asli dari laptop:
 
 ```ini
 [nvmdrive]
 type = drive
+client_id = <dari laptop>
+client_secret = <dari laptop>
 scope = drive.file
-token = <token JSON dari laptop>
+token = <dari laptop>
 ```
 
-Lalu kunci izinnya. Folder di-mount sebagai folder, bukan satu berkas, karena rclone menulis ulang berkas ini setiap kali token diperbarui:
+Dua catatan yang menghabiskan waktu kalau tidak disebut:
+
+- **`sudo nano`, bukan `sudoedit`.** `sudoedit` menolak path yang induknya bisa ditulis user biasa, dan `/srv/nvm-internal` memang begitu.
+- **Mode folder 711, bukan 700.** Isinya milik UID 65532 (container rclone), sedangkan `drive-export.sh` berjalan sebagai user VM dan memeriksa dulu apakah `rclone.conf` ada. Dengan 700, user VM bahkan tidak bisa menelusuri folder itu, jadi pemeriksaannya selalu gagal dan skripnya berhenti sebelum mulai. 711 memberi hak menelusuri (`x`) tanpa hak membaca daftar isi (`r`), dan berkasnya tetap 600 milik 65532, jadi isinya tetap tidak bisa dibaca user VM.
+
+Kunci izinnya. Folder di-mount sebagai folder, bukan satu berkas, karena rclone menulis ulang berkas ini setiap kali token diperbarui:
 
 ```bash
 sudo chown -R 65532:65532 /srv/nvm-internal/secrets
@@ -344,12 +377,42 @@ sudo chmod 711 /srv/nvm-internal/secrets
 sudo chmod 600 /srv/nvm-internal/secrets/rclone.conf
 ```
 
-Periksa remote-nya bisa dipakai, tanpa mencetak isi rclone.conf:
+Periksa isinya tanpa mencetak rahasia. Setiap angka harus **1**:
+
+```bash
+for k in '^\[nvmdrive\]' '^token *=' '^client_id *=' '^client_secret *='; do
+  printf '%-20s %s\n' "$k" "$(sudo grep -c "$k" /srv/nvm-internal/secrets/rclone.conf)"
+done
+```
+
+Angka 2 berarti bloknya tertempel dua kali (kejadian di nano saat tempel kedua). Perintah ini menyisakan blok pertama saja, lewat berkas sementara bermode 600 supaya isinya tidak pernah terbaca user lain, lalu ulangi pemeriksaan di atas:
+
+```bash
+sudo sh -c 'umask 077; f=/srv/nvm-internal/secrets/rclone.conf; awk "/^\[nvmdrive\]\$/{n++} n<=1" "$f" >"$f.baru" && chown 65532:65532 "$f.baru" && mv "$f.baru" "$f"'
+```
+
+Periksa remote-nya bisa dipakai dari VM, tanpa mencetak isi rclone.conf:
 
 ```bash
 docker run --rm --user 65532:65532 -e XDG_CACHE_HOME=/tmp \
   -v /srv/nvm-internal/secrets:/config/rclone rclone/rclone:1.71.0 \
   --config /config/rclone/rclone.conf about nvmdrive:
+```
+
+**d. Kalau client_id diganti** (misalnya client lama dihapus atau dibuat ulang): `drive.file` berlaku per client, jadi client baru tidak bisa melihat folder `NVM Internal` buatan client lama dan membuat folder baru bernama sama. Akibatnya:
+
+1. Catatan `drive_exports` harus dikosongkan, supaya semua lampiran terunggah ulang lewat client baru. Ini **DELETE di produksi**, jadi hanya dijalankan dengan izin Rifky, sesudah backup:
+   ```bash
+   docker exec -i nvm-internal-postgres psql -U nvm_internal_migrator -d nvm_internal_prod -c "DELETE FROM drive_exports"
+   ```
+   `drive_folders` dibiarkan: nama folder task dan sub task tetap sama di folder yang baru.
+2. Jalankan `drive-export.sh` sekali, lalu periksa folder baru dengan `rclone ls "nvmdrive:NVM Internal"` dari laptop.
+3. Hapus folder `NVM Internal` lama secara manual lewat Drive di browser. Folder lama itu yang tidak punya isi terbaru.
+
+**e. Halaman privasi.** Tautan privacy policy di layar izin Google menunjuk `https://novoidminds.xyz/privasi/`. Halamannya berkas statis `frontend/public/privasi/index.html` (gayanya di `gaya.css` sebelahnya, karena CSP melarang `<style>` inline), disajikan Nginx lewat location `/privasi/` sendiri tanpa login. Halaman itu harus tetap tayang: jangan pindahkan ke dalam aplikasi Vue dan jangan beri syarat login. Pemeriksaan setelah deploy:
+
+```bash
+curl -s https://novoidminds.xyz/privasi/ | grep -o '<title>[^<]*'   # harus: <title>Kebijakan Privasi NVM Internal
 ```
 
 #### 2. Kunci age untuk dump database

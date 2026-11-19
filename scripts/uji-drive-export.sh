@@ -3,11 +3,12 @@
 # yang meniru dua hal yang pernah menipu skrip ini: baris progres Compose di stderr, dan log perintah Go yang
 # juga di stderr (dulu di stdout, sehingga daftar path tercemar dan pesan galatnya hilang).
 #
-# Lima kasus: folder backup tanpa berkas weekly-*, tanpa db-* sama sekali, keduanya ada, kegagalan di langkah
+# Enam kasus: folder backup tanpa berkas weekly-*, tanpa db-* sama sekali, keduanya ada, kegagalan di langkah
 # stage, dan kegagalan tanpa pesan apa pun. Yang diperiksa:
 #   - skrip tidak gagal hanya karena pola glob tidak cocok,
 #   - daftar path di stdout tidak pernah memuat baris log JSON,
-#   - pesan galat asli dari perintah Go muncul utuh di stderr dan di drive.log, tanpa baris Compose.
+#   - pesan galat asli dari perintah Go muncul utuh di stderr dan di drive.log, tanpa baris Compose,
+#   - setiap run menulis tepat satu baris drive.log, walau du di host gagal karena symlink menggantung.
 #
 #   bash scripts/uji-drive-export.sh
 set -uo pipefail
@@ -44,7 +45,7 @@ if [[ "${1:-}" == "compose" ]]; then
         ;;
       sunyi) exit 1 ;;
     esac
-    echo '{"time":"2026-11-18T10:13:10Z","level":"INFO","msg":"staging siap","berkas_baru":2}' >&2
+    echo '{"time":"2026-11-18T10:13:10Z","level":"INFO","msg":"staging siap","berkas_baru":2,"berkas_ditimpa":1,"bytes":16384,"dry_run":true}' >&2
     echo 'Task/2026-11/T-0012 Foto katalog/Brief/brief.pdf'
     echo 'Aktivitas/2026-11 November/Aktivitas Harian November 2026.xlsx'
     exit 0
@@ -54,6 +55,16 @@ fi
 exit 0
 STUB
 chmod +x "$bin/docker"
+
+# Stub du meniru host VM: symlink di staging menunjuk /data/storage (path di container), jadi du -L mencetak
+# ukuran sebagian lalu keluar bukan nol. Dulu itu membelah baris drive.log menjadi dua.
+cat >"$bin/du" <<'STUB'
+#!/usr/bin/env bash
+echo "du: cannot access '/data/storage/attachments/11/x': No such file or directory" >&2
+printf '16K\t%s\n' "${!#}"
+exit 1
+STUB
+chmod +x "$bin/du"
 
 periksa() {
   local nama="$1" kondisi="$2" pesan="$3"
@@ -92,12 +103,16 @@ jalankan() {
     >"$run/stdout.txt" 2>"$run/stderr.txt"
   local kode=$?
   local log="$(tail -1 "$run/backup/drive.log" 2>/dev/null || echo '')"
+  local baris_log="$(wc -l <"$run/backup/drive.log" 2>/dev/null | tr -d ' ')"
+  periksa "$nama" "[[ '$baris_log' == 1 ]]" "drive.log tepat satu baris untuk satu run (dapat $baris_log)"
+  periksa "$nama" "[[ \"\$(tail -1 '$run/backup/drive.log')\" =~ ^[^\ ]+\ (OK|GAGAL)\ berkas=[^\ ]+\ ukuran=[^\ ]+ ]]" "baris drive.log utuh: waktu, status, berkas, ukuran satu token"
 
   if [[ -z "$gagal" ]]; then
     periksa "$nama" "[[ $kode == 0 ]]" "keluar dengan kode 0 (dapat $kode)"
     periksa "$nama" "! grep -q '^{' '$run/stdout.txt'" "daftar path di stdout bebas baris log JSON"
     periksa "$nama" "grep -q 'Brief/brief.pdf' '$run/stdout.txt'" "daftar path tercetak"
     periksa "$nama" "[[ '$log' == *OK* ]]" "drive.log mencatat OK"
+    periksa "$nama" "[[ '$log' == *'ukuran=16K'* ]]" "ukuran dari bytes log perintah Go, bukan du"
     if [[ "$daily" == dobel ]]; then
       local terkirim tanggal_unik
       terkirim="$(grep -c '^TAR ' "$run/stderr.txt" || true)"
