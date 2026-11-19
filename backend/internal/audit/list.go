@@ -41,6 +41,11 @@ var Categories = map[string][]string{
 	"activity": {
 		"activity_updated", "activity_file_added", "activity_file_deleted",
 	},
+	// Revisi 30: semua tulisan di Timeline, yang hanya dilakukan Manajer.
+	"timeline": {
+		"timeline_event_created", "timeline_event_updated", "timeline_event_deleted",
+		"timeline_note_created", "timeline_note_updated", "timeline_note_deleted",
+	},
 }
 
 const PageSize = 50

@@ -26,6 +26,8 @@
 // E2E_ONLY=createtask (revisi 26: pemilih berkas yang dibatalkan tidak menutup panel Buat task, panel tidak
 // melompat saat pilih berkas diklik, Escape tetap menutup, dan halaman /task/baru; membuat satu task uji per lebar
 // di database dev lewat form, dengan Manajer sebagai PIC).
+// E2E_ONLY=timeline (revisi 30: grid dan agenda, keyboard dan popover tanggal, Manajer membuat satu kartu per
+// kategori di hari ini lalu menghapusnya, Staf tanpa tombol tulis dan tanpa alasan kehadiran Manajer).
 // Keluar dengan kode 1 bila ada yang gagal.
 import { chromium } from "playwright-core";
 
@@ -49,6 +51,7 @@ const ROLES = {
       "/task",
       "/arsip",
       "/aktivitas",
+      "/timeline",
       "/pengguna",
       "/audit-log",
       "/pengaturan",
@@ -65,6 +68,7 @@ const ROLES = {
       "/task",
       "/arsip",
       "/aktivitas",
+      "/timeline",
       "/pengguna",
       "/audit-log",
       "/pengaturan",
@@ -76,7 +80,15 @@ const ROLES = {
   staf: {
     user: env("DEV_STAFF_USERNAME"),
     pass: env("DEV_STAFF_PASSWORD"),
-    pages: ["/task", "/arsip", "/aktivitas", "/profil", "TASK", "/tidak-ada"],
+    pages: [
+      "/task",
+      "/arsip",
+      "/aktivitas",
+      "/timeline",
+      "/profil",
+      "TASK",
+      "/tidak-ada",
+    ],
   },
 };
 const WIDTHS = [360, 768, 1280, 1920];
@@ -2332,6 +2344,282 @@ async function checkTodo(width) {
 }
 
 if (ONLY === "todo") for (const w of [360, 1280]) await checkTodo(w);
+
+// Revisi 30: halaman Timeline. Kartu uji ditandai "E2E Timeline" dan dibersihkan lewat API di finally.
+const hariKantor = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Jakarta",
+}).format(new Date());
+async function bersihkanTimeline(mgr) {
+  const res = await mgr.call(
+    "GET",
+    `/timeline/events?month=${hariKantor.slice(0, 7)}`,
+  );
+  for (const e of res.body?.events ?? [])
+    if (
+      e.title.startsWith("E2E Timeline") ||
+      e.description.startsWith("E2E Timeline")
+    )
+      await mgr.call("DELETE", `/timeline/events/${e.id}`);
+}
+
+async function checkTimeline(width) {
+  const where = (what) => `timeline ${width} ${what}`;
+  const expect = (cond, w, msg) => {
+    checks++;
+    if (!cond) fail(where(w), msg);
+  };
+  const lebarAman = async (page, w) => {
+    const [sw, vw] = await page.evaluate(() => [
+      document.documentElement.scrollWidth,
+      window.innerWidth,
+    ]);
+    expect(sw <= vw, w, `scrollWidth ${sw} > ${vw}`);
+  };
+  const grid = width >= 768;
+  const mgr = await apiAs("manajer");
+  const nama = mgr.me.name;
+  const judul = {
+    launching: `E2E Timeline ${width} L`,
+    produksi: `E2E Timeline ${width} P`,
+  };
+  const ringkas = [judul.launching, judul.produksi, `${nama}: Sakit`];
+  const { ctx, page, errors } = await open("manajer", width, "terang");
+  const muat = async () => {
+    await page.waitForLoadState("networkidle");
+    await page
+      .getByText("Memuat jadwal...")
+      .waitFor({ state: "detached" })
+      .catch(() => {});
+  };
+  const bukaHari = async () => {
+    await page.locator(`[data-date="${hariKantor}"]`).first().click();
+    await page.locator(POP).waitFor();
+  };
+  try {
+    await page.goto(BASE + "/timeline");
+    await muat();
+    expect(
+      (await page.getByRole("grid").count()) === (grid ? 1 : 0),
+      "tampilan",
+      grid ? "grid tidak tampil" : "grid tetap tampil di bawah 768 px",
+    );
+    expect(
+      (await page.getByRole("list", { name: "Agenda bulan ini" }).count()) ===
+        (grid ? 0 : 1),
+      "tampilan",
+      grid ? "agenda ikut tampil" : "agenda tidak tampil",
+    );
+    for (const c of ["Launching", "Produksi", "Kehadiran"])
+      expect(
+        (await page
+          .getByRole("button", { name: c, exact: true })
+          .getAttribute("aria-pressed")) === "true",
+        "filter",
+        `toggle ${c} tidak menyala bawaan`,
+      );
+
+    if (grid) {
+      // Roving tabindex: satu tanggal di urutan Tab, panah pindah hari, Home dan End ke ujung minggu.
+      const aktif = page.locator('[role="grid"] button[tabindex="0"]');
+      expect(
+        (await aktif.count()) === 1,
+        "keyboard",
+        "bukan tepat satu tanggal di urutan Tab",
+      );
+      await aktif.focus();
+      const fokus = () =>
+        page.evaluate(() => document.activeElement?.getAttribute("data-date"));
+      const awal = await fokus();
+      await page.keyboard.press("ArrowRight");
+      const kanan = await fokus();
+      expect(
+        kanan && kanan > awal,
+        "keyboard",
+        `ArrowRight dari ${awal} ke ${kanan}`,
+      );
+      await page.keyboard.press("Home");
+      const senin = await fokus();
+      await page.keyboard.press("End");
+      const minggu = await fokus();
+      expect(
+        new Date(senin + "T00:00:00Z").getUTCDay() === 1 &&
+          new Date(minggu + "T00:00:00Z").getUTCDay() === 0,
+        "keyboard",
+        `Home ${senin}, End ${minggu}`,
+      );
+      // Panah di tepi bulan pindah ke bulan sebelumnya, lalu kembali.
+      const bulan = hariKantor.slice(0, 7);
+      await page.locator(`[data-date="${bulan}-01"]`).focus();
+      await page.keyboard.press("ArrowLeft");
+      await page.waitForTimeout(200);
+      const sebelum = await fokus();
+      expect(
+        sebelum && sebelum.slice(0, 7) < bulan,
+        "keyboard",
+        `ArrowLeft dari tanggal 1 ke ${sebelum}`,
+      );
+      await page.keyboard.press("ArrowRight");
+      await muat();
+      expect(
+        (await fokus()) === `${bulan}-01`,
+        "keyboard",
+        "tidak kembali ke tanggal 1",
+      );
+      // Enter membuka popover, Escape menutup dan fokus kembali ke sel.
+      await page.locator(`[data-date="${hariKantor}"]`).focus();
+      await page.keyboard.press("Enter");
+      await page.locator(POP).waitFor();
+      expect(
+        await page.evaluate(
+          (sel) =>
+            document.querySelector(sel)?.contains(document.activeElement),
+          POP,
+        ),
+        "popover",
+        "fokus tidak pindah ke popover",
+      );
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(150);
+      expect(
+        (await page.locator(POP).count()) === 0,
+        "popover",
+        "Escape tidak menutup popover",
+      );
+      expect(
+        (await fokus()) === hariKantor,
+        "popover",
+        "fokus tidak kembali ke sel",
+      );
+    }
+
+    // Manajer membuat satu kartu per kategori di hari ini.
+    for (const kat of ["Launching", "Produksi", "Kehadiran"]) {
+      await page.getByRole("button", { name: "Buat kartu" }).click();
+      const dlg = page.locator("dialog[open]");
+      await dlg.waitFor();
+      await dlg.locator("label", { hasText: kat }).first().click();
+      await dlg.getByLabel("Tanggal mulai (wajib)").fill(hariKantor);
+      if (kat === "Kehadiran") {
+        await dlg
+          .locator("option", { hasText: nama })
+          .first()
+          .waitFor({ state: "attached" });
+        await dlg.getByLabel("Nama (wajib)").selectOption({ label: nama });
+        await dlg.locator("label", { hasText: "Sakit" }).click();
+        await dlg.getByLabel("Keterangan").fill("E2E Timeline rahasia");
+      } else {
+        await dlg.getByLabel("Judul (wajib)").fill(judul[kat.toLowerCase()]);
+      }
+      await lebarAman(page, `form ${kat}`);
+      await dlg.getByRole("button", { name: "Buat kartu" }).click();
+      const ok = await page
+        .getByText("Kartu dibuat.")
+        .waitFor({ timeout: 5000 })
+        .then(() => true)
+        .catch(() => false);
+      expect(ok, `buat ${kat}`, "pesan Kartu dibuat tidak muncul");
+      if (!ok) {
+        await page.keyboard.press("Escape");
+        continue;
+      }
+      await muat();
+    }
+
+    await bukaHari();
+    for (const r of ringkas)
+      expect(
+        (await page.locator(POP).getByText(r, { exact: true }).count()) === 1,
+        "popover",
+        `entri "${r}" tidak ada di popover`,
+      );
+    expect(
+      (await page.locator(POP).getByText("E2E Timeline rahasia").count()) === 1,
+      "privasi",
+      "Manajer tidak melihat keterangan kehadiran",
+    );
+    await lebarAman(page, "popover");
+    await audit(page, errors, where("popover Manajer"));
+    await page.keyboard.press("Escape");
+
+    // Staf: tanpa tombol tulis, dan alasan kehadiran Manajer disembunyikan server.
+    const s = await open("staf", width, "terang");
+    try {
+      await s.page.goto(BASE + "/timeline");
+      await s.page.waitForLoadState("networkidle");
+      await s.page
+        .getByText("Memuat jadwal...")
+        .waitFor({ state: "detached" })
+        .catch(() => {});
+      expect(
+        (await s.page.getByRole("button", { name: "Buat kartu" }).count()) ===
+          0,
+        "staf",
+        "tombol Buat kartu tampil untuk Staf",
+      );
+      expect(
+        (await s.page.getByLabel("Judul catatan baru").count()) === 0,
+        "staf",
+        "form catatan tampil untuk Staf",
+      );
+      await s.page.locator(`[data-date="${hariKantor}"]`).first().click();
+      await s.page.locator(POP).waitFor();
+      const pop = s.page.locator(POP);
+      expect(
+        (await pop
+          .getByRole("button", { name: "Tambah di tanggal ini" })
+          .count()) === 0 &&
+          (await pop
+            .getByRole("button", { name: /^(Ubah|Hapus) / })
+            .count()) === 0,
+        "staf",
+        "tombol tulis tampil di popover Staf",
+      );
+      expect(
+        (await pop
+          .getByText(`${nama}: Tidak hadir`, { exact: true })
+          .count()) === 1 &&
+          (await pop.getByText(`${nama}: Sakit`).count()) === 0 &&
+          (await pop.getByText("E2E Timeline rahasia").count()) === 0,
+        "privasi",
+        "Staf melihat alasan atau keterangan kehadiran Manajer",
+      );
+      await lebarAman(s.page, "staf");
+      await audit(s.page, s.errors, where("popover Staf"));
+    } finally {
+      await s.ctx.close();
+    }
+
+    // Manajer menghapus ketiganya lewat popover, dengan konfirmasi.
+    await bukaHari();
+    for (const r of ringkas) {
+      const hapus = page
+        .locator(POP)
+        .getByRole("button", { name: `Hapus ${r}` });
+      if (!(await hapus.count())) continue;
+      await hapus.click();
+      await page
+        .locator(POP)
+        .getByRole("button", { name: "Ya, hapus" })
+        .click();
+      // Tombol Hapus sudah hilang begitu konfirmasi tampil, jadi yang ditunggu teks entrinya sampai DELETE selesai.
+      const entri = page.locator(POP).getByText(r, { exact: true });
+      await entri.waitFor({ state: "detached", timeout: 5000 }).catch(() => {});
+      expect(
+        (await entri.count()) === 0,
+        "hapus",
+        `"${r}" masih ada setelah dihapus`,
+      );
+    }
+    await page.keyboard.press("Escape");
+    await audit(page, errors, where("setelah hapus"));
+  } finally {
+    await bersihkanTimeline(mgr);
+    await mgr.ctx.close();
+    await ctx.close();
+  }
+}
+
+if (ONLY === "timeline") for (const w of [360, 1280]) await checkTimeline(w);
 
 await browser.close();
 console.log(

@@ -15,6 +15,7 @@ import (
 	"nvm-internal/internal/label"
 	"nvm-internal/internal/storage"
 	"nvm-internal/internal/task"
+	"nvm-internal/internal/timeline"
 	"nvm-internal/internal/todo"
 )
 
@@ -30,6 +31,7 @@ type Server struct {
 	activities   *activity.Service
 	labels       *label.Service
 	todos        *todo.Service
+	timeline     *timeline.Service
 	tasks        *task.Service
 	files        *storage.Store
 	avatars      *account.Avatars
@@ -66,6 +68,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 		activities:   activity.NewService(pool, files),
 		labels:       label.NewService(pool),
 		todos:        todo.NewService(pool),
+		timeline:     timeline.NewService(pool),
 		tasks:        task.NewService(pool),
 		files:        files,
 		attachments:  task.NewAttachments(pool, files),
@@ -164,6 +167,16 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	app.PUT("/todos/:todoId", s.renameTodo)
 	app.PUT("/todos/:todoId/done", s.setTodoDone)
 	app.DELETE("/todos/:todoId", s.deleteTodo)
+	// Timeline (revisi 30). Semua yang login membaca; hanya Manajer menulis, diperiksa di timeline.Service.
+	app.GET("/timeline/events", s.listTimelineEvents)
+	app.POST("/timeline/events", s.createTimelineEvent)
+	app.PUT("/timeline/events/:id", s.updateTimelineEvent)
+	app.DELETE("/timeline/events/:id", s.deleteTimelineEvent)
+	app.GET("/timeline/notes", s.listTimelineNotes)
+	app.POST("/timeline/notes", s.createTimelineNote)
+	app.PUT("/timeline/notes/order", s.reorderTimelineNotes)
+	app.PUT("/timeline/notes/:id", s.updateTimelineNote)
+	app.DELETE("/timeline/notes/:id", s.deleteTimelineNote)
 	// Lampiran per jam (revisi 24). Haknya sama dengan isian aktivitas dan dicek di service.
 	app.POST("/activities/files", s.uploadActivityFile)
 	app.GET("/activities/files/:fileId", s.downloadActivityFile)

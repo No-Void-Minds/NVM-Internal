@@ -27,6 +27,11 @@ const navItems: NavItem[] = [
   },
   { to: '/aktivitas', label: 'Aktivitas', iconPath: 'M12 8v4l3 2M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18' },
   {
+    to: '/timeline',
+    label: 'Timeline',
+    iconPath: 'M8 2v4M16 2v4M4 6h16a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1M3 10h18',
+  },
+  {
     to: '/pengguna',
     label: 'Pengguna',
     roles: ['admin', 'manager'],
@@ -115,8 +120,9 @@ const gutter = 'px-4 md:px-8'
 // karena tabel dan form yang direntang sampai 1920 px menyisakan ruang kosong besar di kanan.
 // Top bar tetap selebar layar di semua rute, jadi logo dan menu tidak pernah berpindah (Sprint 11c).
 // Lebar penuh hanya untuk halaman yang kolomnya memang butuh seluruh layar: papan (empat kolom status) dan
-// Aktivitas Harian (satu kolom per Staf, revisi 21). Sisanya ditengahkan, lihat Keputusan Sprint 11c.
-const fullWidth = ['tasks', 'activity']
+// Aktivitas Harian (satu kolom per Staf, revisi 21), dan Timeline (grid tujuh hari plus kolom catatan, revisi 30).
+// Sisanya ditengahkan, lihat Keputusan Sprint 11c.
+const fullWidth = ['tasks', 'activity', 'timeline']
 const contentWidth = computed(() =>
   fullWidth.includes(String(route.name)) ? 'w-full' : 'mx-auto w-full max-w-6xl',
 )

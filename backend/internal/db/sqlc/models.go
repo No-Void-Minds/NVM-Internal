@@ -12,6 +12,52 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AbsenceType string
+
+const (
+	AbsenceTypeSakit       AbsenceType = "sakit"
+	AbsenceTypeIzinPribadi AbsenceType = "izin_pribadi"
+	AbsenceTypeCutiPribadi AbsenceType = "cuti_pribadi"
+	AbsenceTypeCutiKhusus  AbsenceType = "cuti_khusus"
+	AbsenceTypeTukarLibur  AbsenceType = "tukar_libur"
+	AbsenceTypeTukarShift  AbsenceType = "tukar_shift"
+)
+
+func (e *AbsenceType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = AbsenceType(s)
+	case string:
+		*e = AbsenceType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for AbsenceType: %T", src)
+	}
+	return nil
+}
+
+type NullAbsenceType struct {
+	AbsenceType AbsenceType
+	Valid       bool // Valid is true if AbsenceType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullAbsenceType) Scan(value interface{}) error {
+	if value == nil {
+		ns.AbsenceType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.AbsenceType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullAbsenceType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.AbsenceType), nil
+}
+
 type AttachmentKind string
 
 const (
@@ -183,6 +229,49 @@ func (ns NullTaskUrgency) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.TaskUrgency), nil
+}
+
+type TimelineCategory string
+
+const (
+	TimelineCategoryLaunching TimelineCategory = "launching"
+	TimelineCategoryProduksi  TimelineCategory = "produksi"
+	TimelineCategoryKehadiran TimelineCategory = "kehadiran"
+)
+
+func (e *TimelineCategory) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TimelineCategory(s)
+	case string:
+		*e = TimelineCategory(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TimelineCategory: %T", src)
+	}
+	return nil
+}
+
+type NullTimelineCategory struct {
+	TimelineCategory TimelineCategory
+	Valid            bool // Valid is true if TimelineCategory is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTimelineCategory) Scan(value interface{}) error {
+	if value == nil {
+		ns.TimelineCategory, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TimelineCategory.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTimelineCategory) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TimelineCategory), nil
 }
 
 type UserRole string
@@ -391,6 +480,34 @@ type TaskSubtask struct {
 	ReferenceUrl   string
 	DueDate        pgtype.Date
 	ResultNote     pgtype.Text
+}
+
+type TimelineEvent struct {
+	ID          int64
+	Category    TimelineCategory
+	Title       pgtype.Text
+	Description pgtype.Text
+	StartDate   pgtype.Date
+	EndDate     pgtype.Date
+	UserID      pgtype.Int8
+	AbsenceType NullAbsenceType
+	CreatedBy   int64
+	UpdatedBy   int64
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+	IsDeleted   bool
+}
+
+type TimelineNote struct {
+	ID        int64
+	Title     string
+	Body      string
+	Position  int32
+	CreatedBy int64
+	UpdatedBy int64
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
+	IsDeleted bool
 }
 
 type User struct {

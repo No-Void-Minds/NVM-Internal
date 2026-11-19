@@ -17,6 +17,7 @@ import TaskPage from '../pages/TaskPage.vue'
 import TaskNewPage from '../pages/TaskNewPage.vue'
 import ArchivePage from '../pages/ArchivePage.vue'
 import ActivityPage from '../pages/ActivityPage.vue'
+import TimelinePage from '../pages/TimelinePage.vue'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -92,6 +93,7 @@ export const router = createRouter({
     { path: '/task/:id', name: 'task-detail', component: TaskPage, meta: { title: 'Detail task' } },
     { path: '/arsip', name: 'archive', component: ArchivePage, meta: { title: 'Arsip' } },
     { path: '/aktivitas', name: 'activity', component: ActivityPage, meta: { title: 'Aktivitas Harian' } },
+    { path: '/timeline', name: 'timeline', component: TimelinePage, meta: { title: 'Timeline' } },
   ],
 })
 

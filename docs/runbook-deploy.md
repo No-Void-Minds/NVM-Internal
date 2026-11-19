@@ -569,6 +569,9 @@ docker run --rm --network "$PG_NETWORK" -v "$PWD/backend/migrations:/migrations:
 # dijalankan ulang sesudahnya, dan tabel itu MEMANG harus ada di daftar DELETE, jadi keluarannya delapan tabel.
 # Migrasi 000019 (revisi 28, To Do pribadi) menambah tabel user_todos, yang juga perlu DELETE: 10-grants.sql
 # WAJIB dijalankan ulang sesudahnya, dan keluarannya jadi delapan tabel.
+# Migrasi 000020 (revisi 30, Timeline) menambah tabel timeline_events dan timeline_notes: 10-grants.sql WAJIB
+# dijalankan ulang sesudahnya, lalu cek daftar DELETE tetap delapan tabel (keduanya tidak boleh ada di sana,
+# karena hapus memakai is_deleted).
 docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
 curl -s http://127.0.0.1:8094/api/health
 ```

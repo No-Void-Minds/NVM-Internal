@@ -32,6 +32,9 @@ TO nvm_internal_app;
 -- drive_exports, drive_folders, dan drive_export_runs (migrasi 000018, revisi 25) juga tidak ada di daftar
 -- DELETE: ketiganya hanya ditambah dan dibaca. Salinan ke Drive tidak pernah menghapus apa pun.
 
+-- timeline_events dan timeline_notes (migrasi 000020, revisi 30) juga tidak ada di daftar DELETE: hapus memakai
+-- is_deleted lewat UPDATE, supaya kartu yang dihapus tetap terbaca untuk audit.
+
 -- Bukti untuk runbook: daftar tabel yang boleh dihapus app.
 SELECT table_name FROM information_schema.role_table_grants
 WHERE grantee = 'nvm_internal_app' AND privilege_type = 'DELETE'
