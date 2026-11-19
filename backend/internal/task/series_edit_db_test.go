@@ -71,8 +71,7 @@ func TestJadwalLewatUbahMengisiOccurrenceDate(t *testing.T) {
 	}
 }
 
-// Perbaikan bug revisi 19: detail task berulang membawa daftar sub task templat beserta PIC-nya, dan menandai
-// kalau sub task task ini sudah berbeda dengan templat.
+// Perbaikan bug revisi 19: detail task berulang membawa daftar sub task templat beserta PIC-nya.
 func TestDetailMembawaSubTaskTemplat(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
@@ -100,7 +99,7 @@ func TestDetailMembawaSubTaskTemplat(t *testing.T) {
 		t.Fatal("tepat setelah dibuat, sub task task dan templat harus sama")
 	}
 
-	// Sub task yang ditambahkan lewat panel detail tidak masuk templat, dan itu harus terlihat.
+	// Sejak revisi 29 sub task yang ditambahkan lewat panel detail di kemunculan terbaru ikut masuk templat.
 	if _, err := f.svc.AddSubtask(ctx, f.stafA, id, SubtaskFields{Title: "Unggah", PICID: f.stafA.ID}); err != nil {
 		t.Fatal(err)
 	}
@@ -108,10 +107,7 @@ func TestDetailMembawaSubTaskTemplat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(d.TemplateSubtasks) != 1 {
-		t.Fatalf("templat tidak boleh ikut berubah: %+v", d.TemplateSubtasks)
-	}
-	if d.TemplateMatchesTask() {
-		t.Fatal("sub task task sudah berbeda dengan templat, harus ditandai")
+	if len(d.TemplateSubtasks) != 2 || !d.TemplateMatchesTask() {
+		t.Fatalf("templat harus ikut kemunculan terbaru: %+v", d.TemplateSubtasks)
 	}
 }

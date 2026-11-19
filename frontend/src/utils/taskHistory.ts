@@ -98,6 +98,7 @@ export function describeTaskHistory(h: TaskHistoryItem): string {
     case 'series_created':
       return `menjadikan task ini berulang (${freqWord(after.freq)})`
     case 'series_updated':
+      if (after.source === 'subtask') return 'memperbarui sub task di templat task berulang'
       return 'mengubah jadwal dan templat task berulang'
     case 'series_stopped':
       return 'menghentikan pengulangan'

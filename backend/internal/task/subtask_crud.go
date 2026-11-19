@@ -192,8 +192,11 @@ func (s *Service) AddSubtask(ctx context.Context, actor Actor, taskID string, in
 		if _, err := q.BumpTaskVersion(ctx, taskID); err != nil {
 			return err
 		}
-		return audit.Change(ctx, q, actor.auditActor(), "subtask_added", "task", taskID, nil,
-			map[string]any{"id": id, "title": f.title, "pic_id": in.PICID, "due_date": dateValue(f.due)})
+		if err := audit.Change(ctx, q, actor.auditActor(), "subtask_added", "task", taskID, nil,
+			map[string]any{"id": id, "title": f.title, "pic_id": in.PICID, "due_date": dateValue(f.due)}); err != nil {
+			return err
+		}
+		return syncTemplateSubtasks(ctx, q, actor, taskID)
 	})
 	return id, err
 }
@@ -281,11 +284,14 @@ func (s *Service) UpdateSubtask(ctx context.Context, actor Actor, taskID string,
 		}
 		// Satu kejadian audit untuk nama dan PIC sekalian, supaya riwayat tidak terbelah dua
 		// untuk satu kali simpan.
-		return audit.Change(ctx, q, actor.auditActor(), "subtask_renamed", "task", taskID,
+		if err := audit.Change(ctx, q, actor.auditActor(), "subtask_renamed", "task", taskID,
 			map[string]any{"id": st.ID, "title": st.Title, "pic_id": oldPICID, "due_date": dateValue(st.DueDate),
 				"deliverable_url": st.DeliverableUrl, "result_note": textValue(st.ResultNote)},
 			map[string]any{"id": st.ID, "title": f.title, "pic_id": in.PICID, "due_date": dateValue(f.due),
-				"deliverable_url": f.deliverable, "result_note": textValue(note)})
+				"deliverable_url": f.deliverable, "result_note": textValue(note)}); err != nil {
+			return err
+		}
+		return syncTemplateSubtasks(ctx, q, actor, taskID)
 	})
 }
 
@@ -306,7 +312,10 @@ func (s *Service) DeleteSubtask(ctx context.Context, actor Actor, taskID string,
 		if _, err := q.BumpTaskVersion(ctx, taskID); err != nil {
 			return err
 		}
-		return audit.Change(ctx, q, actor.auditActor(), "subtask_removed", "task", taskID,
-			map[string]any{"id": st.ID, "title": st.Title}, nil)
+		if err := audit.Change(ctx, q, actor.auditActor(), "subtask_removed", "task", taskID,
+			map[string]any{"id": st.ID, "title": st.Title}, nil); err != nil {
+			return err
+		}
+		return syncTemplateSubtasks(ctx, q, actor, taskID)
 	})
 }

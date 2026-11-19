@@ -187,6 +187,11 @@ func (s *Service) Update(ctx context.Context, actor Actor, id string, in UpdateI
 					return err
 				}
 			}
+			// Urutan, nama, dan PIC sub task (PIC ikut lepas bila PIC task dilepas) juga lewat form ini. Dengan
+			// centang "Pakai perubahan ini", applySchedule menulis ulang seluruh templat, jadi tidak perlu dua kali.
+			if (subChanged || picChanged) && (in.Schedule == nil || !in.Schedule.ApplyToSeries) {
+				return syncTemplateSubtasks(ctx, q, actor, id)
+			}
 			return nil
 		}(); err != nil {
 			return err

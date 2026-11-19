@@ -73,6 +73,8 @@ export type SeriesInfo = {
   template_subtasks: { title: string; pic: string }[]
   // false berarti sub task task ini sudah berbeda dengan templat. Dihitung server.
   template_matches: boolean
+  // true berarti perubahan sub task di task ini langsung masuk templat selama seri aktif (revisi 29).
+  latest_occurrence: boolean
 }
 
 // Bagian Jadwal yang dikirim ke server. Tidak dikirim berarti seri tidak disentuh.

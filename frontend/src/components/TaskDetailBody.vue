@@ -700,9 +700,16 @@ const buttonSecondary =
               </li>
             </ul>
             <p v-else class="text-ink-muted">Tidak ada sub task di templat.</p>
-            <p v-if="!task.series.template_matches" class="text-ink-muted">
-              Sub task di task ini berbeda dengan templat. Simpan lewat Ubah dengan centang "Pakai perubahan
-              ini" untuk memperbarui.
+            <!-- Revisi 29: templat hanya mengikuti kemunculan terbaru, jadi peringatan beda templat hanya
+                 berarti di kemunculan lama. -->
+            <p v-if="task.series.active && task.series.latest_occurrence" class="text-ink-muted">
+              Perubahan sub task di kemunculan terbaru otomatis dipakai untuk kemunculan berikutnya.
+            </p>
+            <p
+              v-else-if="!task.series.latest_occurrence && !task.series.template_matches"
+              class="text-ink-muted"
+            >
+              Sub task di task ini berbeda dengan templat. Templat mengikuti sub task di kemunculan terbaru.
             </p>
             <RouterLink
               :to="{ name: 'archive', query: { series: String(task.series.id) } }"

@@ -1,6 +1,7 @@
 package task
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -121,9 +122,17 @@ func templateFromTask(ctx context.Context, q *sqlc.Queries, taskID string, occur
 	for _, l := range labels {
 		t.LabelIDs = append(t.LabelIDs, l.ID)
 	}
+	t.Subtasks, err = seriesSubtasksOf(ctx, q, taskID, occurrence)
+	return t, err
+}
+
+// seriesSubtasksOf menyalin bagian rencana sub task task ini: centang, catatan hasil, tautan hasil, dan berkas
+// diisi saat pengerjaan, jadi tidak ikut.
+func seriesSubtasksOf(ctx context.Context, q *sqlc.Queries, taskID string, occurrence time.Time) ([]SeriesSubtask, error) {
+	out := []SeriesSubtask{}
 	subs, err := loadSubtaskViews(ctx, q, taskID)
 	if err != nil {
-		return t, err
+		return nil, err
 	}
 	for _, st := range subs {
 		ss := SeriesSubtask{
@@ -133,9 +142,70 @@ func templateFromTask(ctx context.Context, q *sqlc.Queries, taskID string, occur
 		if len(st.Assignees) > 0 {
 			ss.PICID = st.Assignees[0].ID
 		}
-		t.Subtasks = append(t.Subtasks, ss)
+		out = append(out, ss)
 	}
-	return t, nil
+	return out, nil
+}
+
+// syncTemplateSubtasks (revisi 29): perubahan sub task di kemunculan terbaru seri yang aktif langsung menjadi
+// sub task templat, di transaksi pemanggil. Kemunculan lama dan seri yang dihentikan tidak menyentuh templat,
+// supaya membereskan task minggu lalu tidak mengubah task minggu depan. Field task induk tetap lewat Ubah
+// dengan centang "Pakai perubahan ini".
+func syncTemplateSubtasks(ctx context.Context, q *sqlc.Queries, actor Actor, taskID string) error {
+	ref, err := q.GetTaskSeriesRef(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if !ref.SeriesID.Valid || !ref.OccurrenceDate.Valid {
+		return nil
+	}
+	cur, err := q.GetSeriesForUpdate(ctx, ref.SeriesID.Int64)
+	if err != nil || !cur.Active {
+		return err
+	}
+	latest, err := q.IsLatestOccurrence(ctx, sqlc.IsLatestOccurrenceParams{
+		SeriesID: ref.SeriesID, OccurrenceDate: ref.OccurrenceDate,
+	})
+	if err != nil || !latest.Bool {
+		return err
+	}
+	var tmpl SeriesTemplate
+	if err := json.Unmarshal(cur.Template, &tmpl); err != nil {
+		return err
+	}
+	subs, err := seriesSubtasksOf(ctx, q, taskID, ref.OccurrenceDate.Time)
+	if err != nil {
+		return err
+	}
+	// Mengubah catatan hasil atau tautan hasil saja tidak mengubah rencana, jadi tidak perlu ditulis dan dicatat.
+	oldRaw, _ := json.Marshal(tmpl.Subtasks)
+	newRaw, _ := json.Marshal(subs)
+	if bytes.Equal(oldRaw, newRaw) {
+		return nil
+	}
+	before := subtaskTitles(tmpl.Subtasks)
+	tmpl.Subtasks = subs
+	raw, err := json.Marshal(tmpl)
+	if err != nil {
+		return err
+	}
+	if err := q.UpdateSeries(ctx, sqlc.UpdateSeriesParams{
+		ID: cur.ID, Freq: cur.Freq, SkipWeekend: cur.SkipWeekend, Weekdays: cur.Weekdays, MonthDay: cur.MonthDay,
+		EndDate: cur.EndDate, Template: raw,
+	}); err != nil {
+		return err
+	}
+	return audit.Change(ctx, q, actor.auditActor(), "series_updated", "task", taskID,
+		map[string]any{"series_id": cur.ID, "subtasks": before},
+		map[string]any{"series_id": cur.ID, "subtasks": subtaskTitles(subs), "source": "subtask"})
+}
+
+func subtaskTitles(subs []SeriesSubtask) []string {
+	out := []string{}
+	for _, st := range subs {
+		out = append(out, st.Title)
+	}
+	return out
 }
 
 func ruleAudit(r Rule) map[string]any {

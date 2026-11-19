@@ -148,6 +148,26 @@ func (q *Queries) GetTaskSeriesRef(ctx context.Context, id string) (GetTaskSerie
 	return i, err
 }
 
+const isLatestOccurrence = `-- name: IsLatestOccurrence :one
+SELECT NOT EXISTS (
+  SELECT 1 FROM tasks
+  WHERE series_id = $1 AND occurrence_date > $2 AND NOT is_deleted
+)::bool AS latest
+`
+
+type IsLatestOccurrenceParams struct {
+	SeriesID       pgtype.Int8
+	OccurrenceDate pgtype.Date
+}
+
+// Kemunculan yang sudah dihapus tidak dihitung, jadi kemunculan sebelumnya kembali menjadi yang terbaru.
+func (q *Queries) IsLatestOccurrence(ctx context.Context, arg IsLatestOccurrenceParams) (pgtype.Bool, error) {
+	row := q.db.QueryRow(ctx, isLatestOccurrence, arg.SeriesID, arg.OccurrenceDate)
+	var latest pgtype.Bool
+	err := row.Scan(&latest)
+	return latest, err
+}
+
 const listActiveSeries = `-- name: ListActiveSeries :many
 SELECT id, freq, skip_weekend, weekdays, month_day, start_date, end_date, active, template, created_by
 FROM task_series

@@ -75,6 +75,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 11w | Salinan ke Google Drive | Job malam menyalin berkas ke Drive akun tim dengan struktur yang dibaca orang |
 | 11x | Panel Buat task: dua bug pemilih berkas dan halaman penuh | Batal memilih berkas tidak menutup panel, panel tidak melompat, dan rute /task/baru |
 | 11y | Semua anggota membuat task, To Do pribadi, dan perbaikan task berulang | Staf boleh membuat task; To Do pribadi di papan; detail task berulang menampilkan kemunculan dan sub task templat |
+| 11z | Sub task otomatis masuk templat seri | Perubahan sub task di kemunculan terbaru seri aktif langsung dipakai kemunculan berikutnya |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -1338,6 +1339,27 @@ Keputusan teknis:
 
 **Hasil:** kode selesai 2026-11-19, `./scripts/check.sh` lolos, `go vet ./...` bersih, test unit dan test DB baru terkompilasi dan vet-bersih (test DB skip di laptop karena `TEST_DATABASE_URL` kosong). Migrasi, grants, uji curl, uji browser, dan `E2E_ONLY=todo` menunggu Rifky.
 
+## Sprint 11z: Sub task otomatis masuk templat seri
+
+**Tujuan:** revisi 29 Manajer. Sub task yang ditambahkan lewat panel detail di task berulang tidak masuk templat, jadi tidak ikut kemunculan berikutnya. Contoh produksi: T-0018 punya 3 sub task, tetapi bagian Jadwal menulis "Tidak ada sub task di templat."
+
+- [x] S11z-01 `syncTemplateSubtasks` di `task/series.go`, dipanggil di akhir transaksi tambah, ubah, dan hapus sub task, dan di Ubah task (jalur urutkan, ubah, dan PIC sub task yang ikut lepas). Query baru `IsLatestOccurrence`.
+- [x] S11z-02 Detail membawa `series.latest_occurrence`. Bagian Jadwal: kalimat "Perubahan sub task di kemunculan terbaru otomatis dipakai untuk kemunculan berikutnya." di kemunculan terbaru seri aktif, peringatan beda templat hanya di kemunculan lama. Teks audit dan riwayat untuk pembaruan templat dari sub task.
+- [x] S11z-03 Test DB `series_subtask_template_db_test.go`; `TestDetailMembawaSubTaskTemplat` disesuaikan dengan aturan baru. Tanpa E2E.
+
+**Keputusan:**
+- Kemunculan terbaru adalah kemunculan dengan `occurrence_date` paling akhir di serinya, tidak termasuk yang dihapus. Bila kemunculan terbaru dihapus, kemunculan sebelumnya kembali menjadi yang terbaru.
+- Selama seri aktif, setiap tambah, ubah, hapus, dan urutkan sub task di kemunculan terbaru menulis ulang daftar sub task templat dari sub task task itu, di transaksi yang sama. Siapa pun yang boleh mengubah sub task itu (Manajer, PIC task, pembuat atau PIC sub task) ikut memperbarui templat; aturan hak sub task tidak berubah.
+- Yang disalin hanya rencana: nama, PIC, deskripsi, tautan acuan, dan jarak deadline terhadap `occurrence_date`. Centang, catatan hasil, tautan hasil, dan berkas tidak. Perubahan yang hanya menyentuh hasil pengerjaan tidak menulis templat dan tidak mencatat audit.
+- Kemunculan lama dan seri yang dihentikan tidak memperbarui templat, supaya membereskan task minggu lalu tidak mengubah task minggu depan.
+- Field task induk (judul, deskripsi, urgency, PIC, label, deadline) tetap hanya masuk templat lewat Ubah dengan centang "Pakai perubahan ini". Ubah tanpa centang yang mengubah sub task tetap memperbarui sub task templat. Dengan centang, seluruh templat ditulis ulang sekali oleh jalur jadwal, jadi tidak tercatat dua kali.
+- Audit: `series_updated` dengan aktor yang mengubah sub task, `new_value.source = "subtask"`, dan daftar judul sub task templat sebelum dan sesudah.
+- Data lama tidak diisi ulang lewat migrasi. Task seperti T-0018 (kemunculan terbaru yang sub task-nya sudah beda dengan templat) ikut sinkron pada perubahan sub task berikutnya, atau segera lewat Ubah dengan centang "Pakai perubahan ini".
+
+**Selesai kalau:** `./scripts/check.sh` lolos dan test DB revisi 29 lolos.
+
+**Hasil:** `./scripts/check.sh` lolos. `go test ./internal/task/` lolos, test DB terlewati karena `TEST_DATABASE_URL` kosong di terminal Claude; test DB revisi 29 menunggu dijalankan Rifky. Tanpa migrasi; backend perlu build ulang.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -1520,9 +1542,10 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 26 | 2026-11-18 | Panel Buat task: batal memilih berkas tidak lagi menutup panel, isi panel tidak melompat saat pilih berkas diklik, dan form Buat task bisa dibuka di tab baru sebagai halaman /task/baru | Sprint 11x |
 | 27 | 2026-11-19 | Staf dan Manajer boleh membuat task dengan aturan yang sama persis. Admin tidak. Pembuat task boleh mengubah dan menghapus task buatannya selama masih Requested | Sprint 11y |
 | 28 | 2026-11-19 | To Do pribadi di papan: daftar catatan per akun, hanya bisa dibaca dan diubah pemiliknya, dengan centang, ubah di tempat, urutkan, hapus dengan Urungkan, dan bersihkan yang selesai | Sprint 11y |
+| 29 | 2026-11-19 | Sub task di kemunculan terbaru task berulang otomatis masuk templat seri: tambah, ubah, hapus, dan urutkan sub task langsung dipakai kemunculan berikutnya; kemunculan lama dan seri yang dihentikan tidak | Sprint 11z |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat kedua puluh delapan revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat kedua puluh sembilan revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

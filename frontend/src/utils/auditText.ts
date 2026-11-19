@@ -102,6 +102,9 @@ export function describeAudit(e: AuditEntry, divisionName: (id: number) => strin
     case 'series_created':
       return `Menjadikan task ${e.target?.id ?? ''} berulang`
     case 'series_updated':
+      // Revisi 29: perubahan sub task di kemunculan terbaru ikut memperbarui templat.
+      if (after.source === 'subtask')
+        return `Memperbarui sub task templat task berulang dari ${e.target?.id ?? ''}`
       return `Mengubah jadwal task berulang dari ${e.target?.id ?? ''}`
     case 'series_stopped':
       return `Menghentikan pengulangan task ${e.target?.id ?? ''}`

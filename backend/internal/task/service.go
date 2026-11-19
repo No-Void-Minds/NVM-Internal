@@ -165,6 +165,9 @@ type Detail struct {
 	// TemplateSubtasks: sub task di templat seri, nama PIC-nya sudah dicarikan. Kosong bila task ini tidak
 	// berulang (revisi 19).
 	TemplateSubtasks []TemplateSubtask
+	// LatestOccurrence: task ini kemunculan terbaru serinya, jadi perubahan sub task-nya langsung masuk templat
+	// selama seri aktif (revisi 29).
+	LatestOccurrence bool
 }
 
 // TemplateSubtask adalah satu sub task di templat seri, siap ditampilkan.
@@ -237,6 +240,13 @@ func (s *Service) Get(ctx context.Context, id string) (Detail, error) {
 		if d.TemplateSubtasks, err = templateSubtasks(ctx, q, sr.Template); err != nil {
 			return d, err
 		}
+		latest, err := q.IsLatestOccurrence(ctx, sqlc.IsLatestOccurrenceParams{
+			SeriesID: d.Task.SeriesID, OccurrenceDate: d.Task.OccurrenceDate,
+		})
+		if err != nil {
+			return d, err
+		}
+		d.LatestOccurrence = latest.Bool
 	}
 	return d, nil
 }

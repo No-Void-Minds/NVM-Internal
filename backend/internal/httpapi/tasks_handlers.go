@@ -433,13 +433,14 @@ type seriesItem struct {
 	NextDate *string `json:"next_date"`
 	// Tenggat kemunculan berikutnya dari templat, untuk kalimat pratinjau. null berarti tanpa tenggat.
 	DueOffsetDays *int `json:"due_offset_days"`
-	// TemplateSubtasks: sub task yang akan ikut di kemunculan berikutnya, dari templat seri. Sub task yang
-	// ditambahkan lewat panel detail tidak masuk templat sampai disimpan lewat Ubah dengan centang
-	// "Pakai perubahan ini", dan tanpa daftar ini pemakai tidak tahu mana yang ikut diulang (revisi 19).
+	// TemplateSubtasks: sub task yang akan ikut di kemunculan berikutnya, dari templat seri. Sejak revisi 29
+	// hanya kemunculan terbaru yang mengubahnya, jadi di kemunculan lama daftar ini bisa berbeda (revisi 19).
 	TemplateSubtasks []templateSubtaskItem `json:"template_subtasks"`
 	// TemplateMatches: false berarti sub task task ini berbeda dengan templat. Dihitung server, jadi
 	// frontend tidak membandingkan dua daftar sendiri.
 	TemplateMatches bool `json:"template_matches"`
+	// LatestOccurrence: perubahan sub task di task ini langsung masuk templat bila seri aktif (revisi 29).
+	LatestOccurrence bool `json:"latest_occurrence"`
 }
 
 type templateSubtaskItem struct {
@@ -472,6 +473,7 @@ func seriesOf(d task.Detail, now time.Time) *seriesItem {
 		out.TemplateSubtasks = append(out.TemplateSubtasks, templateSubtaskItem{Title: st.Title, PIC: st.PIC})
 	}
 	out.TemplateMatches = d.TemplateMatchesTask()
+	out.LatestOccurrence = d.LatestOccurrence
 	return out
 }
 

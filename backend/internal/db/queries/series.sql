@@ -40,3 +40,10 @@ UPDATE tasks SET series_id = @series_id, occurrence_date = @occurrence_date WHER
 
 -- name: GetTaskSeriesRef :one
 SELECT series_id, occurrence_date, start_date FROM tasks WHERE id = @id AND NOT is_deleted;
+
+-- name: IsLatestOccurrence :one
+-- Kemunculan yang sudah dihapus tidak dihitung, jadi kemunculan sebelumnya kembali menjadi yang terbaru.
+SELECT NOT EXISTS (
+  SELECT 1 FROM tasks
+  WHERE series_id = @series_id AND occurrence_date > @occurrence_date AND NOT is_deleted
+)::bool AS latest;
