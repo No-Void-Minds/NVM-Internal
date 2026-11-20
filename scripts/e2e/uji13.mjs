@@ -2706,10 +2706,26 @@ async function checkChain(width) {
       "pasang",
       "label Lanjutan tidak muncul",
     );
+    // Isi jam kepala harus tampil di jam tersambung. Sejak revisi 33b kotak lanjutan di tabel (mulai 768 px)
+    // adalah textarea readonly, jadi isinya ada di value-nya dan tidak bisa dicari dengan getByText; di
+    // kartu jam (di bawah 768 px) isinya masih teks biasa di kartu itu.
+    const isiJam = async (jam) => {
+      const kotak = page
+        .getByRole("textbox", { name: `Aktivitas ${jam}` })
+        .locator("visible=true")
+        .first();
+      if ((await kotak.count()) > 0) return await kotak.inputValue();
+      const kartu = page.locator("li:visible").filter({ hasText: jam }).first();
+      return (await kartu.count()) > 0 ? await kartu.innerText() : "";
+    };
+    const isiLanjutan = [
+      await isiJam("15.00-16.00"),
+      await isiJam("16.00-17.00"),
+    ];
     expect(
-      (await page.getByText(kepala).filter({ visible: true }).count()) >= 2,
+      isiLanjutan.every((t) => t.includes(kepala)),
       "pasang",
-      "isi jam kepala tidak tampil di jam tersambung",
+      `isi jam kepala tidak tampil di jam tersambung: ${JSON.stringify(isiLanjutan)}`,
     );
     expect(
       (await terisi()) === awal + 2,
