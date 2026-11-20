@@ -47,3 +47,9 @@ SELECT NOT EXISTS (
   SELECT 1 FROM tasks
   WHERE series_id = @series_id AND occurrence_date > @occurrence_date AND NOT is_deleted
 )::bool AS latest;
+
+-- name: SeriesLiveState :one
+-- Pengaman ticker (revisi 31): jumlah kemunculan yang belum dihapus dan tanggal kemunculan terakhir (termasuk
+-- yang dihapus) satu seri.
+SELECT count(*) FILTER (WHERE NOT is_deleted)::int AS live, max(occurrence_date)::date AS last_occurrence
+FROM tasks WHERE series_id = @series_id;

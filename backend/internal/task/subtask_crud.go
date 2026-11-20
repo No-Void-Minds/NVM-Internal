@@ -20,7 +20,7 @@ import (
 // mencentang adalah PIC sub task itu. Sub task yang belum ditugaskan boleh dicentang PIC task mana pun.
 
 // ErrSubtaskLocked dipakai saat sub task tidak boleh diubah karena bukan urusan pelaku.
-var ErrSubtaskLocked = forbidden("Sub task ini urusan orang lain. Yang bisa mengubahnya: pembuatnya, PIC-nya, dan Manajer.")
+var ErrSubtaskLocked = forbidden("Sub task ini urusan orang lain. Yang bisa mengubahnya: pembuatnya, PIC-nya, PIC task, dan Manajer.")
 
 // subtaskWindow: menambah dan mengubah sub task hanya saat task masih disiapkan atau sedang dikerjakan.
 // Ditutup mulai Ready supaya pekerjaan tidak bertambah saat Manajer sedang mereview, dan supaya syarat
@@ -202,7 +202,8 @@ func (s *Service) AddSubtask(ctx context.Context, actor Actor, taskID string, in
 }
 
 // editableSubtask memastikan sub task ada di task ini dan boleh diubah pelaku: Manajer, yang membuatnya,
-// atau PIC yang ditugaskan mengerjakannya.
+// PIC yang ditugaskan mengerjakannya, atau Staf PIC task (revisi 32: PIC yang menyusun sub task, keputusan
+// revisi 6, termasuk sub task templat yang tercatat dibuat pembuat seri).
 func editableSubtask(ctx context.Context, q *sqlc.Queries, actor Actor, taskID string, subtaskID int64) (sqlc.GetSubtaskRow, error) {
 	st, err := q.GetSubtask(ctx, sqlc.GetSubtaskParams{ID: subtaskID, TaskID: taskID})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -217,6 +218,11 @@ func editableSubtask(ctx context.Context, q *sqlc.Queries, actor Actor, taskID s
 	pic, err := q.IsSubtaskAssignee(ctx, sqlc.IsSubtaskAssigneeParams{SubtaskID: subtaskID, UserID: actor.ID})
 	if err != nil {
 		return st, err
+	}
+	if !pic && actor.Role == RoleStaff {
+		if pic, err = q.IsTaskAssignee(ctx, sqlc.IsTaskAssigneeParams{TaskID: taskID, UserID: actor.ID}); err != nil {
+			return st, err
+		}
 	}
 	if !pic {
 		return st, ErrSubtaskLocked

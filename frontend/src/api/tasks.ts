@@ -25,7 +25,8 @@ export type TaskSubtask = {
   can_attach: boolean
   // Dihitung backend dengan aturan yang sama dengan penolakan 403, jadi UI tidak menebak siapa yang boleh.
   can_check: boolean
-  // Boleh diubah atau dihapus: pembuatnya, PIC-nya, dan Manajer, selama task masih Requested atau On Progress.
+  // Boleh diubah atau dihapus: pembuatnya, PIC-nya, PIC task (revisi 32), dan Manajer, selama task masih Requested
+  // atau On Progress.
   can_edit: boolean
   assignees: TaskPerson[]
   attachments: TaskAttachment[]
@@ -96,6 +97,8 @@ export type TaskCan = {
   move_to: TaskStatus[]
   // Pengguna ini PIC salah satu sub task (revisi 17). Hanya untuk teks; haknya sudah ada di move_to.
   subtask_pic: boolean
+  // Boleh menghentikan pengulangan, juga lewat pilihan di dialog hapus (revisi 31).
+  stop_series: boolean
 }
 
 export type TaskHistoryItem = {
@@ -179,8 +182,9 @@ export function stopSeries(id: string) {
   return apiPost<void>(`/tasks/${id}/stop-series`)
 }
 
-export function deleteTask(id: string, version: number) {
-  return request<void>('DELETE', `/tasks/${id}?version=${version}`)
+// stopSeries ikut menghentikan seri dalam transaksi yang sama (revisi 31). Hanya Manajer; server memeriksa ulang.
+export function deleteTask(id: string, version: number, stopSeries = false) {
+  return request<void>('DELETE', `/tasks/${id}?version=${version}${stopSeries ? '&stop_series=true' : ''}`)
 }
 
 export function setSubtaskDone(taskId: string, subtaskId: number, done: boolean) {

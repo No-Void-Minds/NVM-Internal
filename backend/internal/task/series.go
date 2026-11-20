@@ -367,14 +367,24 @@ func (s *Service) StopSeries(ctx context.Context, actor Actor, taskID string) er
 // yang sudah ada dilewati, dan bentrok unique (series_id, occurrence_date) dianggap "sudah dibuat".
 // now disuntikkan supaya bisa diuji dengan jam palsu.
 func (s *Service) CreateDueOccurrences(ctx context.Context, now time.Time) (created []string, err error) {
+	created, _, err = s.createDueOccurrences(ctx, now)
+	return created, err
+}
+
+// abandonedAfterDays: seri aktif yang semua kemunculannya sudah dihapus dan kemunculan terakhirnya lebih lama
+// dari ini dianggap ditinggalkan (revisi 31). Ticker tidak membuat kemunculan baru dan mencatat peringatan, tetapi
+// seri tidak dihentikan otomatis, karena yang berhak menghentikannya Manajer.
+const abandonedAfterDays = 7
+
+func (s *Service) createDueOccurrences(ctx context.Context, now time.Time) (created []string, abandoned []int64, err error) {
 	today := officeDate(now)
 	q := sqlc.New(s.pool)
 	if _, err := q.EndExpiredSeries(ctx, pgDate(today)); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	list, err := q.ListActiveSeries(ctx, pgDate(today))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var errs []error
 	for _, row := range list {
@@ -390,6 +400,15 @@ func (s *Service) CreateDueOccurrences(ctx context.Context, now time.Time) (crea
 			continue
 		}
 		if exists {
+			continue
+		}
+		st, err := q.SeriesLiveState(ctx, pgtype.Int8{Int64: row.ID, Valid: true})
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if st.Live == 0 && st.LastOccurrence.Valid && st.LastOccurrence.Time.Before(today.AddDate(0, 0, -abandonedAfterDays)) {
+			abandoned = append(abandoned, row.ID)
 			continue
 		}
 		var id string
@@ -409,7 +428,7 @@ func (s *Service) CreateDueOccurrences(ctx context.Context, now time.Time) (crea
 			created = append(created, id)
 		}
 	}
-	return created, errors.Join(errs...)
+	return created, abandoned, errors.Join(errs...)
 }
 
 var errNoEligiblePIC = errors.New("tidak ada PIC templat yang masih aktif")
@@ -506,9 +525,12 @@ func createOccurrence(ctx context.Context, q *sqlc.Queries, series sqlc.TaskSeri
 // selesai. Galat dicatat dan tidak menghentikan ticker.
 func (s *Service) RunOccurrenceTicker(ctx context.Context, log *slog.Logger, every time.Duration) {
 	run := func() {
-		created, err := s.CreateDueOccurrences(ctx, s.clock())
+		created, abandoned, err := s.createDueOccurrences(ctx, s.clock())
 		if len(created) > 0 {
 			log.Info("kemunculan task berulang dibuat", "tasks", created)
+		}
+		if len(abandoned) > 0 {
+			log.Warn("seri aktif tanpa kemunculan tersisa dilewati, minta Manajer menghentikannya", "series", abandoned)
 		}
 		if err != nil {
 			log.Error("pembuat kemunculan task berulang", "err", err)

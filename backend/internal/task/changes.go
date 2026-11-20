@@ -323,9 +323,23 @@ func (s *Service) SetDeliverable(ctx context.Context, actor Actor, id string, ve
 }
 
 // Delete menandai task terhapus (FR-TASK-16). Datanya tetap ada untuk audit, tetapi hilang dari semua daftar.
+// Seri task berulang tetap berjalan.
 func (s *Service) Delete(ctx context.Context, actor Actor, id string, version int32) error {
+	return s.deleteTask(ctx, actor, id, version, false)
+}
+
+// DeleteAndStopSeries menghapus task dan menghentikan serinya dalam satu transaksi (revisi 31): menghapus
+// kemunculan saja tidak menghentikan pengulangan, dan pemakai sering mengira sebaliknya. Hanya Manajer.
+func (s *Service) DeleteAndStopSeries(ctx context.Context, actor Actor, id string, version int32) error {
+	return s.deleteTask(ctx, actor, id, version, true)
+}
+
+func (s *Service) deleteTask(ctx context.Context, actor Actor, id string, version int32, stop bool) error {
 	if actor.Role != RoleManager && actor.Role != RoleStaff {
 		return errDeleteForbidden
+	}
+	if stop && actor.Role != RoleManager {
+		return errStopSeriesForbidden
 	}
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := sqlc.New(tx)
@@ -339,7 +353,20 @@ func (s *Service) Delete(ctx context.Context, actor Actor, id string, version in
 		if err := q.SoftDeleteTask(ctx, id); err != nil {
 			return err
 		}
-		return audit.Change(ctx, q, actor.auditActor(), "task_deleted", "task", id, map[string]any{"title": cur.Title}, nil)
+		if err := audit.Change(ctx, q, actor.auditActor(), "task_deleted", "task", id, map[string]any{"title": cur.Title}, nil); err != nil {
+			return err
+		}
+		if !stop {
+			return nil
+		}
+		ref, err := q.GetTaskSeriesRef(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !ref.SeriesID.Valid {
+			return apperr.Invalid("Task ini tidak berulang, jadi tidak ada pengulangan yang bisa dihentikan.")
+		}
+		return stopSeries(ctx, q, actor, id, ref.SeriesID.Int64)
 	})
 }
 

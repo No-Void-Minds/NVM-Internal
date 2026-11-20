@@ -18,6 +18,8 @@ type Can struct {
 	// SubtaskPIC: pelaku memegang salah satu sub task task ini (revisi 17). Hanya menentukan teks di detail;
 	// haknya sendiri sudah tercermin di MoveTo.
 	SubtaskPIC bool `json:"subtask_pic"`
+	// StopSeries: boleh menghentikan pengulangan, termasuk lewat pilihan di dialog hapus (revisi 31).
+	StopSeries bool `json:"stop_series"`
 }
 
 // CanCreateTask: Staf dan Manajer boleh membuat task dengan aturan yang sama (revisi 27). Admin tidak.
@@ -48,6 +50,7 @@ func PermissionsFor(role Role, isPIC, isSubtaskPIC, isCreator bool, status Statu
 		AddSubtask: contributor && SubtaskWindowOpen(status),
 		MoveTo:     []Status{},
 		SubtaskPIC: isSubtaskPIC,
+		StopSeries: manager,
 	}
 	for _, to := range []Status{Requested, OnProgress, Ready, Completed} {
 		// Catatan diisi sembarang supaya aturan wajib-catatan tidak menyembunyikan tujuan yang sebenarnya boleh.

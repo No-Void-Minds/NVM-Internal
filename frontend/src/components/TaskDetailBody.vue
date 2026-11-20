@@ -489,10 +489,22 @@ function saveDeliverable() {
 }
 
 const deleteOpen = ref(false)
+// Revisi 31: task dari seri aktif wajib memilih nasib serinya, tanpa pilihan bawaan, karena menghapus kemunculan
+// saja tidak menghentikan pengulangan.
+const deleteChoice = ref<'' | 'one' | 'stop'>('')
+const activeSeries = computed(() => !!task.value?.series?.active)
+function openDelete() {
+  deleteChoice.value = ''
+  deleteOpen.value = true
+}
 async function confirmDelete() {
   const t = task.value
   if (!t) return
-  const ok = await run(() => deleteTask(t.id, t.version), `${t.id} dihapus.`)
+  const stop = deleteChoice.value === 'stop'
+  const ok = await run(
+    () => deleteTask(t.id, t.version, stop),
+    stop ? `${t.id} dihapus dan pengulangannya dihentikan.` : `${t.id} dihapus.`,
+  )
   deleteOpen.value = false
   if (ok) emit('close')
 }
@@ -679,6 +691,8 @@ const buttonSecondary =
         </template>
         <!-- Revisi 19: aturan seri, tanggal kemunculan ini, dan kemunculan berikutnya dari server. -->
         <template v-if="task.series">
+          <dt class="text-ink-muted">Pengulangan</dt>
+          <dd class="font-medium">{{ task.series.active ? 'Aktif' : 'Dihentikan' }}</dd>
           <dt class="text-ink-muted">Kemunculan</dt>
           <dd>{{ task.occurrence_date ? formatPlain(task.occurrence_date) : '-' }}</dd>
           <dt class="text-ink-muted">Jadwal</dt>
@@ -1271,7 +1285,7 @@ const buttonSecondary =
           v-if="task.can.delete"
           type="button"
           class="mr-auto inline-flex min-h-11 items-center rounded-card px-3 font-medium text-urgent hover:bg-canvas"
-          @click="deleteOpen = true"
+          @click="openDelete"
         >
           Hapus
         </button>
@@ -1335,11 +1349,56 @@ const buttonSecondary =
         Task ini hilang dari semua daftar dan tidak bisa dipulihkan dari aplikasi. Jejaknya tetap ada di audit
         log.
       </p>
+      <fieldset v-if="activeSeries && task?.series" class="mt-4">
+        <legend class="font-medium">Task ini berulang. Bagaimana dengan pengulangannya?</legend>
+        <div class="mt-2 space-y-2">
+          <label
+            class="flex min-h-11 cursor-pointer items-start gap-3 rounded-card border border-line p-3 has-[:checked]:border-mark has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-mark"
+          >
+            <input
+              v-model="deleteChoice"
+              type="radio"
+              name="delete-choice"
+              value="one"
+              class="mt-1 size-4 accent-mark"
+            />
+            <span>
+              <span class="block font-medium">Hapus kemunculan ini saja (pengulangan tetap berjalan)</span>
+              <span class="block text-sm text-ink-muted">
+                {{
+                  task.series.next_date
+                    ? `Kemunculan berikutnya tetap dibuat ${formatPlain(task.series.next_date)}.`
+                    : 'Tidak ada kemunculan berikutnya yang terjadwal.'
+                }}
+              </span>
+            </span>
+          </label>
+          <label
+            v-if="task.can.stop_series"
+            class="flex min-h-11 cursor-pointer items-start gap-3 rounded-card border border-line p-3 has-[:checked]:border-mark has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-mark"
+          >
+            <input
+              v-model="deleteChoice"
+              type="radio"
+              name="delete-choice"
+              value="stop"
+              class="mt-1 size-4 accent-mark"
+            />
+            <span>
+              <span class="block font-medium">Hapus dan hentikan pengulangan</span>
+              <span class="block text-sm text-ink-muted">
+                Tidak ada kemunculan baru. Kemunculan lain yang sudah ada tidak dihapus.
+              </span>
+            </span>
+          </label>
+          <p v-else class="text-sm text-ink-muted">Untuk menghentikan pengulangan, minta Manajer.</p>
+        </div>
+      </fieldset>
       <template #footer>
         <button type="button" :class="buttonSecondary" @click="deleteOpen = false">Batal</button>
         <button
           type="button"
-          :disabled="busy"
+          :disabled="busy || (activeSeries && !deleteChoice)"
           class="inline-flex min-h-11 items-center rounded-card bg-urgent px-4 font-medium text-on-urgent active:translate-y-px disabled:opacity-60"
           @click="confirmDelete"
         >

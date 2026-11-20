@@ -114,7 +114,12 @@ func (s *Server) deleteTask(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, CodeBadRequest, "Versi task wajib dikirim.")
 		return
 	}
-	if err := s.tasks.Delete(c.Request.Context(), taskActor(c), id, int32(v)); err != nil {
+	// stop_series=true ikut menghentikan seri (revisi 31); hak diperiksa di service.
+	del := s.tasks.Delete
+	if c.Query("stop_series") == "true" {
+		del = s.tasks.DeleteAndStopSeries
+	}
+	if err := del(c.Request.Context(), taskActor(c), id, int32(v)); err != nil {
 		s.writeTaskError(c, err)
 		return
 	}

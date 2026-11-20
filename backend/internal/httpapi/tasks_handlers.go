@@ -253,13 +253,12 @@ func (s *Server) getTask(c *gin.Context) {
 		// can_check berasal dari aturan yang sama dengan SetSubtaskDone, supaya UI tidak menebak.
 		item.CanCheck = checkable[st.ID]
 		// Sama dengan lockForSubtask + editableSubtask: Manajer, PIC sub task ini (juga dari luar task, revisi 11),
-		// atau pembuatnya selama dia masih PIC task. Sebelumnya disyaratkan PIC task, sehingga PIC sub task dari
-		// luar task tidak pernah melihat tombol Ubah dan kotak hasil walau backend menerima perubahannya.
+		// atau Staf PIC task untuk semua sub task di task-nya (revisi 32).
 		manager := actor.Role == task.RoleManager
 		assigned := isAssigned(actor.ID, st)
 		taskPIC := actor.Role == task.RoleStaff && d.IsPIC(actor.ID)
 		item.CanEdit = task.SubtaskWindowOpen(task.Status(t.Status)) &&
-			(manager || assigned || (taskPIC && st.CreatedBy == actor.ID))
+			(manager || assigned || taskPIC)
 		item.CanAttach = manager || taskPIC || assigned
 		for _, a := range st.Assignees {
 			item.Assignees = append(item.Assignees, taskPerson{ID: a.ID, Name: a.Name, Username: a.Username, AvatarID: avatarID(a.AvatarID)})

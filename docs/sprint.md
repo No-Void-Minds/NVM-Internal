@@ -77,6 +77,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 11y | Semua anggota membuat task, To Do pribadi, dan perbaikan task berulang | Staf boleh membuat task; To Do pribadi di papan; detail task berulang menampilkan kemunculan dan sub task templat |
 | 11z | Sub task otomatis masuk templat seri | Perubahan sub task di kemunculan terbaru seri aktif langsung dipakai kemunculan berikutnya |
 | 12a | Halaman Timeline | Kalender bersama launching, produksi, dan kehadiran, plus Important Notes; hanya Manajer yang menulis |
+| 12b | Hapus task berulang dan hak PIC atas sub task | Dialog hapus memilih nasib seri, pengaman ticker, PIC task mengatur semua sub task di task-nya |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -1393,6 +1394,30 @@ Keputusan teknis:
 
 **Hasil:** kode selesai 2026-11-19, `./scripts/check.sh` lolos, test unit backend dan frontend lolos. Migrasi 000020, restart backend, test DB, dan E2E menunggu Rifky.
 
+## Sprint 12b: Hapus task berulang dan hak PIC atas sub task
+
+**Tujuan:** revisi 31 dan 32 Manajer, dari dua kejadian di produksi: task "TEslagi" dihapus lalu T-0026 tetap dibuat Sistem, dan PIC task T-0029 tidak bisa mengubah sub task kemunculannya.
+
+- [x] S12b-01 Revisi 31 backend: `DELETE /api/tasks/:id?stop_series=true` menghapus task dan menghentikan seri dalam satu transaksi (`Service.DeleteAndStopSeries`), audit `task_deleted` dan `series_stopped`. `can.stop_series` di detail. Pengaman ticker untuk seri yang ditinggalkan. Tanpa migrasi.
+- [x] S12b-02 Revisi 31 frontend: dialog hapus task dari seri aktif dengan dua pilihan tanpa bawaan, tanggal kemunculan berikutnya, dan baris "Pengulangan: Aktif atau Dihentikan" di detail.
+- [x] S12b-03 Revisi 32: Staf PIC task boleh mengubah dan menghapus semua sub task di task-nya (`editableSubtask`, `can_edit`).
+- [x] S12b-04 Test DB `internal/task/series_delete_db_test.go` dan `internal/httpapi/task_delete_series_db_test.go`.
+
+**Keputusan:**
+- Revisi 31: dialog hapus task yang termasuk seri aktif wajib memilih "Hapus kemunculan ini saja (pengulangan tetap berjalan)" atau "Hapus dan hentikan pengulangan". Tidak ada pilihan bawaan dan tombol Hapus nonaktif sampai salah satu dipilih. Pilihan pertama menyebut tanggal kemunculan berikutnya dari server. Seri yang sudah berhenti atau task biasa memakai dialog lama.
+- Pilihan kedua hanya untuk yang `can.stop_series` (Manajer, sama dengan hak "Hentikan pengulangan" revisi 19). Yang lain melihat pilihan pertama saja dengan teks "Untuk menghentikan pengulangan, minta Manajer.". Server menolak `stop_series=true` dari selain Manajer dengan 403 sebelum apa pun berubah, juga bila pengirimnya pembuat task yang boleh menghapus.
+- `stop_series=true` untuk task yang tidak berulang ditolak 400 dan task tidak ikut terhapus, karena hapus dan henti seri satu transaksi.
+- Pengaman ticker: seri aktif yang tidak punya kemunculan tersisa (semua `is_deleted`) dan kemunculan terakhirnya (termasuk yang dihapus) lebih dari 7 hari sebelum hari ini tidak dibuatkan kemunculan baru, lalu dicatat `WARN` di log backend. Seri tidak dihentikan otomatis, karena menghentikan seri hak Manajer dan bisa saja dihidupkan lagi lewat Ubah. Pengaman ini tidak mencegah kasus "TEslagi" (dihapus kemarin, muncul hari ini); itu tugas pilihan di dialog hapus.
+- Detail task berulang menampilkan baris "Pengulangan: Aktif" atau "Dihentikan".
+- Revisi 32: Staf PIC task boleh mengubah dan menghapus semua sub task di task-nya, termasuk sub task templat yang tercatat dibuat pembuat seri dan dipegang orang lain, selama task Requested atau On Progress. Hak pembuat, PIC sub task, dan Manajer tidak berubah. Perubahan PIC task di kemunculan terbaru tetap memperbarui templat seri (revisi 29). Menambah sub task sudah boleh untuk PIC task sejak revisi 6.
+- Mengurutkan sub task: aplikasi belum punya pengurutan sub task di luar form Ubah task (yang hanya untuk Manajer dan pembuat task selama Requested), jadi revisi ini tidak menambah pengurutan. Masuk "Menunggu jawaban Manajer".
+- Centang tidak berubah dan sesuai permintaan: PIC task tidak boleh mencentang sub task yang dipegang orang lain. Satu-satunya pengecualian yang sudah ada sejak revisi 7: sub task tanpa PIC boleh dicentang PIC task mana pun.
+- Teks "Kamu hanya bisa melihat task ini" di T-0029: kode tidak membedakan kemunculan buatan Sistem. Hak dihitung dari `task_assignees`, bukan `requested_by` atau `created_by`, dan Staf yang tercatat PIC task selalu mendapat `edit_labels` sehingga teks itu tidak mungkin tampil untuknya. Test `TestTaskPICManagesTickerSubtasks` membuktikan PIC task di kemunculan ticker mendapat On Progress di `move_to` dan tombol Tambah sub task. Jadi saat teks itu tampil, akun yang membuka bukan PIC kemunculan itu di database (misalnya PIC templat lain, atau akun Nala nonaktif saat kemunculan dibuat sehingga dilewati `GetEligiblePICs`). Perlu dicek di data produksi.
+
+**Selesai kalau:** `./scripts/check.sh` lolos dan test DB `-run 'DeleteAndStopSeries|TickerSkipsAbandoned|TaskPICManagesTicker|DeleteStopSeriesHTTP'` lolos.
+
+**Hasil:** kode selesai 2026-11-20, `./scripts/check.sh` lolos. Test DB menunggu Rifky (`TEST_DATABASE_URL`).
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -1577,9 +1602,11 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 28 | 2026-11-19 | To Do pribadi di papan: daftar catatan per akun, hanya bisa dibaca dan diubah pemiliknya, dengan centang, ubah di tempat, urutkan, hapus dengan Urungkan, dan bersihkan yang selesai | Sprint 11y |
 | 29 | 2026-11-19 | Sub task di kemunculan terbaru task berulang otomatis masuk templat seri: tambah, ubah, hapus, dan urutkan sub task langsung dipakai kemunculan berikutnya; kemunculan lama dan seri yang dihentikan tidak | Sprint 11z |
 | 30 | 2026-11-19 | Halaman Timeline: kalender bulan bersama untuk launching, produksi, dan kehadiran, plus Important Notes. Manajer menulis, peran lain membaca; alasan kehadiran pribadi hanya untuk Manajer dan orangnya | Sprint 12a |
+| 31 | 2026-11-20 | Menghapus task berulang tidak menghentikan serinya: dialog hapus memilih hapus kemunculan saja atau hapus dan hentikan pengulangan (Manajer), pengaman ticker untuk seri tanpa kemunculan tersisa, status seri di detail | Sprint 12b |
+| 32 | 2026-11-20 | PIC task mengubah dan menghapus semua sub task di task-nya, termasuk sub task templat dari pembuat seri; centang tidak berubah | Sprint 12b |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat ketiga puluh revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat ketiga puluh dua revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 
@@ -1590,6 +1617,7 @@ SRS v1.0 belum memuat ketiga puluh revisi (revisi 5 di S14-17). SRS diperbarui s
 - Jabatan diisi sendiri oleh tiap orang atau hanya pengelola.
 - Aturan centang: Manajer boleh mencentang sub task siapa pun kecuali yang dipegang Manajer lain. Sejak revisi 6 sub task tanpa pemilik (buatan Manajer) juga boleh dicentang PIC task mana pun. Setuju?
 - Revisi 6: apakah PIC boleh menandai task Ready tanpa membuat sub task sama sekali? Sekarang boleh, karena syarat Ready hanya "tidak ada sub task yang belum tercentang".
+- Revisi 32, mengurutkan sub task: belum ada pengurutan sub task di detail task, hanya di form Ubah task (Manajer dan pembuat selama Requested). Apakah PIC task perlu tombol naik dan turun di daftar sub task? Sementara tidak ditambah.
 - Revisi 30, privasi kehadiran: alasan sakit, izin pribadi, cuti pribadi, dan cuti khusus beserta keterangannya hanya dikirim server ke Manajer dan orang yang bersangkutan. Staf lain dan Admin menerima "Tidak hadir" tanpa alasan dan keterangan. Tukar libur dan tukar shift tampil apa adanya untuk semua. Dipakai pilihan yang paling aman sambil menunggu konfirmasi.
 
 ## Setelah go-live (belum dijadwalkan)

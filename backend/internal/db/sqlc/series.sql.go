@@ -235,6 +235,25 @@ func (q *Queries) OccurrenceExists(ctx context.Context, arg OccurrenceExistsPara
 	return exists, err
 }
 
+const seriesLiveState = `-- name: SeriesLiveState :one
+SELECT count(*) FILTER (WHERE NOT is_deleted)::int AS live, max(occurrence_date)::date AS last_occurrence
+FROM tasks WHERE series_id = $1
+`
+
+type SeriesLiveStateRow struct {
+	Live           int32
+	LastOccurrence pgtype.Date
+}
+
+// Pengaman ticker (revisi 31): jumlah kemunculan yang belum dihapus dan tanggal kemunculan terakhir (termasuk
+// yang dihapus) satu seri.
+func (q *Queries) SeriesLiveState(ctx context.Context, seriesID pgtype.Int8) (SeriesLiveStateRow, error) {
+	row := q.db.QueryRow(ctx, seriesLiveState, seriesID)
+	var i SeriesLiveStateRow
+	err := row.Scan(&i.Live, &i.LastOccurrence)
+	return i, err
+}
+
 const setTaskSeries = `-- name: SetTaskSeries :exec
 UPDATE tasks SET series_id = $1, occurrence_date = $2 WHERE id = $3
 `
