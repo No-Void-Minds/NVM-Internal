@@ -14,6 +14,9 @@ defineProps<{
   // statusId dipakai dua arah: id baris status di sel Output, dan aria-describedby di kedua sel, supaya
   // hasil simpan tetap terbaca saat fokus ada di isian Aktivitas.
   statusId: string
+  // readonly: jam yang tersambung ke jam sebelumnya. Isiannya tetap isian yang sama, hanya tidak bisa
+  // diubah, supaya tinggi dan patahan teksnya persis sama dengan jam kepalanya (revisi 33b lanjutan).
+  readonly?: boolean
   showStatus?: boolean
   status?: 'saving' | 'saved' | 'error'
   message?: string
@@ -47,6 +50,9 @@ watch(value, () => void nextTick(() => grow(box)))
 <template>
   <!-- max-h-40 plus overflow-auto: catatan panjang digulir di dalam kotaknya, tabelnya tidak ikut memanjang.
        resize-none karena tingginya sudah mengikuti isi, jadi pegangan resize hanya mengacaukan baris tabel. -->
+  <!-- Jam tersambung: tepi kiri lurus tanpa garis dan latar canvas, jadi terbaca menyambung dari jam
+       sebelumnya tanpa melebar menutupi celah tombol rantai. Placeholder dimatikan supaya jam kepala yang
+       kosong tidak tampak berisi di jam lanjutannya. -->
   <textarea
     :ref="bind"
     v-model="value"
@@ -54,10 +60,12 @@ watch(value, () => void nextTick(() => grow(box)))
     maxlength="1000"
     :data-slot="num"
     :data-kind="kind"
+    :readonly="readonly"
     :aria-label="`${label} ${time}`"
     :aria-describedby="statusId"
-    :placeholder="placeholder"
-    class="field-sizing-content block min-h-11 max-h-40 w-full min-w-0 resize-none overflow-auto rounded-card border border-line bg-surface px-3 py-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
+    :placeholder="readonly ? undefined : placeholder"
+    class="field-sizing-content block min-h-11 max-h-40 w-full min-w-0 resize-none overflow-auto rounded-card border border-line px-3 py-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
+    :class="readonly ? 'rounded-l-none border-l-0 bg-canvas' : 'bg-surface'"
     @input="grow($event.target)"
     @blur="emit('blur')"
   ></textarea>

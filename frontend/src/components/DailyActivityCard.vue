@@ -76,12 +76,6 @@ const headTime = (c: ActivityCell) => cells.value.find((x) => x.slot === c.head)
 // yang akan ditolak server (link_hint berisi alasannya) tidak lagi memunculkan tombol mati (revisi 33b).
 const chainable = (c: ActivityCell) => c.linked || (c.joinable && c.link_hint === '')
 
-// Jam tersambung menyatu dengan jam kepalanya: kotaknya ditarik ke kiri sampai menyentuh isian jam
-// sebelumnya (pl-6 kolom ini ditambah pr-4 kolom sebelumnya), tepi kirinya lurus tanpa garis, dan latarnya
-// canvas tipis. pl-8 menyisakan ruang untuk ikon rantai yang duduk di tepi itu.
-const linkedBox =
-  '-ml-10 min-h-11 rounded-card rounded-l-none border border-line border-l-0 bg-canvas py-2 pr-3 pl-8'
-
 function remember(list: ActivityCell[]) {
   cells.value = list
   saved.value = Object.fromEntries(list.map((c) => [c.slot, { activity: c.activity, output: c.output }]))
@@ -102,6 +96,8 @@ async function load() {
 
 // Sel disimpan saat kehilangan fokus, hanya kalau isinya memang berubah.
 function blur(cell: ActivityCell) {
+  // Jam tersambung tidak punya isi sendiri; server menolaknya 409, jadi tidak perlu dikirim sama sekali.
+  if (cell.linked) return
   const before = saved.value[cell.slot]
   if (before && before.activity === cell.activity && before.output === cell.output) return
   void save(0, date.value, cell.slot, cell.activity, cell.output)
@@ -258,6 +254,12 @@ onMounted(() => {
                   class="pb-2 pl-6 pr-4 text-sm font-medium whitespace-nowrap"
                 >
                   {{ c.time }}
+                  <!-- Label Lanjutan ada di kepala kolom, bukan di dalam selnya: di dalam sel ia memakan
+                       satu baris dan membuat jam lanjutan lebih tinggi daripada jam kepalanya. Sebagai
+                       kepala kolom (scope="col") ia juga ikut dibacakan untuk kedua sel di bawahnya. -->
+                  <span v-if="c.linked" class="block text-xs font-normal text-ink-muted">
+                    Lanjutan {{ headTime(c) }}
+                  </span>
                 </th>
               </tr>
             </thead>
@@ -286,14 +288,11 @@ onMounted(() => {
                       class="absolute top-1/2 -left-6 z-10 -translate-x-1/2 -translate-y-1/2"
                       @toggle="toggleLink(c)"
                     />
-                    <!-- Jam tersambung hanya dibaca: isinya milik jam kepala dan diubah di sana. -->
-                    <div v-if="c.linked" :class="linkedBox">
-                      <p class="text-xs text-ink-muted">Lanjutan {{ headTime(c) }}</p>
-                      <p class="line-clamp-3 break-words whitespace-pre-line">{{ c.activity || '-' }}</p>
-                    </div>
+                    <!-- Jam tersambung memakai isian yang sama dalam keadaan hanya dibaca, jadi tinggi,
+                         lebar, dan patahan teksnya sama dengan jam kepalanya. -->
                     <ActivityBox
-                      v-else
                       v-model="c.activity"
+                      :readonly="c.linked"
                       :num="c.slot"
                       :time="c.time"
                       kind="activity"
@@ -319,13 +318,9 @@ onMounted(() => {
                   @drop.prevent="dropFiles($event, c.slot)"
                   @paste="onPaste($event, c)"
                 >
-                  <div v-if="c.linked" :class="linkedBox">
-                    <p class="text-xs text-ink-muted">Lanjutan {{ headTime(c) }}</p>
-                    <p class="line-clamp-3 break-words whitespace-pre-line">{{ c.output || '-' }}</p>
-                  </div>
                   <ActivityBox
-                    v-else
                     v-model="c.output"
+                    :readonly="c.linked"
                     :num="c.slot"
                     :time="c.time"
                     kind="output"

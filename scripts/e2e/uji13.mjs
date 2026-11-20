@@ -2716,6 +2716,36 @@ async function checkChain(width) {
       "terisi",
       `jam terisi ${awal} jadi ${await terisi()}, mau +2`,
     );
+
+    // Revisi 33b lanjutan: kotak jam lanjutan memakai isian yang sama dengan jam kepalanya, jadi tingginya
+    // sama (selisih maksimal 1 px) dan lebarnya sama dengan kolom jam lain. Di bawah 768 px jam lanjutan
+    // berupa teks, bukan isian, jadi pengukuran ini dilewati di sana.
+    const ukurKotak = async (jam) => {
+      const kotak = page
+        .getByRole("textbox", { name: `Aktivitas ${jam}` })
+        .locator("visible=true")
+        .first();
+      if ((await kotak.count()) === 0) return null;
+      const box = await kotak.boundingBox();
+      return box
+        ? { tinggi: Math.round(box.height), lebar: Math.round(box.width) }
+        : null;
+    };
+    const kotakKepala = await ukurKotak("14.00-15.00");
+    const kotakLanjut = await ukurKotak("15.00-16.00");
+    const kotakLain = await ukurKotak("17.00-18.00");
+    if (kotakKepala && kotakLanjut && kotakLain) {
+      expect(
+        Math.abs(kotakLanjut.tinggi - kotakKepala.tinggi) <= 1,
+        "ukuran",
+        `tinggi kotak lanjutan ${kotakLanjut.tinggi} px, kepala ${kotakKepala.tinggi} px`,
+      );
+      expect(
+        Math.abs(kotakLanjut.lebar - kotakLain.lebar) <= 1,
+        "ukuran",
+        `lebar kotak lanjutan ${kotakLanjut.lebar} px, kolom lain ${kotakLain.lebar} px`,
+      );
+    }
     await audit(page, errors, where("tersambung"));
 
     // Halaman Aktivitas: satu sel untuk tiga jam.
