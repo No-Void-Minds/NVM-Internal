@@ -72,7 +72,7 @@ func (q *Queries) GetActivityAttachment(ctx context.Context, id pgtype.UUID) (Ge
 }
 
 const getDailyActivity = `-- name: GetDailyActivity :one
-SELECT activity, output FROM daily_activities
+SELECT activity, output, continues_previous FROM daily_activities
 WHERE user_id = $1 AND activity_date = $2 AND slot = $3
 `
 
@@ -83,14 +83,15 @@ type GetDailyActivityParams struct {
 }
 
 type GetDailyActivityRow struct {
-	Activity pgtype.Text
-	Output   pgtype.Text
+	Activity          pgtype.Text
+	Output            pgtype.Text
+	ContinuesPrevious bool
 }
 
 func (q *Queries) GetDailyActivity(ctx context.Context, arg GetDailyActivityParams) (GetDailyActivityRow, error) {
 	row := q.db.QueryRow(ctx, getDailyActivity, arg.UserID, arg.ActivityDate, arg.Slot)
 	var i GetDailyActivityRow
-	err := row.Scan(&i.Activity, &i.Output)
+	err := row.Scan(&i.Activity, &i.Output, &i.ContinuesPrevious)
 	return i, err
 }
 
@@ -126,6 +127,32 @@ func (q *Queries) InsertActivityAttachment(ctx context.Context, arg InsertActivi
 	var id string
 	err := row.Scan(&id)
 	return id, err
+}
+
+const linkDailyActivity = `-- name: LinkDailyActivity :exec
+INSERT INTO daily_activities (user_id, activity_date, slot, continues_previous, updated_by)
+VALUES ($1, $2, $3, true, $4)
+ON CONFLICT (user_id, activity_date, slot) DO UPDATE
+SET continues_previous = true, updated_by = EXCLUDED.updated_by
+`
+
+type LinkDailyActivityParams struct {
+	UserID       int64
+	ActivityDate pgtype.Date
+	Slot         int16
+	UpdatedBy    int64
+}
+
+// Revisi 33: jam ini menyambung ke jam sebelumnya. Isinya sudah dipastikan kosong oleh service, dan CHECK
+// daily_activities_chain_empty menjaga kalau tidak.
+func (q *Queries) LinkDailyActivity(ctx context.Context, arg LinkDailyActivityParams) error {
+	_, err := q.db.Exec(ctx, linkDailyActivity,
+		arg.UserID,
+		arg.ActivityDate,
+		arg.Slot,
+		arg.UpdatedBy,
+	)
+	return err
 }
 
 const listActivityAttachments = `-- name: ListActivityAttachments :many
@@ -245,7 +272,8 @@ func (q *Queries) ListActivityPeople(ctx context.Context, arg ListActivityPeople
 }
 
 const listDailyActivities = `-- name: ListDailyActivities :many
-SELECT a.user_id, a.activity_date, a.slot, a.activity, a.output, a.updated_by, ub.name AS updated_by_name
+SELECT a.user_id, a.activity_date, a.slot, a.activity, a.output, a.updated_by, ub.name AS updated_by_name,
+       a.continues_previous
 FROM daily_activities a
 JOIN users ub ON ub.id = a.updated_by
 WHERE a.activity_date BETWEEN $1::date AND $2::date
@@ -258,13 +286,14 @@ type ListDailyActivitiesParams struct {
 }
 
 type ListDailyActivitiesRow struct {
-	UserID        int64
-	ActivityDate  pgtype.Date
-	Slot          int16
-	Activity      pgtype.Text
-	Output        pgtype.Text
-	UpdatedBy     int64
-	UpdatedByName string
+	UserID            int64
+	ActivityDate      pgtype.Date
+	Slot              int16
+	Activity          pgtype.Text
+	Output            pgtype.Text
+	UpdatedBy         int64
+	UpdatedByName     string
+	ContinuesPrevious bool
 }
 
 // Semua isian di rentang tanggal, termasuk sel yang isinya sudah dikosongkan (activity dan output NULL),
@@ -286,6 +315,7 @@ func (q *Queries) ListDailyActivities(ctx context.Context, arg ListDailyActiviti
 			&i.Output,
 			&i.UpdatedBy,
 			&i.UpdatedByName,
+			&i.ContinuesPrevious,
 		); err != nil {
 			return nil, err
 		}
@@ -295,6 +325,29 @@ func (q *Queries) ListDailyActivities(ctx context.Context, arg ListDailyActiviti
 		return nil, err
 	}
 	return items, nil
+}
+
+const unlinkDailyActivities = `-- name: UnlinkDailyActivities :exec
+UPDATE daily_activities SET continues_previous = false, updated_by = $1
+WHERE user_id = $2 AND activity_date = $3 AND slot = ANY($4::smallint[])
+`
+
+type UnlinkDailyActivitiesParams struct {
+	UpdatedBy    int64
+	UserID       int64
+	ActivityDate pgtype.Date
+	Slots        []int16
+}
+
+// Revisi 33: melepas satu jam beserta jam setelahnya yang tersambung ke jam itu. Barisnya dibiarkan kosong.
+func (q *Queries) UnlinkDailyActivities(ctx context.Context, arg UnlinkDailyActivitiesParams) error {
+	_, err := q.db.Exec(ctx, unlinkDailyActivities,
+		arg.UpdatedBy,
+		arg.UserID,
+		arg.ActivityDate,
+		arg.Slots,
+	)
+	return err
 }
 
 const upsertDailyActivity = `-- name: UpsertDailyActivity :exec

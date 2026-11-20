@@ -40,7 +40,7 @@ func (s *Service) Export(ctx context.Context, from, to string) ([]byte, string, 
 	}
 
 	name := fmt.Sprintf("aktivitas-harian-%s-sampai-%s.xlsx", from, to)
-	data, err := writeXLSX(exportRows(exportTitle(start, end), people, list))
+	data, err := writeXLSX(exportRows(exportTitle(start, end), people, list), exportMerges(people, list))
 	return data, name, err
 }
 
@@ -94,9 +94,41 @@ func exportRows(title string, people []Person, days []exportDay) [][]string {
 				if cells == nil {
 					continue
 				}
+				// Jam tersambung dikosongkan: isinya sudah di jam kepala, yang digabung ke bawah oleh exportMerges.
+				if cells[slot].Linked {
+					continue
+				}
 				r[3+2*i], r[4+2*i] = cells[slot].Activity, outputWithFiles(cells[slot])
 			}
 			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// exportMerges menggabungkan kolom Activity dan Output seseorang ke bawah sepanjang rantai jamnya (revisi 33),
+// jadi 09.00-10.00 dan 10.00-11.00 yang tersambung tampil sebagai satu blok, bukan isi yang tertulis dua kali.
+// Nomor baris mengikuti exportRows: tiga baris kepala, lalu satu baris per slot per hari.
+func exportMerges(people []Person, days []exportDay) []string {
+	out := []string{}
+	for d, day := range days {
+		for i, p := range people {
+			cells := day.Cells[p.ID]
+			for _, c := range cells {
+				n := 0
+				for _, o := range cells {
+					if o.Head == c.Slot {
+						n++
+					}
+				}
+				if c.Linked || n < 2 {
+					continue
+				}
+				top := 4 + d*len(Slots) + c.Slot - 1
+				for _, col := range []string{colName(3 + 2*i), colName(4 + 2*i)} {
+					out = append(out, fmt.Sprintf("%s%d:%s%d", col, top, col, top+n-1))
+				}
+			}
 		}
 	}
 	return out

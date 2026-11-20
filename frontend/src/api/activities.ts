@@ -19,6 +19,14 @@ export type ActivityCell = {
   // Nama penyimpan terakhir, hanya terisi bila bukan pemilik isian (Manajer yang mengubah isian orang lain).
   updated_by: string
   files: ActivityFile[]
+  // Revisi 33, rantai sambung jam. linked: jam ini menyambung ke jam sebelumnya; isinya salinan jam kepala
+  // (head) dari server dan hanya dibaca. span: rentang seluruh rantai, mis. "09.00-11.00".
+  linked: boolean
+  head: number
+  span: string
+  // joinable: ada tombol rantai ke jam sebelumnya. link_hint: alasan tombol itu tidak bisa dipakai.
+  joinable: boolean
+  link_hint: string
 }
 
 // Satu kolom tabel Aktivitas: seluruh sel orang itu di rentang yang diminta, dikelompokkan per tanggal.
@@ -72,6 +80,12 @@ export function getActivityRange(
 
 export function saveActivity(input: SaveActivityInput): Promise<MyActivities> {
   return apiPut<MyActivities>('/activities', input)
+}
+
+// Memasang atau melepas sambungan ke jam sebelumnya. Jawabannya isian sehari penuh, karena melepas satu jam
+// bisa ikut melepas jam setelahnya.
+export function linkActivity(input: { user_id?: number; date: string; slot: number; linked: boolean }) {
+  return apiPut<MyActivities>('/activities/link', input)
 }
 
 // Unduhan memakai tautan biasa, bukan fetch, supaya nama berkas dari Content-Disposition yang dipakai.

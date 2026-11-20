@@ -1419,6 +1419,36 @@ Keputusan teknis:
 
 **Hasil:** kode selesai 2026-11-20, `./scripts/check.sh` lolos. Test DB menunggu Rifky (`TEST_DATABASE_URL`).
 
+## Sprint 12c: Rantai sambung jam di Aktivitas Harian
+
+**Tujuan:** revisi 33 Manajer. Pekerjaan yang berlangsung lebih dari satu jam tidak perlu diisi ulang di setiap jam: jam berikutnya cukup disambung ke jam sebelumnya lewat tombol rantai.
+
+- [x] S12c-01 Migrasi 000021: kolom `continues_previous boolean NOT NULL DEFAULT false` di `daily_activities` dan CHECK `daily_activities_chain_empty` (jam tersambung tidak boleh punya Aktivitas atau Output sendiri). Tanpa tabel baru.
+- [x] S12c-02 Backend `internal/activity/chain.go`: `Joinable`, `resolveChains`, `Service.Link`, dan `Conflict` (409). `PUT /api/activities/link` dengan `{user_id, date, slot, linked}`, jawabannya isian sehari penuh. Simpan dan unggah ke jam tersambung ditolak 409.
+- [x] S12c-03 Sel API membawa `linked`, `head`, `span`, `joinable`, dan `link_hint`. Hitungan jam terisi, halaman `/aktivitas` (rowspan), ekspor Excel (sel digabung ke bawah), dan nama berkas di ekspor Drive (`09.00-11.00 - bukti.png`) memakai rantai yang sama.
+- [x] S12c-04 Frontend: `ActivityChainButton` di kepala kolom jam (layar lebar) dan di kartu jam (di bawah 768 px), jam tersambung tampil readonly dengan label "Lanjutan 09.00-10.00".
+- [x] S12c-05 Test DB `internal/activity/chain_db_test.go`, test unit `TestJoinable`, test `TestRantaiBolehMelintasiIstirahat`, dan bagian `E2E_ONLY=chain` di `scripts/e2e/uji13.mjs` (360 dan 1280 px).
+
+**Keputusan:**
+- Data: satu penanda di baris jam, bukan salinan isi. Isi jam tersambung diturunkan dari jam kepalanya saat dibaca (`resolveChains`), jadi edit di jam kepala langsung tampil di semua jam yang tersambung. Model data yang ada cocok: satu baris per orang, tanggal, dan slot sudah ada, dan berkas sudah menempel per slot.
+- Melepas rantai hanya mengubah penanda menjadi false. Baris tidak dihapus, jadi hak DELETE di `daily_activities` tetap tidak dibutuhkan dan `deploy/sql/10-grants.sql` tidak berubah (tidak ada tabel baru).
+- Rantai boleh lebih dari dua jam. Melepas jam di tengah ikut melepas jam setelahnya yang tersambung ke jam itu; jam kepala tidak berubah. Jam yang dilepas kembali kosong dan bisa diisi.
+- Ubahan revisi 33 (2026-11-20): rantai boleh melintasi jam istirahat. Jam bersebelahan berarti slot berurutan di `activity.Slots`, jadi 11.00-12.00 dan 13.00-14.00 juga bisa disambung dan tombol rantainya muncul di antara keduanya. Satu-satunya jam tanpa tombol adalah slot pertama (ditolak 400 lewat API). Span tetap dari jam mulai kepala sampai jam selesai ekor (mis. 11.00-14.00), sedangkan hitungan jam terisi tetap per slot (rantai 11.00-12.00 dan 13.00-14.00 dihitung 2 jam). Excel dan nama berkas Drive mengikuti aturan yang sama. Menggantikan keputusan awal revisi 33 yang memutus rantai di jam istirahat.
+- Rantai hanya bisa dipasang bila jam itu kosong (Aktivitas, Output, dan berkas). Kalau tidak, server menolak 409 "Kosongkan jam ini dulu untuk menyambung." dan tombolnya `aria-disabled` dengan tooltip yang sama.
+- Tambahan dari kami: rantai juga ditolak 409 bila jam sebelumnya (atau kepala rantainya) kosong, "Isi jam sebelumnya dulu untuk menyambung.". Tanpa ini jam kosong bisa disambung ke jam kosong dan terhitung terisi. Masuk "Menunggu jawaban Manajer".
+- Jam tersambung tidak bisa diisi atau diberi berkas sendiri: simpan dan unggah ke jam itu ditolak 409 "Jam ini tersambung ke jam sebelumnya. Lepas sambungan dulu untuk mengisinya.". Simpan, unggah, dan sambung untuk orang yang sama berjalan bergiliran karena ketiganya mengunci baris akun pemilik (`GetUserForUpdate`); CHECK migrasi menjadi pengaman terakhir.
+- Hak sama dengan mengisi jam (`CanEdit`): Staf hanya jamnya sendiri hari ini, Manajer siapa pun di tanggal berapa pun, Admin tidak. Perubahan Manajer pada jam orang lain dicatat sebagai `activity_updated` dengan `linked` di before dan after, jadi tidak ada aksi audit baru.
+- Jam tersambung dihitung terisi selama jam kepalanya berisi. Hitungan frontend (`filledHours`) kini juga menghitung jam yang hanya berisi berkas, sama dengan backend.
+- Halaman `/aktivitas`: rantai tampil sebagai satu sel dengan `rowspan`, dan dialognya berjudul rentangnya (mis. 09.00-11.00). Tombol rantai hanya ada di kartu papan task, tempat jam diisi; halaman `/aktivitas` tidak menambah tombol rantai. Backend tetap mengizinkan Manajer lewat API.
+- Ekspor Excel: kolom Activity dan Output orang itu digabung ke bawah sepanjang rantai (`mergeCell`), isinya ditulis sekali di jam kepala. Kolom Time tetap per jam, karena kolom itu dipakai bersama semua orang.
+- Ekspor Drive: berkas di jam kepala rantai diberi nama dengan rentangnya. Berkas yang sudah terunggah tidak diganti namanya (ekspor satu arah).
+- Tombol rantai di layar lebar duduk di garis antara dua kolom jam (kepala kolom), 44x44 px. Di bawah 768 px tombolnya ada di baris jam di kartu jam itu. `aria-pressed` menandai keadaan tersambung, `aria-label` "Sambungkan ke jam sebelumnya" atau "Lepas sambungan". Tanpa animasi baru.
+- Test `TestLampiranManajerDanHapus` gagal sebelum revisi ini: test menghitung aksi `activity_updated`, sedangkan unggah mencatat `activity_file_added`. Tidak diubah di sini, masuk Sprint 13.
+
+**Selesai kalau:** `./scripts/check.sh` lolos, migrasi 000021 jalan di dev dan test DB, test DB `-run 'Rantai|Joinable'` lolos tanpa SKIP, dan `E2E_ONLY=chain` lolos di 360 dan 1280 px.
+
+**Hasil:** kode selesai 2026-11-20, `./scripts/check.sh` lolos, migrasi 000021 jalan di dev dan test DB, test DB rantai lolos. E2E menunggu backend di-restart.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -1605,9 +1635,10 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 30 | 2026-11-19 | Halaman Timeline: kalender bulan bersama untuk launching, produksi, dan kehadiran, plus Important Notes. Manajer menulis, peran lain membaca; alasan kehadiran pribadi hanya untuk Manajer dan orangnya | Sprint 12a |
 | 31 | 2026-11-20 | Menghapus task berulang tidak menghentikan serinya: dialog hapus memilih hapus kemunculan saja atau hapus dan hentikan pengulangan (Manajer), pengaman ticker untuk seri tanpa kemunculan tersisa, status seri di detail | Sprint 12b |
 | 32 | 2026-11-20 | PIC task mengubah dan menghapus semua sub task di task-nya, termasuk sub task templat dari pembuat seri; centang tidak berubah | Sprint 12b |
+| 33 | 2026-11-20 | Rantai sambung jam di Aktivitas Harian: jam berikutnya yang kosong bisa disambung ke jam sebelumnya dan menampilkan isinya secara readonly, termasuk melintasi jam istirahat; halaman Manajer dan ekspor menampilkan rantai sebagai satu rentang | Sprint 12c |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat ketiga puluh dua revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat ketiga puluh tiga revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 
@@ -1620,6 +1651,7 @@ SRS v1.0 belum memuat ketiga puluh dua revisi (revisi 5 di S14-17). SRS diperbar
 - Revisi 6: apakah PIC boleh menandai task Ready tanpa membuat sub task sama sekali? Sekarang boleh, karena syarat Ready hanya "tidak ada sub task yang belum tercentang".
 - Revisi 32, mengurutkan sub task: belum ada pengurutan sub task di detail task, hanya di form Ubah task (Manajer dan pembuat selama Requested). Apakah PIC task perlu tombol naik dan turun di daftar sub task? Sementara tidak ditambah.
 - Revisi 30, privasi kehadiran: alasan sakit, izin pribadi, cuti pribadi, dan cuti khusus beserta keterangannya hanya dikirim server ke Manajer dan orang yang bersangkutan. Staf lain dan Admin menerima "Tidak hadir" tanpa alasan dan keterangan. Tukar libur dan tukar shift tampil apa adanya untuk semua. Dipakai pilihan yang paling aman sambil menunggu konfirmasi.
+- Revisi 33: rantai ditolak bila jam sebelumnya kosong ("Isi jam sebelumnya dulu untuk menyambung."), supaya jam kosong tidak terhitung terisi. Ini tambahan dari kami, tidak ada di permintaan. Setuju? Tombol rantai juga hanya ada di kartu papan task, belum di dialog sel halaman Aktivitas untuk Manajer.
 
 ## Setelah go-live (belum dijadwalkan)
 

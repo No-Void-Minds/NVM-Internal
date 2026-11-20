@@ -91,6 +91,9 @@ func (s *Service) CheckUpload(ctx context.Context, actor Actor, userID int64, da
 	if err != nil {
 		return "", err
 	}
+	if err := rejectChained(ctx, q, sqlc.GetDailyActivityParams{UserID: userID, ActivityDate: pgDay, Slot: int16(slot)}); err != nil {
+		return "", err
+	}
 	n, err := q.CountActivityAttachments(ctx, sqlc.CountActivityAttachmentsParams{
 		UserID: userID, ActivityDate: pgDay, Slot: int16(slot),
 	})
@@ -154,6 +157,10 @@ func (s *Service) Upload(ctx context.Context, actor Actor, userID int64, date st
 		}
 		if !CanEdit(actor, userID, day, s.Today()) {
 			return ErrForbidden
+		}
+		// Dicek ulang juga: jam ini bisa disambung ke jam sebelumnya selama berkas diunggah (revisi 33).
+		if err := rejectChained(ctx, q, sqlc.GetDailyActivityParams{UserID: userID, ActivityDate: pgDay, Slot: int16(slot)}); err != nil {
+			return err
 		}
 		id, err := q.InsertActivityAttachment(ctx, sqlc.InsertActivityAttachmentParams{
 			UserID: userID, ActivityDate: pgDay, Slot: int16(slot), OriginalName: name,

@@ -66,6 +66,15 @@ type Cell struct {
 	UpdatedBy string `json:"updated_by"`
 	// Lampiran jam itu (revisi 24). Selalu ada, kosong berarti belum ada berkas.
 	Files []FileInfo `json:"files"`
+	// Revisi 33. Linked: jam ini menyambung ke jam sebelumnya, isinya salinan jam kepala (Head) dan hanya
+	// dibaca. Span: rentang seluruh rantai, mis. "09.00-11.00", sama dengan Time bila tidak tersambung.
+	Linked bool   `json:"linked"`
+	Head   int    `json:"head"`
+	Span   string `json:"span"`
+	// Joinable: ada tombol rantai ke jam sebelumnya. LinkHint: alasan tombol itu tidak bisa dipakai, kosong
+	// bila bisa.
+	Joinable bool   `json:"joinable"`
+	LinkHint string `json:"link_hint"`
 }
 
 // Person adalah satu kolom tabel Aktivitas: isinya seluruh sel orang itu di rentang yang diminta, dikelompokkan
@@ -195,6 +204,9 @@ func (s *Service) Save(ctx context.Context, actor Actor, in SaveInput) error {
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		if before.ContinuesPrevious {
+			return &Conflict{Message: "Jam ini tersambung ke jam sebelumnya. Lepas sambungan dulu untuk mengisinya."}
+		}
 		if err := q.UpsertDailyActivity(ctx, sqlc.UpsertDailyActivityParams{
 			UserID: in.UserID, ActivityDate: day, Slot: int16(in.Slot),
 			Activity: pgText(activity), Output: pgText(output), UpdatedBy: actor.ID,
@@ -219,26 +231,8 @@ func (s *Service) Save(ctx context.Context, actor Actor, in SaveInput) error {
 // Mine mengembalikan isian satu orang di satu tanggal, lengkap dengan daftar slot supaya frontend tidak
 // menulis sendiri jam kerjanya.
 func (s *Service) Mine(ctx context.Context, userID int64, date string) (Mine, error) {
-	out := Mine{Date: date, Slots: Slots, Cells: emptyCells()}
-	rows, err := s.rows(ctx, date, date)
-	if err != nil {
-		return out, err
-	}
-	for _, r := range rows {
-		if r.UserID == userID {
-			fill(out.Cells, r)
-		}
-	}
-	files, err := s.fileRows(ctx, date, date)
-	if err != nil {
-		return out, err
-	}
-	for _, r := range files {
-		if r.UserID == userID {
-			addFile(out.Cells, r)
-		}
-	}
-	return out, nil
+	cells, err := dayCells(ctx, sqlc.New(s.pool), userID, date)
+	return Mine{Date: date, Slots: Slots, Cells: cells}, err
 }
 
 // WeekRange mengembalikan Senin sampai Jumat dari minggu tanggal itu. Minggu kerja dihitung mulai Senin,
@@ -340,8 +334,10 @@ func (s *Service) collect(ctx context.Context, from, to string) ([]Person, []str
 			if people[i].Days[key] == nil {
 				people[i].Days[key] = emptyCells()
 			}
+			// Jam tersambung ikut terisi dari jam kepalanya, jadi terhitung terisi (revisi 33).
+			resolveChains(people[i].Days[key])
 			for _, c := range people[i].Days[key] {
-				if c.Activity != "" || c.Output != "" || len(c.Files) > 0 {
+				if hasContent(c) {
 					people[i].Filled++
 				}
 			}
@@ -387,22 +383,10 @@ func dayHasContent(people []Person, date string) bool {
 	return false
 }
 
-func (s *Service) rows(ctx context.Context, from, to string) ([]sqlc.ListDailyActivitiesRow, error) {
-	fromDay, err := pgDate(from)
-	if err != nil {
-		return nil, err
-	}
-	toDay, err := pgDate(to)
-	if err != nil {
-		return nil, err
-	}
-	return sqlc.New(s.pool).ListDailyActivities(ctx, sqlc.ListDailyActivitiesParams{FromDate: fromDay, ToDate: toDay})
-}
-
 func emptyCells() []Cell {
 	cells := make([]Cell, len(Slots))
 	for i, label := range Slots {
-		cells[i] = Cell{Slot: i + 1, Time: label, Files: []FileInfo{}}
+		cells[i] = Cell{Slot: i + 1, Time: label, Files: []FileInfo{}, Head: i + 1, Span: label, Joinable: Joinable(i + 1)}
 	}
 	return cells
 }
@@ -414,6 +398,7 @@ func fill(cells []Cell, r sqlc.ListDailyActivitiesRow) {
 	}
 	cells[i].Activity = r.Activity.String
 	cells[i].Output = r.Output.String
+	cells[i].Linked = r.ContinuesPrevious
 	if r.UpdatedBy != r.UserID {
 		cells[i].UpdatedBy = r.UpdatedByName
 	}

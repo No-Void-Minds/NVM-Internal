@@ -157,6 +157,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	app.GET("/activities", s.listActivities)
 	app.GET("/activities/me", s.myActivities)
 	app.PUT("/activities", s.saveActivity)
+	app.PUT("/activities/link", s.linkActivity)
 	app.GET("/activities/export", managerOnly, s.exportActivities)
 	// To Do pribadi (revisi 28). Semua rute memakai akun yang login; tidak ada rute untuk To Do orang lain,
 	// dan id milik orang lain dijawab 404 supaya keberadaannya tidak bocor.

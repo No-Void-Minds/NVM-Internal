@@ -28,6 +28,8 @@
 // di database dev lewat form, dengan Manajer sebagai PIC).
 // E2E_ONLY=timeline (revisi 30: grid dan agenda, keyboard dan popover tanggal, Manajer membuat satu kartu per
 // kategori di hari ini lalu menghapusnya, Staf tanpa tombol tulis dan tanpa alasan kehadiran Manajer).
+// E2E_ONLY=chain (revisi 33: rantai sambung jam di kartu Aktivitas hari ini milik Staf, termasuk melintasi istirahat,
+// 360 dan 1280 px; menulis lalu mengosongkan jam 11.00-12.00 sampai 16.00-17.00 hari ini).
 // Keluar dengan kode 1 bila ada yang gagal.
 import { chromium } from "playwright-core";
 
@@ -2620,6 +2622,147 @@ async function checkTimeline(width) {
 }
 
 if (ONLY === "timeline") for (const w of [360, 1280]) await checkTimeline(w);
+
+// Revisi 33: rantai sambung jam di kartu Aktivitas hari ini milik Staf. Menulis jam 11.00-12.00, 14.00-15.00,
+// 15.00-16.00, dan 16.00-17.00 hari ini lewat API, lalu mengosongkannya lagi di akhir.
+async function checkChain(width) {
+  const staf = await apiAs("staf");
+  const { ctx, page, errors } = await open("staf", width, "terang");
+  const where = (what) => `rantai ${width} ${what}`;
+  const expect = (cond, w, msg) => {
+    checks++;
+    if (!cond) fail(where(w), msg);
+  };
+  const kepala = `Uji rantai ${Date.now()}`;
+  const simpan = (slot, activity) =>
+    staf.call("PUT", "/activities", { slot, activity, output: "" });
+  const bersihkan = async () => {
+    for (const slot of [4, 6])
+      await staf.call("PUT", "/activities/link", { slot, linked: false });
+    for (const slot of [3, 5, 6, 7]) await simpan(slot, "");
+  };
+  // Tombol rantai di kolom (layar lebar) atau kartu (layar sempit) jam itu, mana pun yang terlihat.
+  const tombol = (jam) =>
+    page
+      .locator("th:visible, li:visible")
+      .filter({ hasText: jam })
+      .getByRole("button", {
+        name: /Sambungkan ke jam sebelumnya|Lepas sambungan/,
+      })
+      .first();
+
+  try {
+    await bersihkan();
+    await simpan(5, kepala);
+    await simpan(3, "Isi jam ketiga");
+    const today = (await staf.call("GET", "/activities/me")).body.date;
+
+    await page.goto(BASE + "/task");
+    await page.waitForLoadState("networkidle");
+    const judul = page.getByRole("button", { name: /Aktivitas hari ini/ });
+    if ((await judul.getAttribute("aria-expanded")) === "false")
+      await judul.click();
+    await page.waitForSelector("textarea:visible");
+    const terisi = async () =>
+      Number((await judul.textContent()).match(/(\d+) dari/)?.[1] ?? -1);
+    const awal = await terisi();
+
+    // Ubahan revisi 33: jam setelah istirahat juga punya tombol rantai.
+    expect(
+      (await tombol("13.00-14.00").count()) === 1,
+      "istirahat",
+      "13.00-14.00 tidak punya tombol rantai",
+    );
+    // Jam yang berisi: tombol tetap bisa difokus, aria-disabled, dengan alasannya.
+    const isi = tombol("11.00-12.00");
+    expect(
+      (await isi.getAttribute("aria-disabled")) === "true" &&
+        (await isi.getAttribute("title")) ===
+          "Kosongkan jam ini dulu untuk menyambung.",
+      "jam berisi",
+      "tombol jam berisi tidak nonaktif atau tooltip salah",
+    );
+
+    // Sambung 15.00-16.00 lewat keyboard, lalu 16.00-17.00 lewat klik.
+    await tombol("15.00-16.00").focus();
+    await page.keyboard.press("Enter");
+    await page.waitForSelector('[aria-pressed="true"]:visible');
+    await tombol("16.00-17.00").click();
+    await page.waitForFunction(
+      () => document.querySelectorAll('[aria-pressed="true"]').length >= 4,
+    );
+    const lanjutan = page
+      .getByText("Lanjutan 14.00-15.00")
+      .filter({ visible: true });
+    expect(
+      (await lanjutan.count()) >= 2,
+      "pasang",
+      "label Lanjutan tidak muncul",
+    );
+    expect(
+      (await page.getByText(kepala).filter({ visible: true }).count()) >= 2,
+      "pasang",
+      "isi jam kepala tidak tampil di jam tersambung",
+    );
+    expect(
+      (await terisi()) === awal + 2,
+      "terisi",
+      `jam terisi ${awal} jadi ${await terisi()}, mau +2`,
+    );
+    await audit(page, errors, where("tersambung"));
+
+    // Halaman Aktivitas: satu sel untuk tiga jam.
+    await page.goto(BASE + `/aktivitas?mode=hari&tanggal=${today}`);
+    await page.waitForSelector("table td");
+    expect(
+      (await page
+        .locator('td[rowspan="3"]')
+        .filter({ hasText: kepala })
+        .count()) === 1,
+      "halaman",
+      "rantai tidak tampil sebagai satu sel rowspan 3",
+    );
+    await audit(page, errors, where("halaman aktivitas"));
+
+    // Lepas di tengah: 16.00-17.00 ikut lepas.
+    await page.goto(BASE + "/task");
+    await page.waitForSelector("textarea:visible");
+    await tombol("15.00-16.00").click();
+    await page.waitForFunction(
+      () => !document.body.innerText.includes("Lanjutan 14.00-15.00"),
+    );
+    expect(
+      (await tombol("16.00-17.00").getAttribute("aria-pressed")) === "false",
+      "lepas",
+      "16.00-17.00 masih tersambung setelah 15.00-16.00 dilepas",
+    );
+    await audit(page, errors, where("dilepas"));
+
+    // Melintasi istirahat: 13.00-14.00 menyambung ke 11.00-12.00 dan terhitung satu jam terisi.
+    const sebelumIstirahat = await terisi();
+    await tombol("13.00-14.00").click();
+    await page.waitForFunction(() =>
+      document.body.innerText.includes("Lanjutan 11.00-12.00"),
+    );
+    expect(
+      (await tombol("13.00-14.00").getAttribute("aria-pressed")) === "true",
+      "istirahat",
+      "13.00-14.00 tidak tersambung",
+    );
+    expect(
+      (await terisi()) === sebelumIstirahat + 1,
+      "istirahat",
+      `jam terisi ${sebelumIstirahat} jadi ${await terisi()}, mau +1`,
+    );
+    await audit(page, errors, where("melintasi istirahat"));
+  } finally {
+    await bersihkan();
+    await staf.ctx.close();
+    await ctx.close();
+  }
+}
+
+if (ONLY === "chain") for (const w of [360, 1280]) await checkChain(w);
 
 await browser.close();
 console.log(

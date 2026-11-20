@@ -219,10 +219,22 @@ func (s *Service) stageActivityFiles(ctx context.Context, m *Manifest, taken *ta
 	if err != nil {
 		return fmt.Errorf("daftar lampiran aktivitas: %w", err)
 	}
+	// Sel per orang per tanggal, supaya berkas di jam kepala rantai memakai rentangnya (revisi 33), mis.
+	// "09.00-11.00 - bukti.png". Cache karena satu jam bisa punya sampai 10 berkas.
+	days := map[string][]activity.Cell{}
 	for _, r := range rows {
+		date := r.ActivityDate.Time.Format("2006-01-02")
+		key := fmt.Sprintf("%d:%s", r.UserID, date)
+		if _, ok := days[key]; !ok {
+			mine, err := s.activities.Mine(ctx, r.UserID, date)
+			if err != nil {
+				return fmt.Errorf("sel aktivitas %s: %w", key, err)
+			}
+			days[key] = mine.Cells
+		}
 		slotLabel := "jam lain"
-		if i := int(r.Slot) - 1; i >= 0 && i < len(activity.Slots) {
-			slotLabel = activity.Slots[i]
+		if i := int(r.Slot) - 1; i >= 0 && i < len(days[key]) {
+			slotLabel = days[key][i].Span
 		}
 		folder := ActivityDayDir(r.ActivityDate.Time) + "/" + Clean(r.UserName)
 		name, err := taken.pick(ctx, folder, ActivityFileName(slotLabel, r.OriginalName))

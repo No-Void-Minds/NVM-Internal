@@ -127,6 +127,45 @@ func (s *Server) saveActivity(c *gin.Context) {
 	c.JSON(http.StatusOK, out)
 }
 
+type linkActivityRequest struct {
+	UserID int64  `json:"user_id"`
+	Date   string `json:"date"`
+	Slot   int    `json:"slot"`
+	Linked bool   `json:"linked"`
+}
+
+// linkActivity memasang atau melepas rantai sambung satu jam ke jam sebelumnya (revisi 33). Jawabannya isian
+// sehari penuh, karena melepas satu jam bisa ikut melepas jam setelahnya.
+func (s *Server) linkActivity(c *gin.Context) {
+	var req linkActivityRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeError(c, http.StatusBadRequest, CodeBadRequest, "Isian tidak terbaca.")
+		return
+	}
+	actor := activityActor(c)
+	if req.UserID == 0 {
+		req.UserID = actor.ID
+	}
+	err := s.activities.Link(c.Request.Context(), actor, activity.LinkInput{
+		UserID: req.UserID, Date: req.Date, Slot: req.Slot, Linked: req.Linked,
+	})
+	if err != nil {
+		s.writeActivityError(c, err)
+		return
+	}
+	date, err := s.activities.ParseDay(req.Date)
+	if err != nil {
+		s.writeActivityError(c, err)
+		return
+	}
+	out, err := s.activities.Mine(c.Request.Context(), req.UserID, date)
+	if err != nil {
+		s.writeActivityError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
+
 // exportActivities mengirim .xlsx untuk rentang tanggal. Hanya Manajer (dibatasi di router).
 func (s *Server) exportActivities(c *gin.Context) {
 	from, err := s.activities.ParseDay(c.Query("from"))
@@ -154,7 +193,10 @@ func (s *Server) writeActivityError(c *gin.Context, err error) {
 	var ve *apperr.Validation
 	var rejected *attachment.Rejected
 	var tooBig *http.MaxBytesError
+	var conflict *activity.Conflict
 	switch {
+	case errors.As(err, &conflict):
+		writeError(c, http.StatusConflict, CodeConflict, conflict.Message)
 	case errors.As(err, &rejected):
 		writeError(c, http.StatusUnsupportedMediaType, CodeUnsupportedFile, rejected.Message)
 	case errors.Is(err, activity.ErrTooLarge), errors.As(err, &tooBig):

@@ -57,7 +57,7 @@ const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 </cellXfs>
 </styleSheet>`
 
-func writeXLSX(rows [][]string) ([]byte, error) {
+func writeXLSX(rows [][]string, extraMerges []string) ([]byte, error) {
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	parts := []struct{ name, body string }{
@@ -66,7 +66,7 @@ func writeXLSX(rows [][]string) ([]byte, error) {
 		{"xl/workbook.xml", workbook},
 		{"xl/_rels/workbook.xml.rels", workbookRels},
 		{"xl/styles.xml", styles},
-		{"xl/worksheets/sheet1.xml", sheetXML(rows)},
+		{"xl/worksheets/sheet1.xml", sheetXML(rows, extraMerges)},
 	}
 	for _, p := range parts {
 		w, err := zw.Create(p.name)
@@ -83,7 +83,7 @@ func writeXLSX(rows [][]string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func sheetXML(rows [][]string) string {
+func sheetXML(rows [][]string, extraMerges []string) string {
 	width := 0
 	for _, r := range rows {
 		width = max(width, len(r))
@@ -131,6 +131,7 @@ func sheetXML(rows [][]string) string {
 			}
 		}
 	}
+	merges = append(merges, extraMerges...)
 	if len(merges) > 0 {
 		fmt.Fprintf(&b, `<mergeCells count="%d">`, len(merges))
 		for _, m := range merges {

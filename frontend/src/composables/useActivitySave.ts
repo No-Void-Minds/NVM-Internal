@@ -8,7 +8,11 @@ export const cellKey = (userId: number, slot: number) => `${userId}:${slot}`
 
 // Simpan otomatis satu sel: dipakai kartu di papan task dan halaman Aktivitas, supaya aturan simpan,
 // status per baris, dan tombol Coba lagi hanya ada di satu tempat.
-export function useActivitySave(apply: (userId: number, slot: number, cell: ActivityCell) => void) {
+// apply juga menerima seluruh jam hari itu: menyimpan jam kepala mengubah isi jam yang tersambung ke jam itu
+// (revisi 33), jadi pemanggil bisa ikut menyegarkannya.
+export function useActivitySave(
+  apply: (userId: number, slot: number, cell: ActivityCell, day: ActivityCell[]) => void,
+) {
   const status = ref<Record<string, Status>>({})
   const message = ref<Record<string, string>>({})
   // Nilai yang terakhir dicoba, supaya Coba lagi tidak perlu menunggu pengguna mengetik ulang.
@@ -23,7 +27,7 @@ export function useActivitySave(apply: (userId: number, slot: number, cell: Acti
       const res = await saveActivity({ user_id: userId, date, slot, activity, output })
       // Hanya sel yang baru disimpan yang ditimpa hasil server, supaya sel lain yang sedang diisi tidak
       // ikut kembali ke nilai lama.
-      apply(userId, slot, res.cells[slot - 1])
+      apply(userId, slot, res.cells[slot - 1], res.cells)
       status.value[key] = 'saved'
     } catch (err) {
       // Isian yang gagal sengaja tidak ditimpa: teks yang diketik tetap ada di layar untuk dicoba lagi.

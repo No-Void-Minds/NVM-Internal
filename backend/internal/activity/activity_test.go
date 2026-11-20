@@ -211,3 +211,12 @@ func TestOutputWithFiles(t *testing.T) {
 		t.Fatalf("dengan teks %q", got)
 	}
 }
+
+// Revisi 33 (ubahan): semua slot kecuali yang pertama bisa disambung, termasuk 13.00-14.00 setelah istirahat.
+func TestJoinable(t *testing.T) {
+	for slot, want := range map[int]bool{0: false, 1: false, 2: true, 3: true, 4: true, 5: true, 8: true, 9: false} {
+		if got := Joinable(slot); got != want {
+			t.Errorf("Joinable(%d) = %v, mau %v", slot, got, want)
+		}
+	}
+}

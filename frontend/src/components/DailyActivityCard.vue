@@ -5,7 +5,8 @@ import LoadingSkeleton from './LoadingSkeleton.vue'
 import ActivityCellFields from './ActivityCellFields.vue'
 import ActivityBox from './ActivityBox.vue'
 import ActivityFiles from './ActivityFiles.vue'
-import { getMyActivities, type ActivityCell } from '../api/activities'
+import ActivityChainButton from './ActivityChainButton.vue'
+import { getMyActivities, linkActivity, type ActivityCell } from '../api/activities'
 import { ApiError } from '../api/client'
 import { useActivitySave } from '../composables/useActivitySave'
 import { filledHours } from '../utils/activity'
@@ -25,12 +26,51 @@ const loadState = ref<'loading' | 'ready' | 'error'>('loading')
 const loadError = ref('')
 
 const terisi = computed(() => filledHours(cells.value))
-const { status, message, save, retry } = useActivitySave((_userId, slot, cell) => {
+const { status, message, save, retry } = useActivitySave((_userId, slot, cell, day) => {
   const i = cells.value.findIndex((c) => c.slot === slot)
   if (i === -1) return
   cells.value[i] = cell
   saved.value[slot] = { activity: cell.activity, output: cell.output }
+  applyDay(day)
 })
+
+// Jawaban server untuk satu hari (revisi 33). Jam yang tersambung atau baru dilepas diganti utuh, karena isinya
+// milik server. Jam lain hanya diperbarui data rantainya, supaya teks yang sedang diketik di sana tidak hilang.
+function applyDay(day: ActivityCell[]) {
+  day.forEach((fresh, i) => {
+    const c = cells.value[i]
+    if (!c || c.slot !== fresh.slot) return
+    if (fresh.linked || c.linked) {
+      cells.value[i] = fresh
+      saved.value[fresh.slot] = { activity: fresh.activity, output: fresh.output }
+      return
+    }
+    Object.assign(c, {
+      head: fresh.head,
+      span: fresh.span,
+      joinable: fresh.joinable,
+      link_hint: fresh.link_hint,
+    })
+  })
+}
+
+// Rantai sambung jam (revisi 33).
+const linking = ref(0)
+const linkError = ref('')
+
+async function toggleLink(c: ActivityCell) {
+  linking.value = c.slot
+  linkError.value = ''
+  try {
+    applyDay((await linkActivity({ date: date.value, slot: c.slot, linked: !c.linked })).cells)
+  } catch (err) {
+    linkError.value = err instanceof ApiError ? err.message : 'Tidak bisa mengubah sambungan. Coba lagi.'
+  } finally {
+    linking.value = 0
+  }
+}
+
+const headTime = (c: ActivityCell) => cells.value.find((x) => x.slot === c.head)?.time ?? ''
 
 function remember(list: ActivityCell[]) {
   cells.value = list
@@ -186,6 +226,9 @@ onMounted(() => {
           Belum ada jam yang terisi. Tulis apa yang kamu kerjakan dan hasilnya, lalu klik di luar kotak untuk
           menyimpan.
         </p>
+        <p v-if="linkError" role="alert" class="mb-3 rounded-card bg-danger-bg p-3 text-danger">
+          {{ linkError }}
+        </p>
         <!-- Mulai 768 px tabelnya diputar: jam jadi kepala kolom, jadi kartu ini hanya tiga baris tinggi
              (revisi 21). Wadahnya yang bergulir ke samping bila delapan kolom tidak muat, bukan halamannya;
              kolom label tetap terlihat karena lengket di kiri. -->
@@ -202,7 +245,17 @@ onMounted(() => {
                   scope="col"
                   class="px-2 pb-2 text-sm font-medium whitespace-nowrap"
                 >
-                  {{ c.time }}
+                  <!-- Tombol rantai duduk tepat di garis antara kolom ini dan kolom sebelumnya (revisi 33). -->
+                  <div class="relative flex min-h-11 items-center" :class="c.joinable ? 'pl-7' : ''">
+                    <ActivityChainButton
+                      v-if="c.joinable"
+                      :cell="c"
+                      :busy="linking === c.slot"
+                      class="absolute -left-2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+                      @toggle="toggleLink(c)"
+                    />
+                    {{ c.time }}
+                  </div>
                 </th>
               </tr>
             </thead>
@@ -216,12 +269,21 @@ onMounted(() => {
                   :key="c.slot"
                   class="px-2 py-1"
                   :class="[cellDrop, dragSlot === c.slot ? 'bg-canvas outline-2 outline-mark' : '']"
-                  @dragover.prevent="dragSlot = c.slot"
+                  @dragover.prevent="dragSlot = c.linked ? 0 : c.slot"
                   @dragleave="dragLeave($event, c.slot)"
                   @drop.prevent="dropFiles($event, c.slot)"
                   @paste="onPaste($event, c)"
                 >
+                  <!-- Jam tersambung hanya dibaca: isinya milik jam kepala dan diubah di sana. -->
+                  <div
+                    v-if="c.linked"
+                    class="min-h-11 rounded-card border border-dashed border-line px-3 py-2"
+                  >
+                    <p class="text-xs text-ink-muted">Lanjutan {{ headTime(c) }}</p>
+                    <p class="line-clamp-3 break-words whitespace-pre-line">{{ c.activity || '-' }}</p>
+                  </div>
                   <ActivityBox
+                    v-else
                     v-model="c.activity"
                     :num="c.slot"
                     :time="c.time"
@@ -242,12 +304,20 @@ onMounted(() => {
                   :key="c.slot"
                   class="px-2 py-1"
                   :class="[cellDrop, dragSlot === c.slot ? 'bg-canvas outline-2 outline-mark' : '']"
-                  @dragover.prevent="dragSlot = c.slot"
+                  @dragover.prevent="dragSlot = c.linked ? 0 : c.slot"
                   @dragleave="dragLeave($event, c.slot)"
                   @drop.prevent="dropFiles($event, c.slot)"
                   @paste="onPaste($event, c)"
                 >
+                  <div
+                    v-if="c.linked"
+                    class="min-h-11 rounded-card border border-dashed border-line px-3 py-2"
+                  >
+                    <p class="text-xs text-ink-muted">Lanjutan {{ headTime(c) }}</p>
+                    <p class="line-clamp-3 break-words whitespace-pre-line">{{ c.output || '-' }}</p>
+                  </div>
                   <ActivityBox
+                    v-else
                     v-model="c.output"
                     :num="c.slot"
                     :time="c.time"
@@ -269,7 +339,7 @@ onMounted(() => {
                     :num="c.slot"
                     :time="c.time"
                     :files="c.files"
-                    can-manage
+                    :can-manage="!c.linked"
                     compact
                     class="mt-1"
                     @changed="load()"
@@ -295,12 +365,21 @@ onMounted(() => {
             :key="c.slot"
             class="grid gap-2 rounded-card border border-line p-3 sm:grid-cols-[7rem_minmax(0,1fr)_minmax(0,1fr)] sm:items-start sm:gap-3"
             :class="dragSlot === c.slot ? 'bg-canvas outline-2 outline-mark' : ''"
-            @dragover.prevent="dragSlot = c.slot"
+            @dragover.prevent="dragSlot = c.linked ? 0 : c.slot"
             @dragleave="dragLeave($event, c.slot)"
             @drop.prevent="dropFiles($event, c.slot)"
             @paste="onPaste($event, c)"
           >
-            <p class="font-medium sm:pt-2">{{ c.time }}</p>
+            <div class="flex flex-wrap items-center gap-x-2">
+              <ActivityChainButton
+                v-if="c.joinable"
+                :cell="c"
+                :busy="linking === c.slot"
+                @toggle="toggleLink(c)"
+              />
+              <p class="font-medium">{{ c.time }}</p>
+              <p v-if="c.linked" class="w-full text-xs text-ink-muted">Lanjutan {{ headTime(c) }}</p>
+            </div>
             <ActivityCellFields
               v-model:activity="c.activity"
               v-model:output="c.output"
@@ -308,6 +387,7 @@ onMounted(() => {
               :updated-by="c.updated_by"
               :status="status[`0:${c.slot}`]"
               :message="message[`0:${c.slot}`]"
+              :readonly="c.linked"
               @blur="blur(c)"
               @retry="retry(0, c.slot)"
             />
@@ -318,7 +398,7 @@ onMounted(() => {
               :num="c.slot"
               :time="c.time"
               :files="c.files"
-              can-manage
+              :can-manage="!c.linked"
               class="sm:col-span-3"
               @changed="load()"
             />

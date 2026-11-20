@@ -343,14 +343,15 @@ type AuditLog struct {
 }
 
 type DailyActivity struct {
-	ID           int64
-	UserID       int64
-	ActivityDate pgtype.Date
-	Slot         int16
-	Activity     pgtype.Text
-	Output       pgtype.Text
-	UpdatedBy    int64
-	UpdatedAt    pgtype.Timestamptz
+	ID                int64
+	UserID            int64
+	ActivityDate      pgtype.Date
+	Slot              int16
+	Activity          pgtype.Text
+	Output            pgtype.Text
+	UpdatedBy         int64
+	UpdatedAt         pgtype.Timestamptz
+	ContinuesPrevious bool
 }
 
 type Division struct {

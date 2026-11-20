@@ -31,6 +31,7 @@ import {
   type ActivityMode,
 } from '../utils/activityWeek'
 import { officeToday } from '../utils/recurrence'
+import { chainLength, filledHours } from '../utils/activity'
 
 // Halaman Aktivitas Harian (revisi 21): satu kolom per orang, bawaan satu minggu kerja. Semua peran boleh
 // membaca, hanya Manajer yang boleh mengubah (can_edit dari server, bukan dihitung di sini).
@@ -205,7 +206,8 @@ function openCell(p: ActivityPerson, date: string, slot: number, e: Event) {
     personName: p.name,
     date,
     slot,
-    time: cell.time,
+    // Jam kepala rantai (revisi 33) mewakili seluruh rentangnya, mis. 09.00-11.00.
+    time: cell.span,
     activity: cell.activity,
     output: cell.output,
     updatedBy: cell.updated_by,
@@ -271,12 +273,11 @@ async function saveCell() {
     const person = people.value.find((p) => p.id === d.personId)
     const cells = person?.days[d.date]
     const fresh = res.cells[d.slot - 1]
-    if (person && cells && fresh) {
-      const terisiSebelum = cells[d.slot - 1].activity !== '' || cells[d.slot - 1].output !== ''
-      const terisiSesudah = fresh.activity !== '' || fresh.output !== ''
-      cells[d.slot - 1] = fresh
-      // Ringkasan kolom ikut berubah tanpa memuat ulang seluruh tabel.
-      if (terisiSebelum !== terisiSesudah) person.filled += terisiSesudah ? 1 : -1
+    if (person && cells) {
+      // Seluruh hari diganti, karena jam yang tersambung ke jam ini ikut berubah isinya (revisi 33). Ringkasan
+      // kolom ikut berubah tanpa memuat ulang seluruh tabel.
+      person.filled += filledHours(res.cells) - filledHours(cells)
+      person.days[d.date] = res.cells
     }
     if (fresh) {
       d.activity = fresh.activity
@@ -601,14 +602,22 @@ const timeCell = 'sticky left-0 z-20 w-28 px-3 py-2 text-left font-medium whites
             >
               {{ time }}
             </th>
-            <td v-for="p in visible" :key="p.id" class="relative border-l border-line p-0">
-              <ActivityCellView
-                v-if="p.days[date]?.[i]"
-                :cell="p.days[date][i]"
-                :open-label="`Lihat aktivitas ${p.name}, ${time}, ${dayLabel(date)}`"
-                @open="openCell(p, date, i + 1, $event)"
-              />
-            </td>
+            <!-- Jam yang tersambung (revisi 33) digabung ke sel jam kepalanya lewat rowspan, jadi satu rantai
+                 tampil sebagai satu sel 09.00-11.00, bukan isi yang sama dua kali. -->
+            <template v-for="p in visible" :key="p.id">
+              <td
+                v-if="!p.days[date]?.[i]?.linked"
+                :rowspan="p.days[date] ? chainLength(p.days[date], i + 1) : 1"
+                class="relative border-l border-line p-0"
+              >
+                <ActivityCellView
+                  v-if="p.days[date]?.[i]"
+                  :cell="p.days[date][i]"
+                  :open-label="`Lihat aktivitas ${p.name}, ${p.days[date][i].span}, ${dayLabel(date)}`"
+                  @open="openCell(p, date, i + 1, $event)"
+                />
+              </td>
+            </template>
           </tr>
         </tbody>
       </table>

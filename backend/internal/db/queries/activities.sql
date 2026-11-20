@@ -16,14 +16,15 @@ ORDER BY lower(d.name), lower(u.name);
 -- name: ListDailyActivities :many
 -- Semua isian di rentang tanggal, termasuk sel yang isinya sudah dikosongkan (activity dan output NULL),
 -- supaya "diubah <nama>" tetap terbaca setelah Manajer menghapus isi sel.
-SELECT a.user_id, a.activity_date, a.slot, a.activity, a.output, a.updated_by, ub.name AS updated_by_name
+SELECT a.user_id, a.activity_date, a.slot, a.activity, a.output, a.updated_by, ub.name AS updated_by_name,
+       a.continues_previous
 FROM daily_activities a
 JOIN users ub ON ub.id = a.updated_by
 WHERE a.activity_date BETWEEN @from_date::date AND @to_date::date
 ORDER BY a.activity_date, a.slot;
 
 -- name: GetDailyActivity :one
-SELECT activity, output FROM daily_activities
+SELECT activity, output, continues_previous FROM daily_activities
 WHERE user_id = @user_id AND activity_date = @activity_date AND slot = @slot;
 
 -- name: UpsertDailyActivity :exec
@@ -32,6 +33,19 @@ INSERT INTO daily_activities (user_id, activity_date, slot, activity, output, up
 VALUES (@user_id, @activity_date, @slot, @activity, @output, @updated_by)
 ON CONFLICT (user_id, activity_date, slot) DO UPDATE
 SET activity = EXCLUDED.activity, output = EXCLUDED.output, updated_by = EXCLUDED.updated_by;
+
+-- name: LinkDailyActivity :exec
+-- Revisi 33: jam ini menyambung ke jam sebelumnya. Isinya sudah dipastikan kosong oleh service, dan CHECK
+-- daily_activities_chain_empty menjaga kalau tidak.
+INSERT INTO daily_activities (user_id, activity_date, slot, continues_previous, updated_by)
+VALUES (@user_id, @activity_date, @slot, true, @updated_by)
+ON CONFLICT (user_id, activity_date, slot) DO UPDATE
+SET continues_previous = true, updated_by = EXCLUDED.updated_by;
+
+-- name: UnlinkDailyActivities :exec
+-- Revisi 33: melepas satu jam beserta jam setelahnya yang tersambung ke jam itu. Barisnya dibiarkan kosong.
+UPDATE daily_activities SET continues_previous = false, updated_by = @updated_by
+WHERE user_id = @user_id AND activity_date = @activity_date AND slot = ANY(@slots::smallint[]);
 
 -- name: InsertActivityAttachment :one
 -- id dikembalikan sebagai teks karena langsung dipakai sebagai nama berkas di disk.
