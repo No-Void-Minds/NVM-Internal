@@ -97,12 +97,13 @@ const link = 'underline focus-visible:outline-2 focus-visible:outline-offset-2 f
       </div>
     </template>
 
+    <!-- Tinggi satu baris selalu tersedia, jadi status simpan tidak menggeser isi di bawahnya (revisi 33b). -->
     <p
-      v-if="status || updatedBy"
-      class="text-sm sm:col-span-2"
+      aria-live="polite"
+      class="min-h-5 text-xs leading-5 sm:col-span-2"
       :class="status === 'error' ? 'text-danger' : 'text-ink-muted'"
     >
-      <span v-if="status" aria-live="polite">{{ saveLabel[status] }}</span>
+      <span v-if="status">{{ saveLabel[status] }}</span>
       <template v-if="status === 'error'">
         <span v-if="message"> {{ message }}</span>
         <button

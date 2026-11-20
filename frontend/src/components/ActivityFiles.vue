@@ -123,6 +123,9 @@ const iconButton =
   'inline-flex size-11 shrink-0 items-center justify-center rounded-card text-ink-muted hover:bg-canvas hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark'
 const smallButton =
   'inline-flex min-h-11 items-center gap-1 rounded-card border border-line px-2 text-sm font-medium hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark disabled:opacity-60'
+// Di dalam sel tabel tombol ini terulang delapan kali, jadi bingkainya dilepas (revisi 33b).
+const ghostButton =
+  'inline-flex min-h-11 items-center gap-1 rounded-card px-2 text-sm font-medium text-ink-muted hover:bg-canvas hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark disabled:opacity-60'
 </script>
 
 <template>
@@ -255,7 +258,7 @@ const smallButton =
       />
       <button
         type="button"
-        :class="smallButton"
+        :class="compact ? ghostButton : smallButton"
         :disabled="busy"
         :title="activityAllowedText"
         :aria-label="`Tambah berkas untuk jam ${time}. ${activityAllowedText}`"

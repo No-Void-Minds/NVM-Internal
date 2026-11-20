@@ -62,13 +62,16 @@ watch(value, () => void nextTick(() => grow(box)))
     @blur="emit('blur')"
   ></textarea>
 
+  <!-- Baris status selalu ada selama showStatus, dengan tinggi satu baris, supaya munculnya "Tersimpan"
+       tidak mendorong Tambah berkas ke bawah dan membuat tinggi kolom melompat (revisi 33b). -->
   <p
-    v-if="showStatus && (status || updatedBy)"
+    v-if="showStatus"
     :id="statusId"
-    class="mt-1 text-sm"
+    aria-live="polite"
+    class="mt-1 min-h-5 text-xs leading-5"
     :class="status === 'error' ? 'text-danger' : 'text-ink-muted'"
   >
-    <span v-if="status" aria-live="polite">{{ saveLabel[status] }}</span>
+    <span v-if="status">{{ saveLabel[status] }}</span>
     <template v-if="status === 'error'">
       <span v-if="message"> {{ message }}</span>
       <button

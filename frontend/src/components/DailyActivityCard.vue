@@ -72,6 +72,16 @@ async function toggleLink(c: ActivityCell) {
 
 const headTime = (c: ActivityCell) => cells.value.find((x) => x.slot === c.head)?.time ?? ''
 
+// Tombol rantai hanya untuk jam yang benar-benar bisa disambung sekarang, atau yang sudah tersambung. Jam
+// yang akan ditolak server (link_hint berisi alasannya) tidak lagi memunculkan tombol mati (revisi 33b).
+const chainable = (c: ActivityCell) => c.linked || (c.joinable && c.link_hint === '')
+
+// Jam tersambung menyatu dengan jam kepalanya: kotaknya ditarik ke kiri sampai menyentuh isian jam
+// sebelumnya (pl-6 kolom ini ditambah pr-4 kolom sebelumnya), tepi kirinya lurus tanpa garis, dan latarnya
+// canvas tipis. pl-8 menyisakan ruang untuk ikon rantai yang duduk di tepi itu.
+const linkedBox =
+  '-ml-10 min-h-11 rounded-card rounded-l-none border border-line border-l-0 bg-canvas py-2 pr-3 pl-8'
+
 function remember(list: ActivityCell[]) {
   cells.value = list
   saved.value = Object.fromEntries(list.map((c) => [c.slot, { activity: c.activity, output: c.output }]))
@@ -239,23 +249,15 @@ onMounted(() => {
                 <th scope="col" class="sticky left-0 z-10 w-28 bg-surface px-2 pb-2">
                   <span class="sr-only">Isian</span>
                 </th>
+                <!-- pl-6 pr-4 berlaku di semua kolom jam: celah tetap tempat tombol rantai duduk, jadi
+                     kolom tanpa tombol pun tidak bergeser (revisi 33b). -->
                 <th
                   v-for="c in cells"
                   :key="c.slot"
                   scope="col"
-                  class="px-2 pb-2 text-sm font-medium whitespace-nowrap"
+                  class="pb-2 pl-6 pr-4 text-sm font-medium whitespace-nowrap"
                 >
-                  <!-- Tombol rantai duduk tepat di garis antara kolom ini dan kolom sebelumnya (revisi 33). -->
-                  <div class="relative flex min-h-11 items-center" :class="c.joinable ? 'pl-7' : ''">
-                    <ActivityChainButton
-                      v-if="c.joinable"
-                      :cell="c"
-                      :busy="linking === c.slot"
-                      class="absolute -left-2 top-1/2 -translate-x-1/2 -translate-y-1/2"
-                      @toggle="toggleLink(c)"
-                    />
-                    {{ c.time }}
-                  </div>
+                  {{ c.time }}
                 </th>
               </tr>
             </thead>
@@ -267,32 +269,40 @@ onMounted(() => {
                 <td
                   v-for="c in cells"
                   :key="c.slot"
-                  class="px-2 py-1"
+                  class="py-1 pl-6 pr-4"
                   :class="[cellDrop, dragSlot === c.slot ? 'bg-canvas outline-2 outline-mark' : '']"
                   @dragover.prevent="dragSlot = c.linked ? 0 : c.slot"
                   @dragleave="dragLeave($event, c.slot)"
                   @drop.prevent="dropFiles($event, c.slot)"
                   @paste="onPaste($event, c)"
                 >
-                  <!-- Jam tersambung hanya dibaca: isinya milik jam kepala dan diubah di sana. -->
-                  <div
-                    v-if="c.linked"
-                    class="min-h-11 rounded-card border border-dashed border-line px-3 py-2"
-                  >
-                    <p class="text-xs text-ink-muted">Lanjutan {{ headTime(c) }}</p>
-                    <p class="line-clamp-3 break-words whitespace-pre-line">{{ c.activity || '-' }}</p>
+                  <div class="relative">
+                    <!-- Tombol rantai duduk di celah antara isian ini dan isian jam sebelumnya, di tengah
+                         tinggi isian itu, bukan di baris judul (revisi 33b). -->
+                    <ActivityChainButton
+                      v-if="chainable(c)"
+                      :cell="c"
+                      :busy="linking === c.slot"
+                      class="absolute top-1/2 -left-6 z-10 -translate-x-1/2 -translate-y-1/2"
+                      @toggle="toggleLink(c)"
+                    />
+                    <!-- Jam tersambung hanya dibaca: isinya milik jam kepala dan diubah di sana. -->
+                    <div v-if="c.linked" :class="linkedBox">
+                      <p class="text-xs text-ink-muted">Lanjutan {{ headTime(c) }}</p>
+                      <p class="line-clamp-3 break-words whitespace-pre-line">{{ c.activity || '-' }}</p>
+                    </div>
+                    <ActivityBox
+                      v-else
+                      v-model="c.activity"
+                      :num="c.slot"
+                      :time="c.time"
+                      kind="activity"
+                      label="Aktivitas"
+                      placeholder="Apa yang dikerjakan"
+                      :status-id="`${id}-status-${c.slot}`"
+                      @blur="blur(c)"
+                    />
                   </div>
-                  <ActivityBox
-                    v-else
-                    v-model="c.activity"
-                    :num="c.slot"
-                    :time="c.time"
-                    kind="activity"
-                    label="Aktivitas"
-                    placeholder="Apa yang dikerjakan"
-                    :status-id="`${id}-status-${c.slot}`"
-                    @blur="blur(c)"
-                  />
                 </td>
               </tr>
               <tr class="align-top">
@@ -302,17 +312,14 @@ onMounted(() => {
                 <td
                   v-for="c in cells"
                   :key="c.slot"
-                  class="px-2 py-1"
+                  class="py-1 pl-6 pr-4"
                   :class="[cellDrop, dragSlot === c.slot ? 'bg-canvas outline-2 outline-mark' : '']"
                   @dragover.prevent="dragSlot = c.linked ? 0 : c.slot"
                   @dragleave="dragLeave($event, c.slot)"
                   @drop.prevent="dropFiles($event, c.slot)"
                   @paste="onPaste($event, c)"
                 >
-                  <div
-                    v-if="c.linked"
-                    class="min-h-11 rounded-card border border-dashed border-line px-3 py-2"
-                  >
+                  <div v-if="c.linked" :class="linkedBox">
                     <p class="text-xs text-ink-muted">Lanjutan {{ headTime(c) }}</p>
                     <p class="line-clamp-3 break-words whitespace-pre-line">{{ c.output || '-' }}</p>
                   </div>
@@ -372,11 +379,13 @@ onMounted(() => {
           >
             <div class="flex flex-wrap items-center gap-x-2">
               <ActivityChainButton
-                v-if="c.joinable"
+                v-if="chainable(c)"
                 :cell="c"
                 :busy="linking === c.slot"
                 @toggle="toggleLink(c)"
               />
+              <!-- Ruang tombol tetap disisakan, jadi label jam semua kartu tetap sejajar (revisi 33b). -->
+              <span v-else class="size-11 shrink-0" aria-hidden="true"></span>
               <p class="font-medium">{{ c.time }}</p>
               <p v-if="c.linked" class="w-full text-xs text-ink-muted">Lanjutan {{ headTime(c) }}</p>
             </div>

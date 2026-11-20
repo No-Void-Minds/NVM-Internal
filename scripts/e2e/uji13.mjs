@@ -2641,14 +2641,16 @@ async function checkChain(width) {
       await staf.call("PUT", "/activities/link", { slot, linked: false });
     for (const slot of [3, 5, 6, 7]) await simpan(slot, "");
   };
-  // Tombol rantai di kolom (layar lebar) atau kartu (layar sempit) jam itu, mana pun yang terlihat.
+  // Tombol rantai jam itu, dicari dari nama aksesibelnya saja (revisi 33b menyebut jamnya di label), bukan
+  // dari tempatnya di DOM: di layar lebar tombolnya sekarang ada di sel Aktivitas, bukan di kepala kolom.
   const tombol = (jam) =>
     page
-      .locator("th:visible, li:visible")
-      .filter({ hasText: jam })
       .getByRole("button", {
-        name: /Sambungkan ke jam sebelumnya|Lepas sambungan/,
+        name: new RegExp(
+          `(Sambungkan|Lepas sambungan) jam ${jam.replace(/\./g, "\\.")}`,
+        ),
       })
+      .locator("visible=true")
       .first();
 
   try {
@@ -2683,14 +2685,11 @@ async function checkChain(width) {
       "istirahat",
       "13.00-14.00 tidak punya tombol rantai",
     );
-    // Jam yang berisi: tombol tetap bisa difokus, aria-disabled, dengan alasannya.
-    const isi = tombol("11.00-12.00");
+    // Revisi 33b: jam yang berisi tidak lagi menampilkan tombol mati, tombolnya tidak dirender sama sekali.
     expect(
-      (await isi.getAttribute("aria-disabled")) === "true" &&
-        (await isi.getAttribute("title")) ===
-          "Kosongkan jam ini dulu untuk menyambung.",
+      (await tombol("11.00-12.00").count()) === 0,
       "jam berisi",
-      "tombol jam berisi tidak nonaktif atau tooltip salah",
+      "jam berisi masih menampilkan tombol rantai",
     );
 
     // Sambung 15.00-16.00 lewat keyboard, lalu 16.00-17.00 lewat klik.
@@ -2739,10 +2738,12 @@ async function checkChain(width) {
     await page.waitForFunction(
       () => !document.body.innerText.includes("Lanjutan 14.00-15.00"),
     );
+    // Setelah 15.00-16.00 dilepas, 16.00-17.00 ikut lepas dan jam sebelumnya jadi kosong, jadi tombolnya
+    // memang tidak dirender lagi (revisi 33b). Label Lanjutan yang hilang sudah ditunggu di atas.
     expect(
-      (await tombol("16.00-17.00").getAttribute("aria-pressed")) === "false",
+      (await tombol("16.00-17.00").count()) === 0,
       "lepas",
-      "16.00-17.00 masih tersambung setelah 15.00-16.00 dilepas",
+      "16.00-17.00 masih punya tombol rantai setelah 15.00-16.00 dilepas",
     );
     await audit(page, errors, where("dilepas"));
 
