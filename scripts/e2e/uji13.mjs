@@ -2663,8 +2663,18 @@ async function checkChain(width) {
     if ((await judul.getAttribute("aria-expanded")) === "false")
       await judul.click();
     await page.waitForSelector("textarea:visible");
+    // Dibaca dari span ringkasan saja: textContent judul menempelkan tahun tanggal ke angkanya ("20264 dari").
     const terisi = async () =>
-      Number((await judul.textContent()).match(/(\d+) dari/)?.[1] ?? -1);
+      Number(
+        (await judul.locator("span").last().textContent()).match(
+          /(\d+) dari/,
+        )?.[1] ?? -1,
+      );
+    // Menunggu tombol jam itu sendiri, bukan aria-pressed mana pun: data dev bisa sudah punya rantai lain.
+    const tunggu = (jam, pressed) =>
+      tombol(jam)
+        .and(page.locator(`[aria-pressed="${pressed}"]`))
+        .waitFor({ timeout: 10000 });
     const awal = await terisi();
 
     // Ubahan revisi 33: jam setelah istirahat juga punya tombol rantai.
@@ -2686,11 +2696,9 @@ async function checkChain(width) {
     // Sambung 15.00-16.00 lewat keyboard, lalu 16.00-17.00 lewat klik.
     await tombol("15.00-16.00").focus();
     await page.keyboard.press("Enter");
-    await page.waitForSelector('[aria-pressed="true"]:visible');
+    await tunggu("15.00-16.00", true);
     await tombol("16.00-17.00").click();
-    await page.waitForFunction(
-      () => document.querySelectorAll('[aria-pressed="true"]').length >= 4,
-    );
+    await tunggu("16.00-17.00", true);
     const lanjutan = page
       .getByText("Lanjutan 14.00-15.00")
       .filter({ visible: true });
