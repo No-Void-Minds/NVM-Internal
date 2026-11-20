@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"nvm-internal/internal/apperr"
@@ -314,6 +315,11 @@ func (s *Server) writeTaskError(c *gin.Context, err error) {
 		writeError(c, http.StatusBadRequest, CodeBadRequest, ve.Message)
 	case errors.Is(err, task.ErrNotFound):
 		writeError(c, http.StatusNotFound, CodeNotFound, "Task tidak ditemukan.")
+	case errors.Is(err, pgx.ErrNoRows):
+		// Jaring pengaman: query :one yang tidak menemukan baris berarti task atau datanya sudah hilang, bukan
+		// galat server. Dicatat supaya akar masalahnya tetap terlihat di log.
+		s.log.Warn("ErrNoRows di jalur task", "err", err, "method", c.Request.Method, "route", c.FullPath(), "request_id", requestID(c))
+		writeError(c, http.StatusNotFound, CodeNotFound, "Task tidak ditemukan atau sudah dihapus. Muat ulang halaman.")
 	case errors.As(err, &fe):
 		writeError(c, http.StatusForbidden, CodeForbidden, fe.Message)
 	case errors.Is(err, task.ErrForbidden):

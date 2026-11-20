@@ -167,3 +167,27 @@ func TestTaskPICManagesTickerSubtasks(t *testing.T) {
 		t.Fatalf("PIC task mencentang sub task milik orang lain: err %v, mau ErrForbidden", err)
 	}
 }
+
+// Bug produksi revisi 31 (T-0026): kemunculan buatan ticker dari seri harian lewati akhir pekan, status Requested,
+// versi 1. Hapus dengan stop_series dulu gagal ErrNoRows karena rujukan seri dibaca sesudah soft delete.
+func TestDeleteAndStopSeriesTickerOccurrence(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	first, sid := newSeriesTask(t, f, "2026-11-18", CreateInput{
+		Title: "TEslagi", Urgency: "medium", PICIDs: []int64{f.stafC.ID},
+		Schedule: &ScheduleInput{Freq: FreqDaily, SkipWeekend: true},
+	})
+	if err := f.svc.Delete(ctx, f.manager, first, 1); err != nil {
+		t.Fatal(err)
+	}
+	if created, err := f.svc.CreateDueOccurrences(ctx, at("2026-11-20")); err != nil || len(created) != 1 {
+		t.Fatalf("kemunculan 20 November: %v err %v", created, err)
+	}
+	id := mustOccurrence(t, f, sid, "2026-11-20")
+	if err := f.svc.DeleteAndStopSeries(ctx, f.manager, id, 1); err != nil {
+		t.Fatalf("Manajer hapus dan hentikan seri dari kemunculan ticker: %v", err)
+	}
+	if seriesActive(t, f, sid) {
+		t.Fatal("seri harus berhenti")
+	}
+}

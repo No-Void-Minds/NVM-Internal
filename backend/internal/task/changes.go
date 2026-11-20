@@ -350,6 +350,22 @@ func (s *Service) deleteTask(ctx context.Context, actor Actor, id string, versio
 		if actor.Role != RoleManager && !CanEditOwn(cur.RequestedBy == actor.ID, Status(cur.Status)) {
 			return errDeleteForbidden
 		}
+		// Rujukan seri dibaca sebelum soft delete: GetTaskSeriesRef memfilter NOT is_deleted, jadi sesudahnya task
+		// ini sudah tidak terbaca dan hasilnya ErrNoRows (bug produksi revisi 31, T-0026).
+		var seriesID int64
+		if stop {
+			ref, err := q.GetTaskSeriesRef(ctx, id)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			if err != nil {
+				return err
+			}
+			if !ref.SeriesID.Valid {
+				return apperr.Invalid("Task ini tidak berulang, jadi tidak ada pengulangan yang bisa dihentikan.")
+			}
+			seriesID = ref.SeriesID.Int64
+		}
 		if err := q.SoftDeleteTask(ctx, id); err != nil {
 			return err
 		}
@@ -359,14 +375,7 @@ func (s *Service) deleteTask(ctx context.Context, actor Actor, id string, versio
 		if !stop {
 			return nil
 		}
-		ref, err := q.GetTaskSeriesRef(ctx, id)
-		if err != nil {
-			return err
-		}
-		if !ref.SeriesID.Valid {
-			return apperr.Invalid("Task ini tidak berulang, jadi tidak ada pengulangan yang bisa dihentikan.")
-		}
-		return stopSeries(ctx, q, actor, id, ref.SeriesID.Int64)
+		return stopSeries(ctx, q, actor, id, seriesID)
 	})
 }
 
