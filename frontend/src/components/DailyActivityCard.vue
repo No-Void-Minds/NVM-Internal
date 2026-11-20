@@ -6,6 +6,7 @@ import ActivityCellFields from './ActivityCellFields.vue'
 import ActivityBox from './ActivityBox.vue'
 import ActivityFiles from './ActivityFiles.vue'
 import ActivityChainButton from './ActivityChainButton.vue'
+import ActivitySlotStatus from './ActivitySlotStatus.vue'
 import { getMyActivities, linkActivity, type ActivityCell } from '../api/activities'
 import { ApiError } from '../api/client'
 import { useActivitySave } from '../composables/useActivitySave'
@@ -254,12 +255,20 @@ onMounted(() => {
                   class="pb-2 pl-6 pr-4 text-sm font-medium whitespace-nowrap"
                 >
                   {{ c.time }}
-                  <!-- Label Lanjutan ada di kepala kolom, bukan di dalam selnya: di dalam sel ia memakan
-                       satu baris dan membuat jam lanjutan lebih tinggi daripada jam kepalanya. Sebagai
-                       kepala kolom (scope="col") ia juga ikut dibacakan untuk kedua sel di bawahnya. -->
-                  <span v-if="c.linked" class="block text-xs font-normal text-ink-muted">
-                    Lanjutan {{ headTime(c) }}
-                  </span>
+                  <!-- Label Lanjutan dan status simpan ada di kepala kolom, bukan di dalam selnya: di dalam
+                       sel keduanya memakan baris dan membuat tinggi kolom melompat. Sebagai kepala kolom
+                       (scope="col") baris ini juga ikut dibacakan untuk kedua sel di bawahnya, dan id-nya
+                       yang dipakai aria-describedby kedua isian. -->
+                  <ActivitySlotStatus
+                    :id="`${id}-status-${c.slot}`"
+                    :time="c.time"
+                    :linked="c.linked"
+                    :head-time="headTime(c)"
+                    :status="status[`0:${c.slot}`]"
+                    :message="message[`0:${c.slot}`]"
+                    :updated-by="c.updated_by"
+                    @retry="retry(0, c.slot)"
+                  />
                 </th>
               </tr>
             </thead>
@@ -327,12 +336,7 @@ onMounted(() => {
                     label="Output"
                     placeholder="Hasil atau tautan"
                     :status-id="`${id}-status-${c.slot}`"
-                    show-status
-                    :status="status[`0:${c.slot}`]"
-                    :message="message[`0:${c.slot}`]"
-                    :updated-by="c.updated_by"
                     @blur="blur(c)"
-                    @retry="retry(0, c.slot)"
                   />
                   <ActivityFiles
                     :ref="(el) => setFileBox(c.slot, el)"
@@ -382,18 +386,26 @@ onMounted(() => {
               <!-- Ruang tombol tetap disisakan, jadi label jam semua kartu tetap sejajar (revisi 33b). -->
               <span v-else class="size-11 shrink-0" aria-hidden="true"></span>
               <p class="font-medium">{{ c.time }}</p>
-              <p v-if="c.linked" class="w-full text-xs text-ink-muted">Lanjutan {{ headTime(c) }}</p>
+              <ActivitySlotStatus
+                :id="`${id}-status-${c.slot}`"
+                :time="c.time"
+                :linked="c.linked"
+                :head-time="headTime(c)"
+                :status="status[`0:${c.slot}`]"
+                :message="message[`0:${c.slot}`]"
+                :updated-by="c.updated_by"
+                class="w-full"
+                @retry="retry(0, c.slot)"
+              />
             </div>
             <ActivityCellFields
               v-model:activity="c.activity"
               v-model:output="c.output"
               :time="c.time"
               :updated-by="c.updated_by"
-              :status="status[`0:${c.slot}`]"
-              :message="message[`0:${c.slot}`]"
               :readonly="c.linked"
+              hide-status
               @blur="blur(c)"
-              @retry="retry(0, c.slot)"
             />
             <ActivityFiles
               :ref="(el) => setFileBox(c.slot, el)"

@@ -14,6 +14,9 @@ defineProps<{
   message?: string
   // readonly berarti sel hanya dibaca: teks biasa dan tautan, bukan isian.
   readonly?: boolean
+  // hideStatus: pemanggil menampilkan status simpan sendiri di baris judul jam (kartu papan task), jadi
+  // baris status di sini tidak perlu ikut memakan ruang di bawah Output.
+  hideStatus?: boolean
 }>()
 const emit = defineEmits<{ blur: []; retry: [] }>()
 
@@ -99,6 +102,7 @@ const link = 'underline focus-visible:outline-2 focus-visible:outline-offset-2 f
 
     <!-- Tinggi satu baris selalu tersedia, jadi status simpan tidak menggeser isi di bawahnya (revisi 33b). -->
     <p
+      v-if="!hideStatus"
       aria-live="polite"
       class="min-h-5 text-xs leading-5 sm:col-span-2"
       :class="status === 'error' ? 'text-danger' : 'text-ink-muted'"

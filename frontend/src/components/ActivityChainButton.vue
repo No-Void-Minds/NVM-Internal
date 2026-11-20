@@ -21,6 +21,7 @@ function click() {
       busy ? 'opacity-60' : '',
     ]"
     :aria-pressed="cell.linked"
+    :title="cell.linked ? 'Lepas sambungan' : 'Sambungkan ke jam sebelumnya'"
     :aria-label="
       cell.linked ? `Lepas sambungan jam ${cell.time}` : `Sambungkan jam ${cell.time} ke jam sebelumnya`
     "
@@ -32,7 +33,7 @@ function click() {
       class="size-4"
       fill="none"
       stroke="currentColor"
-      stroke-width="2"
+      :stroke-width="cell.linked ? 2.75 : 2"
       stroke-linecap="round"
       stroke-linejoin="round"
     >

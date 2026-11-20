@@ -2746,6 +2746,47 @@ async function checkChain(width) {
         `lebar kotak lanjutan ${kotakLanjut.lebar} px, kolom lain ${kotakLain.lebar} px`,
       );
     }
+    // Keadaan tombol rantai dibedakan warna: yang tersambung memakai accent, yang belum tetap ink-muted.
+    const warna = async (jam) => {
+      const t = tombol(jam);
+      return (await t.count()) === 0
+        ? null
+        : await t.evaluate((el) => getComputedStyle(el).color);
+    };
+    const warnaTersambung = await warna("15.00-16.00");
+    const warnaBelum = await warna("13.00-14.00");
+    expect(
+      !!warnaTersambung && !!warnaBelum && warnaTersambung !== warnaBelum,
+      "warna",
+      `warna tombol tersambung ${warnaTersambung} dan belum ${warnaBelum}`,
+    );
+
+    // Status simpan pindah ke baris judul jam, jadi Tambah berkas merapat ke bawah Output.
+    const jarakBerkas = async (jam) => {
+      const out = page
+        .getByRole("textbox", { name: `Output ${jam}` })
+        .locator("visible=true")
+        .first();
+      const tombolBerkas = page
+        .getByRole("button", {
+          name: new RegExp(
+            `^Tambah berkas untuk jam ${jam.replace(/\./g, "\\.")}`,
+          ),
+        })
+        .locator("visible=true")
+        .first();
+      if ((await out.count()) === 0 || (await tombolBerkas.count()) === 0)
+        return null;
+      const a = await out.boundingBox();
+      const b = await tombolBerkas.boundingBox();
+      return a && b ? Math.round(b.y - (a.y + a.height)) : null;
+    };
+    const jarak = await jarakBerkas("14.00-15.00");
+    expect(
+      jarak !== null && jarak <= 12,
+      "jarak berkas",
+      `jarak Output ke Tambah berkas ${jarak} px`,
+    );
     await audit(page, errors, where("tersambung"));
 
     // Halaman Aktivitas: satu sel untuk tiga jam.
