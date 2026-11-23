@@ -129,7 +129,6 @@ func TestTaskActionsRejectedByRole(t *testing.T) {
 		c                  *http.Client
 		method, path, body string
 	}{
-		{"Staf PIC", tm.pic, http.MethodPost, "/api/tasks", create},
 		{"Staf PIC", tm.pic, http.MethodPut, path, update},
 		{"Staf PIC", tm.pic, http.MethodDelete, path + "?version=1", ""},
 		{"Staf lain", tm.other, http.MethodPut, path + "/labels", labels},

@@ -69,7 +69,7 @@ func TestCreateRejectsInvalidInput(t *testing.T) {
 	inactive := testdb.Division(t, f.pool, "Lama", false)
 	cases := map[string]CreateInput{
 		"username berspasi": {Name: "X", Username: "staf a", Role: sqlc.UserRoleStaff, DivisionID: f.marketing, Password: "sementara123"},
-		"password pendek":   {Name: "X", Username: "staf.x", Role: sqlc.UserRoleStaff, DivisionID: f.marketing, Password: "pendek"},
+		"password pendek":   {Name: "X", Username: "staf.x", Role: sqlc.UserRoleStaff, DivisionID: f.marketing, Password: "abcde"},
 		"peran asing":       {Name: "X", Username: "staf.x", Role: "owner", DivisionID: f.marketing, Password: "sementara123"},
 		"divisi nonaktif":   {Name: "X", Username: "staf.x", Role: sqlc.UserRoleStaff, DivisionID: inactive, Password: "sementara123"},
 	}

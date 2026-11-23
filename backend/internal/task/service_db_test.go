@@ -71,13 +71,15 @@ func TestCreateTaskByManager(t *testing.T) {
 	}
 }
 
-func TestOnlyManagerCreatesTask(t *testing.T) {
+// Revisi 27: Staf dan Manajer membuat task dengan aturan yang sama, Admin tidak.
+func TestCreateTaskRoles(t *testing.T) {
 	f := setup(t)
-	for _, actor := range []Actor{f.admin, f.stafA} {
-		_, err := f.svc.Create(context.Background(), actor, CreateInput{Title: "X", Urgency: "low", PICIDs: []int64{f.stafA.ID}})
-		if !errors.Is(err, ErrForbidden) {
-			t.Errorf("%s membuat task: err %v, mau ErrForbidden", actor.Role, err)
-		}
+	in := CreateInput{Title: "X", Urgency: "low", PICIDs: []int64{f.stafA.ID}}
+	if _, err := f.svc.Create(context.Background(), f.admin, in); !errors.Is(err, ErrForbidden) {
+		t.Errorf("Admin membuat task: err %v, mau ErrForbidden", err)
+	}
+	if _, err := f.svc.Create(context.Background(), f.stafA, in); err != nil {
+		t.Errorf("Staf membuat task: %v", err)
 	}
 }
 

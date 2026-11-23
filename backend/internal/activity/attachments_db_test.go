@@ -105,8 +105,13 @@ func TestLampiranManajerDanHapus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := f.auditCount(t); n != 1 {
-		t.Fatalf("audit log %d baris, mau 1", n)
+	// Unggah dan hapus berkas punya aksi audit sendiri (activity_file_added dan activity_file_deleted, kategori
+	// Aktivitas), bukan activity_updated yang khusus untuk isian teks.
+	if n := f.auditActionCount(t, "activity_file_added"); n != 1 {
+		t.Fatalf("audit activity_file_added %d baris, mau 1", n)
+	}
+	if n := f.auditCount(t); n != 0 {
+		t.Fatalf("unggah berkas tidak boleh tercatat sebagai activity_updated, dapat %d", n)
 	}
 	mine, err := f.svc.Mine(ctx, f.dina.ID, bulanLalu)
 	if err != nil {
@@ -129,8 +134,11 @@ func TestLampiranManajerDanHapus(t *testing.T) {
 	if f.onDisk(t, got.ID) {
 		t.Fatal("berkasnya harus ikut hilang dari disk")
 	}
-	if n := f.auditCount(t); n != 2 {
-		t.Fatalf("audit log %d baris, mau 2 (tambah dan hapus)", n)
+	if n := f.auditActionCount(t, "activity_file_deleted"); n != 1 {
+		t.Fatalf("audit activity_file_deleted %d baris, mau 1", n)
+	}
+	if n := f.auditActionCount(t, "activity_file_added"); n != 1 {
+		t.Fatalf("audit activity_file_added %d baris setelah hapus, mau tetap 1", n)
 	}
 	if err := f.svc.DeleteFile(ctx, f.manajer, got.ID); !errors.Is(err, ErrFileMissing) {
 		t.Fatalf("hapus dua kali harus 404, dapat %v", err)
@@ -173,4 +181,13 @@ func TestLampiranAkhirPekanTampilDiMinggu(t *testing.T) {
 	if len(r.Dates) != 6 || r.Dates[5] != "2026-11-21" {
 		t.Fatalf("Sabtu dengan lampiran harus tampil, dapat %+v", r.Dates)
 	}
+}
+
+func (f fixture) auditActionCount(t *testing.T, action string) int {
+	t.Helper()
+	var n int
+	if err := f.pool.QueryRow(context.Background(), `SELECT count(*) FROM audit_logs WHERE action = $1`, action).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }

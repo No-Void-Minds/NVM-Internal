@@ -83,6 +83,12 @@ func TestSubTaskKemunculanTerbaruMasukTemplat(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// Centang hanya bisa saat On Progress; perpindahan status juga tidak menyentuh templat.
+	if d, err := f.svc.Get(ctx, id); err != nil {
+		t.Fatal(err)
+	} else if _, err := f.svc.Move(ctx, f.stafA, id, d.Task.Version, OnProgress, "", nil); err != nil {
+		t.Fatal(err)
+	}
 	if err := f.svc.SetSubtaskDone(ctx, f.stafA, id, a, true); err != nil {
 		t.Fatal(err)
 	}

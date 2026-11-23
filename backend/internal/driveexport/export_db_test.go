@@ -152,9 +152,10 @@ func TestRecordMembuatBerkasTidakDisusunLagi(t *testing.T) {
 	if err := f.svc.Record(ctx, m); err != nil {
 		t.Fatal(err)
 	}
-	// Staging dibuang setelah dicatat.
-	if _, err := os.Stat(f.svc.staging); !os.IsNotExist(err) {
-		t.Fatal("staging harus dibuang setelah record")
+	// Isi staging dibuang setelah dicatat, tetapi foldernya tetap ada: di container folder itu titik mount dan
+	// menghapusnya gagal dengan EROFS (keputusan Sprint 11w).
+	if sisa, err := os.ReadDir(f.svc.staging); err != nil || len(sisa) != 0 {
+		t.Fatalf("staging harus tetap ada dan kosong setelah record: %d entri, err %v", len(sisa), err)
 	}
 
 	kedua, err := f.svc.Stage(ctx, nil, false)

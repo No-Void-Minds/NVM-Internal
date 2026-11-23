@@ -33,6 +33,8 @@ func TestManagerUpdateMovesDivisionAndBumpsVersion(t *testing.T) {
 	ctx := context.Background()
 	id := f.newTask(t, f.stafA.ID)
 
+	// Divisi mengikuti PIC task pertama menurut urutan pemasangan, bukan urutan di form (keputusan Sprint 11d):
+	// staf.a sudah terpasang dan dipertahankan, jadi divisinya tetap Marketing walau staf.c ditulis lebih dulu.
 	v, err := f.svc.Update(ctx, f.manager, id, UpdateInput{
 		Version: 1, Title: "Foto katalog Core", Urgency: "urgent", PICIDs: []int64{f.stafC.ID, f.stafA.ID},
 	})
@@ -40,15 +42,24 @@ func TestManagerUpdateMovesDivisionAndBumpsVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	d, _ := f.svc.Get(ctx, id)
-	if v != 2 || d.Task.DivisionID != f.creative || d.Task.Title != "Foto katalog Core" {
-		t.Fatalf("versi=%d divisi=%d judul=%q; mau versi 2, divisi Creative, judul baru", v, d.Task.DivisionID, d.Task.Title)
+	if v != 2 || d.Task.DivisionID != f.marketing || d.Task.Title != "Foto katalog Core" {
+		t.Fatalf("versi=%d divisi=%d judul=%q; mau versi 2, divisi tetap Marketing, judul baru", v, d.Task.DivisionID, d.Task.Title)
+	}
+	// Setelah staf.a dilepas, PIC pertama yang tersisa staf.c, jadi divisi pindah ke Creative.
+	if v, err = f.svc.Update(ctx, f.manager, id, UpdateInput{
+		Version: v, Title: "Foto katalog Core", Urgency: "urgent", PICIDs: []int64{f.stafC.ID},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ = f.svc.Get(ctx, id); v != 3 || d.Task.DivisionID != f.creative {
+		t.Fatalf("versi=%d divisi=%d; mau versi 3, divisi Creative", v, d.Task.DivisionID)
 	}
 
 	_, err = f.svc.Update(ctx, f.manager, id, UpdateInput{Version: 1, Title: "Lama", Urgency: "low", PICIDs: []int64{f.stafA.ID}})
 	if !errors.Is(err, ErrVersionConflict) {
 		t.Fatalf("versi lama: err %v, mau ErrVersionConflict", err)
 	}
-	if _, err := f.svc.Update(ctx, f.stafA, id, UpdateInput{Version: 2, Title: "X", Urgency: "low", PICIDs: []int64{f.stafA.ID}}); !errors.Is(err, ErrForbidden) {
+	if _, err := f.svc.Update(ctx, f.stafA, id, UpdateInput{Version: 3, Title: "X", Urgency: "low", PICIDs: []int64{f.stafA.ID}}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("Staf mengubah atribut task: err %v, mau ErrForbidden (AC-04)", err)
 	}
 }

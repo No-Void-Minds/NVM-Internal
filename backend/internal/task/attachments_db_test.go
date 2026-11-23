@@ -53,7 +53,7 @@ func TestUploadSavesFileChecksumAndAudit(t *testing.T) {
 	att, store := f.attachments(t)
 	id := f.newTask(t, f.stafA.ID)
 
-	saved, err := att.Upload(ctx, f.manager, id, KindBrief, `C:\Users\manajer\brief final.pdf`, bytes.NewReader(pdfContent))
+	saved, err := att.Upload(ctx, f.manager, id, KindBrief, 0, `C:\Users\manajer\brief final.pdf`, bytes.NewReader(pdfContent))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestUploadPermissions(t *testing.T) {
 		{"Admin deliverable", f.admin, KindDeliverable, ErrForbidden},
 	}
 	for _, c := range cases {
-		_, err := att.Upload(ctx, c.actor, id, c.kind, "berkas.pdf", bytes.NewReader(pdfContent))
+		_, err := att.Upload(ctx, c.actor, id, c.kind, 0, "berkas.pdf", bytes.NewReader(pdfContent))
 		if !errors.Is(err, c.want) {
 			t.Errorf("%s: err %v, mau %v", c.who, err, c.want)
 		}
@@ -133,14 +133,14 @@ func TestRejectedUploadLeavesNothingBehind(t *testing.T) {
 	id := f.newTask(t, f.stafA.ID)
 
 	tooBig := io.MultiReader(strings.NewReader("%PDF-1.7\n"), io.LimitReader(zeros{}, MaxAttachmentSize))
-	if _, err := att.Upload(ctx, f.manager, id, KindBrief, "besar.pdf", tooBig); !errors.Is(err, ErrTooLarge) {
+	if _, err := att.Upload(ctx, f.manager, id, KindBrief, 0, "besar.pdf", tooBig); !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("berkas di atas 50 MB: err %v, mau ErrTooLarge", err)
 	}
 	tmpIsEmpty(t, store)
 
 	exe := append([]byte("MZ"), make([]byte, 64)...)
 	var rejected *attachment.Rejected
-	if _, err := att.Upload(ctx, f.manager, id, KindBrief, "invoice.pdf", bytes.NewReader(exe)); !errors.As(err, &rejected) {
+	if _, err := att.Upload(ctx, f.manager, id, KindBrief, 0, "invoice.pdf", bytes.NewReader(exe)); !errors.As(err, &rejected) {
 		t.Fatalf("EXE diganti nama: err %v, mau Rejected", err)
 	}
 	tmpIsEmpty(t, store)
@@ -158,7 +158,7 @@ func TestUploadToDeletedTask(t *testing.T) {
 	if err := f.svc.Delete(ctx, f.manager, id, 1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := att.Upload(ctx, f.manager, id, KindBrief, "brief.pdf", bytes.NewReader(pdfContent)); !errors.Is(err, ErrNotFound) {
+	if _, err := att.Upload(ctx, f.manager, id, KindBrief, 0, "brief.pdf", bytes.NewReader(pdfContent)); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unggah ke task terhapus: err %v, mau ErrNotFound", err)
 	}
 }
@@ -170,11 +170,11 @@ func TestOpenListAndSoftDelete(t *testing.T) {
 	id := f.newTask(t, f.stafA.ID)
 	other := f.newTask(t, f.stafA.ID)
 
-	brief, err := att.Upload(ctx, f.manager, id, KindBrief, "brief.pdf", bytes.NewReader(pdfContent))
+	brief, err := att.Upload(ctx, f.manager, id, KindBrief, 0, "brief.pdf", bytes.NewReader(pdfContent))
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := att.Upload(ctx, f.stafA, id, KindDeliverable, "hasil.pdf", bytes.NewReader(pdfContent))
+	result, err := att.Upload(ctx, f.stafA, id, KindDeliverable, 0, "hasil.pdf", bytes.NewReader(pdfContent))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func TestAttachmentsHiddenWhenTaskDeleted(t *testing.T) {
 	ctx := context.Background()
 	att, _ := f.attachments(t)
 	id := f.newTask(t, f.stafA.ID)
-	saved, err := att.Upload(ctx, f.manager, id, KindBrief, "brief.pdf", bytes.NewReader(pdfContent))
+	saved, err := att.Upload(ctx, f.manager, id, KindBrief, 0, "brief.pdf", bytes.NewReader(pdfContent))
 	if err != nil {
 		t.Fatal(err)
 	}

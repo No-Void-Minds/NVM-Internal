@@ -546,6 +546,16 @@ Template pemetaan: `deploy/import/pemetaan-nama.example.csv` (kolom `nama_excel,
 
 ## 10. Update versi dan rollback
 
+### Sebelum deploy
+
+Di PC tim, sebelum commit fitur backend dan sebelum `git pull` di VM, jalankan dari root repo:
+
+```bash
+./scripts/pra-deploy.sh
+```
+
+Baris terakhirnya harus `PRA-DEPLOY LOLOS`. Skrip ini memuat `backend/.env` bila `TEST_DATABASE_URL` belum ada di env, menolak database test yang tidak berakhiran `_test` atau sama dengan database dev, memigrasikan `nvm_internal_test` ke versi terbaru (hanya `up`), menjalankan seluruh test backend tanpa cache, lalu `./scripts/check.sh`. Test yang SKIP dihitung gagal, tanpa pengecualian: bug 500 hapus task dengan `stop_series` (revisi 31) lolos ke produksi karena test DB yang menangkapnya SKIP tanpa ada yang sadar.
+
 Update:
 
 ```bash
