@@ -682,7 +682,9 @@ const timeCell = 'sticky left-0 z-20 w-28 px-3 py-2 text-left font-medium whites
         <template v-else>
           <div>
             <h3 class="font-medium">Aktivitas</h3>
-            <p class="mt-1 break-words whitespace-pre-line">{{ cellDialog.activity || 'Kosong' }}</p>
+            <p class="mt-1 whitespace-pre-line [overflow-wrap:anywhere]">
+              {{ cellDialog.activity || 'Kosong' }}
+            </p>
           </div>
           <div>
             <h3 class="font-medium">Output</h3>

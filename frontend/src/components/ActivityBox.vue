@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { nextTick, onMounted, watch } from 'vue'
+import { computed, nextTick, onMounted, watch } from 'vue'
+import OutputLinks from './OutputLinks.vue'
+import { outputParts } from '../utils/outputLink'
 
 // Satu isian di tabel Aktivitas hari ini (revisi 21, tata letak diputar): satu textarea per sel. Nama isian
 // datang dari aria-label, bukan label terlihat, karena kepala baris dan kolom tabelnya sudah menyebut
 // "Aktivitas" dan jamnya. Status simpannya ada di baris judul jam (ActivitySlotStatus, revisi 33b).
-defineProps<{
+const props = defineProps<{
   num: number
   time: string
   kind: 'activity' | 'output'
@@ -40,6 +42,12 @@ function bind(el: unknown) {
 onMounted(() => grow(box))
 // Isian yang datang dari server (muat ulang atau hasil simpan) juga perlu diukur ulang.
 watch(value, () => void nextTick(() => grow(box)))
+
+// Revisi 35: Output jam lanjutan yang berisi tautan tampil sebagai tombol, bukan URL mentah di textarea.
+// Bentuk kotaknya disamakan dengan textarea readonly supaya tetap terbaca menyambung dari jam kepalanya.
+const linkView = computed(
+  () => props.readonly && props.kind === 'output' && outputParts(value.value).some((p) => p.type === 'link'),
+)
 </script>
 
 <template>
@@ -48,7 +56,19 @@ watch(value, () => void nextTick(() => grow(box)))
   <!-- Jam tersambung: tepi kiri lurus tanpa garis dan latar canvas, jadi terbaca menyambung dari jam
        sebelumnya tanpa melebar menutupi celah tombol rantai. Placeholder dimatikan supaya jam kepala yang
        kosong tidak tampak berisi di jam lanjutannya. -->
+  <div
+    v-if="linkView"
+    :data-slot="num"
+    :data-kind="kind"
+    role="group"
+    :aria-label="`${label} ${time}`"
+    :aria-describedby="statusId"
+    class="block min-h-11 max-h-40 w-full min-w-0 overflow-y-auto rounded-card rounded-l-none border border-l-0 border-line bg-canvas px-3 py-1"
+  >
+    <OutputLinks :output="value" />
+  </div>
   <textarea
+    v-else
     :ref="bind"
     v-model="value"
     rows="1"

@@ -30,6 +30,10 @@
 // kategori di hari ini lalu menghapusnya, Staf tanpa tombol tulis dan tanpa alasan kehadiran Manajer).
 // E2E_ONLY=chain (revisi 33: rantai sambung jam di kartu Aktivitas hari ini milik Staf, termasuk melintasi istirahat,
 // 360 dan 1280 px; menulis lalu mengosongkan jam 11.00-12.00 sampai 16.00-17.00 hari ini).
+// E2E_ONLY=centang (revisi 34: PIC task mencentang dan membatalkan centang sub task milik Manajer, nama pencentang
+// tampil, Staf yang tidak terlibat dan Admin melihat kotak mati; membuat dua task uji lalu menghapusnya).
+// E2E_ONLY=outputlinks (revisi 35: tiga tautan di Output jam 16.00-17.00 Staf yang disambung ke 17.00-18.00, di kartu
+// papan, tabel /aktivitas, dan dialog detail tanpa gulir horizontal; jam 7 dan 8 Staf dikosongkan sesudahnya).
 // Keluar dengan kode 1 bila ada yang gagal.
 import { chromium } from "playwright-core";
 
@@ -2859,6 +2863,244 @@ async function checkChain(width) {
 }
 
 if (ONLY === "chain") for (const w of [360, 1280]) await checkChain(w);
+
+// Revisi 34: centang sub task. Task A: PIC task Staf, sub task dipegang Manajer, jadi Staf boleh mencentang
+// sebagai PIC task. Task B: Staf tidak terlibat sama sekali, jadi kotaknya mati. Admin selalu mati.
+async function checkCentang(width) {
+  const where = (what) => `centang ${width} ${what}`;
+  const expect = (cond, w, msg) => {
+    checks++;
+    if (!cond) fail(where(w), msg);
+  };
+  const mgr = await apiAs("manajer");
+  const staf = await apiAs("staf");
+  const made = [];
+  const buat = async (title, pic, subPic) => {
+    const r = await mgr.call("POST", "/tasks", {
+      title,
+      urgency: "medium",
+      pic_ids: [pic],
+      label_ids: [],
+      subtasks: [{ title: `${title} sub`, pic_id: subPic }],
+    });
+    if (r.status !== 201) throw new Error(`buat task ${r.status}`);
+    made.push(r.body.id);
+    const d = (await mgr.call("GET", `/tasks/${r.body.id}`)).body.task;
+    await mgr.call("POST", `/tasks/${r.body.id}/move`, {
+      version: d.version,
+      to: "on_progress",
+      note: "",
+    });
+    return r.body.id;
+  };
+  const stamp = Date.now();
+  const a = await buat(
+    `E2E centang A ${width} ${stamp}`,
+    staf.me.id,
+    mgr.me.id,
+  );
+  const b = await buat(`E2E centang B ${width} ${stamp}`, mgr.me.id, mgr.me.id);
+  const kotak = (page) =>
+    page.locator('input[type="checkbox"][aria-busy]').first();
+  try {
+    const s = await open("staf", width, "terang");
+    try {
+      await s.page.goto(BASE + `/task/${a}`);
+      await s.page.waitForLoadState("networkidle");
+      expect(
+        (await s.page
+          .getByText(
+            "Sub task bisa dicentang PIC sub task, PIC task, pembuat task, dan Manajer",
+          )
+          .count()) === 1,
+        "teks bantuan",
+        "teks bantuan sub task belum diganti",
+      );
+      expect(
+        await kotak(s.page).isEnabled(),
+        "PIC task",
+        "kotak mati untuk PIC task",
+      );
+      await kotak(s.page).focus();
+      await s.page.keyboard.press("Space");
+      const dicentang = s.page.getByText(
+        new RegExp(`Dicentang ${staf.me.name}`),
+      );
+      const ok = await dicentang
+        .waitFor({ timeout: 8000 })
+        .then(() => true)
+        .catch(() => false);
+      expect(ok, "pencentang", `tidak tampil "Dicentang ${staf.me.name}"`);
+      await audit(s.page, s.errors, where("detail PIC task"));
+      await kotak(s.page).click();
+      await s.page.waitForLoadState("networkidle");
+      await s.page.waitForTimeout(300);
+      expect(
+        !(await kotak(s.page).isChecked()),
+        "batal",
+        "centang tidak bisa dibatalkan PIC task",
+      );
+
+      await s.page.goto(BASE + `/task/${b}`);
+      await s.page.waitForLoadState("networkidle");
+      expect(
+        await kotak(s.page).isDisabled(),
+        "tidak terlibat",
+        "kotak aktif untuk Staf yang tidak terlibat",
+      );
+      const tolak = await staf.call(
+        "PUT",
+        `/tasks/${b}/subtasks/${(await mgr.call("GET", `/tasks/${b}`)).body.task.subtasks[0].id}/done`,
+        { done: true },
+      );
+      expect(
+        tolak.status === 403,
+        "tidak terlibat",
+        `API centang Staf tidak terlibat ${tolak.status}, mau 403`,
+      );
+    } finally {
+      await s.ctx.close();
+    }
+    const ad = await open("admin", width, "terang");
+    try {
+      await ad.page.goto(BASE + `/task/${a}`);
+      await ad.page.waitForLoadState("networkidle");
+      expect(
+        await kotak(ad.page).isDisabled(),
+        "admin",
+        "kotak aktif untuk Admin",
+      );
+    } finally {
+      await ad.ctx.close();
+    }
+  } finally {
+    for (const id of made) {
+      const d = (await mgr.call("GET", `/tasks/${id}`)).body?.task;
+      if (d) await mgr.call("DELETE", `/tasks/${id}?version=${d.version}`);
+    }
+    await staf.ctx.close();
+    await mgr.ctx.close();
+  }
+}
+
+if (ONLY === "centang") for (const w of [360, 1280]) await checkCentang(w);
+
+// Revisi 35: Output dengan beberapa tautan. Jam 16.00-17.00 milik Staf berisi tiga URL dan teks, jam
+// 17.00-18.00 disambung ke sana, lalu diperiksa kartu papan (jam lanjutan), tabel /aktivitas Manajer, dan
+// dialog detail jam tanpa gulir horizontal.
+async function checkOutputLinks(width) {
+  const where = (what) => `tautan ${width} ${what}`;
+  const expect = (cond, w, msg) => {
+    checks++;
+    if (!cond) fail(where(w), msg);
+  };
+  const staf = await apiAs("staf");
+  const panjang = "https://contoh.test/" + "a".repeat(180);
+  const output = `Draf: https://drive.google.com/file/d/AbC1/view\nhttps://drive.google.com/file/d/AbC2/view, ${panjang}.`;
+  const label = ["File Drive", "File Drive 2", "contoh.test"];
+  const bersihkan = async () => {
+    await staf.call("PUT", "/activities/link", { slot: 8, linked: false });
+    for (const slot of [7, 8])
+      await staf.call("PUT", "/activities", { slot, activity: "", output: "" });
+  };
+  const periksaTautan = async (scope, w) => {
+    for (const l of label) {
+      const a = scope
+        .getByRole("link", { name: `${l}, buka di tab baru` })
+        .first();
+      const ada = (await a.count()) === 1;
+      expect(ada, w, `tombol "${l}" tidak ada`);
+      if (!ada) continue;
+      expect(
+        (await a.getAttribute("target")) === "_blank" &&
+          (await a.getAttribute("rel")) === "noopener noreferrer" &&
+          ((await a.getAttribute("title")) ?? "").startsWith("https://"),
+        w,
+        `atribut tombol "${l}" salah`,
+      );
+    }
+  };
+  try {
+    await bersihkan();
+    await staf.call("PUT", "/activities", {
+      slot: 7,
+      activity: "E2E tautan",
+      output,
+    });
+    const link = await staf.call("PUT", "/activities/link", {
+      slot: 8,
+      linked: true,
+    });
+    expect(link.status < 300, "rantai", `sambung jam 8 ${link.status}`);
+
+    const s = await open("staf", width, "terang");
+    try {
+      await s.page.goto(BASE + "/task");
+      await s.page.waitForLoadState("networkidle");
+      const judul = s.page.getByRole("button", { name: /Aktivitas hari ini/ });
+      if ((await judul.getAttribute("aria-expanded")) === "false")
+        await judul.click();
+      await s.page.waitForTimeout(500);
+      // Di layar lebar Output jam lanjutan ada di kotak data-slot 8; di layar sempit di kartu jam 17.00-18.00.
+      const scope =
+        width >= 768
+          ? s.page.locator('[data-slot="8"][data-kind="output"]')
+          : s.page.locator("body");
+      await periksaTautan(scope, "kartu papan");
+      await audit(s.page, s.errors, where("kartu papan"));
+    } finally {
+      await s.ctx.close();
+    }
+
+    const m = await open("manajer", width, "terang");
+    try {
+      await m.page.goto(BASE + "/aktivitas");
+      await m.page.waitForLoadState("networkidle");
+      const sel = m.page.getByRole("button", {
+        name: new RegExp(`Lihat aktivitas ${staf.me.name}, 16\\.00-18\\.00`),
+      });
+      const adaSel = await sel
+        .first()
+        .waitFor({ timeout: 8000 })
+        .then(() => true)
+        .catch(() => false);
+      expect(
+        adaSel,
+        "tabel",
+        "sel rantai 16.00-18.00 tidak ditemukan di /aktivitas",
+      );
+      if (adaSel) {
+        const td = m.page.locator("td", { has: sel.first() });
+        await periksaTautan(td, "tabel");
+        // Tengah sel tertutup chip tautan (z-10, sengaja), jadi dialog dibuka lewat keyboard: jalur Tab lalu Enter.
+        await sel.first().focus();
+        await m.page.keyboard.press("Enter");
+        const dlg = m.page.locator("dialog[open]");
+        await dlg.waitFor();
+        await periksaTautan(dlg, "dialog");
+        const [sw, cw] = await dlg.evaluate((d) => [
+          d.scrollWidth,
+          d.clientWidth,
+        ]);
+        expect(
+          sw <= cw,
+          "dialog",
+          `dialog bisa digulir ke samping: scrollWidth ${sw} > ${cw}`,
+        );
+        await audit(m.page, m.errors, where("dialog"));
+        await m.page.keyboard.press("Escape");
+      }
+    } finally {
+      await m.ctx.close();
+    }
+  } finally {
+    await bersihkan();
+    await staf.ctx.close();
+  }
+}
+
+if (ONLY === "outputlinks")
+  for (const w of [360, 1280]) await checkOutputLinks(w);
 
 await browser.close();
 console.log(

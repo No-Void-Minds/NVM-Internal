@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, useId, watch } from 'vue'
 import { saveLabel } from '../utils/activity'
-import { outputLink } from '../utils/outputLink'
+import OutputLinks from './OutputLinks.vue'
 
 // Dua isian satu slot jam: Aktivitas dan Output, dengan status simpan di bawahnya. Dipakai kartu di papan
 // task dan halaman Aktivitas, jadi aturan simpan otomatis dan teks statusnya hanya ada di satu tempat.
@@ -45,7 +45,6 @@ watch([activity, output], () => void nextTick(growAll))
 
 const box =
   'block min-h-11 w-full min-w-0 resize-y overflow-hidden rounded-card border border-line bg-surface px-3 py-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark'
-const link = 'underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark'
 </script>
 
 <template>
@@ -54,18 +53,8 @@ const link = 'underline focus-visible:outline-2 focus-visible:outline-offset-2 f
       <p class="min-w-0 break-words whitespace-pre-line">
         {{ activity || '-' }}
       </p>
-      <p class="min-w-0 break-words whitespace-pre-line">
-        <a
-          v-if="outputLink(output)"
-          :href="outputLink(output) ?? undefined"
-          target="_blank"
-          rel="noopener noreferrer"
-          :class="link"
-        >
-          {{ output }}
-        </a>
-        <template v-else>{{ output || '-' }}</template>
-      </p>
+      <OutputLinks v-if="output" :output="output" />
+      <p v-else class="min-w-0">-</p>
     </template>
     <template v-else>
       <div class="min-w-0">

@@ -78,6 +78,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 11z | Sub task otomatis masuk templat seri | Perubahan sub task di kemunculan terbaru seri aktif langsung dipakai kemunculan berikutnya |
 | 12a | Halaman Timeline | Kalender bersama launching, produksi, dan kehadiran, plus Important Notes; hanya Manajer yang menulis |
 | 12b | Hapus task berulang dan hak PIC atas sub task | Dialog hapus memilih nasib seri, pengaman ticker, PIC task mengatur semua sub task di task-nya |
+| 12d | Hak centang sub task dan Output beberapa tautan | Centang untuk PIC sub task, PIC task, pembuat task, dan Manajer; setiap URL di Output Aktivitas jadi tombol |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -1468,11 +1469,36 @@ Keputusan teknis:
 - Status simpan ("Menyimpan", "Tersimpan", galat) punya baris tetap setinggi satu baris teks kecil di `ActivityBox` dan `ActivityCellFields`, selalu dirender. Sebelumnya baris itu muncul dan hilang, jadi Tambah berkas terdorong turun dan tinggi kolom melompat setiap simpan. Karena baris itu permanen, `aria-live="polite"` pindah dari span status ke baris itu: live region yang lahir bersama isinya sering tidak diumumkan. Baris galat masih bisa lebih tinggi karena membawa tombol "Coba lagi", dan itu dibiarkan: galat jarang dan tombolnya memang perlu.
 - Kontras dihitung, dua mode: ikon rantai mati (ink-muted) 6,42:1 terang dan 5,97:1 gelap di atas surface, 5,73:1 dan 6,2:1 di atas canvas saat sel disorot drag (ambang non-teks 3:1); ikon tersambung (accent) 15,23:1 dan 15,54:1; status simpan 13px (ink-muted) 6,42:1 dan 5,97:1; teks "Lanjutan" di latar canvas 5,73:1 dan 6,2:1; isi jam tersambung 15,23:1 dan 16,66:1. Semua lolos AA.
 - Tombol "Tambah berkas" di dalam sel tabel (`compact`) kehilangan bingkainya dan memakai warna `ink-muted`; di luar sel (kartu jam) tetap berbingkai. Delapan tombol berbingkai di satu baris membuat tabelnya terbaca seperti deretan kotak, padahal isian yang utama.
-- Test `TestLampiranManajerDanHapus` gagal sebelum revisi ini: test menghitung aksi `activity_updated`, sedangkan unggah mencatat `activity_file_added`. Tidak diubah di sini, masuk Sprint 13.
+- Test `TestLampiranManajerDanHapus` gagal sebelum revisi ini: test menghitung aksi `activity_updated`, sedangkan unggah mencatat `activity_file_added`. Diperbaiki 2026-11-20 bersama gerbang `scripts/pra-deploy.sh`: kodenya yang benar (aksi khusus berkas terdaftar di kategori Aktivitas Audit Log sejak Sprint 11v), jadi test kini menghitung `activity_file_added` dan `activity_file_deleted` masing-masing dan memastikan unggah tidak tercatat sebagai `activity_updated`.
 
 **Selesai kalau:** `./scripts/check.sh` lolos, migrasi 000021 jalan di dev dan test DB, test DB `-run 'Rantai|Joinable'` lolos tanpa SKIP, dan `E2E_ONLY=chain` lolos di 360 dan 1280 px.
 
 **Hasil:** kode selesai 2026-11-20, `./scripts/check.sh` lolos, migrasi 000021 jalan di dev dan test DB, test DB rantai lolos. E2E menunggu backend di-restart.
+
+## Sprint 12d: Hak centang sub task dan Output beberapa tautan
+
+**Tujuan:** revisi 34 dan 35 Manajer.
+
+- [x] S12d-01 Revisi 34 backend: `canToggle` baru (PIC sub task itu, PIC task mana pun, pembuat task `requested_by`, Manajer), `CheckableSubtasks` jadi fungsi murni tanpa query, query `ListSubtasksWithOtherManagerPIC` dan `CountSubtaskAssignees` dibuang. Pesan 403 "Sub task ini hanya bisa dicentang PIC sub task, PIC task, pembuat task, atau Manajer.".
+- [x] S12d-02 Revisi 34, jalur revisi: `Move` menerima `subtask_ids` opsional dari PIC task dan Manajer saat Ready ke On Progress (sub task tercentang mana pun, catatan tetap wajib). Detail mengirim `revision_subtasks` dan `revision_note_required`; dialog revisi di detail memakai `SubtaskRevisionFields` dengan `noteRequired`.
+- [x] S12d-03 Revisi 35: `outputParts` di `utils/outputLink.ts` dengan test unit `tests/outputParts.test.ts`, komponen `OutputLinks.vue`, dipasang di sel tabel /aktivitas, dialog detail jam, kartu Aktivitas di papan (tampilan bertumpuk), dan Output jam lanjutan.
+- [x] S12d-04 Test DB `TestCentangSubTaskPerPeran` dan `TestRevisiPICTaskMembukaSubTask`, unit `TestCanToggle` ditulis ulang; test lama yang menguji aturan yang diganti disesuaikan.
+
+**Keputusan:**
+- Revisi 34: yang boleh mencentang dan membatalkan centang sub task mana pun di task itu adalah PIC sub task itu, semua PIC task, pembuat task (`requested_by`), dan Manajer, hanya saat task On Progress. Admin selalu ditolak, juga bila tercatat sebagai peminta task hasil impor Excel. Staf yang tidak terlibat ditolak 403.
+- Aturan lama yang diganti: (1) Sprint 11g, pembuat sub task boleh mencentang: dihapus atas jawaban Rifky 2026-11-23, karena pembuat sub task hampir selalu PIC task atau Manajer; orang yang dicopot dari task tidak lagi bisa mencentang. (2) Revisi 4, Manajer tidak boleh mencentang sub task yang dipegang Manajer lain: dihapus, Manajer boleh semua. (3) Sprint 11e, PIC task hanya boleh mencentang sub task tanpa PIC: dihapus, PIC task boleh semua. (4) Revisi 32 mencatat "PIC task tidak mencentang sub task milik orang lain": diganti revisi ini.
+- "Dicentang <nama>, <waktu>" dan audit `subtask_checked` memakai pelaku (`done_by` diisi `actor.ID`), bukan PIC sub task. Ini sudah begitu sejak awal; revisi ini menambah testnya.
+- Berlaku sama untuk kemunculan seri: aturan dihitung dari `task_assignees` dan `requested_by` kemunculan itu.
+- Perluasan revisi 22 (jawaban Rifky 2026-11-23): PIC task dan Manajer boleh memilih sub task tercentang mana pun untuk dibuka lagi saat mengembalikan Ready ke On Progress. Pilihannya opsional dan tidak ada yang terpilih secara bawaan, supaya pekerjaan orang lain tidak terbuka tanpa dipilih sendiri; catatan revisi tetap wajib. Audit memakai `note` seperti revisi biasa ditambah `reopened_subtasks`. Jalur PIC sub task tidak berubah (wajib memilih, sub task miliknya, alasan opsional). Pembuat task Staf tetap tidak bisa memindahkan Ready ke On Progress, karena itu hak pindah status, bukan hak centang.
+- Pilihan sub task untuk PIC task dan Manajer hanya dikirim di detail task. Papan dan Arsip tidak mengirimnya, karena butuh semua sub task setiap kartu; di sana dialog Pindahkan tetap revisi biasa dengan catatan. `revision_note_required` dikirim di detail, papan, dan Arsip supaya frontend tidak menebak jalurnya.
+- Revisi 35: semua URL http dan https di Output dikenali, dipisah spasi, baris baru, atau koma. Tanda baca di ujung (titik, koma, titik koma, titik dua, tanda seru, tanda tanya) dibuang; kurung tutup dan kurung siku hanya dibuang bila tidak punya pasangan di dalam URL, supaya tautan seperti `.../Foo_(bar)` tetap utuh. Label mengikuti aturan lama (File Drive, Folder Drive, Google Docs, Spreadsheet, Slide, atau nama host); label yang sama diberi nomor mulai dari yang kedua ("File Drive 2"). Potongan teks yang isinya hanya pemisah dibuang, teks lain tetap di urutan aslinya.
+- Tombol tautan: tab baru dengan `rel="noopener noreferrer"`, `title` berisi URL lengkap, `aria-label` "<label>, buka di tab baru", tinggi `min-h-11` seperti chip File Drive sebelumnya, focus ring `mark`. Di sel tabel tombolnya `z-10` di atas tombol selebar sel. Di dialog detail setiap tautan punya barisnya sendiri dengan URL lengkap di bawahnya, karena `title` tidak terlihat di layar sentuh.
+- Dialog detail jam tidak boleh digulir ke samping: teks Output, URL di bawah tombol, dan teks Aktivitas memakai `overflow-wrap: anywhere`. Thumbnail Drive diambil dari file Drive pertama di Output.
+- Output jam lanjutan (rantai revisi 33) di tabel kartu papan yang berisi tautan tampil sebagai kotak hanya baca berisi tombol, bukan textarea readonly. Tanpa tautan tetap textarea readonly yang sama dengan jam kepalanya. Akibatnya tinggi kotak lanjutan yang berisi tautan bisa berbeda sedikit dari textarea jam kepalanya.
+- Isi Output yang tersimpan tidak diubah. Ekspor Excel dan salinan Drive tetap memakai teks aslinya.
+- Tidak ada migrasi dan tidak ada tabel baru, jadi grants tidak perlu dijalankan ulang.
+
+**Selesai kalau:** `scripts/pra-deploy.sh` LOLOS dan E2E revisi 34 dan 35 lolos di 360 dan 1280 px.
 
 ## Sprint 12: Persiapan deploy dan migrasi data
 
@@ -1661,10 +1687,12 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 31 | 2026-11-20 | Menghapus task berulang tidak menghentikan serinya: dialog hapus memilih hapus kemunculan saja atau hapus dan hentikan pengulangan (Manajer), pengaman ticker untuk seri tanpa kemunculan tersisa, status seri di detail | Sprint 12b |
 | 32 | 2026-11-20 | PIC task mengubah dan menghapus semua sub task di task-nya, termasuk sub task templat dari pembuat seri; centang tidak berubah | Sprint 12b |
 | 33 | 2026-11-20 | Rantai sambung jam di Aktivitas Harian: jam berikutnya yang kosong bisa disambung ke jam sebelumnya dan menampilkan isinya secara readonly, termasuk melintasi jam istirahat; halaman Manajer dan ekspor menampilkan rantai sebagai satu rentang | Sprint 12c |
+| 34 | 2026-11-23 | Sub task bisa dicentang dan dibatalkan PIC sub task, PIC task, pembuat task, dan Manajer saat On Progress; PIC task dan Manajer boleh membuka lagi sub task pilihan saat mengembalikan Ready ke On Progress | Sprint 12d |
+| 35 | 2026-11-23 | Output Aktivitas dengan beberapa tautan: setiap URL jadi tombol berlabel, dialog detail tanpa gulir horizontal | Sprint 12d |
 | 33b | 2026-11-20 | Poles tampilan kartu Aktivitas: tombol rantai pindah ke celah antar isian dan jadi ikon kecil tanpa bingkai, tombol mati tidak dirender, jam tersambung menyatu dengan jam kepalanya, status simpan punya baris tetap, Tambah berkas di sel tabel tanpa bingkai | Sprint 12c |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat ketiga puluh tiga revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat ketiga puluh lima revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

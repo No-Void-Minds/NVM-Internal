@@ -1,18 +1,18 @@
 <script setup lang="ts">
 import type { ActivityCell } from '../api/activities'
-import LinkKindIcon from './LinkKindIcon.vue'
+import { computed } from 'vue'
 import ActivityThumb from './ActivityThumb.vue'
-import { outputKind, outputLink } from '../utils/outputLink'
+import OutputLinks from './OutputLinks.vue'
+import { outputParts } from '../utils/outputLink'
 
 // Satu sel tabel Aktivitas (revisi 21): ringkasan isi, dipotong tiga baris, dengan tombol selebar sel yang
 // membuka dialog. Sel kosong dibiarkan kosong secara visual, hanya pembaca layar yang diberi tahu.
 const props = defineProps<{ cell: ActivityCell; openLabel: string }>()
 const emit = defineEmits<{ open: [Event] }>()
 
-const link = () => outputLink(props.cell.output)
+const hasLink = computed(() => outputParts(props.cell.output).some((p) => p.type === 'link'))
 // Thumbnail hanya untuk gambar pertama: cukup sebagai petunjuk isi, tanpa mengunduh semua lampiran.
 const firstImage = () => props.cell.files.find((f) => f.mime_type.startsWith('image/'))
-const kind = () => outputKind(props.cell.output)
 </script>
 
 <template>
@@ -20,20 +20,9 @@ const kind = () => outputKind(props.cell.output)
     <span v-if="!cell.activity && !cell.output && cell.files.length === 0" class="sr-only">kosong</span>
     <p v-if="cell.activity" class="line-clamp-3 break-words whitespace-pre-line">{{ cell.activity }}</p>
     <template v-if="cell.output">
-      <!-- URL panjang jadi chip: ikon dan label jenis (File Drive, Spreadsheet, atau nama host) saja, URL
-           penuhnya di title dan aria-label. z-10 menaruh chip di atas tombol sel, jadi tautannya tetap bisa diklik sendiri. -->
-      <a
-        v-if="link()"
-        :href="link() ?? undefined"
-        :title="cell.output"
-        :aria-label="`Buka tautan output ${cell.output}`"
-        target="_blank"
-        rel="noopener noreferrer"
-        class="relative z-10 mt-1 inline-flex min-h-11 max-w-full items-center gap-1 rounded-chip border border-line px-2 hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
-      >
-        <LinkKindIcon :kind="kind()?.kind ?? 'host'" class="size-4 shrink-0" />
-        <span class="truncate">{{ kind()?.label }}</span>
-      </a>
+      <!-- Setiap URL jadi chip berlabel jenisnya (revisi 35), URL lengkapnya di title. Chip berada di atas tombol
+           sel (z-10), jadi tautannya tetap bisa diklik sendiri. -->
+      <OutputLinks v-if="hasLink" :output="cell.output" class="mt-1 text-ink-muted" />
       <p v-else class="mt-1 line-clamp-3 break-words whitespace-pre-line text-ink-muted">
         {{ cell.output }}
       </p>

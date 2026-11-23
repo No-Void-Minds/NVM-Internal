@@ -1,13 +1,19 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import LinkKindIcon from './LinkKindIcon.vue'
-import { driveThumbnail, outputKind, outputLink } from '../utils/outputLink'
+import OutputLinks from './OutputLinks.vue'
+import { driveThumbnail, outputParts } from '../utils/outputLink'
 
-// Output satu sel di dialog Aktivitas, mode lihat: jenis tautan, thumbnail untuk file Drive, lalu URL lengkap.
-// Output yang bukan tautan tampil sebagai teks biasa.
+// Output satu sel di dialog Aktivitas, mode lihat: setiap tautan jadi tombol berlabel dengan URL lengkap di
+// bawahnya (revisi 35), plus thumbnail untuk file Drive pertama. Output tanpa tautan tampil sebagai teks biasa.
+// Semua teks dipatahkan di mana saja, jadi URL panjang tidak membuat dialog bisa digulir ke samping.
 const props = defineProps<{ output: string }>()
 
-const kind = computed(() => outputKind(props.output))
+const parts = computed(() => outputParts(props.output))
+const driveFileId = computed(() => {
+  for (const p of parts.value) if (p.type === 'link' && p.driveFileId) return p.driveFileId
+  return null
+})
+const hasLink = computed(() => parts.value.some((p) => p.type === 'link'))
 const thumbFailed = ref(false)
 watch(
   () => props.output,
@@ -23,16 +29,12 @@ function onLoad(e: Event) {
 </script>
 
 <template>
-  <div v-if="kind" class="mt-1 grid gap-2">
-    <p class="inline-flex items-center gap-2 font-medium">
-      <LinkKindIcon :kind="kind.kind" class="size-5 shrink-0" />
-      {{ kind.label }}
-    </p>
-    <template v-if="kind.driveFileId">
+  <div v-if="hasLink" class="mt-1 grid min-w-0 gap-2">
+    <template v-if="driveFileId">
       <!-- Ruang tetap lewat aspect-ratio supaya gambar yang datang belakangan tidak menggeser isi dialog. -->
       <div v-if="!thumbFailed" class="aspect-video overflow-hidden rounded-card border border-line bg-canvas">
         <img
-          :src="driveThumbnail(kind.driveFileId)"
+          :src="driveThumbnail(driveFileId)"
           alt=""
           referrerpolicy="no-referrer"
           loading="lazy"
@@ -45,14 +47,7 @@ function onLoad(e: Event) {
         Pratinjau muncul kalau kamu login Google dan punya akses ke file ini.
       </p>
     </template>
-    <a
-      :href="outputLink(output) ?? undefined"
-      target="_blank"
-      rel="noopener noreferrer"
-      class="break-all underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
-    >
-      {{ output }}
-    </a>
+    <OutputLinks :output="output" layout="list" />
   </div>
-  <p v-else class="mt-1 break-words whitespace-pre-line">{{ output || 'Kosong' }}</p>
+  <p v-else class="mt-1 whitespace-pre-line [overflow-wrap:anywhere]">{{ output || 'Kosong' }}</p>
 </template>
