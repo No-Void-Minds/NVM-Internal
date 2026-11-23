@@ -2,9 +2,11 @@
 import { useId } from 'vue'
 import type { RevisionSubtask } from '../api/tasks'
 
-// Isian jalur revisi PIC sub task (revisi 22), dipakai dialog Pindahkan dan panel detail. Daftar pilihan
-// datang dari server (revision_subtasks), jadi frontend tidak menentukan sendiri sub task mana yang boleh.
-defineProps<{ choices: RevisionSubtask[] }>()
+// Isian revisi yang membuka lagi sub task, dipakai dialog Pindahkan dan panel detail. Daftar pilihan datang dari
+// server (revision_subtasks), jadi frontend tidak menentukan sendiri sub task mana yang boleh. Jalur PIC sub task
+// (revisi 22) wajib memilih dan alasannya opsional; noteRequired (PIC task dan Manajer, revisi 34) membalik
+// keduanya: pilihan opsional, catatan revisi wajib.
+defineProps<{ choices: RevisionSubtask[]; noteRequired?: boolean }>()
 const selected = defineModel<number[]>('selected', { required: true })
 const reason = defineModel<string>('reason', { required: true })
 
@@ -16,9 +18,15 @@ const reasonHintId = useId()
 <template>
   <div class="space-y-4">
     <fieldset :aria-describedby="hintId">
-      <legend class="text-sm font-medium">Sub task yang direvisi</legend>
+      <legend class="text-sm font-medium">
+        {{ noteRequired ? 'Sub task yang dibuka lagi (opsional)' : 'Sub task yang direvisi' }}
+      </legend>
       <p :id="hintId" class="text-sm text-ink-muted">
-        Centangnya dibuka lagi. Sub task lain, termasuk milik orang lain, tetap tercentang.
+        {{
+          noteRequired
+            ? 'Centang sub task yang dipilih dibuka lagi. Yang tidak dipilih tetap tercentang.'
+            : 'Centangnya dibuka lagi. Sub task lain, termasuk milik orang lain, tetap tercentang.'
+        }}
       </p>
       <div class="mt-1">
         <label v-for="s in choices" :key="s.id" class="flex min-h-11 cursor-pointer items-center gap-3">
@@ -28,12 +36,15 @@ const reasonHintId = useId()
       </div>
     </fieldset>
     <div>
-      <label :for="reasonId" class="block text-sm font-medium">Alasan revisi (opsional)</label>
+      <label :for="reasonId" class="block text-sm font-medium">
+        {{ noteRequired ? 'Catatan revisi (wajib)' : 'Alasan revisi (opsional)' }}
+      </label>
       <textarea
         :id="reasonId"
         v-model="reason"
         rows="3"
         maxlength="500"
+        :required="noteRequired"
         :aria-describedby="reasonHintId"
         class="mt-1 block w-full rounded-card border border-line bg-surface p-3"
       />

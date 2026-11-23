@@ -79,9 +79,10 @@ func TestSubtaskPICRevision(t *testing.T) {
 	if _, err := f.svc.Move(ctx, f.stafC, id, get().Task.Version-1, OnProgress, "", []int64{naskah}); !errors.Is(err, ErrVersionConflict) {
 		t.Fatalf("version basi: err %v, mau ErrVersionConflict", err)
 	}
-	// PIC task tidak memakai jalur ini: pilihan sub task ditolak, catatan tetap wajib.
-	if err := move(f.stafA, OnProgress, "Perlu revisi", []int64{naskah}); !errors.As(err, &ve) {
-		t.Fatalf("PIC task mengirim pilihan sub task: err %v, mau Validation", err)
+	// PIC task memakai jalur revisi biasa: catatan tetap wajib walau memilih sub task (revisi 34 membolehkan
+	// pilihannya, diuji di TestRevisiPICTaskMembukaSubTask).
+	if err := move(f.stafA, OnProgress, "", []int64{naskah}); !errors.As(err, &ve) {
+		t.Fatalf("PIC task memilih sub task tanpa catatan: err %v, mau Validation", err)
 	}
 	if d := get(); d.Task.Status != "ready" {
 		t.Fatalf("setelah semua penolakan status %s, mau ready", d.Task.Status)

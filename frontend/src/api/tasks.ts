@@ -121,6 +121,9 @@ export type TaskDetail = TaskSummary & {
   can: TaskCan
   // Revisi 22: terisi hanya untuk jalur revisi PIC sub task, sama dengan di papan.
   revision_subtasks: RevisionSubtask[]
+  // true: catatan revisi wajib dan pilihan sub task opsional (PIC task dan Manajer, revisi 34). false: jalur PIC
+  // sub task, wajib memilih dan alasannya opsional (revisi 22).
+  revision_note_required: boolean
   history: TaskHistoryItem[]
   attachments: TaskAttachment[]
   subtasks: TaskSubtask[]

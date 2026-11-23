@@ -395,9 +395,11 @@ async function toggleSubtask(s: TaskSubtask, e: Event) {
 const revisionOpen = ref(false)
 const revisionNote = ref('')
 const revisionError = ref<string | null>(null)
-// Revisi 22: PIC sub task memilih sub task miliknya yang dibuka lagi; daftar dan jalurnya dari server.
+// Revisi 22: PIC sub task memilih sub task miliknya yang dibuka lagi; daftar dan jalurnya dari server. Revisi 34:
+// PIC task dan Manajer boleh memilih sub task tercentang mana pun, opsional, dan catatannya tetap wajib.
 const revisionSelected = ref<number[]>([])
-const subtaskRevision = computed(() => (task.value?.revision_subtasks.length ?? 0) > 0)
+const revisionChoices = computed(() => (task.value?.revision_subtasks.length ?? 0) > 0)
+const subtaskRevision = computed(() => revisionChoices.value && !task.value?.revision_note_required)
 
 function startMove(to: TaskStatus) {
   const t = task.value
@@ -408,7 +410,9 @@ function startMove(to: TaskStatus) {
   }
   if (t.status === 'ready' && to === 'on_progress') {
     revisionNote.value = ''
-    revisionSelected.value = t.revision_subtasks.map((s) => s.id)
+    // Jalur PIC sub task: semua miliknya terpilih. Jalur PIC task dan Manajer: tidak ada yang terpilih, supaya
+    // pekerjaan orang lain tidak terbuka tanpa dipilih sendiri.
+    revisionSelected.value = t.revision_note_required ? [] : t.revision_subtasks.map((s) => s.id)
     revisionError.value = null
     revisionOpen.value = true
     return
@@ -434,7 +438,7 @@ async function submitRevision() {
         t.version,
         'on_progress',
         revisionNote.value.trim(),
-        subtaskRevision.value ? revisionSelected.value : [],
+        revisionChoices.value ? revisionSelected.value : [],
       ),
     `${t.id} dikembalikan untuk revisi.`,
   )
@@ -750,11 +754,11 @@ const buttonSecondary =
             </span>
           </component>
           <p v-if="task.subtasks.length && task.status !== 'on_progress'" class="mt-1 text-sm text-ink-muted">
-            Sub task hanya bisa dicentang saat task berstatus On Progress.
+            Sub task bisa dicentang PIC sub task, PIC task, pembuat task, dan Manajer saat task On Progress.
           </p>
           <p v-else-if="readyReason" class="mt-1 text-sm text-ink-muted">
-            Dicentang oleh PIC sub task atau yang menugaskannya. Semua harus tercentang sebelum task bisa
-            Ready.
+            Sub task bisa dicentang PIC sub task, PIC task, pembuat task, dan Manajer. Semua harus tercentang
+            sebelum task bisa Ready.
           </p>
           <p class="sr-only" role="status">{{ announce }}</p>
           <!-- Bar progres centang sub task, terbaca pembaca layar lewat role dan aria-valuetext. -->
@@ -1316,10 +1320,11 @@ const buttonSecondary =
           {{ revisionError }}
         </p>
         <SubtaskRevisionFields
-          v-if="subtaskRevision && task"
+          v-if="revisionChoices && task"
           v-model:selected="revisionSelected"
           v-model:reason="revisionNote"
           :choices="task.revision_subtasks"
+          :note-required="task.revision_note_required"
         />
         <template v-else>
           <label for="revision-note" class="block text-sm font-medium">Apa yang perlu direvisi?</label>

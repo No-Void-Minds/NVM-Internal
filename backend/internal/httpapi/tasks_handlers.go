@@ -102,11 +102,14 @@ type taskDetail struct {
 	IsMigrated     bool      `json:"is_migrated"`
 	Can            task.Can  `json:"can"`
 	// RevisionSubtasks: sama dengan di papan, untuk jalur revisi PIC sub task (revisi 22).
-	RevisionSubtasks []task.SubtaskRef  `json:"revision_subtasks"`
-	History          []historyItem      `json:"history"`
-	Attachments      []attachmentDetail `json:"attachments"`
-	Subtasks         []subtaskItem      `json:"subtasks"`
-	Series           *seriesItem        `json:"series"`
+	RevisionSubtasks []task.SubtaskRef `json:"revision_subtasks"`
+	// RevisionNoteRequired: catatan revisi wajib dan pilihan sub task opsional (PIC task dan Manajer, revisi 34);
+	// false untuk jalur PIC sub task, yang wajib memilih dan alasannya opsional (revisi 22).
+	RevisionNoteRequired bool               `json:"revision_note_required"`
+	History              []historyItem      `json:"history"`
+	Attachments          []attachmentDetail `json:"attachments"`
+	Subtasks             []subtaskItem      `json:"subtasks"`
+	Series               *seriesItem        `json:"series"`
 }
 
 type createTaskRequest struct {
@@ -197,6 +200,10 @@ func (s *Server) getTask(c *gin.Context) {
 	}
 	out.Can, out.RevisionSubtasks = task.MoveOptions(actor.Role, d.IsPIC(actor.ID), t.RequestedBy == actor.ID,
 		d.MySubtasks(actor.ID), task.Status(t.Status))
+	out.RevisionNoteRequired = task.RevisionNoteRequired(actor.Role, d.IsPIC(actor.ID), len(d.MySubtasks(actor.ID)) > 0)
+	if out.RevisionNoteRequired {
+		out.RevisionSubtasks = task.TaskRevisionChoices(actor.Role, d.IsPIC(actor.ID), task.Status(t.Status), d.Subtasks)
+	}
 	out.SubtaskPICs = detailSubtaskPICs(d)
 	for _, h := range d.History {
 		out.History = append(out.History, historyItem{
@@ -233,11 +240,7 @@ func (s *Server) getTask(c *gin.Context) {
 	out.Subtasks = make([]subtaskItem, 0, len(d.Subtasks))
 	doneCount := 0
 	isPIC := d.IsPIC(actor.ID)
-	checkable, err := s.tasks.CheckableSubtasks(c.Request.Context(), actor, task.Status(t.Status), isPIC, d.Subtasks)
-	if err != nil {
-		s.writeTaskError(c, err)
-		return
-	}
+	checkable := task.CheckableSubtasks(actor, task.Status(t.Status), isPIC, t.RequestedBy == actor.ID, d.Subtasks)
 	for _, st := range d.Subtasks {
 		item := subtaskItem{
 			ID: st.ID, Title: st.Title, Description: st.Description,

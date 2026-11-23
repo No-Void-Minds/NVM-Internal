@@ -14,7 +14,11 @@ export type BoardQuery = {
   due?: DueFilter
 }
 
-export type BoardTask = TaskSummary & { move_to: TaskStatus[]; revision_subtasks: RevisionSubtask[] }
+export type BoardTask = TaskSummary & {
+  move_to: TaskStatus[]
+  revision_subtasks: RevisionSubtask[]
+  revision_note_required: boolean
+}
 export type BoardColumn = { status: TaskStatus; count: number; tasks: BoardTask[] }
 export type Board = { columns: BoardColumn[]; completed_days: number }
 

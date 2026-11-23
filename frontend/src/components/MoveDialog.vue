@@ -16,7 +16,7 @@ const emit = defineEmits<{ close: []; moved: [message: string]; stale: [message:
 function describe(t: BoardTask, to: TaskStatus): string {
   const from = t.status
   if (from === 'requested') return 'Mulai dikerjakan.'
-  if (from === 'ready' && to === 'on_progress' && t.revision_subtasks.length)
+  if (from === 'ready' && to === 'on_progress' && t.revision_subtasks.length && !t.revision_note_required)
     return 'Buka lagi sub task milikmu yang perlu direvisi.'
   if (from === 'ready' && to === 'on_progress') return 'Kembalikan untuk revisi. Catatan revisi wajib diisi.'
   if (to === 'ready') return 'Kirim ke Manajer untuk ditinjau.'
@@ -31,8 +31,14 @@ const error = ref<string | null>(null)
 const busy = ref(false)
 
 const isRevision = computed(() => props.task?.status === 'ready' && target.value === 'on_progress')
-// Revisi 22: jalur PIC sub task dipilih server lewat revision_subtasks; kosong berarti jalur revisi biasa.
-const subtaskRevision = computed(() => isRevision.value && (props.task?.revision_subtasks.length ?? 0) > 0)
+// Revisi 22: jalur PIC sub task dipilih server lewat revision_subtasks; kosong berarti jalur revisi biasa. Papan
+// tidak mengirim pilihan revisi 34 untuk PIC task dan Manajer, mereka memilihnya di panel detail.
+const subtaskRevision = computed(
+  () =>
+    isRevision.value &&
+    !props.task?.revision_note_required &&
+    (props.task?.revision_subtasks.length ?? 0) > 0,
+)
 const selected = ref<number[]>([])
 
 watch(

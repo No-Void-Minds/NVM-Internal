@@ -112,7 +112,7 @@ func mustOccurrence(t *testing.T, f fixture, sid int64, date string) string {
 }
 
 // Revisi 32: di kemunculan buatan ticker, PIC task mengatur semua sub task, termasuk yang tercatat dibuat pembuat
-// seri dan dipegang orang lain, tetapi tidak mencentang sub task milik orang lain. move_to-nya berisi On Progress.
+// seri dan dipegang orang lain. move_to-nya berisi On Progress.
 func TestTaskPICManagesTickerSubtasks(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
@@ -159,12 +159,13 @@ func TestTaskPICManagesTickerSubtasks(t *testing.T) {
 		t.Fatalf("templat seri tidak mengikuti perubahan PIC task: %+v", d.TemplateSubtasks)
 	}
 
-	// Centang tetap: PIC task tidak mencentang sub task yang dipegang orang lain.
+	// Revisi 34 menggantikan batas centang revisi 32: PIC task boleh mencentang sub task yang dipegang orang lain,
+	// juga di kemunculan buatan ticker.
 	if _, err := f.svc.Move(ctx, f.stafA, id, d.Task.Version, OnProgress, "", nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.svc.SetSubtaskDone(ctx, f.stafA, id, first.ID, true); !errors.Is(err, ErrForbidden) {
-		t.Fatalf("PIC task mencentang sub task milik orang lain: err %v, mau ErrForbidden", err)
+	if err := f.svc.SetSubtaskDone(ctx, f.stafA, id, first.ID, true); err != nil {
+		t.Fatalf("PIC task mencentang sub task milik orang lain di kemunculan ticker: %v", err)
 	}
 }
 

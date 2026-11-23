@@ -71,20 +71,11 @@ FROM task_subtasks
 WHERE task_id = ANY(@task_ids::text[])
 GROUP BY task_id;
 
--- name: ListSubtasksWithOtherManagerPIC :many
--- Sub task yang punya PIC Manajer selain si pemanggil. Dipakai aturan: Manajer tidak boleh menyentuh centang milik Manajer lain.
-SELECT DISTINCT sa.subtask_id
-FROM subtask_assignees sa
-JOIN users u ON u.id = sa.user_id
-WHERE sa.subtask_id = ANY(@subtask_ids::bigint[]) AND u.role = 'manager' AND u.id <> @user_id;
 -- name: SubtaskSlot :one
 -- Jumlah sub task dan posisi berikutnya, dipakai saat PIC atau Manajer menambah satu sub task.
 -- Posisi dihitung dari max, bukan dari jumlah, karena penghapusan meninggalkan lubang.
 SELECT count(*)::int AS total, COALESCE(max(position) + 1, 0)::int AS next_position
 FROM task_subtasks WHERE task_id = @task_id;
-
--- name: CountSubtaskAssignees :one
-SELECT count(*)::int FROM subtask_assignees WHERE subtask_id = @subtask_id;
 
 -- name: RenameSubtask :exec
 -- Nama, deskripsi, tautan, tenggat, dan catatan hasil; urutan tidak ikut berubah saat PIC atau Manajer

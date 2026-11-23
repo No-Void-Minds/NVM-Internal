@@ -21,6 +21,9 @@ type boardTask struct {
 	// RevisionSubtasks terisi hanya bila pelaku memakai jalur revisi PIC sub task (revisi 22): sub task
 	// miliknya yang tercentang, untuk daftar centang di dialog Pindahkan.
 	RevisionSubtasks []task.SubtaskRef `json:"revision_subtasks"`
+	// Sama dengan detail task. Di papan dan Arsip pilihan untuk PIC task dan Manajer tidak dikirim (butuh semua
+	// sub task setiap kartu), jadi mereka memilih sub task dari panel detail.
+	RevisionNoteRequired bool `json:"revision_note_required"`
 }
 
 type boardColumn struct {

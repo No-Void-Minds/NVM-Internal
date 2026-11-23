@@ -22,7 +22,8 @@ type MoveResult struct {
 
 // Move memindahkan status task menurut aturan di transition.go (S3-04). solved_date diatur oleh query,
 // dan setiap perpindahan tercatat sebagai task_status_changed untuk riwayat task (FR-TASK-11).
-// subtaskIDs hanya untuk jalur revisi PIC sub task (revisi 22): sub task miliknya yang dibuka lagi.
+// subtaskIDs: sub task yang dibuka lagi saat Ready ke On Progress. Wajib di jalur revisi PIC sub task (revisi 22,
+// hanya sub task miliknya), opsional di jalur revisi PIC task dan Manajer (revisi 34, sub task mana pun).
 func (s *Service) Move(ctx context.Context, actor Actor, id string, version int32, to Status, note string, subtaskIDs []int64) (MoveResult, error) {
 	var res MoveResult
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -60,14 +61,37 @@ func (s *Service) Move(ctx context.Context, actor Actor, id string, version int3
 		case err != nil:
 			return err
 		}
-		if !subtaskRevision && len(subtaskIDs) > 0 {
-			return apperr.Invalid("Pilihan sub task hanya dipakai PIC sub task yang mengembalikan task ke On Progress.")
+		// Jalur revisi biasa (PIC task dan Manajer; CheckTransition sudah memastikan haknya). Revisi 34 memberi
+		// mereka pilihan membuka lagi sub task tercentang mana pun, karena sekarang mereka juga boleh mencentangnya.
+		taskRevision := !subtaskRevision && from == Ready && to == OnProgress
+		if !subtaskRevision && !taskRevision && len(subtaskIDs) > 0 {
+			return apperr.Invalid("Pilihan sub task hanya dipakai saat mengembalikan task dari Ready ke On Progress.")
 		}
 		var reopened []SubtaskRef
-		if subtaskRevision {
-			if reopened, err = pickRevisionSubtasks(mine, subtaskIDs); err != nil {
+		switch {
+		case subtaskRevision:
+			if len(subtaskIDs) == 0 {
+				return apperr.Invalid("Pilih minimal satu sub task yang direvisi.")
+			}
+			cands := []SubtaskRef{}
+			for _, m := range mine {
+				if m.Done {
+					cands = append(cands, SubtaskRef{ID: m.ID, Title: m.Title})
+				}
+			}
+			if reopened, err = pickRevisionSubtasks(cands, subtaskIDs, "hanya sub task milikmu yang sedang tercentang yang bisa dipilih"); err != nil {
 				return err
 			}
+		case taskRevision && len(subtaskIDs) > 0:
+			subs, err := loadSubtaskViews(ctx, q, id)
+			if err != nil {
+				return err
+			}
+			if reopened, err = pickRevisionSubtasks(doneRefs(subs), subtaskIDs, "hanya sub task yang sedang tercentang yang bisa dipilih"); err != nil {
+				return err
+			}
+		}
+		if len(reopened) > 0 {
 			ids := make([]int64, len(reopened))
 			for i, r := range reopened {
 				ids[i] = r.ID
@@ -105,6 +129,9 @@ func (s *Service) Move(ctx context.Context, actor Actor, id string, version int3
 			}
 		case cleanNote != "":
 			after["note"] = cleanNote
+			if len(reopened) > 0 {
+				after["reopened_subtasks"] = reopened
+			}
 		}
 		return audit.Change(ctx, q, actor.auditActor(), "task_status_changed", "task", id,
 			map[string]any{"status": from}, after)
@@ -112,25 +139,47 @@ func (s *Service) Move(ctx context.Context, actor Actor, id string, version int3
 	return res, err
 }
 
-// pickRevisionSubtasks memeriksa pilihan PIC sub task (revisi 22): minimal satu, dan setiap id harus sub task
-// miliknya di task ini yang sedang tercentang. Urutannya mengikuti posisi sub task, bukan urutan kiriman.
-func pickRevisionSubtasks(mine []sqlc.ListMySubtasksRow, ids []int64) ([]SubtaskRef, error) {
-	if len(ids) == 0 {
-		return nil, apperr.Invalid("Pilih minimal satu sub task yang direvisi.")
-	}
+// pickRevisionSubtasks memeriksa pilihan sub task yang dibuka lagi: setiap id harus ada di cands (sub task
+// tercentang yang boleh dipilih pelaku). Urutannya mengikuti posisi sub task, bukan urutan kiriman. Pesan galat
+// menyebut id, bukan judul, supaya judul sub task task lain tidak bocor (revisi 22).
+func pickRevisionSubtasks(cands []SubtaskRef, ids []int64, why string) ([]SubtaskRef, error) {
 	want := make(map[int64]bool, len(ids))
 	for _, id := range ids {
 		want[id] = true
 	}
 	out := []SubtaskRef{}
-	for _, m := range mine {
-		if want[m.ID] && m.Done {
-			out = append(out, SubtaskRef{ID: m.ID, Title: m.Title})
-			delete(want, m.ID)
+	for _, c := range cands {
+		if want[c.ID] {
+			out = append(out, c)
+			delete(want, c.ID)
 		}
 	}
 	for id := range want {
-		return nil, apperr.Invalid(fmt.Sprintf("Sub task %d tidak bisa dibuka lagi: hanya sub task milikmu yang sedang tercentang yang bisa dipilih.", id))
+		return nil, apperr.Invalid(fmt.Sprintf("Sub task %d tidak bisa dibuka lagi: %s.", id, why))
 	}
 	return out, nil
+}
+
+func doneRefs(subs []SubtaskView) []SubtaskRef {
+	out := []SubtaskRef{}
+	for _, s := range subs {
+		if s.DoneAt.Valid {
+			out = append(out, SubtaskRef{ID: s.ID, Title: s.Title})
+		}
+	}
+	return out
+}
+
+// TaskRevisionChoices: sub task tercentang yang boleh dibuka lagi PIC task atau Manajer saat mengembalikan Ready
+// ke On Progress (revisi 34). Kosong untuk yang lain; jalur PIC sub task memakai pilihan dari MoveOptions.
+func TaskRevisionChoices(role Role, isPIC bool, status Status, subs []SubtaskView) []SubtaskRef {
+	if status != Ready || !(role == RoleManager || (role == RoleStaff && isPIC)) {
+		return []SubtaskRef{}
+	}
+	return doneRefs(subs)
+}
+
+// RevisionNoteRequired: catatan revisi wajib di semua jalur Ready ke On Progress kecuali jalur PIC sub task.
+func RevisionNoteRequired(role Role, isPIC, isSubtaskPIC bool) bool {
+	return !IsSubtaskRevision(role, isPIC, isSubtaskPIC, Ready, OnProgress)
 }
