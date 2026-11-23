@@ -34,6 +34,8 @@
 // tampil, Staf yang tidak terlibat dan Admin melihat kotak mati; membuat dua task uji lalu menghapusnya).
 // E2E_ONLY=outputlinks (revisi 35: tiga tautan di Output jam 16.00-17.00 Staf yang disambung ke 17.00-18.00, di kartu
 // papan, tabel /aktivitas, dan dialog detail tanpa gulir horizontal; jam 7 dan 8 Staf dikosongkan sesudahnya).
+// E2E_ONLY=paste (revisi 36: tempel gambar di Hasil dan Arahan sub task masuk ke bagiannya, tempelan teks tetap teks,
+// berkas di atas 50 MB ditolak; membuat satu task uji milik Manajer lalu menghapusnya).
 // Keluar dengan kode 1 bila ada yang gagal.
 import { chromium } from "playwright-core";
 
@@ -3101,6 +3103,149 @@ async function checkOutputLinks(width) {
 
 if (ONLY === "outputlinks")
   for (const w of [360, 1280]) await checkOutputLinks(w);
+
+// Revisi 36: tempel dan seret berkas di lampiran sub task. Gambar tempelan di Hasil masuk ke Hasil, di Arahan
+// masuk ke Arahan, tempelan teks di Catatan hasil tetap teks, dan berkas di atas 50 MB ditolak dengan pesan.
+async function checkPaste(width) {
+  const where = (what) => `tempel ${width} ${what}`;
+  const expect = (cond, w, msg) => {
+    checks++;
+    if (!cond) fail(where(w), msg);
+  };
+  const mgr = await apiAs("manajer");
+  const title = `E2E tempel ${width} ${Date.now()}`;
+  const made = await mgr.call("POST", "/tasks", {
+    title,
+    urgency: "medium",
+    pic_ids: [mgr.me.id],
+    label_ids: [],
+    subtasks: [{ title: "Sub task tempel", pic_id: mgr.me.id }],
+  });
+  if (made.status !== 201) throw new Error(`buat task ${made.status}`);
+  const id = made.body.id;
+  const { ctx, page, errors } = await open("manajer", width, "terang");
+  await ctx.grantPermissions(["clipboard-read", "clipboard-write"], {
+    origin: BASE,
+  });
+  // Event paste sintetis berisi berkas, dikirim ke elemen yang sedang difokus seperti Ctrl+V sungguhan.
+  const tempel = (name, type, size = 0) =>
+    page.evaluate(
+      ({ name, type, size }) => {
+        const png =
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==";
+        const bytes = size
+          ? new Uint8Array(size)
+          : Uint8Array.from(atob(png), (c) => c.charCodeAt(0));
+        const dt = new DataTransfer();
+        dt.items.add(new File([bytes], name, { type }));
+        document.activeElement.dispatchEvent(
+          new ClipboardEvent("paste", {
+            clipboardData: dt,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      },
+      { name, type, size },
+    );
+  const tempelan = /^Pratinjau tempel-\d{8}-\d{6}(-\d+)?\.png$/;
+  try {
+    await page.goto(BASE + `/task/${id}`);
+    await page.waitForLoadState("networkidle");
+    await page
+      .getByRole("button", { name: "Detail", exact: true })
+      .first()
+      .click();
+    const arahan = page
+      .locator("section", {
+        has: page.getByRole("heading", { name: "Arahan" }),
+      })
+      .last();
+    const hasil = page
+      .locator("section", { has: page.getByRole("heading", { name: "Hasil" }) })
+      .last();
+    await hasil.waitFor();
+    if (width >= 768)
+      expect(
+        await hasil
+          .getByText("Atau tempel (Ctrl+V) atau seret berkas ke sini.")
+          .isVisible(),
+        "petunjuk",
+        "teks bantuan tempel tidak tampil",
+      );
+
+    // Gambar ditempel saat fokus di Catatan hasil: masuk ke Hasil, bukan ke Arahan.
+    await hasil.getByLabel("Catatan hasil").focus();
+    await tempel("image.png", "image/png");
+    const diHasil = await hasil
+      .getByRole("button", { name: tempelan })
+      .first()
+      .waitFor({ timeout: 10000 })
+      .then(() => true)
+      .catch(() => false);
+    expect(diHasil, "Hasil", "gambar tempelan tidak masuk ke Hasil");
+    expect(
+      (await arahan.getByRole("button", { name: tempelan }).count()) === 0,
+      "Hasil",
+      "gambar ikut masuk ke Arahan",
+    );
+
+    // Gambar ditempel saat fokus di tombol Tambah berkas Arahan: masuk ke Arahan.
+    await page.getByRole("button", { name: "Tambah berkas arahan" }).focus();
+    await tempel("image.png", "image/png");
+    const diArahan = await arahan
+      .getByRole("button", { name: tempelan })
+      .first()
+      .waitFor({ timeout: 10000 })
+      .then(() => true)
+      .catch(() => false);
+    expect(diArahan, "Arahan", "gambar tempelan tidak masuk ke Arahan");
+    expect(
+      (await hasil.getByRole("button", { name: tempelan }).count()) === 1,
+      "Arahan",
+      "Hasil ikut bertambah",
+    );
+
+    // Teks lewat Ctrl+V sungguhan tetap jadi teks di Catatan hasil, tanpa unggahan baru.
+    const catatan = hasil.getByLabel("Catatan hasil");
+    await catatan.fill("");
+    await page.evaluate(() =>
+      navigator.clipboard.writeText("Teks tempelan biasa"),
+    );
+    await catatan.focus();
+    await page.keyboard.press("Control+V");
+    expect(
+      (await catatan.inputValue()) === "Teks tempelan biasa",
+      "teks",
+      `isi Catatan hasil "${await catatan.inputValue()}"`,
+    );
+    expect(
+      (await hasil.locator("progress").count()) === 0,
+      "teks",
+      "tempelan teks memicu unggahan",
+    );
+
+    // Di atas batas 50 MB: ditolak sebelum diunggah, dengan pesan.
+    await catatan.focus();
+    await tempel("besar.png", "image/png", 51 * 1024 * 1024);
+    const ditolak = await hasil
+      .getByText(/besar\.png berukuran .* melebihi batas 50 MB/)
+      // Pesannya juga ada di area aria-live untuk pembaca layar, jadi yang terlihat diambil yang pertama.
+      .first()
+      .waitFor({ timeout: 5000 })
+      .then(() => true)
+      .catch(() => false);
+    expect(ditolak, "batas", "berkas di atas 50 MB tidak ditolak dengan pesan");
+    await audit(page, errors, where("detail"));
+  } finally {
+    const d = (await mgr.call("GET", `/tasks/${id}`)).body?.task;
+    if (d) await mgr.call("DELETE", `/tasks/${id}?version=${d.version}`);
+    await mgr.ctx.close();
+    await ctx.close();
+  }
+}
+
+if (ONLY === "paste") for (const w of [360, 1280]) await checkPaste(w);
 
 await browser.close();
 console.log(

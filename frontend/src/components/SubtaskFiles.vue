@@ -3,10 +3,13 @@ import { ref } from 'vue'
 import { ApiError } from '../api/client'
 import { attachmentUrl, deleteAttachment, uploadAttachment, type TaskAttachment } from '../api/attachments'
 import AttachmentPreview from './AttachmentPreview.vue'
-import { acceptAttr, formatBytes, isImage, isPdf, precheck } from '../utils/attachment'
+import UploadQueueList from './UploadQueueList.vue'
+import { useUploadQueue } from '../composables/useUploadQueue'
+import { acceptAttr, formatBytes, isImage, isPdf } from '../utils/attachment'
 
 // Lampiran sub task sengaja lebih ringkas daripada AttachmentSection milik task induk: di dalam kartu
-// sub task tidak ada ruang untuk dropzone besar, dan isinya biasanya satu atau dua berkas.
+// sub task tidak ada ruang untuk dropzone besar, dan isinya biasanya satu atau dua berkas. Tempel dan seret
+// ditangani FileDropTarget di bagian induknya (revisi 36), yang menyerahkan berkasnya lewat add.
 const props = defineProps<{
   taskId: string
   subtaskId: number
@@ -33,26 +36,18 @@ function messageOf(err: unknown): string {
   return err instanceof ApiError ? err.message : 'Terjadi kesalahan yang tidak terduga. Coba lagi.'
 }
 
-async function onPick(e: Event) {
+const { queue, uploading, announce, add, dismiss, retry, abort } = useUploadQueue(
+  (file, onProgress) => uploadAttachment(props.taskId, props.kind, file, onProgress, props.subtaskId),
+  (msg) => emit('changed', msg),
+)
+defineExpose({ add })
+
+function onPick(e: Event) {
   const input = e.target as HTMLInputElement
-  const file = input.files?.[0]
+  const files = Array.from(input.files ?? [])
+  // Dikosongkan supaya memilih berkas yang sama lagi (misalnya setelah gagal) tetap memicu change.
   input.value = ''
-  if (!file || busy.value) return
-  const bad = precheck(file)
-  if (bad) {
-    error.value = bad
-    return
-  }
-  busy.value = true
-  error.value = ''
-  try {
-    await uploadAttachment(props.taskId, props.kind, file, () => {}, props.subtaskId).promise
-    emit('changed', `${file.name} diunggah.`)
-  } catch (err) {
-    error.value = messageOf(err)
-  } finally {
-    busy.value = false
-  }
+  if (files.length) add(files)
 }
 
 async function remove(a: TaskAttachment) {
@@ -150,20 +145,24 @@ const iconButton =
         class="sr-only"
         tabindex="-1"
         aria-hidden="true"
+        multiple
         :accept="acceptAttr"
-        :disabled="busy"
         @change="onPick"
       />
       <button
         type="button"
-        class="inline-flex min-h-11 items-center rounded-card border border-line px-3 text-sm font-medium hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark disabled:opacity-60"
-        :disabled="busy"
-        :aria-label="busy ? undefined : `Tambah berkas ${group}`"
+        class="inline-flex min-h-11 items-center rounded-card border border-line px-3 text-sm font-medium hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
+        :aria-label="`Tambah berkas ${group}`"
         @click="picker?.click()"
       >
-        {{ busy ? 'Mengunggah...' : 'Tambah berkas' }}
+        {{ uploading ? 'Tambah berkas lagi' : 'Tambah berkas' }}
       </button>
+      <!-- Ctrl+V tidak ada di layar sentuh, jadi petunjuknya hanya untuk perangkat dengan mouse. -->
+      <p class="mt-1 hidden text-sm text-ink-muted pointer-fine:block">
+        Atau tempel (Ctrl+V) atau seret berkas ke sini.
+      </p>
     </div>
+    <UploadQueueList :queue="queue" :announce="announce" @abort="abort" @retry="retry" @dismiss="dismiss" />
 
     <p v-if="error" role="alert" class="mt-2 rounded-card bg-danger-bg p-2 text-sm text-danger">
       {{ error }}

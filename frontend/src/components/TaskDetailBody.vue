@@ -30,6 +30,7 @@ import { formatDateTime } from '../utils/format'
 import { describeTaskHistory, historyNote } from '../utils/taskHistory'
 import { formatDay, isOverdue, statusClass, statusLabel, type TaskStatus } from '../utils/task'
 import AttachmentSection from './AttachmentSection.vue'
+import FileDropTarget from './FileDropTarget.vue'
 import UrgencyLabel from './UrgencyLabel.vue'
 import PersonChip from './PersonChip.vue'
 import UserAvatar from './UserAvatar.vue'
@@ -179,6 +180,20 @@ async function run(action: () => Promise<unknown>, success: string): Promise<boo
   } finally {
     busy.value = false
   }
+}
+
+// Tempel dan seret berkas (revisi 36): setiap bagian lampiran menyerahkan berkasnya ke komponen lampiran di
+// dalamnya, jadi antrean, batas ukuran, dan hak akses tetap milik komponen itu. Hanya satu sub task terbuka
+// sekaligus, jadi cukup satu acuan untuk Arahan dan satu untuk Hasil.
+type FilesHandle = { add: (files: File[]) => void }
+const dropTargets: Record<'brief' | 'deliverable' | 'subBrief' | 'subResult', FilesHandle | null> = {
+  brief: null,
+  deliverable: null,
+  subBrief: null,
+  subResult: null,
+}
+function setDropTarget(key: keyof typeof dropTargets, el: unknown) {
+  dropTargets[key] = (el as FilesHandle | null) ?? null
 }
 
 const briefs = computed(() => task.value?.attachments.filter((a) => a.kind === 'brief') ?? [])
@@ -905,7 +920,13 @@ const buttonSecondary =
                 <div v-if="openSub === s.id" :id="`sub-detail-${s.id}`" class="mt-3 ml-8 space-y-3">
                   <!-- Revisi 18: arahan dari yang menugaskan dan hasil dari yang mengerjakan dipisah, supaya jelas
                        mana bahan kerja dan mana keluarannya. Kelompok kosong tetap tampil supaya tempatnya jelas. -->
-                  <section :aria-labelledby="`sub-arahan-${s.id}`" class="space-y-2">
+                  <FileDropTarget
+                    as="section"
+                    :enabled="s.can_attach"
+                    :aria-labelledby="`sub-arahan-${s.id}`"
+                    class="space-y-2"
+                    @files="(f) => dropTargets.subBrief?.add(f)"
+                  >
                     <component :is="groupTag" :id="`sub-arahan-${s.id}`" class="text-sm font-semibold">
                       Arahan
                     </component>
@@ -938,6 +959,7 @@ const buttonSecondary =
                     </a>
                     <p v-if="!hasArahan(s)" class="text-sm text-ink-muted">Belum ada arahan tambahan.</p>
                     <SubtaskFiles
+                      :ref="(el) => setDropTarget('subBrief', el)"
                       :task-id="task.id"
                       :subtask-id="s.id"
                       :items="filesOf(s, 'brief')"
@@ -946,9 +968,15 @@ const buttonSecondary =
                       group="arahan"
                       @changed="onSubtaskFiles"
                     />
-                  </section>
+                  </FileDropTarget>
 
-                  <section :aria-labelledby="`sub-hasil-${s.id}`" class="space-y-2">
+                  <FileDropTarget
+                    as="section"
+                    :enabled="s.can_attach"
+                    :aria-labelledby="`sub-hasil-${s.id}`"
+                    class="space-y-2"
+                    @files="(f) => dropTargets.subResult?.add(f)"
+                  >
                     <component :is="groupTag" :id="`sub-hasil-${s.id}`" class="text-sm font-semibold">
                       Hasil
                     </component>
@@ -1026,6 +1054,7 @@ const buttonSecondary =
                     </form>
 
                     <SubtaskFiles
+                      :ref="(el) => setDropTarget('subResult', el)"
                       :task-id="task.id"
                       :subtask-id="s.id"
                       :items="filesOf(s, 'deliverable')"
@@ -1034,7 +1063,7 @@ const buttonSecondary =
                       group="hasil"
                       @changed="onSubtaskFiles"
                     />
-                  </section>
+                  </FileDropTarget>
 
                   <div v-if="s.can_edit" class="flex gap-1">
                     <button type="button" :class="linkButton" @click="startEdit(s)">Ubah</button>
@@ -1118,9 +1147,10 @@ const buttonSecondary =
           <p class="mt-2 text-sm whitespace-pre-line break-words">{{ task.description }}</p>
         </section>
 
-        <section>
+        <FileDropTarget as="section" :enabled="task.can.edit" @files="(f) => dropTargets.brief?.add(f)">
           <component :is="sectionTag" class="font-semibold">Lampiran brief</component>
           <AttachmentSection
+            :ref="(el) => setDropTarget('brief', el)"
             :task-id="task.id"
             kind="brief"
             :items="briefs"
@@ -1128,9 +1158,13 @@ const buttonSecondary =
             :can-delete="task.can.edit"
             @changed="onFilesChanged"
           />
-        </section>
+        </FileDropTarget>
 
-        <section>
+        <FileDropTarget
+          as="section"
+          :enabled="task.can.edit_deliverable"
+          @files="(f) => dropTargets.deliverable?.add(f)"
+        >
           <component :is="sectionTag" class="font-semibold">Deliverable</component>
           <form
             v-if="task.can.edit_deliverable"
@@ -1161,6 +1195,7 @@ const buttonSecondary =
           </p>
           <p v-else-if="!task.can.edit_deliverable" class="mt-2 text-sm text-ink-muted">Belum ada tautan.</p>
           <AttachmentSection
+            :ref="(el) => setDropTarget('deliverable', el)"
             :task-id="task.id"
             kind="deliverable"
             :items="deliverables"
@@ -1168,7 +1203,7 @@ const buttonSecondary =
             :can-delete="task.can.edit_deliverable"
             @changed="onFilesChanged"
           />
-        </section>
+        </FileDropTarget>
       </div>
 
       <div class="min-w-0 space-y-6">

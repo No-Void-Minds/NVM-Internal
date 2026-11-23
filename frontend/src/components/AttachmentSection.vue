@@ -10,10 +10,11 @@ import {
   uploadAttachment,
   type AttachmentKind,
   type TaskAttachment,
-  type UploadHandle,
 } from '../api/attachments'
 import FileDropzone from './FileDropzone.vue'
-import { formatBytes, isImage, isPdf, precheck } from '../utils/attachment'
+import UploadQueueList from './UploadQueueList.vue'
+import { useUploadQueue } from '../composables/useUploadQueue'
+import { formatBytes, isImage, isPdf } from '../utils/attachment'
 import { formatDateTime } from '../utils/format'
 
 const props = defineProps<{
@@ -31,64 +32,20 @@ function messageOf(err: unknown): string {
   return err instanceof ApiError ? err.message : 'Terjadi kesalahan yang tidak terduga. Coba lagi.'
 }
 
-type QueueItem = {
-  key: number
-  file: File
-  status: 'waiting' | 'uploading' | 'failed'
-  progress: number
-  error: string | null
-}
-
-const queue = ref<QueueItem[]>([])
-const uploading = ref(false)
-let nextKey = 0
-let current: UploadHandle | null = null
-
-function addFiles(files: File[]) {
-  for (const file of files) {
-    const error = precheck(file)
-    queue.value.push({ key: nextKey++, file, status: error ? 'failed' : 'waiting', progress: 0, error })
-  }
-  void runQueue()
-}
-
-// Satu berkas per waktu: progresnya jelas dan Wi-Fi kantor tidak dibanjiri unggahan paralel.
-async function runQueue() {
-  if (uploading.value) return
-  uploading.value = true
-  let done = 0
-  try {
-    for (let item = nextWaiting(); item; item = nextWaiting()) {
-      const it = item
-      it.status = 'uploading'
-      try {
-        current = uploadAttachment(props.taskId, props.kind, it.file, (p) => (it.progress = p))
-        await current.promise
-        done++
-        dismiss(it.key)
-      } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') {
-          dismiss(it.key)
-          continue
-        }
-        it.status = 'failed'
-        it.error = `${it.file.name}: ${messageOf(err)}`
-      }
-    }
-  } finally {
-    uploading.value = false
-    current = null
-  }
-  if (done) emit('changed', done === 1 ? '1 berkas diunggah.' : `${done} berkas diunggah.`)
-}
-
-function nextWaiting(): QueueItem | undefined {
-  return queue.value.find((q) => q.status === 'waiting')
-}
-
-function dismiss(key: number) {
-  queue.value = queue.value.filter((q) => q.key !== key)
-}
+// Antrean bersama dengan lampiran sub task (revisi 36). add diekspos supaya tempelan Ctrl+V di bagian induknya
+// (FileDropTarget) masuk ke antrean yang sama.
+const {
+  queue,
+  announce,
+  add: addFiles,
+  dismiss,
+  retry,
+  abort,
+} = useUploadQueue(
+  (file, onProgress) => uploadAttachment(props.taskId, props.kind, file, onProgress),
+  (msg) => emit('changed', msg),
+)
+defineExpose({ add: addFiles })
 
 // Pratinjau hanya untuk gambar dan PDF; isinya ditangani AttachmentPreview.
 function canPreview(a: TaskAttachment): boolean {
@@ -234,44 +191,12 @@ const buttonSecondary =
     <p v-else-if="!canUpload" class="mt-2 text-sm text-ink-muted">Belum ada {{ kindLabel }}.</p>
 
     <FileDropzone v-if="canUpload" class="mt-2" @files="addFiles" />
+    <!-- Ctrl+V tidak ada di layar sentuh, jadi petunjuknya hanya untuk perangkat dengan mouse. -->
+    <p v-if="canUpload" class="mt-1 hidden text-sm text-ink-muted pointer-fine:block">
+      Atau tempel (Ctrl+V) atau seret berkas ke sini.
+    </p>
 
-    <ul v-if="queue.length" class="mt-2 space-y-2">
-      <li v-for="q in queue" :key="q.key" class="rounded-card border border-line p-3 text-sm">
-        <div class="flex items-center gap-2">
-          <p class="min-w-0 flex-1 truncate font-medium">{{ q.file.name }}</p>
-          <button
-            v-if="q.status === 'uploading'"
-            type="button"
-            :class="buttonSecondary"
-            @click="current?.abort()"
-          >
-            Batal
-          </button>
-          <button
-            v-else-if="q.status === 'failed'"
-            type="button"
-            :class="buttonSecondary"
-            @click="dismiss(q.key)"
-          >
-            Tutup
-          </button>
-        </div>
-        <p v-if="q.status === 'failed'" role="alert" class="mt-1 text-danger">{{ q.error }}</p>
-        <template v-else>
-          <progress
-            class="mt-2 h-2 w-full accent-mark"
-            :value="q.progress"
-            max="1"
-            :aria-label="`Progres unggah ${q.file.name}`"
-          />
-          <p class="mt-1 text-ink-muted">
-            {{
-              q.status === 'uploading' ? `Mengunggah ${Math.round(q.progress * 100)}%` : 'Menunggu giliran'
-            }}
-          </p>
-        </template>
-      </li>
-    </ul>
+    <UploadQueueList :queue="queue" :announce="announce" @abort="abort" @retry="retry" @dismiss="dismiss" />
 
     <AttachmentPreview :task-id="taskId" :item="preview" @close="preview = null" />
 

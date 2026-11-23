@@ -78,7 +78,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 11z | Sub task otomatis masuk templat seri | Perubahan sub task di kemunculan terbaru seri aktif langsung dipakai kemunculan berikutnya |
 | 12a | Halaman Timeline | Kalender bersama launching, produksi, dan kehadiran, plus Important Notes; hanya Manajer yang menulis |
 | 12b | Hapus task berulang dan hak PIC atas sub task | Dialog hapus memilih nasib seri, pengaman ticker, PIC task mengatur semua sub task di task-nya |
-| 12d | Hak centang sub task dan Output beberapa tautan | Centang untuk PIC sub task, PIC task, pembuat task, dan Manajer; setiap URL di Output Aktivitas jadi tombol |
+| 12d | Hak centang sub task, Output beberapa tautan, tempel dan seret lampiran | Centang untuk PIC sub task, PIC task, pembuat task, dan Manajer; setiap URL di Output Aktivitas jadi tombol; Ctrl+V dan seret-lepas di lampiran task dan sub task |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -1498,7 +1498,21 @@ Keputusan teknis:
 - Isi Output yang tersimpan tidak diubah. Ekspor Excel dan salinan Drive tetap memakai teks aslinya.
 - Tidak ada migrasi dan tidak ada tabel baru, jadi grants tidak perlu dijalankan ulang.
 
-**Selesai kalau:** `scripts/pra-deploy.sh` LOLOS dan E2E revisi 34 dan 35 lolos di 360 dan 1280 px.
+**Revisi 36 (tempel dan seret berkas di lampiran task dan sub task):**
+
+- [x] S12d-05 `utils/pasteFiles.ts` (penamaan tempelan, dengan test unit `tests/pasteFiles.test.ts`), composable `useUploadQueue` (antrean yang diangkat dari `AttachmentSection`, ditambah coba lagi), komponen `UploadQueueList` dan `FileDropTarget`. Dipasang di Arahan dan Hasil sub task serta Lampiran brief dan Deliverable task. E2E `E2E_ONLY=paste`.
+
+**Keputusan revisi 36:**
+- Bagian tujuan ditentukan dari tempat event terjadi, bukan dari logika terpisah: setiap bagian lampiran (Arahan sub task, Hasil sub task, Lampiran brief, Deliverable) dibungkus `FileDropTarget` yang menangkap `paste` dan `drop` dari elemen mana pun di dalamnya, termasuk isian Catatan hasil, Tautan hasil, dan tautan deliverable, lalu menyerahkan berkasnya ke komponen lampiran bagian itu. `stopPropagation` menjaga bagian luar tidak ikut menerima berkas yang sama.
+- Tempelan tanpa berkas dibiarkan, jadi Ctrl+V berisi teks tetap menempel teks ke isian yang difokus.
+- Gambar dari clipboard yang tidak bernama atau bernama generik (`image.png`) diberi nama `tempel-YYYYMMDD-HHMMSS.<ext>` menurut jam perangkat, dengan `-2`, `-3` untuk beberapa gambar sekaligus; ekstensi mengikuti jenis gambar (png, jpg, webp, gif) karena backend menolak isi yang tidak cocok dengan ekstensi. Berkas bernama yang disalin dari penjelajah berkas tetap memakai namanya. Form Buat task memakai fungsi yang sama, jadi tempelannya juga bernama `tempel-...` (sebelumnya `screenshot-...`). Aktivitas Harian tetap memakai nama per jam (`tangkapan-09.00-1.png`, keputusan Sprint 11v).
+- Batas ukuran, tipe berkas, dan hak akses sama dengan tombol Tambah berkas di bagian itu, karena berkas tempelan dan seretan masuk ke antrean yang sama (`precheck` 50 MB dan daftar tipe lampiran task, `can_attach` untuk sub task, `can.edit` untuk brief, `can.edit_deliverable` untuk deliverable). Backend tidak berubah.
+- Antrean bersama dipakai lampiran task dan sub task: satu berkas per waktu, progres per berkas, beberapa berkas sekaligus, galat per berkas. Galat jaringan dan penolakan server (tidak berhak, terlalu besar menurut server) punya tombol "Coba lagi"; penolakan sebelum unggah (tipe atau ukuran) hanya "Tutup", karena mengulang tidak mengubah hasilnya. Hasil unggah dan galat dibacakan lewat `aria-live`.
+- Lampiran sub task sekarang menerima beberapa berkas sekaligus lewat tombolnya juga (`multiple`), dengan progres yang sama. Tombolnya tetap aktif selama mengunggah, berkas tambahan masuk antrean.
+- Petunjuk "Atau tempel (Ctrl+V) atau seret berkas ke sini." hanya tampil di perangkat dengan mouse (`pointer-fine`), karena Ctrl+V tidak ada di layar sentuh. Tombol Tambah berkas selalu ada. Sorotan saat berkas diseret di atas bagian memakai `bg-canvas` dan garis `mark`, sama dengan Aktivitas Harian, tanpa animasi baru.
+- Dropzone lampiran task di dalam bagian sudah menangani drop sendiri; `FileDropTarget` melewati event yang sudah ditangani (`defaultPrevented`) supaya berkas tidak terunggah dua kali.
+
+**Selesai kalau:** `scripts/pra-deploy.sh` LOLOS dan E2E revisi 34, 35, dan 36 lolos di 360 dan 1280 px.
 
 ## Sprint 12: Persiapan deploy dan migrasi data
 
@@ -1689,10 +1703,11 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 33 | 2026-11-20 | Rantai sambung jam di Aktivitas Harian: jam berikutnya yang kosong bisa disambung ke jam sebelumnya dan menampilkan isinya secara readonly, termasuk melintasi jam istirahat; halaman Manajer dan ekspor menampilkan rantai sebagai satu rentang | Sprint 12c |
 | 34 | 2026-11-23 | Sub task bisa dicentang dan dibatalkan PIC sub task, PIC task, pembuat task, dan Manajer saat On Progress; PIC task dan Manajer boleh membuka lagi sub task pilihan saat mengembalikan Ready ke On Progress | Sprint 12d |
 | 35 | 2026-11-23 | Output Aktivitas dengan beberapa tautan: setiap URL jadi tombol berlabel, dialog detail tanpa gulir horizontal | Sprint 12d |
+| 36 | 2026-11-23 | Tempel (Ctrl+V) dan seret-lepas berkas di lampiran Arahan dan Hasil sub task serta lampiran task, dengan antrean berprogres dan coba lagi | Sprint 12d |
 | 33b | 2026-11-20 | Poles tampilan kartu Aktivitas: tombol rantai pindah ke celah antar isian dan jadi ikon kecil tanpa bingkai, tombol mati tidak dirender, jam tersambung menyatu dengan jam kepalanya, status simpan punya baris tetap, Tambah berkas di sel tabel tanpa bingkai | Sprint 12c |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat ketiga puluh lima revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat ketiga puluh enam revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { pastedFiles } from '../utils/pasteFiles'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import FileDropzone from './FileDropzone.vue'
 import SubtaskEditor from './SubtaskEditor.vue'
@@ -150,27 +151,13 @@ function removePending(index: number) {
   pending.value.splice(index, 1)
 }
 
-const pastedExt: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg' }
-
-function stamp(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
-}
-
-// Screenshot dari clipboard selalu bernama image.png; diberi nama berwaktu supaya beberapa tempelan bisa dibedakan.
-function renamePasted(file: File, index: number): File {
-  const ext = pastedExt[file.type]
-  if (!ext || (file.name && file.name !== 'image.png')) return file
-  const suffix = index > 0 ? `-${index + 1}` : ''
-  return new File([file], `screenshot-${stamp(new Date())}${suffix}.${ext}`, { type: file.type })
-}
-
+// Penamaan tempelan sama dengan lampiran di detail task (revisi 36): tempel-<waktu>.<ext>.
 function onPaste(e: ClipboardEvent) {
-  const files = Array.from(e.clipboardData?.files ?? [])
+  const files = pastedFiles(e.clipboardData, new Date())
   // Tempelan teks biasa dibiarkan masuk ke kolom yang sedang difokus.
   if (files.length === 0) return
   e.preventDefault()
-  addPending(files.map(renamePasted))
+  addPending(files)
 }
 
 // Dipasang di document selama panel terbuka, supaya Ctrl+V bekerja dari kolom mana pun di form.
