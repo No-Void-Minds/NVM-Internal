@@ -63,6 +63,19 @@
   --color-danger: #8c2f22;
   --color-danger-bg: #f6e6e2;
 
+  /* Warna kolaborasi Whiteboard (W2): kursor, bingkai, dan label nama orang lain, satu warna tetap per orang. Token
+     baru karena token status hanya empat latar pucat yang tidak cukup berbeda untuk kursor. Terhitung: label teks
+     on-collab di atas warna minimal 5,48:1, warna terhadap canvas dan surface minimal 4,9:1. */
+  --color-collab-1: #b42318;
+  --color-collab-2: #1d4ed8;
+  --color-collab-3: #047857;
+  --color-collab-4: #6d28d9;
+  --color-collab-5: #a1440b;
+  --color-collab-6: #0e6f87;
+  --color-collab-7: #b0175a;
+  --color-collab-8: #4d6a0f;
+  --color-on-collab: #ffffff;
+
   --radius-card: 4px;
   --radius-chip: 2px;
 
@@ -112,6 +125,16 @@
   --shadow-menu: 0 4px 12px rgb(0 0 0 / 0.5);
   --shadow-dialog: 0 12px 32px rgb(0 0 0 / 0.6);
   --shadow-drag: 0 8px 20px rgb(0 0 0 / 0.55);
+  /* Mode gelap: warna kolaborasi terang dengan label tinta (minimal 7,45:1; terhadap canvas minimal 8,7:1). */
+  --color-collab-1: #ff8a7a;
+  --color-collab-2: #8fb3ff;
+  --color-collab-3: #4fd69a;
+  --color-collab-4: #c4a6ff;
+  --color-collab-5: #ffb55c;
+  --color-collab-6: #5fd8f0;
+  --color-collab-7: #ff8fc8;
+  --color-collab-8: #b5e06a;
+  --color-on-collab: #1a1c20;
 }
 
 :root {
@@ -367,4 +390,34 @@ img.ProseMirror-separator {
   .wb-main {
     height: calc(100dvh - 57px);
   }
+}
+
+/* Bingkai orang lain di kartu (W2): warna orang itu, lebih tebal saat sedang diedit. Dibagi zoom seperti garis
+   pilihan, jadi tebalnya tetap di layar. */
+.wb-card-remote {
+  box-shadow: 0 0 0 var(--wb-ring) var(--wb-remote);
+}
+.wb-card-remote-strong {
+  box-shadow: 0 0 0 calc(var(--wb-ring) * 2) var(--wb-remote);
+}
+.wb-remote-label {
+  background-color: var(--wb-remote);
+  color: var(--color-on-collab);
+}
+.wb-presence-ring {
+  box-shadow: 0 0 0 2px var(--wb-remote);
+}
+.wb-cursor-arrow {
+  fill: var(--wb-remote);
+  stroke: var(--color-surface);
+  stroke-width: 1;
+}
+.wb-mini-card {
+  fill: var(--color-line);
+  opacity: 0.6;
+}
+.wb-mini-screen {
+  fill: none;
+  stroke: var(--color-mark);
+  stroke-width: 1.5;
 }

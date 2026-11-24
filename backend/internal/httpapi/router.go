@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"log/slog"
 	"time"
 
@@ -34,13 +35,20 @@ type Server struct {
 	todos        *todo.Service
 	timeline     *timeline.Service
 	whiteboard   *whiteboard.Service
-	tasks        *task.Service
-	files        *storage.Store
-	avatars      *account.Avatars
-	attachments  *task.Attachments
+	hub          *whiteboard.Hub
+	// wsRecheck: jeda pemeriksaan ulang sesi koneksi WebSocket; dipendekkan di test.
+	wsRecheck   time.Duration
+	tasks       *task.Service
+	files       *storage.Store
+	avatars     *account.Avatars
+	attachments *task.Attachments
 	// now bisa diganti di test supaya waktu kuncian dan kedaluwarsa token bisa diuji.
 	now func() time.Time
 }
+
+// wsRecheckEvery: jeda pemeriksaan ulang sesi koneksi WebSocket Whiteboard. Variabel supaya test bisa
+// memendekkannya.
+var wsRecheckEvery = 60 * time.Second
 
 func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.Engine, error) {
 	if cfg.AppEnv == "production" {
@@ -72,11 +80,16 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 		todos:        todo.NewService(pool),
 		timeline:     timeline.NewService(pool),
 		whiteboard:   whiteboard.NewService(pool),
+		wsRecheck:    wsRecheckEvery,
 		tasks:        task.NewService(pool),
 		files:        files,
 		attachments:  task.NewAttachments(pool, files),
 		avatars:      account.NewAvatars(pool, files, log),
 	}
+
+	s.hub = whiteboard.NewHub(s.whiteboard)
+	// Hub hidup selama proses; Sweep melepas kunci kartu yang kehilangan detak.
+	go s.hub.Run(context.Background())
 
 	r := gin.New()
 	// ClientIP dipakai limiter login dan kolom ip_address audit log. Header X-Forwarded-For dan X-Real-IP hanya
@@ -194,6 +207,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	wb.GET("/boards/:id", s.wbBoard)
 	wbWrite.PUT("/boards/:id", s.wbRenameBoard)
 	wb.GET("/boards/:id/activity", s.wbActivity)
+	wb.GET("/ws", s.wbSocket)
 	wbWrite.POST("/boards/:id/cards", s.wbCreateCard)
 	wbWrite.POST("/boards/:id/cards/patch", s.wbPatchCards)
 	wbWrite.POST("/boards/:id/cards/delete", s.wbDeleteCards)

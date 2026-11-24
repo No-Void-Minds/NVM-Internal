@@ -26,6 +26,22 @@ func (q *Queries) BumpWbBoardSeq(ctx context.Context, id pgtype.UUID) (int64, er
 	return seq, err
 }
 
+const countWbCardsSince = `-- name: CountWbCardsSince :one
+SELECT count(*)::bigint FROM wb_cards WHERE board_id = $1 AND seq > $2
+`
+
+type CountWbCardsSinceParams struct {
+	BoardID pgtype.UUID
+	Seq     int64
+}
+
+func (q *Queries) CountWbCardsSince(ctx context.Context, arg CountWbCardsSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countWbCardsSince, arg.BoardID, arg.Seq)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const deleteWbExpiredBoards = `-- name: DeleteWbExpiredBoards :execrows
 DELETE FROM wb_boards WHERE deleted_at < $1
 `
@@ -242,6 +258,22 @@ func (q *Queries) GetWbCardForUpdate(ctx context.Context, arg GetWbCardForUpdate
 		&i.ContentVersion,
 	)
 	return i, err
+}
+
+const getWbCardKind = `-- name: GetWbCardKind :one
+SELECT kind FROM wb_cards WHERE id = $1 AND board_id = $2 AND deleted_at IS NULL
+`
+
+type GetWbCardKindParams struct {
+	ID      pgtype.UUID
+	BoardID pgtype.UUID
+}
+
+func (q *Queries) GetWbCardKind(ctx context.Context, arg GetWbCardKindParams) (string, error) {
+	row := q.db.QueryRow(ctx, getWbCardKind, arg.ID, arg.BoardID)
+	var kind string
+	err := row.Scan(&kind)
+	return kind, err
 }
 
 const getWbRoot = `-- name: GetWbRoot :one
@@ -512,6 +544,92 @@ func (q *Queries) ListWbCards(ctx context.Context, boardID pgtype.UUID) ([]ListW
 			&i.RefVersion,
 			&i.RefBoards,
 			&i.RefCards,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWbCardsSince = `-- name: ListWbCardsSince :many
+SELECT c.id, c.board_id, c.kind, c.ref_board_id, c.x, c.y, c.w, c.h, c.z, c.color, c.content, c.version,
+       c.content_version, c.seq, c.updated_by, c.updated_at,
+       coalesce(rb.title, '')::text AS ref_title, coalesce(rb.version, 0)::int AS ref_version,
+       (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind = 'board')::bigint AS ref_boards,
+       (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind <> 'board')::bigint AS ref_cards,
+       (c.deleted_at IS NOT NULL)::bool AS deleted
+FROM wb_cards c
+LEFT JOIN wb_boards rb ON rb.id = c.ref_board_id
+WHERE c.board_id = $1 AND c.seq > $2
+ORDER BY c.seq, c.id
+`
+
+type ListWbCardsSinceParams struct {
+	BoardID pgtype.UUID
+	Seq     int64
+}
+
+type ListWbCardsSinceRow struct {
+	ID             pgtype.UUID
+	BoardID        pgtype.UUID
+	Kind           string
+	RefBoardID     pgtype.UUID
+	X              float64
+	Y              float64
+	W              float64
+	H              float64
+	Z              float64
+	Color          pgtype.Text
+	Content        []byte
+	Version        int32
+	ContentVersion int32
+	Seq            int64
+	UpdatedBy      int64
+	UpdatedAt      pgtype.Timestamptz
+	RefTitle       string
+	RefVersion     int32
+	RefBoards      int64
+	RefCards       int64
+	Deleted        bool
+}
+
+// Sinkron ulang setelah koneksi putus: semua kartu yang berubah sesudah seq itu, termasuk yang masuk Tempat sampah
+// (deleted true) supaya klien bisa membuangnya.
+func (q *Queries) ListWbCardsSince(ctx context.Context, arg ListWbCardsSinceParams) ([]ListWbCardsSinceRow, error) {
+	rows, err := q.db.Query(ctx, listWbCardsSince, arg.BoardID, arg.Seq)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWbCardsSinceRow{}
+	for rows.Next() {
+		var i ListWbCardsSinceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BoardID,
+			&i.Kind,
+			&i.RefBoardID,
+			&i.X,
+			&i.Y,
+			&i.W,
+			&i.H,
+			&i.Z,
+			&i.Color,
+			&i.Content,
+			&i.Version,
+			&i.ContentVersion,
+			&i.Seq,
+			&i.UpdatedBy,
+			&i.UpdatedAt,
+			&i.RefTitle,
+			&i.RefVersion,
+			&i.RefBoards,
+			&i.RefCards,
+			&i.Deleted,
 		); err != nil {
 			return nil, err
 		}

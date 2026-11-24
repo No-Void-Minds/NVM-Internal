@@ -274,6 +274,8 @@ type BoardTitle struct {
 	ID      string `json:"id"`
 	Title   string `json:"title"`
 	Version int32  `json:"version"`
+	// ParentID: papan induk yang kartunya menampilkan judul ini (kosong untuk papan akar), untuk siaran hub.
+	ParentID string `json:"-"`
 }
 
 // RenameBoard mengganti judul papan, termasuk papan akar. Versi basi ditolak 409, supaya judul yang baru diganti
@@ -304,7 +306,7 @@ func (s *Service) RenameBoard(ctx context.Context, actor Actor, idText, title st
 		if err != nil {
 			return err
 		}
-		out = BoardTitle{ID: idString(r.ID), Title: r.Title, Version: r.Version}
+		out = BoardTitle{ID: idString(r.ID), Title: r.Title, Version: r.Version, ParentID: idString(old.ParentID)}
 		if old.Title == r.Title {
 			return nil
 		}
@@ -774,27 +776,31 @@ func applyChecklistOp(c *ChecklistContent, op ChecklistOp) error {
 }
 
 // DeleteCards memindahkan kartu terpilih ke Tempat sampah dalam satu batch. Kartu papan membawa papan anaknya dan
-// seluruh turunannya ke batch yang sama, jadi pulihkan mengembalikan semuanya sekaligus.
-func (s *Service) DeleteCards(ctx context.Context, actor Actor, boardText string, ids []string) (string, error) {
+// seluruh turunannya ke batch yang sama, jadi pulihkan mengembalikan semuanya sekaligus. drafts berisi draf terakhir
+// kartu yang sedang diedit orang lain (dari hub); draf yang sah disimpan sebagai isi kartu di transaksi yang sama,
+// jadi ketikan terakhir ikut masuk Tempat sampah dan kembali saat dipulihkan.
+// Papan yang ikut terhapus dikembalikan (id) supaya hub bisa memberi tahu siapa pun yang sedang membukanya.
+func (s *Service) DeleteCards(ctx context.Context, actor Actor, boardText string, ids []string, drafts map[string]json.RawMessage) (string, []string, error) {
 	boardID, err := s.boardID(ctx, actor, boardText)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if len(ids) == 0 {
-		return "", apperr.Invalid("Pilih kartu yang mau dihapus.")
+		return "", nil, apperr.Invalid("Pilih kartu yang mau dihapus.")
 	}
 	if len(ids) > MaxBatch {
-		return "", apperr.Invalid(fmt.Sprintf("Maksimal %d kartu sekaligus.", MaxBatch))
+		return "", nil, apperr.Invalid(fmt.Sprintf("Maksimal %d kartu sekaligus.", MaxBatch))
 	}
 	uuids := make([]pgtype.UUID, 0, len(ids))
 	for _, t := range ids {
 		u, err := ParseID(t)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		uuids = append(uuids, u)
 	}
 	var batch pgtype.UUID
+	boardIDs := []string{}
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := sqlc.New(tx)
 		seq, err := q.BumpWbBoardSeq(ctx, boardID)
@@ -803,6 +809,25 @@ func (s *Service) DeleteCards(ctx context.Context, actor Actor, boardText string
 		}
 		if batch, err = newBatch(); err != nil {
 			return err
+		}
+		for _, u := range uuids {
+			draft, ok := drafts[idString(u)]
+			if !ok {
+				continue
+			}
+			cur, err := q.GetWbCardForUpdate(ctx, sqlc.GetWbCardForUpdateParams{ID: u, BoardID: boardID})
+			if err != nil {
+				continue
+			}
+			content, plain, err := CleanContent(cur.Kind, draft)
+			if err != nil {
+				continue
+			}
+			if err := q.PatchWbCard(ctx, sqlc.PatchWbCardParams{
+				Content: content, Plain: pgtype.Text{String: plain, Valid: true}, Seq: seq, ActorID: actor.ID, ID: u, BoardID: boardID,
+			}); err != nil {
+				return err
+			}
 		}
 		rows, err := q.TrashWbCards(ctx, sqlc.TrashWbCardsParams{ActorID: actor.ID, Batch: batch, Seq: seq, BoardID: boardID, Ids: uuids})
 		if err != nil {
@@ -827,6 +852,7 @@ func (s *Service) DeleteCards(ctx context.Context, actor Actor, boardText string
 			}
 			for _, b := range sub {
 				boards = append(boards, b.Title)
+				boardIDs = append(boardIDs, idString(b.ID))
 			}
 		}
 		board, err := q.GetWbBoard(ctx, boardID)
@@ -839,7 +865,7 @@ func (s *Service) DeleteCards(ctx context.Context, actor Actor, boardText string
 		return audit.Change(ctx, q, actor.audit(), "wb_deleted", "wb_batch", idString(batch), nil,
 			map[string]any{"board": board.Title, "cards": len(rows), "boards": boards, "excerpts": excerpts})
 	})
-	return idString(batch), err
+	return idString(batch), boardIDs, err
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -1130,4 +1156,68 @@ func (s *Service) Activity(ctx context.Context, actor Actor, boardText string) (
 		})
 	}
 	return out, nil
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Pendukung hub kolaborasi (hub.go)
+
+// ResolveBoard mengubah "root" atau UUID menjadi id papan hidup.
+func (s *Service) ResolveBoard(ctx context.Context, actor Actor, key string) (string, error) {
+	id, err := s.boardID(ctx, actor, key)
+	if err != nil {
+		return "", err
+	}
+	if _, err := sqlc.New(s.pool).GetWbBoard(ctx, id); err != nil {
+		return "", notFound(err)
+	}
+	return idString(id), nil
+}
+
+// CardKind mengembalikan jenis kartu hidup di papan itu, dipakai hub untuk memvalidasi draf.
+func (s *Service) CardKind(ctx context.Context, boardText, cardText string) (string, error) {
+	b, err := ParseID(boardText)
+	if err != nil {
+		return "", err
+	}
+	c, err := ParseID(cardText)
+	if err != nil {
+		return "", err
+	}
+	kind, err := sqlc.New(s.pool).GetWbCardKind(ctx, sqlc.GetWbCardKindParams{ID: c, BoardID: b})
+	return kind, notFound(err)
+}
+
+// MaxSyncRows: selisih lebih dari ini membuat klien memuat ulang papan utuh, bukan menerima daftar perubahan.
+const MaxSyncRows = 2000
+
+// Since mengembalikan kartu yang berubah sesudah seq (hidup) dan id kartu yang masuk Tempat sampah sesudahnya.
+// tooMany true berarti selisihnya melewati MaxSyncRows.
+func (s *Service) Since(ctx context.Context, boardText string, seq int64) (cards []Card, deleted []string, tooMany bool, err error) {
+	b, err := ParseID(boardText)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	q := sqlc.New(s.pool)
+	n, err := q.CountWbCardsSince(ctx, sqlc.CountWbCardsSinceParams{BoardID: b, Seq: seq})
+	if err != nil || n > MaxSyncRows {
+		return nil, nil, n > MaxSyncRows, err
+	}
+	rows, err := q.ListWbCardsSince(ctx, sqlc.ListWbCardsSinceParams{BoardID: b, Seq: seq})
+	if err != nil {
+		return nil, nil, false, err
+	}
+	cards, deleted = []Card{}, []string{}
+	for _, r := range rows {
+		if r.Deleted {
+			deleted = append(deleted, idString(r.ID))
+			continue
+		}
+		cards = append(cards, cardOf(sqlc.ListWbCardsRow{
+			ID: r.ID, BoardID: r.BoardID, Kind: r.Kind, RefBoardID: r.RefBoardID, X: r.X, Y: r.Y, W: r.W, H: r.H, Z: r.Z,
+			Color: r.Color, Content: r.Content, Version: r.Version, ContentVersion: r.ContentVersion, Seq: r.Seq,
+			UpdatedBy: r.UpdatedBy, UpdatedAt: r.UpdatedAt, RefTitle: r.RefTitle, RefVersion: r.RefVersion,
+			RefBoards: r.RefBoards, RefCards: r.RefCards,
+		}))
+	}
+	return cards, deleted, false, nil
 }

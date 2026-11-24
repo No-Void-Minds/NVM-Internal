@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"time"
@@ -25,39 +26,44 @@ func (s *Server) requireSession() gin.HandlerFunc {
 			return
 		}
 
-		now := s.now()
-		claims, userID, err := s.tokens.Parse(raw, now)
-		if err != nil {
-			s.expireSession(c)
-			return
-		}
-
-		u, err := sqlc.New(s.pool).GetSessionUser(c.Request.Context(), userID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			s.expireSession(c)
-			return
-		}
+		u, ok, err := s.sessionFor(c.Request.Context(), raw)
 		if err != nil {
 			s.internalError(c, err)
 			return
 		}
-		if !u.IsActive || u.TokenVersion != claims.TokenVersion {
+		if !ok {
 			s.expireSession(c)
 			return
 		}
-		alive, err := s.touchSession(c, u.ID, claims.SessionID, now)
-		if err != nil {
-			s.internalError(c, err)
-			return
-		}
-		if !alive {
-			s.expireSession(c)
-			return
-		}
-
 		c.Set(sessionUserKey, u)
 		c.Next()
 	}
+}
+
+// sessionFor memeriksa token sesi dan membaca ulang akun dari database. ok false berarti sesi sudah tidak berlaku
+// (token rusak atau kedaluwarsa, akun nonaktif, token_version naik, baris sesi hilang atau lewat umur mutlak).
+// Dipakai requireSession dan pemeriksaan ulang koneksi WebSocket Whiteboard, supaya aturannya satu.
+func (s *Server) sessionFor(ctx context.Context, raw string) (sqlc.GetSessionUserRow, bool, error) {
+	now := s.now()
+	claims, userID, err := s.tokens.Parse(raw, now)
+	if err != nil {
+		return sqlc.GetSessionUserRow{}, false, nil
+	}
+	u, err := sqlc.New(s.pool).GetSessionUser(ctx, userID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return u, false, nil
+	}
+	if err != nil {
+		return u, false, err
+	}
+	if !u.IsActive || u.TokenVersion != claims.TokenVersion {
+		return u, false, nil
+	}
+	alive, err := s.touchSession(ctx, u.ID, claims.SessionID, now)
+	if err != nil || !alive {
+		return u, false, err
+	}
+	return u, true, nil
 }
 
 // sessionTouchEvery membatasi penulisan last_seen_at: Caddy memanggil verify untuk setiap aset dashboard,
@@ -67,13 +73,13 @@ const sessionTouchEvery = 60 * time.Second
 // touchSession memastikan baris sesinya masih ada dan belum melewati umur mutlak, lalu mencatat aktivitas
 // terakhir. Cookie tidak diterbitkan ulang di sini, sehingga verify untuk Caddy (yang tidak meneruskan
 // Set-Cookie) tidak membuat token berganti di setiap request.
-func (s *Server) touchSession(c *gin.Context, userID int64, sid string, now time.Time) (bool, error) {
+func (s *Server) touchSession(ctx context.Context, userID int64, sid string, now time.Time) (bool, error) {
 	var id pgtype.UUID
 	if err := id.Scan(sid); err != nil || !id.Valid {
 		return false, nil
 	}
 	q := sqlc.New(s.pool)
-	row, err := q.GetUserSession(c.Request.Context(), sqlc.GetUserSessionParams{ID: id, UserID: userID})
+	row, err := q.GetUserSession(ctx, sqlc.GetUserSessionParams{ID: id, UserID: userID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -87,7 +93,7 @@ func (s *Server) touchSession(c *gin.Context, userID int64, sid string, now time
 	}
 	idle := now.Sub(row.LastSeenAt.Time)
 	if idle >= sessionTouchEvery {
-		err = q.TouchUserSession(c.Request.Context(), sqlc.TouchUserSessionParams{
+		err = q.TouchUserSession(ctx, sqlc.TouchUserSessionParams{
 			ID: id, Now: pgtype.Timestamptz{Time: now, Valid: true},
 		})
 	}

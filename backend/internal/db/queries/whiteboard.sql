@@ -205,3 +205,23 @@ SELECT c.id, c.board_id, c.kind, c.ref_board_id, c.x, c.y, c.w, c.h, c.z, c.colo
 FROM wb_cards c
 LEFT JOIN wb_boards rb ON rb.id = c.ref_board_id
 WHERE c.id = @id AND c.deleted_at IS NULL;
+
+-- name: GetWbCardKind :one
+SELECT kind FROM wb_cards WHERE id = @id AND board_id = @board_id AND deleted_at IS NULL;
+
+-- name: CountWbCardsSince :one
+SELECT count(*)::bigint FROM wb_cards WHERE board_id = @board_id AND seq > @seq;
+
+-- name: ListWbCardsSince :many
+-- Sinkron ulang setelah koneksi putus: semua kartu yang berubah sesudah seq itu, termasuk yang masuk Tempat sampah
+-- (deleted true) supaya klien bisa membuangnya.
+SELECT c.id, c.board_id, c.kind, c.ref_board_id, c.x, c.y, c.w, c.h, c.z, c.color, c.content, c.version,
+       c.content_version, c.seq, c.updated_by, c.updated_at,
+       coalesce(rb.title, '')::text AS ref_title, coalesce(rb.version, 0)::int AS ref_version,
+       (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind = 'board')::bigint AS ref_boards,
+       (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind <> 'board')::bigint AS ref_cards,
+       (c.deleted_at IS NOT NULL)::bool AS deleted
+FROM wb_cards c
+LEFT JOIN wb_boards rb ON rb.id = c.ref_board_id
+WHERE c.board_id = @board_id AND c.seq > @seq
+ORDER BY c.seq, c.id;

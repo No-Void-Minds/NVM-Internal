@@ -46,6 +46,8 @@
 // E2E_ONLY=wbdasar, wbkeyboard, wbponsel, wbadmin, atau wb1 untuk keempatnya (Whiteboard W1: papan akar, kartu
 // papan, breadcrumb, alat klik dan seret, catatan, checklist, seret kartu, Tempat sampah, keyboard, layar sentuh,
 // Admin hanya baca; kartu papan uji dipindah ke Tempat sampah di akhir).
+// E2E_ONLY=wb2 untuk semua skenario Whiteboard W2 (atau satu per satu: wbhadir, wblangsung, wbseret, wbhapusedit,
+// wbputus, wbundo, wbduatab) ditambah navbar (semua halaman, tiga peran, 768, 1024, 1279, dan 1280 px).
 // Keluar dengan kode 1 bila ada yang gagal.
 import { chromium } from "playwright-core";
 
@@ -4193,6 +4195,433 @@ if (ONLY === "wb1")
     await checkWbPonsel(w);
     await checkWbAdmin(w);
   }
+
+
+// Whiteboard W2: kolaborasi langsung dengan beberapa konteks browser (akun berbeda) dan dua tab akun yang sama.
+// Setiap skenario memakai papan uji sendiri (kartu papan di papan akar) yang dipindah ke Tempat sampah di akhir.
+async function wbPage(ctx, board, errors) {
+  const page = await ctx.newPage();
+  page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+  page.on("pageerror", (e) => errors.push(`pageerror ${e.message}`));
+  await page.goto(BASE + `/whiteboard/${board}`);
+  await page.waitForLoadState("networkidle");
+  // Tunggu WebSocket tersambung: penanda tidak lagi "Terputus".
+  await page
+    .waitForFunction(() => document.querySelector("[data-testid=wb-save]")?.textContent?.trim() === "Tersimpan", null, { timeout: 15000 })
+    .catch(() => {});
+  return page;
+}
+
+async function wbContext(role, width) {
+  return browser.newContext({ viewport: { width, height: width < 768 ? 800 : 900 }, storageState: sessions[role] });
+}
+
+function wbExpect(name, width) {
+  const where = (w) => `${name} ${width} ${w}`;
+  return (cond, w, msg) => {
+    checks++;
+    if (!cond) fail(where(w), msg);
+  };
+}
+
+async function cardLabelOf(page, id) {
+  return (await page.locator(`[data-card="${id}"]`).getAttribute("aria-label").catch(() => "")) ?? "";
+}
+
+// Kehadiran: tiga orang saling melihat avatar dan kursor bernama; orang yang diam 3 menit tampil redup.
+async function checkWbHadir(width) {
+  const expect = wbExpect("wbhadir", width);
+  const { api, card, board } = await wbSetup("staf", `E2E wbhadir ${width} ${Date.now()}`);
+  await wbCard(api, board, "note", 0, 0, wbNote("Kartu hadir"));
+  const errors = [];
+  const cs = await wbContext("staf", width);
+  const cm = await wbContext("manajer", width);
+  const ca = await wbContext("admin", width);
+  try {
+    const ps = await wbPage(cs, board, errors);
+    const pm = await cm.newPage();
+    pm.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+    // Jam Manajer dipercepat untuk menguji status diam, tanpa menunggu 3 menit sungguhan.
+    await pm.clock.install();
+    await pm.goto(BASE + `/whiteboard/${board}`);
+    await pm.waitForLoadState("networkidle");
+    const pa = await wbPage(ca, board, errors);
+    await ps.locator("[data-testid=wb-presence]").nth(1).waitFor({ timeout: 10000 });
+    expect((await ps.locator("[data-testid=wb-presence]").count()) === 2, "avatar", "Staf tidak melihat dua orang lain");
+    expect((await pa.locator("[data-testid=wb-presence]").count()) === 2, "avatar", "Admin tidak melihat dua orang lain");
+
+    // Kursor Manajer terlihat di layar Staf dengan nama.
+    const cb = await pm.locator('[role="application"]').boundingBox();
+    await pm.mouse.move(cb.x + cb.width / 2, cb.y + cb.height / 2);
+    await pm.clock.runFor(100);
+    await pm.mouse.move(cb.x + cb.width / 2 + 30, cb.y + cb.height / 2 + 20, { steps: 3 });
+    const cursor = ps.locator("[data-testid=wb-cursor]").first();
+    await cursor.waitFor({ timeout: 10000 }).catch(() => {});
+    expect((await cursor.count()) > 0, "kursor", "kursor Manajer tidak terlihat");
+
+    // Manajer diam 3 menit: avatarnya di layar Staf menyebut diam.
+    await pm.clock.runFor(185000);
+    await ps
+      .waitForFunction(() => [...document.querySelectorAll("[data-testid=wb-presence]")].some((b) => b.getAttribute("aria-label")?.includes("diam")), null, { timeout: 10000 })
+      .catch(() => {});
+    const labels = await ps.locator("[data-testid=wb-presence]").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")));
+    expect(labels.some((l) => l.includes("diam")), "diam", `label avatar: ${labels.join(" | ")}`);
+    await audit(ps, errors, `wbhadir ${width} papan`);
+  } finally {
+    await wbCleanup(api, card);
+    await api.ctx.close();
+    await cs.close();
+    await cm.close();
+    await ca.close();
+  }
+}
+
+// Edit langsung: Staf mengetik, Manajer melihat teks berubah dan label "sedang mengedit", tidak bisa membuka editor
+// kartu itu, tetapi bisa mengganti warnanya; kedua perubahan tersimpan.
+async function checkWbLangsung(width) {
+  const expect = wbExpect("wblangsung", width);
+  const { api, card, board } = await wbSetup("staf", `E2E wblangsung ${width} ${Date.now()}`);
+  const note = await wbCard(api, board, "note", 0, 0, wbNote("Awal"));
+  const errors = [];
+  const cs = await wbContext("staf", width);
+  const cm = await wbContext("manajer", width);
+  try {
+    const ps = await wbPage(cs, board, errors);
+    const pm = await wbPage(cm, board, errors);
+    await ps.locator(`[data-card="${note.id}"]`).click({ position: { x: 6, y: 6 } });
+    await ps.keyboard.press("Enter");
+    const editor = ps.getByRole("textbox", { name: "Isi catatan" });
+    await editor.waitFor({ timeout: 10000 });
+    await editor.press("End");
+    await editor.pressSequentially(" ditambah Staf");
+    await pm.waitForFunction((id) => document.querySelector(`[data-card="${id}"]`)?.textContent?.includes("ditambah Staf"), note.id, { timeout: 10000 }).catch(() => {});
+    expect((await pm.locator(`[data-card="${note.id}"]`).textContent()).includes("ditambah Staf"), "draf", "teks Staf tidak terlihat langsung");
+    expect((await cardLabelOf(pm, note.id)).includes("sedang mengedit"), "label", "label sedang mengedit tidak ada");
+
+    // Manajer mencoba mengedit: ditolak dengan nama pemegang. Mengganti warna tetap boleh.
+    await pm.locator(`[data-card="${note.id}"]`).click({ position: { x: 6, y: 6 } });
+    await pm.keyboard.press("Enter");
+    await pm.getByText(/sedang mengedit kartu ini/).first().waitFor({ timeout: 5000 }).catch(() => {});
+    expect((await pm.getByRole("textbox", { name: "Isi catatan" }).count()) === 0, "kunci", "Manajer bisa membuka editor kartu yang dikunci");
+    await pm.getByLabel("Warna kartu terpilih").selectOption("kuning");
+    await wbSaved(pm);
+    await ps.keyboard.press("Escape");
+    await wbSaved(ps);
+    const saved = (await wbCards(api, board)).find((c) => c.id === note.id);
+    expect(saved.color === "kuning" && JSON.stringify(saved.content).includes("ditambah Staf"), "tersimpan", `warna ${saved.color}, isi ${JSON.stringify(saved.content).slice(0, 120)}`);
+    await audit(pm, errors, `wblangsung ${width} papan`);
+  } finally {
+    await wbCleanup(api, card);
+    await api.ctx.close();
+    await cs.close();
+    await cm.close();
+  }
+}
+
+// Seret langsung: Manajer melihat kartu bergerak sebelum Staf melepas. Dua orang memegang kartu yang sama, yang
+// kedua dibatalkan dengan label.
+async function checkWbSeret(width) {
+  const expect = wbExpect("wbseret", width);
+  const { api, card, board } = await wbSetup("staf", `E2E wbseret ${width} ${Date.now()}`);
+  const note = await wbCard(api, board, "note", 0, 0, wbNote("Seret aku"));
+  await wbCard(api, board, "note", 600, 400, wbNote("Jangkar"));
+  const errors = [];
+  const cs = await wbContext("staf", width);
+  const cm = await wbContext("manajer", width);
+  try {
+    const ps = await wbPage(cs, board, errors);
+    const pm = await wbPage(cm, board, errors);
+    const before = await pm.locator(`[data-card="${note.id}"]`).boundingBox();
+    const sb = await ps.locator(`[data-card="${note.id}"]`).boundingBox();
+    await ps.mouse.move(sb.x + 6, sb.y + 6);
+    await ps.mouse.down();
+    await ps.mouse.move(sb.x + 40, sb.y + 30, { steps: 5 });
+    await ps.mouse.move(sb.x + 80, sb.y + 60, { steps: 5 });
+    await pm.waitForTimeout(400);
+    const during = await pm.locator(`[data-card="${note.id}"]`).boundingBox();
+    expect(during && (during.x !== before.x || during.y !== before.y), "langsung", "kartu tidak bergerak di layar Manajer sebelum dilepas");
+    expect((await cardLabelOf(pm, note.id)).includes("sedang memindahkan"), "label", "label sedang memindahkan tidak ada");
+
+    // Manajer mencoba menyeret kartu yang sama selama Staf masih memegangnya.
+    const mb = await pm.locator(`[data-card="${note.id}"]`).boundingBox();
+    await pm.mouse.move(mb.x + 6, mb.y + 6);
+    await pm.mouse.down();
+    await pm.mouse.move(mb.x + 60, mb.y + 60, { steps: 5 });
+    await pm.getByText(/sedang memindahkan kartu ini/).first().waitFor({ timeout: 5000 }).catch(() => {});
+    await pm.mouse.up();
+    expect((await pm.getByText(/sedang memindahkan kartu ini/).count()) > 0, "rebut", "seret kedua tidak dibatalkan dengan label");
+    await ps.mouse.up();
+    await wbSaved(ps);
+    await wbSaved(pm);
+    // Posisi akhir hanya hasil seret Staf (74 px layar ke kanan), bukan ditambah seret Manajer yang ditolak.
+    const z = parseInt((await ps.locator("text=/^\\d+%$/").first().textContent()) ?? "100", 10) / 100;
+    const saved = (await wbCards(api, board)).find((c) => c.id === note.id);
+    expect(Math.abs(saved.x - note.x - 74 / z) <= 16, "posisi", `posisi akhir ${saved.x}, ${saved.y}, mau sekitar ${Math.round(74 / z)} (zoom ${z})`);
+  } finally {
+    await wbCleanup(api, card);
+    await api.ctx.close();
+    await cs.close();
+    await cm.close();
+  }
+}
+
+// Kartu yang sedang diedit dihapus orang lain: yang mengedit melihat dialog dengan nama penghapus, dan Pulihkan
+// kartu mengembalikan ketikan terakhirnya.
+async function checkWbHapusEdit(width) {
+  const expect = wbExpect("wbhapusedit", width);
+  const { api, card, board } = await wbSetup("staf", `E2E wbhapus ${width} ${Date.now()}`);
+  const note = await wbCard(api, board, "note", 0, 0, wbNote("Awal"));
+  const mgr = await apiAs("manajer");
+  const errors = [];
+  const cs = await wbContext("staf", width);
+  try {
+    const ps = await wbPage(cs, board, errors);
+    await ps.locator(`[data-card="${note.id}"]`).click({ position: { x: 6, y: 6 } });
+    await ps.keyboard.press("Enter");
+    const editor = ps.getByRole("textbox", { name: "Isi catatan" });
+    await editor.waitFor({ timeout: 10000 });
+    await editor.press("End");
+    await editor.pressSequentially(" ketikan terakhir");
+    await ps.waitForTimeout(500);
+    const del = await mgr.call("POST", `/whiteboard/boards/${board}/cards/delete`, { ids: [note.id] });
+    expect(del.status === 200, "hapus", `hapus oleh Manajer ${del.status}`);
+    const dialog = ps.locator("dialog[open]", { hasText: "dipindah ke Tempat sampah oleh" });
+    await dialog.waitFor({ timeout: 10000 }).catch(() => {});
+    expect((await dialog.count()) === 1, "dialog", "dialog kartu dihapus tidak muncul");
+    await audit(ps, errors, `wbhapusedit ${width} dialog`);
+    await dialog.getByRole("button", { name: "Pulihkan kartu" }).click();
+    await ps.locator(`[data-card="${note.id}"]`).waitFor({ timeout: 10000 });
+    const back = (await wbCards(api, board)).find((c) => c.id === note.id);
+    expect(back && JSON.stringify(back.content).includes("ketikan terakhir"), "pulih", `isi setelah pulih ${JSON.stringify(back?.content).slice(0, 120)}`);
+  } finally {
+    await wbCleanup(api, card);
+    await api.ctx.close();
+    await mgr.ctx.close();
+    await cs.close();
+  }
+}
+
+// Putus: Staf offline, penanda Terputus tampil, perubahannya menunggu; Manajer mengubah kartu lain; setelah online
+// lagi keduanya sama dan penanda kembali Tersimpan.
+async function checkWbPutus(width) {
+  const expect = wbExpect("wbputus", width);
+  const { api, card, board } = await wbSetup("staf", `E2E wbputus ${width} ${Date.now()}`);
+  const a = await wbCard(api, board, "note", 0, 0, wbNote("Kartu A"));
+  const b = await wbCard(api, board, "note", 400, 0, wbNote("Kartu B"));
+  const errors = [];
+  const cs = await wbContext("staf", width);
+  const cm = await wbContext("manajer", width);
+  try {
+    const ps = await wbPage(cs, board, errors);
+    const pm = await wbPage(cm, board, errors);
+    await cs.setOffline(true);
+    // Seret kartu A selagi offline: REST gagal dan masuk antrean.
+    const ab = await ps.locator(`[data-card="${a.id}"]`).boundingBox();
+    await ps.mouse.move(ab.x + 6, ab.y + 6);
+    await ps.mouse.down();
+    await ps.mouse.move(ab.x + 60, ab.y + 6, { steps: 6 });
+    await ps.mouse.up();
+    await ps.locator("[data-testid=wb-offline]").waitFor({ timeout: 10000 }).catch(() => {});
+    expect(await ps.locator("[data-testid=wb-offline]").isVisible(), "penanda", "penanda Terputus tidak tampil");
+    expect((await ps.locator("[data-testid=wb-save]").textContent()).includes("Terputus"), "status", "status bukan Terputus");
+    // Manajer mengubah warna kartu B selama Staf putus.
+    await pm.locator(`[data-card="${b.id}"]`).click({ position: { x: 6, y: 6 } });
+    await pm.getByLabel("Warna kartu terpilih").selectOption("biru");
+    await wbSaved(pm);
+    await cs.setOffline(false);
+    await ps.waitForFunction(() => document.querySelector("[data-testid=wb-save]")?.textContent?.trim() === "Tersimpan", null, { timeout: 40000 }).catch(() => {});
+    expect((await ps.locator("[data-testid=wb-save]").textContent()).trim() === "Tersimpan", "pulih", "penanda tidak kembali Tersimpan");
+    const saved = await wbCards(api, board);
+    const sa = saved.find((c) => c.id === a.id);
+    expect(sa.x !== a.x, "antrean", "seret selama offline hilang");
+    // Staf melihat warna dari Manajer, Manajer melihat posisi baru kartu A.
+    await ps.waitForFunction((id) => document.querySelector(`[data-card="${id}"]`)?.className.includes("bg-completed-bg"), b.id, { timeout: 10000 }).catch(() => {});
+    expect((await ps.locator(`[data-card="${b.id}"]`).getAttribute("class")).includes("bg-completed-bg"), "sinkron", "Staf tidak melihat warna dari Manajer");
+    const pa = await pm.locator(`[data-card="${a.id}"]`).boundingBox();
+    const pmZoom = parseInt((await pm.locator("text=/^\\d+%$/").first().textContent()) ?? "100", 10) / 100;
+    expect(pa && Math.abs(pa.x - (await pm.locator(`[data-card="${b.id}"]`).boundingBox()).x - (sa.x - b.x) * pmZoom) < 4, "sinkron", "Manajer tidak melihat posisi baru kartu A");
+  } finally {
+    await wbCleanup(api, card);
+    await api.ctx.close();
+    await cs.close();
+    await cm.close();
+  }
+}
+
+// Undo hanya aksi sendiri: Staf memindah lalu mewarnai, Manajer mengganti warnanya; undo warna dilewati dengan
+// pesan, undo pindah mengembalikan posisi, warna Manajer tetap. Salin, tempel, dan duplikat ikut diuji.
+async function checkWbUndo(width) {
+  const expect = wbExpect("wbundo", width);
+  const { api, card, board } = await wbSetup("staf", `E2E wbundo ${width} ${Date.now()}`);
+  const note = await wbCard(api, board, "note", 0, 0, wbNote("Undo"));
+  const errors = [];
+  const cs = await wbContext("staf", width);
+  const cm = await wbContext("manajer", width);
+  try {
+    const ps = await wbPage(cs, board, errors);
+    const pm = await wbPage(cm, board, errors);
+    const loc = ps.locator(`[data-card="${note.id}"]`);
+    await loc.click({ position: { x: 6, y: 6 } });
+    await ps.keyboard.press("Shift+ArrowRight");
+    await ps.keyboard.press("Shift+ArrowRight");
+    await ps.waitForTimeout(600);
+    await wbSaved(ps);
+    await ps.getByLabel("Warna kartu terpilih").selectOption("kuning");
+    await wbSaved(ps);
+    await pm.waitForTimeout(300);
+    await pm.locator(`[data-card="${note.id}"]`).click({ position: { x: 6, y: 6 } });
+    await pm.getByLabel("Warna kartu terpilih").selectOption("hijau");
+    await wbSaved(pm);
+    await ps.waitForFunction((id) => document.querySelector(`[data-card="${id}"]`)?.className.includes("bg-progress-bg"), note.id, { timeout: 10000 }).catch(() => {});
+    await loc.focus();
+    await ps.keyboard.press("Control+z");
+    await ps.getByText("Sebagian langkah tidak dibatalkan").first().waitFor({ timeout: 5000 }).catch(() => {});
+    expect((await ps.getByText("Sebagian langkah tidak dibatalkan").count()) > 0, "lewat", "pesan langkah dilewati tidak tampil");
+    await ps.keyboard.press("Control+z");
+    await wbSaved(ps);
+    let saved = (await wbCards(api, board)).find((c) => c.id === note.id);
+    expect(saved.x === note.x && saved.color === "hijau", "undo", `setelah undo x ${saved.x} warna ${saved.color}`);
+    await ps.keyboard.press("Control+Shift+z");
+    await wbSaved(ps);
+    saved = (await wbCards(api, board)).find((c) => c.id === note.id);
+    expect(saved.x === note.x + 16, "redo", `setelah redo x ${saved.x}`);
+
+    // Duplikat dan salin-tempel membuat kartu baru dengan isi yang sama.
+    await loc.click({ position: { x: 6, y: 6 } });
+    await ps.keyboard.press("Control+d");
+    await ps.waitForFunction((n) => document.querySelectorAll("[data-card]").length >= n, 2, { timeout: 10000 }).catch(() => {});
+    await wbSaved(ps);
+    const cards = await wbCards(api, board);
+    expect(cards.length === 2 && cards.every((c) => JSON.stringify(c.content).includes("Undo")), "duplikat", `kartu ${cards.length}`);
+    await ps.keyboard.press("Control+z");
+    await wbSaved(ps);
+    expect((await wbCards(api, board)).length === 1, "undo duplikat", "undo duplikat tidak menghapus salinannya");
+  } finally {
+    await wbCleanup(api, card);
+    await api.ctx.close();
+    await cs.close();
+    await cm.close();
+  }
+}
+
+// Dua tab akun yang sama: kunci berpindah lewat "Edit di sini"; undo tab kedua tidak membatalkan aksi tab pertama.
+async function checkWbDuaTab(width) {
+  const expect = wbExpect("wbduatab", width);
+  const { api, card, board } = await wbSetup("staf", `E2E wbtab ${width} ${Date.now()}`);
+  const note = await wbCard(api, board, "note", 0, 0, wbNote("Dua tab"));
+  const errors = [];
+  const cs = await wbContext("staf", width);
+  try {
+    const t1 = await wbPage(cs, board, errors);
+    const t2 = await wbPage(cs, board, errors);
+    await t1.bringToFront();
+    await t1.locator(`[data-card="${note.id}"]`).click({ position: { x: 6, y: 6 } });
+    await t1.keyboard.press("Shift+ArrowDown");
+    await t1.waitForTimeout(600);
+    await wbSaved(t1);
+    await t1.keyboard.press("Enter");
+    await t1.getByRole("textbox", { name: "Isi catatan" }).waitFor({ timeout: 10000 });
+    await t2.bringToFront();
+    await t2.waitForFunction((id) => document.querySelector(`[data-card="${id}"]`)?.getAttribute("aria-label")?.includes("tab lain"), note.id, { timeout: 10000 }).catch(() => {});
+    expect((await cardLabelOf(t2, note.id)).includes("tab lain"), "label", "tab kedua tidak menandai kartu diedit di tab lain");
+    expect((await t2.getByRole("button", { name: "Urungkan langkah" }).isDisabled().catch(() => true)), "undo", "tab kedua bisa mengurungkan aksi tab pertama");
+    await t2.locator(`[data-card="${note.id}"]`).click({ position: { x: 6, y: 6 } });
+    await t2.keyboard.press("Enter");
+    const prompt = t2.locator("dialog[open]", { hasText: "tab lain" });
+    await prompt.waitFor({ timeout: 10000 });
+    await prompt.getByRole("button", { name: "Edit di sini" }).click();
+    await t2.getByRole("textbox", { name: "Isi catatan" }).waitFor({ timeout: 10000 }).catch(() => {});
+    expect((await t2.getByRole("textbox", { name: "Isi catatan" }).count()) === 1, "pindah", "editor tidak pindah ke tab kedua");
+    expect((await t1.getByRole("textbox", { name: "Isi catatan" }).count()) === 0, "pindah", "editor tab pertama masih terbuka");
+    await audit(t2, errors, `wbduatab ${width} tab kedua`);
+  } finally {
+    await wbCleanup(api, card);
+    await api.ctx.close();
+    await cs.close();
+  }
+}
+
+// Navbar baru: semua halaman untuk ketiga peran di 768, 1024, 1279, dan 1280 px: tanpa gulir horizontal, menu atas
+// tidak meluap, dan di bawah 1280 px bar bawah plus menu Lainnya memuat semua item peran itu.
+async function checkNavbar() {
+  const expectAll = {
+    admin: ["Timeline", "Task", "Aktivitas", "Whiteboard", "Arsip", "Pengguna", "Pengaturan", "Audit Log", "Status", "Profil"],
+    manajer: ["Timeline", "Task", "Aktivitas", "Whiteboard", "Arsip", "Pengguna", "Pengaturan", "Audit Log", "Profil"],
+    staf: ["Timeline", "Task", "Aktivitas", "Whiteboard", "Arsip", "Profil"],
+  };
+  const pages = { Timeline: "/timeline", Task: "/task", Aktivitas: "/aktivitas", Whiteboard: "/whiteboard", Arsip: "/arsip", Pengguna: "/pengguna", Pengaturan: "/pengaturan", "Audit Log": "/audit-log", Profil: "/profil" };
+  for (const role of ["admin", "manajer", "staf"]) {
+    for (const width of [768, 1024, 1279, 1280]) {
+      const where = (w) => `navbar ${role} ${width} ${w}`;
+      const { ctx, page, errors } = await open(role, width, "terang");
+      try {
+        for (const [label, path] of Object.entries(pages)) {
+          if (!expectAll[role].includes(label)) continue;
+          await page.goto(BASE + path);
+          await page.waitForLoadState("networkidle");
+          const r = await page.evaluate(() => {
+            const nav = document.querySelector('header nav[aria-label="Navigasi utama"]');
+            const right = nav?.nextElementSibling;
+            const navVisible = !!nav && getComputedStyle(nav).display !== "none";
+            const last = nav?.lastElementChild?.getBoundingClientRect();
+            return {
+              sw: document.documentElement.scrollWidth,
+              vw: window.innerWidth,
+              navVisible,
+              navOverflow: navVisible ? nav.scrollWidth > nav.clientWidth + 1 : false,
+              overlap: navVisible && right && last ? last.right > right.getBoundingClientRect().left + 1 : false,
+              bottom: !!document.querySelector("nav.fixed") && getComputedStyle(document.querySelector("nav.fixed")).display !== "none",
+            };
+          });
+          checks++;
+          if (r.sw > r.vw) fail(where(path), `scrollWidth ${r.sw} > ${r.vw}`);
+          checks++;
+          if (r.navOverflow || r.overlap) fail(where(path), "menu atas meluap atau menabrak blok kanan");
+          checks++;
+          if ((width >= 1280) !== r.navVisible || (width < 1280) !== r.bottom) fail(where(path), `menu atas ${r.navVisible}, bar bawah ${r.bottom}`);
+        }
+        // Semua item peran itu ada: di menu atas (1280) atau di bar bawah plus menu Lainnya.
+        let items;
+        if (width >= 1280) {
+          items = (await page.locator('header nav[aria-label="Navigasi utama"] a').allTextContents()).map((t) => t.trim());
+        } else {
+          const bottom = (await page.locator("nav.fixed a").allTextContents()).map((t) => t.trim());
+          await page.locator("nav.fixed").getByRole("button", { name: /Lainnya/ }).click();
+          const more = (await page.locator("#menu-lainnya a").allTextContents()).map((t) => t.trim());
+          await page.keyboard.press("Escape");
+          items = [...bottom, ...more];
+        }
+        checks++;
+        const missing = expectAll[role].filter((x) => !items.includes(x));
+        if (missing.length) fail(where("menu"), `tidak ada di menu: ${missing.join(", ")} (ada: ${items.join(", ")})`);
+        await audit(page, errors, where("audit"));
+      } finally {
+        await ctx.close();
+      }
+    }
+  }
+}
+
+if (ONLY === "wbhadir") for (const w of [360, 1280]) await checkWbHadir(w);
+if (ONLY === "wblangsung") for (const w of [360, 1280]) await checkWbLangsung(w);
+if (ONLY === "wbseret") for (const w of [360, 1280]) await checkWbSeret(w);
+if (ONLY === "wbhapusedit") for (const w of [360, 1280]) await checkWbHapusEdit(w);
+if (ONLY === "wbputus") for (const w of [360, 1280]) await checkWbPutus(w);
+if (ONLY === "wbundo") for (const w of [360, 1280]) await checkWbUndo(w);
+if (ONLY === "wbduatab") for (const w of [360, 1280]) await checkWbDuaTab(w);
+if (ONLY === "navbar") await checkNavbar();
+if (ONLY === "wb2") {
+  for (const w of [360, 1280]) {
+    await checkWbHadir(w);
+    await checkWbLangsung(w);
+    await checkWbSeret(w);
+    await checkWbHapusEdit(w);
+    await checkWbPutus(w);
+    await checkWbUndo(w);
+    await checkWbDuaTab(w);
+  }
+  await checkNavbar();
+}
 
 await browser.close();
 console.log(

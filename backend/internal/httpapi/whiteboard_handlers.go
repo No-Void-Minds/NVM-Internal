@@ -64,6 +64,11 @@ func (s *Server) wbRenameBoard(c *gin.Context) {
 		s.writeWbError(c, err)
 		return
 	}
+	s.hub.Renamed(b.ID, b.Title, b.Version)
+	// Kartu papan di kanvas induk menampilkan judul ini.
+	if b.ParentID != "" {
+		s.hub.Resync(b.ParentID)
+	}
 	c.JSON(http.StatusOK, gin.H{"board": b})
 }
 
@@ -95,6 +100,7 @@ func (s *Server) wbCreateCard(c *gin.Context) {
 		s.writeWbError(c, err)
 		return
 	}
+	s.hub.Changed(card.BoardID, []whiteboard.Card{card}, currentUser(c).ID)
 	c.JSON(http.StatusCreated, gin.H{"card": card})
 }
 
@@ -110,6 +116,9 @@ func (s *Server) wbPatchCards(c *gin.Context) {
 		s.writeWbError(c, err)
 		return
 	}
+	if len(cards) > 0 {
+		s.hub.Changed(cards[0].BoardID, cards, currentUser(c).ID)
+	}
 	c.JSON(http.StatusOK, gin.H{"cards": cards})
 }
 
@@ -123,6 +132,7 @@ func (s *Server) wbChecklist(c *gin.Context) {
 		s.writeWbError(c, err)
 		return
 	}
+	s.hub.Changed(card.BoardID, []whiteboard.Card{card}, currentUser(c).ID)
 	c.JSON(http.StatusOK, gin.H{"card": card})
 }
 
@@ -133,11 +143,19 @@ func (s *Server) wbDeleteCards(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	batch, err := s.whiteboard.DeleteCards(c.Request.Context(), wbActor(c), c.Param("id"), req.IDs)
+	ctx := c.Request.Context()
+	board, err := s.whiteboard.ResolveBoard(ctx, wbActor(c), c.Param("id"))
 	if err != nil {
 		s.writeWbError(c, err)
 		return
 	}
+	// Draf terakhir kartu yang sedang diedit orang lain ikut tersimpan sebelum kartunya masuk Tempat sampah.
+	batch, boards, err := s.whiteboard.DeleteCards(ctx, wbActor(c), board, req.IDs, s.hub.Drafts(req.IDs))
+	if err != nil {
+		s.writeWbError(c, err)
+		return
+	}
+	s.hub.Deleted(board, req.IDs, batch, currentUser(c).Name, boards)
 	c.JSON(http.StatusOK, gin.H{"batch": batch})
 }
 
@@ -156,6 +174,7 @@ func (s *Server) wbRestore(c *gin.Context) {
 		s.writeWbError(c, err)
 		return
 	}
+	s.hub.Resync(out.BoardID)
 	c.JSON(http.StatusOK, gin.H{"restored": out})
 }
 

@@ -28,6 +28,8 @@ const props = defineProps<{
   dy: number
   dw: number
   dh: number
+  // Orang lain yang sedang memilih, menyeret, atau mengedit kartu ini (W2): warna kolaborasi 1 sampai 8 dan label.
+  remote?: { color: number; label: string; strong: boolean } | null
 }>()
 const emit = defineEmits<{
   grab: [e: PointerEvent]
@@ -37,6 +39,7 @@ const emit = defineEmits<{
   note: [doc: PMNode]
   heading: [text: string]
   rename: [title: string]
+  draft: [text: string]
   checklist: [op: ChecklistOp]
 }>()
 
@@ -60,9 +63,15 @@ const style = computed(() => ({
   minHeight: `${props.card.h + props.dh}px`,
   zIndex: props.editing ? 100000 : Math.round(props.card.z),
   '--wb-ring': `${2 / props.zoom}px`,
+  '--wb-remote': props.remote ? `var(--color-collab-${props.remote.color})` : undefined,
 }))
 
-const label = computed(() => cardLabel(props.card) + (props.selected ? ', terpilih' : ''))
+const label = computed(
+  () =>
+    cardLabel(props.card) +
+    (props.selected ? ', terpilih' : '') +
+    (props.remote ? `, ${props.remote.label}` : ''),
+)
 
 const headingDraft = ref('')
 const headingInput = ref<HTMLInputElement | null>(null)
@@ -164,6 +173,7 @@ function onPointerDown(e: PointerEvent) {
     :class="[
       card.color ? colorClass[card.color] : 'bg-surface',
       selected ? 'wb-card-selected' : '',
+      !selected && remote ? (remote.strong ? 'wb-card-remote-strong' : 'wb-card-remote') : '',
       editing ? 'cursor-auto select-text' : canWrite ? 'cursor-grab' : 'cursor-default',
     ]"
     :style="style"
@@ -229,6 +239,7 @@ function onPointerDown(e: PointerEvent) {
           class="min-h-11 w-full rounded-card border border-line bg-surface px-2 text-lg font-bold text-ink"
           @pointerdown.stop
           @keydown="onHeadingKey"
+          @input="emit('draft', headingDraft)"
           @blur="saveHeading"
         />
       </template>
@@ -246,6 +257,14 @@ function onPointerDown(e: PointerEvent) {
       @close="emit('close')"
     />
 
+    <!-- Label orang lain di atas kartu; warnanya warna orang itu, teksnya on-collab (kontras dihitung di style.css). -->
+    <span
+      v-if="remote"
+      aria-hidden="true"
+      class="wb-remote-label pointer-events-none absolute -top-7 left-0 rounded-chip px-1.5 py-0.5 text-xs font-medium whitespace-nowrap"
+    >
+      {{ remote.label }}
+    </span>
     <!-- Pegangan ubah ukuran: gambarnya kecil, area sentuhnya 44x44 px. -->
     <div
       v-if="selected && canWrite && !editing"

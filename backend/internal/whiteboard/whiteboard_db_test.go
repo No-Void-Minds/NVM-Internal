@@ -238,11 +238,11 @@ func TestWbTempatSampah(t *testing.T) {
 	c1 := f.card(t, inner, KindNote, note("Satu"))
 	f.card(t, inner, KindNote, note("Dua"))
 
-	cardBatch, err := f.svc.DeleteCards(ctx, f.rina, inner, []string{c1.ID})
+	cardBatch, _, err := f.svc.DeleteCards(ctx, f.rina, inner, []string{c1.ID}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	boardBatch, err := f.svc.DeleteCards(ctx, f.nala, RootID, []string{kampanye.ID})
+	boardBatch, _, err := f.svc.DeleteCards(ctx, f.nala, RootID, []string{kampanye.ID}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +300,7 @@ func TestWbHapusPermanen(t *testing.T) {
 	old := f.card(t, RootID, KindNote, note("kartu lama"))
 	young := f.card(t, RootID, KindNote, note("kartu muda"))
 	for _, id := range []string{lama.ID, old.ID, young.ID} {
-		if _, err := f.svc.DeleteCards(ctx, f.rina, RootID, []string{id}); err != nil {
+		if _, _, err := f.svc.DeleteCards(ctx, f.rina, RootID, []string{id}, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

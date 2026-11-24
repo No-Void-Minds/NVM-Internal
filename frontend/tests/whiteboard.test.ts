@@ -51,7 +51,13 @@ test('urutan baca: baris dulu, lalu kiri ke kanan, toleransi 24 px', () => {
 
 test('panah memilih kartu terdekat di arah itu, bukan yang di belakang', () => {
   const from = r('from', 500, 500)
-  const cards = [from, r('kanan', 700, 510), r('kanan-jauh', 1200, 500), r('kiri', 200, 500), r('bawah', 500, 800)]
+  const cards = [
+    from,
+    r('kanan', 700, 510),
+    r('kanan-jauh', 1200, 500),
+    r('kiri', 200, 500),
+    r('bawah', 500, 800),
+  ]
   assert.equal(nearestInDirection(from, cards, 'right')?.id, 'kanan')
   assert.equal(nearestInDirection(from, cards, 'left')?.id, 'kiri')
   assert.equal(nearestInDirection(from, cards, 'down')?.id, 'bawah')
@@ -59,20 +65,50 @@ test('panah memilih kartu terdekat di arah itu, bukan yang di belakang', () => {
 })
 
 test('label kartu untuk pembaca layar', () => {
-  const base = { id: 'x', board_id: 'b', x: 0, y: 0, w: 1, h: 1, z: 0, color: null, version: 1, content_version: 1, seq: 1, updated_by: 1, updated_at: '' }
+  const base = {
+    id: 'x',
+    board_id: 'b',
+    x: 0,
+    y: 0,
+    w: 1,
+    h: 1,
+    z: 0,
+    color: null,
+    version: 1,
+    content_version: 1,
+    seq: 1,
+    updated_by: 1,
+    updated_at: '',
+  }
   const note: Card = {
     ...base,
     kind: 'note',
-    content: { doc: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Brief klien' }] }] } },
+    content: {
+      doc: {
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Brief klien' }] }],
+      },
+    },
   }
   const list: Card = {
     ...base,
     kind: 'checklist',
-    content: { title: 'Rilis', items: [{ id: '1', text: 'a', done: true }, { id: '2', text: 'b', done: false }] },
+    content: {
+      title: 'Rilis',
+      items: [
+        { id: '1', text: 'a', done: true },
+        { id: '2', text: 'b', done: false },
+      ],
+    },
   }
   assert.equal(cardLabel(note), 'Catatan: Brief klien')
   assert.equal(cardLabel(list), 'Checklist Rilis, 1 dari 2 selesai')
-  const board: Card = { ...base, kind: 'board', content: {}, ref: { id: 'r', title: '2026', version: 1, boards: 22, cards: 4 } }
+  const board: Card = {
+    ...base,
+    kind: 'board',
+    content: {},
+    ref: { id: 'r', title: '2026', version: 1, boards: 22, cards: 4 },
+  }
   assert.equal(cardLabel(board), 'Papan 2026, 22 papan, 4 kartu')
 })
 
@@ -81,6 +117,62 @@ test('kalimat riwayat', () => {
     activityText({ id: 1, action, summary, created_at: '', updated_at: '', user_name: 'Rina' })
   assert.equal(a('cards_arranged', { count: 3 }), 'mengatur letak, ukuran, atau warna 3 kartu')
   assert.equal(a('card_edited', { kind: 'note', excerpt: 'Halo' }), 'mengubah isi catatan: "Halo"')
-  assert.equal(a('cards_deleted', { count: 2, boards: 1 }), 'memindahkan 2 kartu ke Tempat sampah, termasuk 1 papan')
+  assert.equal(
+    a('cards_deleted', { count: 2, boards: 1 }),
+    'memindahkan 2 kartu ke Tempat sampah, termasuk 1 papan',
+  )
   assert.equal(a('board_renamed', { from: 'A', to: 'B' }), 'mengganti judul papan dari "A" menjadi "B"')
+})
+
+import { reconnectDelay } from '../src/utils/wbSocket.ts'
+import { layoutPatches, push, MAX_STEPS, type Step } from '../src/utils/wbHistory.ts'
+
+test('jeda sambung ulang 1, 2, 4, 8, 16, lalu 30 detik ditambah acak sampai 20%', () => {
+  const none = () => 0
+  assert.deepEqual(
+    [0, 1, 2, 3, 4, 5, 9].map((a) => reconnectDelay(a, none)),
+    [1000, 2000, 4000, 8000, 16000, 30000, 30000],
+  )
+  assert.equal(
+    reconnectDelay(0, () => 0.999),
+    1200,
+  )
+  assert.ok(reconnectDelay(5, () => 0.5) > 30000 && reconnectDelay(5, () => 0.5) <= 36000)
+})
+
+test('undo tata letak melewati field yang sudah diubah orang lain', () => {
+  const base = {
+    board_id: 'b',
+    kind: 'note' as const,
+    z: 0,
+    content: {},
+    version: 1,
+    content_version: 1,
+    seq: 1,
+    updated_by: 1,
+    updated_at: '',
+  }
+  const step: Extract<Step, { kind: 'layout' }> = {
+    kind: 'layout',
+    cards: [
+      { id: 'a', before: { x: 0, y: 0, color: null }, after: { x: 100, y: 0, color: 'kuning' } },
+      { id: 'b', before: { x: 10 }, after: { x: 20 } },
+    ],
+  }
+  // Kartu a: x masih hasil aksi sendiri, warna sudah diganti orang lain. Kartu b sudah dihapus.
+  const current = new Map([['a', { ...base, id: 'a', x: 100, y: 0, w: 1, h: 1, color: 'biru' as const }]])
+  const undo = layoutPatches(step, current, 'undo')
+  assert.deepEqual(undo.patches, [{ id: 'a', x: 0, y: 0 }])
+  assert.equal(undo.skipped, 2)
+  const redoState = new Map([['a', { ...base, id: 'a', x: 0, y: 0, w: 1, h: 1, color: null }]])
+  assert.deepEqual(layoutPatches(step, redoState, 'redo').patches, [
+    { id: 'a', x: 100, y: 0, color: 'kuning' },
+  ])
+})
+
+test('riwayat dibatasi dan redo dibuang setelah aksi baru', () => {
+  const stack = { undo: [] as Step[], redo: [{ kind: 'create', ids: ['x'] }] as Step[] }
+  for (let i = 0; i < MAX_STEPS + 5; i++) push(stack, { kind: 'create', ids: [String(i)] })
+  assert.equal(stack.undo.length, MAX_STEPS)
+  assert.equal(stack.redo.length, 0)
 })
