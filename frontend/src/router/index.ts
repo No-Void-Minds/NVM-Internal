@@ -31,6 +31,8 @@ declare module 'vue-router' {
     // Peran di luar roles melihat halaman 404, bukan dialihkan ke beranda, supaya keberadaan halaman ini tidak
     // terungkap (revisi 23).
     hideFromOthers?: boolean
+    // canvas: halaman mengisi sisa layar di bawah navbar tanpa padding dan tanpa gulir halaman (Whiteboard).
+    canvas?: boolean
   }
 }
 
@@ -94,6 +96,20 @@ export const router = createRouter({
     { path: '/arsip', name: 'archive', component: ArchivePage, meta: { title: 'Arsip' } },
     { path: '/aktivitas', name: 'activity', component: ActivityPage, meta: { title: 'Aktivitas Harian' } },
     { path: '/timeline', name: 'timeline', component: TimelinePage, meta: { title: 'Timeline' } },
+    // Whiteboard dimuat terpisah (dynamic import), supaya kanvas dan editornya tidak menambah berat halaman lain.
+    // /whiteboard membuka papan akar bersama, /whiteboard/:id papan lain di halaman yang sama.
+    {
+      path: '/whiteboard',
+      name: 'whiteboard',
+      component: () => import('../pages/WhiteboardPage.vue'),
+      meta: { title: 'Whiteboard', canvas: true },
+    },
+    {
+      path: '/whiteboard/:id',
+      name: 'whiteboard-board',
+      component: () => import('../pages/WhiteboardPage.vue'),
+      meta: { title: 'Whiteboard', canvas: true },
+    },
   ],
 })
 

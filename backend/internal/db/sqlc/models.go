@@ -549,3 +549,56 @@ type UserTodo struct {
 	CreatedAt pgtype.Timestamptz
 	UpdatedAt pgtype.Timestamptz
 }
+
+type WbActivity struct {
+	ID        int64
+	BoardID   pgtype.UUID
+	UserID    int64
+	Action    string
+	EntityID  pgtype.UUID
+	Summary   []byte
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
+}
+
+type WbBoard struct {
+	ID           pgtype.UUID
+	IsRoot       bool
+	ParentID     pgtype.UUID
+	Title        string
+	IsTemplate   bool
+	Seq          int64
+	Version      int32
+	CreatedBy    int64
+	UpdatedBy    int64
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+	DeletedAt    pgtype.Timestamptz
+	DeletedBy    pgtype.Int8
+	DeletedBatch pgtype.UUID
+}
+
+type WbCard struct {
+	ID             pgtype.UUID
+	BoardID        pgtype.UUID
+	Kind           string
+	RefBoardID     pgtype.UUID
+	X              float64
+	Y              float64
+	W              float64
+	H              float64
+	Z              float64
+	Color          pgtype.Text
+	Content        []byte
+	Plain          string
+	Version        int32
+	ContentVersion int32
+	Seq            int64
+	CreatedBy      int64
+	UpdatedBy      int64
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
+	DeletedAt      pgtype.Timestamptz
+	DeletedBy      pgtype.Int8
+	DeletedBatch   pgtype.UUID
+}

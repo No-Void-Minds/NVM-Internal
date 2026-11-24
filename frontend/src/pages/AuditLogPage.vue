@@ -39,6 +39,7 @@ const categories: { value: AuditCategory; label: string }[] = [
   { value: 'task', label: 'Task' },
   { value: 'activity', label: 'Aktivitas' },
   { value: 'timeline', label: 'Timeline' },
+  { value: 'whiteboard', label: 'Whiteboard' },
 ]
 
 const monthFilter = ref('')

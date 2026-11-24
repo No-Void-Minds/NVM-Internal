@@ -16,7 +16,9 @@ GRANT DELETE ON
   activity_attachments,  -- DeleteActivityAttachment: lampiran aktivitas dihapus permanen (revisi 24)
   user_todos,            -- DeleteTodo dan DeleteDoneTodos: To Do pribadi dihapus permanen (revisi 28)
   user_sessions,         -- job maintenance: sesi kedaluwarsa
-  audit_logs             -- job maintenance: audit log login lebih dari 1 tahun
+  audit_logs,            -- job maintenance: audit log login lebih dari 1 tahun
+  wb_boards,             -- job maintenance: Tempat sampah Whiteboard lebih dari 30 hari (migrasi 000023)
+  wb_cards               -- job maintenance: Tempat sampah Whiteboard lebih dari 30 hari (migrasi 000023)
 TO nvm_internal_app;
 
 -- daily_activities (migrasi 000016, revisi 21) sengaja tidak ada di daftar DELETE: sel yang dikosongkan
@@ -34,6 +36,11 @@ TO nvm_internal_app;
 
 -- timeline_events dan timeline_notes (migrasi 000020, revisi 30) juga tidak ada di daftar DELETE: hapus memakai
 -- is_deleted lewat UPDATE, supaya kartu yang dihapus tetap terbaca untuk audit.
+
+-- wb_boards dan wb_cards (migrasi 000023, Whiteboard W1) hanya dihapus permanen oleh job maintenance, setelah 30
+-- hari di Tempat sampah; aplikasi sendiri menghapus lewat deleted_at. wb_activity sengaja tidak diberi DELETE:
+-- barisnya ikut hilang lewat ON DELETE CASCADE saat papannya dihapus permanen, dan aksi FK berjalan dengan hak
+-- pemilik tabel. Daftar DELETE sekarang sepuluh tabel.
 
 -- Bukti untuk runbook: daftar tabel yang boleh dihapus app.
 SELECT table_name FROM information_schema.role_table_grants

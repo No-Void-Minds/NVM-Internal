@@ -46,6 +46,8 @@ var Categories = map[string][]string{
 		"timeline_event_created", "timeline_event_updated", "timeline_event_deleted",
 		"timeline_note_created", "timeline_note_updated", "timeline_note_deleted",
 	},
+	// Whiteboard: hanya penghapusan, pemulihan, dan hapus permanen. Perubahan isi dicatat di riwayat per papan.
+	"whiteboard": {"wb_deleted", "wb_restored", "wb_purged"},
 }
 
 const PageSize = 50

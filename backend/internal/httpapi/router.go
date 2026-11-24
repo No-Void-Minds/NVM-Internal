@@ -17,6 +17,7 @@ import (
 	"nvm-internal/internal/task"
 	"nvm-internal/internal/timeline"
 	"nvm-internal/internal/todo"
+	"nvm-internal/internal/whiteboard"
 )
 
 type Server struct {
@@ -32,6 +33,7 @@ type Server struct {
 	labels       *label.Service
 	todos        *todo.Service
 	timeline     *timeline.Service
+	whiteboard   *whiteboard.Service
 	tasks        *task.Service
 	files        *storage.Store
 	avatars      *account.Avatars
@@ -69,6 +71,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 		labels:       label.NewService(pool),
 		todos:        todo.NewService(pool),
 		timeline:     timeline.NewService(pool),
+		whiteboard:   whiteboard.NewService(pool),
 		tasks:        task.NewService(pool),
 		files:        files,
 		attachments:  task.NewAttachments(pool, files),
@@ -182,6 +185,21 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	app.POST("/activities/files", s.uploadActivityFile)
 	app.GET("/activities/files/:fileId", s.downloadActivityFile)
 	app.DELETE("/activities/files/:fileId", s.deleteActivityFile)
+
+	// Whiteboard (docs/whiteboard.md): baca untuk semua, tulis hanya Staf dan Manajer.
+	wb := app.Group("/whiteboard")
+	wbWrite := wb.Group("", wbWriter())
+	// :id boleh "root" untuk papan akar.
+	wb.GET("/search", s.wbSearch)
+	wb.GET("/boards/:id", s.wbBoard)
+	wbWrite.PUT("/boards/:id", s.wbRenameBoard)
+	wb.GET("/boards/:id/activity", s.wbActivity)
+	wbWrite.POST("/boards/:id/cards", s.wbCreateCard)
+	wbWrite.POST("/boards/:id/cards/patch", s.wbPatchCards)
+	wbWrite.POST("/boards/:id/cards/delete", s.wbDeleteCards)
+	wbWrite.POST("/boards/:id/cards/:cardId/checklist", s.wbChecklist)
+	wb.GET("/trash", s.wbTrash)
+	wbWrite.POST("/trash/:batch/restore", s.wbRestore)
 
 	return r, nil
 }

@@ -48,8 +48,9 @@ func Pool(t *testing.T) *pgxpool.Pool {
 
 	// Tabel Drive tidak punya FK ke users atau tasks, jadi CASCADE tidak mengosongkannya. Tanpa disebut di sini,
 	// catatan drive_exports dari run sebelumnya membuat lampiran dengan id yang sama dianggap sudah terunggah.
+	// Tabel Whiteboard ikut kosong lewat CASCADE dari users, tetapi disebut supaya jelas.
 	if _, err := pool.Exec(ctx, `TRUNCATE audit_logs, task_attachments, task_labels, task_assignees, tasks, labels, users, divisions,
-		drive_exports, drive_folders, drive_export_runs RESTART IDENTITY CASCADE`); err != nil {
+		drive_exports, drive_folders, drive_export_runs, wb_activity, wb_cards, wb_boards RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `SELECT setval('task_number_seq', 1, false)`); err != nil {

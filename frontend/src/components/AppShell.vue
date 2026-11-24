@@ -28,6 +28,12 @@ const navItems: NavItem[] = [
     iconPath: 'M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11',
   },
   { to: '/aktivitas', label: 'Aktivitas', iconPath: 'M12 8v4l3 2M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18' },
+  // Whiteboard: di ponsel masuk menu Lainnya (tidak primary), di desktop sesudah Aktivitas.
+  {
+    to: '/whiteboard',
+    label: 'Whiteboard',
+    iconPath: 'M3 4h18v12H3zM8 20h8M12 16v4M7 8h5M7 11h3',
+  },
   {
     to: '/arsip',
     label: 'Arsip',
@@ -142,8 +148,7 @@ const contentWidth = computed(() =>
 
     <header class="border-b border-line bg-surface">
       <div class="flex h-14 items-center gap-4 lg:gap-6" :class="gutter">
-        <!-- Logo resmi NVM diikuti "Internal". Di lebar md kata itu hanya untuk pembaca layar, karena tujuh item navigasi
-             Manajer dan Admin tidak muat bersama teksnya. -->
+        <!-- Logo resmi NVM diikuti "Internal". -->
         <!-- Logo mengarah ke halaman awal, Timeline (revisi 39). -->
         <RouterLink
           :to="{ name: 'timeline' }"
@@ -151,21 +156,24 @@ const contentWidth = computed(() =>
           class="flex min-h-11 shrink-0 items-center gap-2 rounded-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
         >
           <BrandLogo class="h-5" />
-          <span class="font-bold whitespace-nowrap max-lg:sr-only max-md:not-sr-only">Internal</span>
+          <span class="font-bold whitespace-nowrap">Internal</span>
         </RouterLink>
-        <nav aria-label="Navigasi utama" class="hidden md:flex md:gap-1">
+        <!-- Menu atas baru dipakai mulai 1280 px. Sepuluh item Admin (sembilan Manajer) sejak Whiteboard tidak muat di
+             768 dan 1024 px (terukur 962 dan 1201 px; sudah meluap sebelum Whiteboard), jadi di bawah 1280 px
+             navigasi memakai bar bawah dan menu Lainnya seperti di ponsel. -->
+        <nav aria-label="Navigasi utama" class="hidden xl:flex xl:gap-1">
           <RouterLink
             v-for="item in visibleNav"
             :key="item.to"
             :to="item.to"
             :aria-current="isCurrent(item.to)"
-            class="inline-flex min-h-11 items-center rounded-card px-2 text-sm whitespace-nowrap text-ink-muted lg:text-base hover:bg-canvas lg:px-3 hover:text-ink active:bg-canvas aria-[current=page]:font-medium aria-[current=page]:text-ink"
+            class="inline-flex min-h-11 items-center rounded-card px-2 text-sm whitespace-nowrap text-ink-muted 2xl:px-3 2xl:text-base hover:bg-canvas hover:text-ink active:bg-canvas aria-[current=page]:font-medium aria-[current=page]:text-ink"
           >
             {{ item.label }}
           </RouterLink>
         </nav>
 
-        <div v-if="session.user" class="ml-auto hidden items-center gap-3 md:flex">
+        <div v-if="session.user" class="ml-auto hidden items-center gap-3 xl:flex">
           <a
             v-if="dashboardUrl"
             :href="dashboardUrl"
@@ -221,18 +229,23 @@ const contentWidth = computed(() =>
     </header>
 
     <!-- Padding bawah di mobile memberi ruang untuk bottom nav dan area aman layar. -->
+    <!-- Rute kanvas (Whiteboard) mengisi sisa layar tanpa padding; tingginya diatur .wb-main di style.css. -->
     <main
       id="konten"
       tabindex="-1"
-      :class="[gutter, contentWidth]"
-      class="pt-6 pb-[calc(5rem+env(safe-area-inset-bottom))] outline-none md:pb-10"
+      :class="
+        route.meta.canvas
+          ? 'wb-main'
+          : [gutter, contentWidth, 'pt-6 pb-[calc(5rem+env(safe-area-inset-bottom))] xl:pb-10']
+      "
+      class="outline-none"
     >
       <slot />
     </main>
 
     <nav
       aria-label="Navigasi utama"
-      class="fixed inset-x-0 bottom-0 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)] md:hidden"
+      class="fixed inset-x-0 bottom-0 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)] xl:hidden"
     >
       <!-- Maksimal empat item di bar bawah (keputusan Sprint 9 dan 11); halaman lain dan Keluar ada di menu Lainnya. -->
       <ul class="flex">

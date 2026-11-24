@@ -17,15 +17,15 @@ Fakta dari kode yang dipakai sebagai dasar:
 
 | No | Hal | Keputusan |
 |---|---|---|
-| 1 | Model data | Satu pohon `wb_boards` (folder dan papan), kartu di `wb_cards` dengan isi JSONB per jenis, `wb_connectors`, `wb_comments`, `wb_files`, `wb_activity`, `wb_link_previews`. Tempat sampah memakai kolom `deleted_at` dan `deleted_batch`, bukan tabel terpisah. `10-grants.sql` berubah. |
+| 1 | Model data | Semua adalah papan: satu papan akar bersama dan pohon `wb_boards`, papan anak tampil sebagai kartu jenis `board`. Kartu di `wb_cards` dengan isi JSONB per jenis, `wb_connectors`, `wb_comments`, `wb_files`, `wb_activity`, `wb_link_previews`. Tempat sampah memakai kolom `deleted_at` dan `deleted_batch`, bukan tabel terpisah. `10-grants.sql` berubah. |
 | 2 | Simpan dan konflik | Server sumber kebenaran. Per kartu dengan `version`, posisi, ukuran, dan warna digabung per field, isi dijaga 409. Kunci lunak per kartu saat mengetik, teks pemegang tampil langsung di layar orang lain. CRDT ditolak untuk sekarang. |
 | 3 | Kolaborasi langsung | WebSocket untuk kehadiran (avatar, kursor bernama, redup saat diam), siapa mengubah apa (bingkai warna, label, gerakan seret 25 per detik), kunci, dan siaran. Perubahan data tetap lewat REST. Hub di memori proses backend. Kasus tepi dan penanda "Tersimpan" atau "Terputus, menyambung ulang" dirinci. |
-| 4 | Frontend | DOM dengan CSS transform, culling di luar layar. TipTap 3 (MIT) hanya untuk kartu yang sedang diedit. Ekspor PNG dengan `html-to-image` (MIT), PDF dirakit sendiri dari JPEG. |
+| 4 | Frontend | Satu halaman kanvas selebar sisa layar (`/whiteboard` dan `/whiteboard/:id`) dengan breadcrumb, sidebar alat, dan panel Tempat sampah. DOM dengan CSS transform, culling di luar layar. TipTap 3 (MIT) hanya untuk kartu yang sedang diedit. Ekspor PNG dengan `html-to-image` (MIT), PDF dirakit sendiri dari JPEG. |
 | 5 | Keamanan | Pratinjau tautan diambil server dengan pemeriksaan IP di dialer. Teks berformat disimpan sebagai JSON ProseMirror tervalidasi, dirender tanpa `v-html`. SVG ditolak. 50 MB. |
 | 6 | Berkas | `storage.Store` yang sama, tabel `wb_files` masuk `ListAttachmentFileIDs`. Ekspor Drive: menunggu Manajer, bawaan tidak ikut. |
 | 7 | Performa | 500 kartu: satu permintaan muat papan, render hanya yang terlihat, drag tanpa render ulang Vue. |
 | 8 | Aksesibilitas | Kartu fokus dengan roving tabindex, pindah dengan Shift+panah, tampilan Daftar sebagai alternatif kanvas. |
-| 9 | Tahap | W1 fondasi dan catatan, W2 kolaborasi langsung dan edit lanjutan, W3 berkas, tautan, kolom, penghubung, komentar, W4 template, ekspor, pencarian isi, poles. |
+| 9 | Tahap | W1 fondasi (papan akar, kartu papan, sidebar alat), catatan, dan Tempat sampah, W2 kolaborasi langsung dan edit lanjutan, W3 berkas, tautan, kolom, penghubung, komentar, W4 template, ekspor, pencarian isi, poles. |
 
 ## 1. Model data dan migrasi
 
@@ -33,24 +33,23 @@ Semua tabel memakai awalan `wb_` supaya mudah dikenali di grants, job, dan backu
 
 ### Tabel
 
-**`wb_boards`**: folder dan papan dalam satu pohon.
+**`wb_boards`**: semua papan dalam satu pohon. Tidak ada konsep folder (keputusan Manajer, seperti Milanote).
 
 | Kolom | Tipe | Catatan |
 |---|---|---|
 | `id` | uuid PK | |
-| `kind` | text CHECK `folder` atau `board` | Folder tidak punya kanvas, hanya berisi folder dan papan. Papan punya kanvas. |
-| `parent_id` | uuid NULL FK `wb_boards` | NULL berarti di Beranda Whiteboard. Papan di dalam papan memakai kolom ini juga. |
+| `is_root` | boolean | Tepat satu papan akar ("Whiteboard"), dibuat migrasi. Indeks unik parsial menjaga hanya ada satu. |
+| `parent_id` | uuid NULL FK `wb_boards` ON DELETE CASCADE | NULL hanya untuk papan akar; papan lain selalu punya induk (CHECK). |
 | `title` | text, 1 sampai 120 karakter | |
-| `color` | text NULL | Nama token, bukan kode warna. |
 | `is_template` | boolean | Template adalah papan biasa yang ditandai (W4). |
 | `seq` | bigint | Naik setiap ada perubahan apa pun di papan ini; dasar sinkron ulang setelah reconnect. |
-| `version` | int | Optimistic locking untuk judul, warna, pindah induk. |
+| `version` | int | Optimistic locking untuk judul. |
 | `created_by`, `created_at`, `updated_by`, `updated_at` | | |
-| `deleted_at`, `deleted_by`, `deleted_batch` | NULL | Tempat sampah. |
+| `deleted_at`, `deleted_by`, `deleted_batch` | NULL | Tempat sampah. Papan akar tidak bisa masuk Tempat sampah (CHECK). |
 
-CHECK `parent_id <> id`. Siklus (papan dipindah ke dalam turunannya sendiri) dicek di Go dengan CTE rekursif di dalam transaksi yang sama, karena CHECK tidak bisa melihat baris lain. Kedalaman maksimal 8, supaya breadcrumb tetap terbaca di ponsel.
+Papan akar tidak bisa dihapus, dipindah, atau diganti induknya; judulnya boleh diubah. Migrasi membuatnya atas nama akun pertama bila sudah ada akun (produksi dan dev); database kosong (test) membuatnya saat pertama dibuka (`Service.rootID`).
 
-Papan di dalam papan tampil sebagai kartu jenis `board` di kanvas induknya, seperti Milanote. Kartu itu hanya menyimpan posisi dan `ref_board_id`; judul diambil dari papan anak. Papan di dalam folder tampil di daftar folder, bukan di kanvas.
+Papan di dalam papan tampil sebagai kartu jenis `board` di kanvas induknya. Kartu itu menyimpan posisi, ukuran, warna, dan `ref_board_id` (UNIQUE, satu kartu per papan anak); judul dan ringkasan isi ("22 papan, 4 kartu") diambil dari papan anak saat dimuat. Membuat kartu papan sekaligus membuat papan anaknya dalam satu transaksi. Kedalaman maksimal 8 (papan akar 0), supaya breadcrumb tetap terbaca di ponsel. Siklus tidak mungkin terjadi di W1 karena papan hanya dibuat di dalam papan yang sedang dibuka dan belum bisa dipindah; pindah kartu papan antar papan (W3) wajib memeriksa siklus dengan CTE rekursif di transaksi yang sama.
 
 **`wb_cards`**
 
@@ -58,7 +57,7 @@ Papan di dalam papan tampil sebagai kartu jenis `board` di kanvas induknya, sepe
 |---|---|---|
 | `id` | uuid PK | |
 | `board_id` | uuid FK | |
-| `kind` | text CHECK | `note`, `heading`, `checklist`, `image`, `file`, `link`, `column`, `board` |
+| `kind` | text CHECK | W1: `note`, `heading`, `checklist`, `board`. W3 menambah `image`, `file`, `link`, `column`, `drawing`, `table`. |
 | `x`, `y`, `w`, `h` | double precision | Koordinat dunia dalam piksel pada zoom 100%. `w` dan `h` dibatasi 40 sampai 4000. |
 | `z` | double precision | Urutan tumpuk. Bilangan pecahan supaya "bawa ke depan" cukup mengubah satu baris. |
 | `column_id` | uuid NULL FK `wb_cards` | Kartu yang ditumpuk di kartu kolom. Bila terisi, `x` dan `y` diabaikan. |
@@ -67,7 +66,7 @@ Papan di dalam papan tampil sebagai kartu jenis `board` di kanvas induknya, sepe
 | `content` | jsonb | Isi per jenis, divalidasi di Go (lihat bawah). Maksimal 64 KB. |
 | `plain` | text | Teks polos dari `content`, diisi Go saat simpan, untuk pencarian. |
 | `file_id` | uuid NULL FK `wb_files` | Untuk `image` dan `file`. |
-| `ref_board_id` | uuid NULL FK `wb_boards` | Untuk `board`. |
+| `ref_board_id` | uuid NULL UNIQUE FK `wb_boards` ON DELETE CASCADE | Hanya dan wajib untuk `board` (CHECK). Sudah ada sejak W1. |
 | `version` | int | Naik setiap perubahan. |
 | `content_version` | int | Naik hanya bila `content` berubah; dipakai aturan konflik di bagian 2. |
 | `seq` | bigint | Nilai `wb_boards.seq` saat kartu terakhir berubah. |
@@ -82,7 +81,9 @@ Isi `content` per jenis:
 - `file`: `{ "caption": "..." }` plus `file_id`.
 - `link`: `{ "url": "https://...", "preview_id": "<id wb_link_previews>" | null }`.
 - `column`: `{ "title": "..." }`.
-- `board`: `{}` plus `ref_board_id`.
+- `board`: `{}` plus `ref_board_id`. Judul ada di `wb_boards`, diganti lewat `PUT /api/whiteboard/boards/:id`.
+- `drawing` (W3): `{ "strokes": [{ "color": "<token>", "width": 2 | 4 | 8, "points": [[x, y], ...] }] }`, lihat W3.
+- `table` (W3): `{ "rows": [["sel", ...], ...] }`, lihat W3.
 
 Kenapa JSONB, bukan tabel per jenis: delapan jenis kartu dengan field berbeda, sedangkan semua jenis berbagi geometri, warna, tempat sampah, dan siaran. Tabel per jenis berarti delapan query untuk memuat satu papan dan delapan jalur hapus dan pulihkan. Validasinya pindah ke Go, yang memang sudah tempat validasi lain (`apperr.Invalid`).
 
@@ -105,7 +106,7 @@ Kenapa JSONB, bukan tabel per jenis: delapan jenis kartu dengan field berbeda, s
 
 ### Tempat sampah
 
-Kolom `deleted_at`, `deleted_by`, `deleted_batch` di `wb_boards`, `wb_cards`, dan `wb_connectors`. Satu aksi hapus (mis. 12 kartu terpilih, atau satu folder beserta seluruh isinya) memakai satu `deleted_batch`, dan Tempat sampah menampilkan satu baris per batch: "Rina menghapus folder Kampanye Desember (3 papan, 140 kartu)". Pulihkan mengembalikan seluruh batch sekaligus.
+Kolom `deleted_at`, `deleted_by`, `deleted_batch` di `wb_boards`, `wb_cards`, dan `wb_connectors`. Satu aksi hapus (mis. 12 kartu terpilih) memakai satu `deleted_batch`. Menghapus kartu papan membawa papan anaknya dan seluruh turunannya ke batch yang sama. Tempat sampah menampilkan satu baris per batch: "Papan Kampanye beserta 3 papan di dalamnya, 140 kartu". Pulihkan mengembalikan seluruh batch sekaligus.
 
 Alternatif yang ditolak: tabel `wb_trash` berisi salinan JSON. Pulihkan dari salinan harus menulis ulang baris dan semua relasinya (berkas, penghubung, komentar), sementara soft delete cukup mengosongkan tiga kolom. Pola `is_deleted` juga sudah dipakai task dan lampiran.
 
@@ -113,14 +114,13 @@ Aturan pulihkan:
 
 - Bila induknya masih ada: kembali ke tempat semula.
 - Bila papan induk sebuah kartu juga di Tempat sampah: ditolak dengan pesan "Pulihkan dulu papan <judul>". Memulihkan papan diam-diam akan mengejutkan orang yang menghapusnya.
-- Bila folder induk sebuah papan sudah dihapus permanen: papan kembali ke Beranda Whiteboard dan pesannya menyebut itu.
 - Penghubung yang salah satu ujungnya masih di Tempat sampah tetap tersembunyi sampai kedua ujungnya pulih.
 
 Hapus permanen hanya oleh job harian `maintenance` (sudah dipanggil cron pukul 03.30 WIB): batch yang `deleted_at`-nya lebih dari 30 hari dihapus dengan `DELETE`, anak lebih dulu. Baris `wb_files` ikut terhapus, lalu berkas di disk dibersihkan oleh pembersih berkas yatim yang sudah ada pada run berikutnya (setelah `orphanGrace`). Tidak ada tombol "Hapus permanen sekarang" di W1 sampai W4, karena itu satu-satunya aksi yang tidak bisa dibatalkan.
 
 ### Indeks
 
-- `wb_boards (parent_id, title) WHERE deleted_at IS NULL`: isi folder dan papan anak.
+- `wb_boards (parent_id) WHERE deleted_at IS NULL`: papan anak.
 - `wb_cards (board_id) WHERE deleted_at IS NULL`: muat papan.
 - `wb_cards (board_id, seq)`: sinkron ulang setelah reconnect, termasuk kartu yang baru dihapus.
 - `wb_cards (column_id, col_order) WHERE column_id IS NOT NULL AND deleted_at IS NULL`.
@@ -135,7 +135,7 @@ FK dari `wb_cards.file_id`, `ref_board_id`, `column_id`, dan penghubung diindeks
 
 ### Migrasi dan grants
 
-- W1: `000023_whiteboard` (boards, cards, activity, kolom tempat sampah, indeks). W2 tanpa migrasi. W3: `000024_whiteboard_media` (files, link_previews, connectors, comments, kolom `file_id`, `ref_board_id`, `column_id`). W4: hanya bila template butuh kolom tambahan. Setiap migrasi dengan `up` dan `down`.
+- W1: `000023_whiteboard` (boards dengan papan akar, cards termasuk `ref_board_id`, activity, kolom tempat sampah, indeks). W2 tanpa migrasi. W3: `000024_whiteboard_media` (files, link_previews, connectors, comments, kolom `file_id` dan `column_id`, jenis kartu baru). W4: hanya bila template butuh kolom tambahan. Setiap migrasi dengan `up` dan `down`.
 - `deploy/sql/10-grants.sql` **berubah**: `nvm_internal_app` butuh DELETE pada `wb_boards`, `wb_cards`, `wb_connectors`, `wb_comments`, `wb_files`, dan `wb_link_previews`, karena job `maintenance` berjalan sebagai role aplikasi dan menghapus permanen. `wb_activity` tidak diberi DELETE sampai Manajer memutuskan masa simpannya. Daftar DELETE di runbook berubah dari delapan menjadi 12 (W1) lalu 14 (W3). `deploy/rilis.sh` sudah menjalankan grants setiap ada migrasi.
 - `ListAttachmentFileIDs` wajib ditambah `UNION ALL SELECT id::text FROM wb_files` di migrasi yang sama dengan tabelnya. Tanpa itu, job harian menghapus semua berkas Whiteboard sebagai berkas yatim (pelajaran revisi 24).
 - `testdb.Pool` menambah tabel baru ke daftar TRUNCATE.
@@ -279,7 +279,7 @@ Satu penanda di toolbar, dengan teks (bukan ikon saja) dan `aria-live="polite"`:
 
 **Kasus lain yang ditangani.**
 
-- Papan yang sedang dibuka dihapus atau dipindah: `board_deleted` menampilkan "Papan ini dipindah ke Tempat sampah oleh Rina" dengan tombol "Pulihkan papan" dan "Ke Beranda Whiteboard"; `board_moved` hanya memperbarui breadcrumb.
+- Papan yang sedang dibuka dihapus atau dipindah: `board_deleted` menampilkan "Papan ini dipindah ke Tempat sampah oleh Rina" dengan tombol "Pulihkan papan" dan "Ke papan induk"; `board_moved` hanya memperbarui breadcrumb.
 - Kartu dipindah ke papan lain saat orang lain sedang mengeditnya: diperlakukan seperti hapus untuk papan asal (dengan nama papan tujuan dan tombol "Buka papan tujuan"), draf disimpan dengan cara yang sama.
 - Sesi berakhir saat mengedit: koneksi ditutup 4401, antrean yang belum terkirim ditampilkan sebagai teks yang bisa disalin sebelum diarahkan ke halaman masuk.
 
@@ -326,7 +326,8 @@ Tidak ditambah: pustaka pan dan zoom, pustaka drag (Pointer Events cukup), pusta
 
 ### Struktur kode
 
-- `frontend/src/pages/WhiteboardHomePage.vue` (folder dan papan), `WhiteboardBoardPage.vue` (kanvas), `WhiteboardTrashPage.vue`.
+- `frontend/src/pages/WhiteboardPage.vue`: satu halaman untuk `/whiteboard` (papan akar) dan `/whiteboard/:id`, mengisi sisa layar di bawah navbar tanpa gulir halaman (`meta.canvas` di router, `.wb-main` di `style.css`). Bar atas: breadcrumb (di ponsel tombol kembali plus judul), judul yang bisa diubah, cari judul papan, penanda simpan, riwayat, dan nanti avatar kehadiran (W2). Sidebar alat vertikal di kiri mulai 768 px (ikon plus label; klik menaruh kartu di tengah layar, seret menaruhnya di titik lepas; Tempat sampah di bawah). Di bawah 768 px sidebar diganti tombol Tambah yang membuka lembar alat. Alat tahap berikutnya baru muncul saat tahapnya selesai.
+- `frontend/src/components/whiteboard/`: `WbCard.vue`, `WbRichText.ts`, `WbNoteEditor.vue`, `WbChecklist.vue`, `WbTrashPanel.vue`.
 - `frontend/src/whiteboard/`: `store.ts` (Pinia, kartu dalam `Map` dengan `shallowRef`), `viewport.ts` (pan, zoom, konversi koordinat), `socket.ts` (koneksi, antrean, reconnect), `history.ts` (undo dan redo), `cards/*.vue` per jenis, `richtext/` (render JSON dan editor).
 - Backend: paket `internal/whiteboard` (service, validasi isi, tempat sampah, hub), `internal/linkpreview` (pengambil aman), handler di `internal/httpapi/whiteboard_handlers.go`.
 
@@ -335,7 +336,7 @@ Tidak ditambah: pustaka pan dan zoom, pustaka drag (Pointer Events cukup), pusta
 ### Hak akses
 
 - Grup rute baru di `router.go`: baca di `app` (semua peran yang sudah ganti password, termasuk Admin), tulis di grup `requireRole(Staf, Manajer)`. Admin hanya baca, sama dengan Timeline dan Important Notes.
-- Semua Staf dan Manajer bisa membuat, mengubah, dan menghapus semua folder, papan, dan kartu. Tidak ada papan pribadi.
+- Semua Staf dan Manajer bisa membuat, mengubah, dan menghapus semua papan dan kartu, kecuali papan akar yang tidak bisa dihapus. Tidak ada papan pribadi.
 - Komentar: menunggu Manajer (bagian 10). Bawaan sampai ada jawaban: penulis mengubah dan menghapus komentarnya sendiri, Manajer bisa menghapus komentar siapa pun.
 
 ### Pratinjau tautan (SSRF)
@@ -417,7 +418,8 @@ Setiap tahap selesai bila `./scripts/pra-deploy.sh` LOLOS (CI hijau), E2E tahap 
 Isi:
 
 - Migrasi `000023_whiteboard`, perubahan `10-grants.sql`, `testdb` diperbarui.
-- Beranda Whiteboard: folder dan papan, buat, ganti nama, pindah, breadcrumb, pencarian judul.
+- Papan akar bersama langsung terbuka di menu Whiteboard. Kartu papan (papan di dalam papan) dengan ringkasan isi; klik atau Enter membukanya di `/whiteboard/:id`, tombol kembali browser bekerja. Breadcrumb, judul yang bisa diubah, cari judul papan.
+- Sidebar alat (Catatan, Judul, Checklist, Papan; Tempat sampah di bawah), klik atau seret ke kanvas. Ponsel: tombol Tambah dan lembar alat.
 - Kanvas: geser, zoom, grid, snap, pas ke layar.
 - Kartu `note` (TipTap), `heading`, `checklist`. Warna kartu.
 - Seret, ubah ukuran, pilih satu dan banyak (kotak seleksi, Shift+klik, Ctrl+A), hapus.
@@ -427,9 +429,9 @@ Isi:
 - Ponsel: lihat, geser, zoom (pinch), tambah catatan dan checklist, ubah isi kartu.
 - Admin hanya baca.
 
-Test DB: hak per peran (Admin 403 untuk setiap tulis), siklus pohon ditolak, validasi isi per jenis (termasuk `href` berbahaya), 409 isi basi, geometri last-write-wins, batch hapus dan pulihkan (termasuk aturan induk), job hapus permanen (29 hari tetap, 31 hari hilang), audit tercatat, penggabungan riwayat geometri.
+Test DB: hak per peran (Admin 403 untuk setiap tulis), papan akar tunggal dan tidak bisa dihapus, batas kedalaman, validasi isi per jenis (termasuk `href` berbahaya), 409 isi basi, geometri last-write-wins, batch hapus dan pulihkan (termasuk aturan induk), job hapus permanen (29 hari tetap, 31 hari hilang), audit tercatat, penggabungan riwayat geometri.
 
-E2E: `wb-dasar` (buat folder, papan, catatan, checklist, seret, hapus, pulihkan dari Tempat sampah), `wb-keyboard` (Tab, panah, Shift+panah, Enter, Escape, Delete), `wb-ponsel` (360 px: pinch dan tambah catatan), `wb-admin` (tombol tulis tidak ada, API 403).
+E2E: `wbdasar` (papan akar tanpa gulir halaman, buat dan buka kartu papan, breadcrumb, tombol kembali browser, alat klik dan seret, catatan, checklist, seret kartu, hapus, Urungkan, panel Tempat sampah, riwayat, ganti judul, cari), `wbkeyboard` (Tab, panah, Shift+panah, Enter, Escape, Ctrl+A, Delete, Enter membuka kartu papan), `wbponsel` (ketuk, Tambah, pinch, geser, ketuk kartu papan), `wbadmin` (tanpa alat tulis, API 403).
 
 Bisa dipakai tim: papan catatan dan checklist bersama tanpa sinkron langsung. Bila dua orang mengubah isi kartu yang sama, yang kedua mendapat salinan, tidak kehilangan ketikan. Perubahan orang lain terlihat setelah muat ulang. Penanda "Tersimpan", "Menyimpan...", dan "Gagal disimpan" sudah ada di W1.
 
@@ -468,22 +470,24 @@ E2E dengan beberapa konteks browser (dua atau tiga akun, ditambah konteks kedua 
 
 Bisa dipakai tim: kerja bersama di papan yang sama secara langsung, dengan semua orang terlihat dan tanpa perubahan yang hilang.
 
-### W3: berkas, tautan, kolom, penghubung, komentar
+### W3: berkas, tautan, kolom, penghubung, gambar bebas, tabel, komentar
 
 Isi:
 
 - Migrasi `000024_whiteboard_media`, `ListAttachmentFileIDs` diperbarui, grants ulang.
 - Kartu `image` dan `file` (tempel, seret, pilih berkas, thumbnail), kartu `link` dengan pratinjau aman.
-- Kartu `column` (menumpuk kartu, urutkan dengan seret dan keyboard), kartu `board` (papan di dalam papan).
+- Kartu `column` (menumpuk kartu, urutkan dengan seret dan keyboard).
+- Alat Gambar bebas: pena dengan pilihan warna (token yang sama dengan warna kartu) dan ketebalan (2, 4, atau 8 px), plus penghapus per goresan. Satu sesi menggambar disimpan sebagai satu kartu `drawing` berisi garis vektor: daftar goresan, tiap goresan berisi warna, ketebalan, dan titik relatif terhadap pojok kartu. Server memvalidasi: warna dan ketebalan dari daftar putih, koordinat angka terhingga di dalam ukuran kartu, maksimal 500 goresan per kartu, 2.000 titik per goresan, dan 64 KB isi. Titik disederhanakan di klien (Ramer-Douglas-Peucker) sebelum dikirim. Dirender sebagai `<path>` SVG yang dibangun dari angka, tanpa string SVG dari klien. Kartu gambar bisa dipindah, diubah ukuran (skala), diwarnai latarnya, dan dihapus seperti kartu lain; menggambar lagi di atasnya menambah goresan lewat patch isi biasa dengan `content_version`.
+- Kartu `table`: baris dan kolom berisi teks polos (tanpa format), maksimal 20 kolom, 100 baris, 500 karakter per sel, dan 64 KB isi. Ubah sel, tambah dan hapus baris atau kolom lewat operasi per sel atau per baris di server (pola checklist), jadi dua orang yang mengubah sel berbeda tidak saling menimpa. Navigasi sel dengan Tab dan panah, dirender sebagai `<table>` dengan judul kolom opsional.
 - Pindah kartu antar papan (menu dan seret ke kartu papan; penghubung ke kartu yang tertinggal dihapus ke Tempat sampah dalam batch yang sama).
 - Garis dan panah penghubung dengan label.
 - Komentar di kartu.
 
-Test: unit `linkpreview` (setiap kelas IP terlarang, redirect ke privat, DNS yang menunjuk 127.0.0.1, ukuran, waktu, tipe), test DB berkas yatim tidak menghapus berkas Whiteboard, test unggah (SVG ditolak, 50 MB), test pindah antar papan.
+Test: unit `linkpreview` (setiap kelas IP terlarang, redirect ke privat, DNS yang menunjuk 127.0.0.1, ukuran, waktu, tipe), unit validasi `drawing` dan `table` (warna dan ketebalan asing, koordinat NaN atau di luar kartu, terlalu banyak goresan atau sel), test DB berkas yatim tidak menghapus berkas Whiteboard, test unggah (SVG ditolak, 50 MB), test pindah antar papan termasuk siklus kartu papan ditolak.
 
-E2E: `wb-berkas`, `wb-tautan` (server uji lokal, bukan situs luar), `wb-kolom`, `wb-penghubung`, `wb-komentar`.
+E2E: `wb-berkas`, `wb-tautan` (server uji lokal, bukan situs luar), `wb-kolom`, `wb-penghubung`, `wb-komentar`, `wb-gambar` (pena, warna, ketebalan, penghapus, simpan dan muat ulang), `wb-tabel` (ubah sel, tambah baris dan kolom, keyboard).
 
-Bisa dipakai tim: moodboard dan rencana konten lengkap dengan gambar, referensi tautan, dan diskusi.
+Bisa dipakai tim: moodboard dan rencana konten lengkap dengan gambar, referensi tautan, coretan tangan, tabel ringkas, dan diskusi.
 
 ### W4: template, ekspor, pencarian isi, poles
 
@@ -506,7 +510,7 @@ Bisa dipakai tim: fitur lengkap sesuai kebutuhan Manajer.
 ### Risiko
 
 - **Ukuran pekerjaan.** Setara Milanote berarti empat tahap yang masing-masing sebesar beberapa revisi biasa. Risiko terbesarnya adalah W2 (koneksi langsung) dan W3 (penghubung dan kolom), karena interaksinya banyak dan sulit diuji. Rencana ini sengaja membuat W1 sudah berguna tanpa W2.
-- **Semua orang bisa menghapus semuanya.** Tempat sampah 30 hari, riwayat per papan, audit log, dan backup harian mengurangi dampaknya, tetapi penghapusan folder besar oleh orang yang salah tetap mengganggu sampai seseorang memulihkannya.
+- **Semua orang bisa menghapus semuanya.** Tempat sampah 30 hari, riwayat per papan, audit log, dan backup harian mengurangi dampaknya, tetapi penghapusan papan besar oleh orang yang salah tetap mengganggu sampai seseorang memulihkannya.
 - **WebSocket lewat Cloudflare.** Didukung, tetapi koneksi diputus saat Cloudflare memperbarui edge dan saat `rilis.sh` me-restart backend. Reconnect dan sinkron `seq` harus kuat; cadangannya SSE tanpa kursor.
 - **Kunci lunak bukan Google Docs.** Dua orang tidak bisa mengetik di kartu yang sama bersamaan. Bila Manajer menganggap itu wajib, CRDT untuk kartu catatan menjadi tahap tambahan sesudah W2 dengan biaya di bagian 2.
 - **Lalu lintas realtime.** Sepuluh orang dengan kursor 20 per detik dan seret 25 per detik masih kecil untuk satu proses Go, tetapi melewati Cloudflare dan nginx. Batas laju di klien dan server wajib sejak W2.
@@ -525,7 +529,7 @@ Masuk ke "Menunggu jawaban Manajer" di `docs/sprint.md` saat W1 dimulai. Pilihan
 3. Berapa lama riwayat aktivitas papan disimpan? (Disimpan tanpa batas sampai diputuskan.)
 4. Template: boleh dibuat dan diubah semua orang, atau hanya Manajer? (Semua Staf dan Manajer, sesuai aturan umum Whiteboard.)
 5. Admin benar-benar hanya baca, termasuk tidak bisa memulihkan dari Tempat sampah? (Ya, hanya baca.)
-6. Apakah perlu papan atau folder pribadi atau per divisi? (Tidak; semua orang melihat semua, sesuai kebutuhan.)
+6. Apakah perlu papan pribadi atau per divisi? (Tidak; semua orang melihat semua, sesuai kebutuhan.)
 7. Apakah pratinjau tautan boleh mengambil halaman situs luar dari server kantor? (Ya, dengan batas di bagian 5. Bila tidak, kartu tautan hanya menampilkan URL dan nama domain.)
 8. Apakah 30 hari di Tempat sampah sudah pas, dan perlu tombol "hapus permanen sekarang" untuk Manajer? (30 hari, tanpa tombol.)
 9. Apakah perlu sebutan (@nama) dan notifikasi di komentar? (Tidak di W1 sampai W4.)
@@ -535,3 +539,12 @@ Masuk ke "Menunggu jawaban Manajer" di `docs/sprint.md` saat W1 dimulai. Pilihan
 
 - 2026-11-24: rancangan W0 ditulis.
 - 2026-11-24: tambahan wajib Manajer untuk realtime penuh: kehadiran, siapa mengubah apa, gerakan seret langsung, perbandingan kunci lunak dan CRDT (rekomendasi kunci lunak), kasus tepi, server sumber kebenaran, dan rencana uji dengan beberapa klien. Bagian 2, 3, 7, 8, 9, dan 10 disesuaikan.
+- 2026-11-24, W1: sepuluh pertanyaan bagian 10 memakai pilihan bawaan sampai Manajer menjawab (dicatat di `docs/sprint.md`, Menunggu jawaban Manajer).
+- 2026-11-24, W1: daftar DELETE di `10-grants.sql` di W1 menjadi sepuluh tabel (`wb_boards`, `wb_cards`), bukan 12, karena penghubung dan komentar baru dibuat di W3 (`000024`). `wb_activity` tetap tanpa DELETE dan ikut terhapus lewat ON DELETE CASCADE saat papannya dihapus permanen.
+- 2026-11-24, W1: kolom `column_id`, `col_order`, dan `file_id` di `wb_cards`, serta jenis kartu selain catatan, judul, checklist, dan papan, ditambahkan di W3 bersama tabelnya, bukan di `000023`.
+- 2026-11-24, W1: hak tulis dijaga satu middleware (`wbWriter`) di grup rute tulis, bukan di service, karena aturannya sama untuk setiap rute. WebSocket di W2 memeriksa peran sendiri.
+- 2026-11-24, W1: hanya `@tiptap/core`, `@tiptap/pm`, dan `@tiptap/starter-kit` 3.33.0 yang dipasang (StarterKit 3 sudah memuat Link dan Underline), tanpa `@tiptap/vue-3`, supaya tidak ikut `@floating-ui/dom`. Lima paket ProseMirror transitif yang terbit kurang dari dua minggu dipin lewat `overrides` di `package.json` ke versi terakhir sebelum 2026-11-10 (history 1.5.1, inputrules 1.5.1, schema-list 1.6.0, transform 1.12.5, view 1.42.9). Semua MIT.
+- 2026-11-24, W1: chunk editor terukur 164 KB gzip, di atas perkiraan 150 KB. Chunk itu hanya dimuat saat kartu catatan dibuka untuk diedit, dan halaman Whiteboard dimuat terpisah (dynamic import), jadi halaman lain tidak bertambah berat. Bila perlu diperkecil, kandidat pertama autolink (linkifyjs).
+- 2026-11-24, W1, keputusan Manajer (seperti Milanote): tidak ada halaman daftar folder dan papan, dan konsep folder dihapus. Menu Whiteboard langsung membuka kanvas papan akar bersama ("Whiteboard", dibuat migrasi) selebar sisa layar tanpa gulir halaman. Semua adalah papan: papan di dalam papan tampil sebagai kartu jenis `board` (ikon, judul, warna, ringkasan isi) dan dibuka di kanvas yang sama dengan URL sendiri (`/whiteboard/:id`). Bar atas berisi breadcrumb, judul yang bisa diubah, cari judul papan, dan penanda simpan; sidebar alat vertikal di kiri (Catatan, Judul, Checklist, Papan; Tempat sampah di bawah, membuka panel) bisa diklik atau diseret ke kanvas. Di bawah 768 px sidebar menjadi tombol Tambah dengan lembar alat, dan breadcrumb menjadi tombol kembali plus judul (768 px dipilih karena sidebar 80 px plus kanvas yang masih bisa dipakai tidak muat di bawahnya). Model data: `wb_boards.kind` dihapus, diganti `is_root` dengan indeks unik parsial dan CHECK; `parent_id` ON DELETE CASCADE (aman karena hapus selalu menandai seluruh subtree); `ref_board_id` dan jenis kartu `board` maju dari W3 ke W1. Rute `/nodes` dan `/folders` dihapus; `GET /boards/root` membuka papan akar dan `PUT /boards/:id` mengganti judul. Migrasi `000023` diubah langsung karena belum di-commit dan belum di produksi; DB dev dan test lokal di-migrate down 1 lalu up.
+- 2026-11-24, W1: menu atas desktop baru dipakai mulai 1280 px. Sepuluh item menu Admin (sembilan Manajer) tidak muat di 768 dan 1024 px (sudah meluap sebelum Whiteboard ditambahkan), jadi di bawah 1280 px navigasi memakai bar bawah dan menu Lainnya seperti di ponsel.
+- 2026-11-24, W3 bertambah: alat Gambar bebas (kartu `drawing` berisi garis vektor yang divalidasi server) dan kartu Tabel (teks polos, maksimal 20 kolom dan 100 baris), keduanya atas permintaan Manajer.

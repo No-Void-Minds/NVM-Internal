@@ -1572,6 +1572,34 @@ Keputusan teknis:
 
 **Catatan infrastruktur dev (2026-11-24):** database dev `nvm_internal` dan test `nvm_internal_test` pindah dari Postgres di VM (lewat tunnel SSH port 15432) ke PostgreSQL 18 lokal di laptop, `localhost:5432`, role `nvm_dev` yang bukan superuser dan memiliki kedua database. Database dev dan test lama di VM sudah dihapus. Cara membuat role dan database serta format `DATABASE_URL` dan `TEST_DATABASE_URL` ada di `README.md`. `scripts/pra-deploy.sh` memigrasikan test DB sendiri. Penyebutan tunnel SSH di retro Sprint 0 dan S7-00 adalah catatan sejarah. Waktu `go test` sebelum tanggal ini (sekitar 330 sampai 1046 detik) diukur lewat tunnel, jadi tidak bisa dibandingkan langsung dengan run sesudahnya.
 
+## Sprint 12f: Whiteboard (revisi 41)
+
+**Tujuan:** Whiteboard setara Milanote atau whiteboard Canva dengan tema NVM, dalam empat tahap W1 sampai W4. Rancangan, alasan, dan alternatif yang ditolak ada di `docs/whiteboard.md`; bagian ini mencatat langkah dan keputusan yang perlu diuji Sprint 13.
+
+**W1 (fondasi, catatan, Tempat sampah):**
+
+- [x] S12f-01 Migrasi `000023_whiteboard`: `wb_boards` (satu papan akar `is_root`, papan lain selalu punya induk), `wb_cards` (catatan, judul, checklist, dan kartu papan dengan `ref_board_id`), `wb_activity`, kolom Tempat sampah, indeks trigram. Papan akar dibuat migrasi. `deploy/sql/10-grants.sql` berubah: DELETE di `wb_boards` dan `wb_cards`, daftar jadi sepuluh tabel.
+- [x] S12f-02 Backend `internal/whiteboard`: validasi isi dari daftar putih (`content.go`), papan akar dan kartu papan, ganti judul papan, kartu dengan patch per field dan 409 isi, operasi checklist per butir, Tempat sampah per batch (kartu papan membawa seluruh subtree), riwayat per papan, audit `wb_deleted`, `wb_restored`, `wb_purged`. Rute `/api/whiteboard/*` (`boards/root` untuk papan akar), tulis hanya Staf dan Manajer.
+- [x] S12f-03 Job `maintenance` menghapus permanen batch Tempat sampah lebih dari 30 hari.
+- [x] S12f-04 Frontend: satu halaman kanvas `/whiteboard` dan `/whiteboard/:id` selebar sisa layar tanpa gulir halaman; bar atas (breadcrumb, judul yang bisa diubah, cari judul papan, penanda simpan, riwayat); sidebar alat (Catatan, Judul, Checklist, Papan, Tempat sampah) yang bisa diklik atau diseret; tombol Tambah dan lembar alat di bawah 768 px; kartu catatan dengan TipTap, judul, checklist, kartu papan; warna, seret, ubah ukuran, kotak seleksi, keyboard; panel Tempat sampah dan riwayat; menu Whiteboard sesudah Aktivitas.
+- [x] S12f-05 Test: unit `content_test.go` dan `tests/whiteboard.test.ts`; DB `TestWbPapanBersarang`, `TestWbKartuPerFieldDanKonflikIsi`, `TestWbChecklistPerButir`, `TestWbTempatSampah`, `TestWbHapusPermanen`, `TestWbRiwayatDigabung`, `TestWhiteboardAdminHanyaMembaca`, `TestWhiteboardKonflikDanTidakAda`; E2E `E2E_ONLY=wb1` (`wbdasar`, `wbkeyboard`, `wbponsel`, `wbadmin`).
+- [x] S12f-06 Navigasi: menu atas desktop mulai 1280 px; di bawahnya bar bawah dan menu Lainnya, karena menu Admin dan Manajer meluap di 768 dan 1024 px.
+
+**Keputusan W1:**
+- Semua adalah papan (keputusan Manajer, seperti Milanote). Satu papan akar bersama "Whiteboard" dibuat migrasi dan langsung terbuka di menu Whiteboard; tidak ada halaman daftar dan tidak ada folder. Papan akar tidak bisa dihapus atau dipindah (CHECK dan indeks unik parsial); judulnya boleh diubah.
+- Papan di dalam papan tampil sebagai kartu jenis `board` dengan judul dan ringkasan isi ("2 papan, 4 kartu"). Klik atau Enter membukanya di `/whiteboard/:id`; di layar sentuh ketukan membukanya. Papan baru dari alat Papan langsung meminta judul di kartunya. Kedalaman maksimal 8 (papan akar 0).
+- Staf dan Manajer membuat, mengubah, dan menghapus semua papan dan kartu. Admin hanya membaca, dijaga satu middleware `wbWriter` di semua rute tulis (403 "Admin hanya bisa melihat Whiteboard, tidak bisa mengubahnya."). `can_write` di respons memakai aturan yang sama. Admin tetap bisa melihat Tempat sampah, tanpa tombol Pulihkan.
+- Posisi, ukuran, urutan tumpuk, dan warna kartu digabung per field (yang terakhir sampai menang). Isi kartu dijaga `content_version`: versi basi ditolak 409 dan klien menyimpan ketikan sebagai kartu salinan di sebelahnya. Checklist diubah per butir lewat `POST .../checklist`, jadi centang tidak pernah bentrok. Ganti judul papan memakai `version`; versi basi 409.
+- Isi catatan disimpan sebagai JSON ProseMirror yang dibangun ulang dari daftar putih (node, mark, atribut). Tautan hanya http, https, dan mailto; lainnya ditolak 400. Dirender tanpa `v-html`. TipTap dengan `injectCSS: false`; CSS ProseMirror yang dibutuhkan disalin ke `style.css`. Gapcursor dan dropcursor dimatikan (kedip tanpa henti dan seret di dalam teks tidak dibutuhkan).
+- Hapus selalu ke Tempat sampah, satu batch per aksi; menghapus kartu papan membawa papan anak dan seluruh turunannya. Pulihkan per batch, ditolak bila papan asal kartunya masih di Tempat sampah (dengan nama papan itu). Hapus permanen hanya oleh job harian setelah 30 hari, tanpa tombol. Riwayat papan ikut hilang saat papannya dihapus permanen (ON DELETE CASCADE); audit log mencatat hapus, pulihkan, dan hapus permanen.
+- Riwayat per papan: seret, ubah ukuran, urutan, dan warna beruntun dari orang yang sama digabung ke satu baris per 5 menit dengan daftar kartu; edit isi kartu yang sama digabung per 5 menit dengan isi terakhir.
+- Warna kartu memakai token latar yang sudah ada (abu, hijau, kuning, biru, krem, merah), tanpa warna baru. Isi kartu krem memakai token mode terang di kedua mode, karena krem tetap terang di mode gelap (ink-muted gelap di atas krem hanya 2,51:1).
+- Sidebar alat mulai 768 px: klik menaruh kartu di tengah layar, seret menaruhnya di titik lepas. Di bawah 768 px: tombol Tambah membuka lembar alat, breadcrumb menjadi tombol kembali plus judul, cari dibuka dari ikon. Alat tahap berikutnya baru ditampilkan saat tahapnya selesai.
+- Di layar sentuh, sentuhan pada kartu yang belum terpilih menggeser kanvas; ketukan memilih kartu, ketukan pada kartu terpilih membukanya. Di mouse, seret area kosong membuat kotak seleksi; geser kanvas dengan roda, Spasi atau tombol tengah, atau tombol mode geser.
+- Perubahan orang lain baru terlihat setelah muat ulang sampai W2.
+
+**Selesai kalau:** `scripts/pra-deploy.sh` LOLOS dengan migrasi 000023 (versi papan akar) di test DB, DB dev di versi 23, `./scripts/check.sh` lolos, dan E2E `wb1` lolos di 360 dan 1280 px.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -1766,10 +1794,11 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 38 | 2026-11-24 | Akses tambahan per pengguna: Kelola Timeline dan Kelola Important Notes, diatur di halaman Pengguna; alasan Kehadiran terbuka untuk semua pengguna | Sprint 12e |
 | 39 | 2026-11-24 | Urutan navbar Timeline, Task, Aktivitas, Arsip; Timeline jadi halaman awal semua peran dan tujuan logo | Sprint 12e |
 | 40 | 2026-11-24 | Kolom Completed di papan task paling banyak 10 task terbaru, dengan total dan tautan ke Arsip | Sprint 12e |
+| 41 | 2026-11-24 | Whiteboard setara Milanote atau Canva: papan akar bersama dan papan bersarang sebagai kartu, kartu, kolaborasi langsung, Tempat sampah, template, ekspor (tahap W1 sampai W4, `docs/whiteboard.md`) | Sprint 12f |
 | 33b | 2026-11-20 | Poles tampilan kartu Aktivitas: tombol rantai pindah ke celah antar isian dan jadi ikon kecil tanpa bingkai, tombol mati tidak dirender, jam tersambung menyatu dengan jam kepalanya, status simpan punya baris tetap, Tambah berkas di sel tabel tanpa bingkai | Sprint 12c |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat keempat puluh revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat keempat puluh satu revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 
@@ -1782,6 +1811,18 @@ SRS v1.0 belum memuat keempat puluh revisi (revisi 5 di S14-17). SRS diperbarui 
 - Revisi 6: apakah PIC boleh menandai task Ready tanpa membuat sub task sama sekali? Sekarang boleh, karena syarat Ready hanya "tidak ada sub task yang belum tercentang".
 - Revisi 32, mengurutkan sub task: belum ada pengurutan sub task di detail task, hanya di form Ubah task (Manajer dan pembuat selama Requested). Apakah PIC task perlu tombol naik dan turun di daftar sub task? Sementara tidak ditambah.
 - Revisi 33: rantai ditolak bila jam sebelumnya kosong ("Isi jam sebelumnya dulu untuk menyambung."), supaya jam kosong tidak terhitung terisi. Ini tambahan dari kami, tidak ada di permintaan. Setuju? Tombol rantai juga hanya ada di kartu papan task, belum di dialog sel halaman Aktivitas untuk Manajer.
+
+- Revisi 41 Whiteboard, sepuluh pertanyaan di `docs/whiteboard.md` bagian 10. Bawaan dipakai, menunggu konfirmasi:
+  1. Komentar: penulis mengubah dan menghapus komentarnya sendiri, Manajer bisa menghapus komentar siapa pun.
+  2. Berkas Whiteboard tidak ikut salinan Google Drive malam.
+  3. Riwayat aktivitas papan disimpan tanpa batas sampai diputuskan.
+  4. Template boleh dibuat dan diubah semua Staf dan Manajer.
+  5. Admin hanya baca, termasuk tidak bisa memulihkan dari Tempat sampah.
+  6. Tidak ada papan pribadi atau per divisi; semua melihat semua.
+  7. Pratinjau tautan boleh mengambil halaman situs luar dari server kantor, dengan batas keamanan di `docs/whiteboard.md` bagian 5.
+  8. Tempat sampah 30 hari, tanpa tombol hapus permanen.
+  9. Tanpa sebutan (@nama) dan notifikasi di komentar.
+  10. Kunci lunak (satu orang mengetik per kartu, yang lain melihat teksnya berubah langsung), bukan mengetik bersamaan seperti Google Docs.
 
 ## Setelah go-live (belum dijadwalkan)
 

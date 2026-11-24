@@ -37,6 +37,7 @@ func runMaintenance(cfg config.Config, log *slog.Logger, args []string) error {
 		"dry_run", r.DryRun,
 		"sesi_kedaluwarsa", r.ExpiredSessions,
 		"audit_login_lama", r.OldLoginAuditLogs,
+		"whiteboard_hapus_permanen", r.WhiteboardBatches,
 		"lampiran_yatim", len(r.OrphanAttachments),
 		"foto_yatim", len(r.OrphanAvatars),
 		"unggahan_terputus", len(r.StaleUploads),

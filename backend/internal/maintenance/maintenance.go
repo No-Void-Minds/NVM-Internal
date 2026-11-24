@@ -1,4 +1,5 @@
-// Package maintenance berisi job harian S12-07: sesi kedaluwarsa, audit log login lama, dan berkas yatim.
+// Package maintenance berisi job harian S12-07: sesi kedaluwarsa, audit log login lama, berkas yatim, dan hapus
+// permanen isi Tempat sampah Whiteboard yang lebih tua dari 30 hari.
 // Dijalankan cron host lewat `docker compose run --rm backend maintenance [--dry-run]`.
 package maintenance
 
@@ -17,6 +18,7 @@ import (
 	"nvm-internal/internal/auth"
 	"nvm-internal/internal/db/sqlc"
 	"nvm-internal/internal/storage"
+	"nvm-internal/internal/whiteboard"
 )
 
 const (
@@ -35,6 +37,8 @@ type Report struct {
 	DryRun            bool
 	ExpiredSessions   int64
 	OldLoginAuditLogs int64
+	// WhiteboardBatches: jumlah batch Tempat sampah Whiteboard yang dihapus permanen (atau akan, saat dry run).
+	WhiteboardBatches int
 	OrphanAttachments []string
 	OrphanAvatars     []string
 	StaleUploads      []string
@@ -66,6 +70,13 @@ func Run(ctx context.Context, pool *pgxpool.Pool, store *storage.Store, now time
 	}
 	if err != nil {
 		return r, fmt.Errorf("audit log login: %w", err)
+	}
+
+	// Sebelum pembersih berkas yatim: berkas Whiteboard (W3) yang barisnya terhapus di sini ikut dibersihkan
+	// pada run berikutnya, setelah orphanGrace.
+	r.WhiteboardBatches, err = whiteboard.Purge(ctx, pool, now, dryRun)
+	if err != nil {
+		return r, fmt.Errorf("tempat sampah whiteboard: %w", err)
 	}
 
 	attachments, err := q.ListAttachmentFileIDs(ctx)

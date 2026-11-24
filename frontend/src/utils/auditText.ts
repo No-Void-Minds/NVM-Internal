@@ -179,6 +179,19 @@ export function describeAudit(e: AuditEntry, divisionName: (id: number) => strin
       return `Mengubah catatan penting "${str(after.title)}"`
     case 'timeline_note_deleted':
       return `Menghapus catatan penting "${str(before.title)}"`
+    // Whiteboard: hanya hapus, pulihkan, dan hapus permanen yang masuk audit log; perubahan isi ada di riwayat papan.
+    case 'wb_deleted':
+    case 'wb_restored': {
+      const boards = Array.isArray(after.boards) ? after.boards.map(String) : []
+      const verb =
+        e.action === 'wb_deleted' ? 'Memindahkan ke Tempat sampah' : 'Memulihkan dari Tempat sampah'
+      const what = boards.length
+        ? `papan "${boards[0]}"${boards.length > 1 ? ` beserta ${boards.length - 1} papan di dalamnya` : ''}`
+        : `${str(after.cards)} kartu`
+      return `${verb} ${what} di papan Whiteboard "${str(after.board)}"`
+    }
+    case 'wb_purged':
+      return `Menghapus permanen isi Tempat sampah Whiteboard (${str(after.boards)} folder atau papan, ${str(after.cards)} kartu)`
     default:
       return e.action
   }

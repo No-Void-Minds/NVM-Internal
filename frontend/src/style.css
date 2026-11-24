@@ -252,3 +252,119 @@ textarea:focus-visible:not([aria-invalid='true']) {
     opacity: 0;
   }
 }
+
+/* Whiteboard (docs/whiteboard.md). Titik grid dekoratif, mengikuti zoom lewat background-size dari CSSOM. */
+.wb-grid {
+  background-image: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--color-line) 45%, transparent) 1px,
+    transparent 1.5px
+  );
+}
+/* Garis pilihan dan cincin fokus kartu. --wb-ring dibagi zoom di WbCard, jadi tebalnya tetap 2 px di layar.
+   Pilihan garis penuh, fokus keyboard garis putus-putus di luarnya, jadi keduanya terlihat bersamaan. */
+.wb-card-selected {
+  box-shadow: 0 0 0 var(--wb-ring) var(--color-mark);
+}
+.wb-card:focus {
+  outline: none;
+}
+.wb-card:focus-visible {
+  outline: var(--wb-ring) dashed var(--color-mark);
+  outline-offset: calc(var(--wb-ring) * 2);
+}
+.wb-richtext a:focus-visible {
+  outline: 2px solid var(--color-mark);
+  outline-offset: 2px;
+}
+
+/* Pengganti CSS yang biasanya disisipkan TipTap (injectCSS: false karena CSP style-src 'self'). */
+.ProseMirror {
+  position: relative;
+  word-wrap: break-word;
+  white-space: break-spaces;
+  font-variant-ligatures: none;
+}
+.ProseMirror [contenteditable='false'] {
+  white-space: normal;
+}
+img.ProseMirror-separator {
+  display: inline !important;
+  border: none !important;
+  margin: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+.ProseMirror-hideselection *::selection {
+  background: transparent;
+}
+.ProseMirror-hideselection {
+  caret-color: transparent;
+}
+.wb-editor:focus-visible {
+  outline: 2px solid var(--color-mark);
+  outline-offset: 4px;
+}
+.wb-editor p {
+  min-height: 1.5em;
+}
+.wb-editor ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+.wb-editor ol {
+  list-style: decimal;
+  padding-left: 1.25rem;
+}
+.wb-editor h1 {
+  font-size: var(--text-lg);
+  font-weight: 700;
+}
+.wb-editor h2 {
+  font-size: var(--text-base);
+  font-weight: 700;
+}
+.wb-editor h3 {
+  font-weight: 700;
+}
+.wb-editor blockquote {
+  border-left: 2px solid var(--color-line);
+  padding-left: 0.75rem;
+}
+.wb-editor code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+.wb-editor a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+/* Kartu krem tetap terang di mode gelap (seperti label hangtag), jadi isinya memakai nilai token mode terang. Tanpa
+   ini ink-muted gelap di atas krem hanya 2,51:1, dan input serta tombol editor di dalamnya bertinta terang di atas
+   krem. Nilai di bawah sama dengan @theme (mode terang). Ditimpa di anak kartu saja, supaya garis pilihan kartu
+   (di luar kartu, di atas kanvas gelap) tetap memakai mark mode gelap. */
+.wb-card-krem > * {
+  --color-canvas: #f3f2ee;
+  --color-surface: #ffffff;
+  --color-ink: #1a1c20;
+  --color-ink-muted: #5a5f68;
+  --color-line: #7d828b;
+  --color-accent: #1a1c20;
+  --color-accent-hover: #2e3138;
+  --color-on-accent: #e8e3d5;
+  --color-mark: #1a1c20;
+  --color-danger: #8c2f22;
+  color-scheme: light;
+}
+
+/* Rute kanvas Whiteboard: sisa layar di bawah top bar (56 px plus garis 1 px). Di bawah 1280 px bar bawah
+   navigasi (56 px plus garis dan area aman) juga dikurangi, karena menu atas baru dipakai mulai 1280 px. */
+.wb-main {
+  height: calc(100dvh - 57px - 57px - env(safe-area-inset-bottom));
+  overflow: hidden;
+}
+@media (min-width: 80rem) {
+  .wb-main {
+    height: calc(100dvh - 57px);
+  }
+}
