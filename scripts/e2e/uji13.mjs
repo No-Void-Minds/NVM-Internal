@@ -39,6 +39,8 @@
 // E2E_ONLY=aktivitasmundur (revisi 37: kartu Aktivitas mundur sampai 2 hari kerja dan batasnya; tidak menulis isian
 // baru). E2E_ONLY=akses (revisi 38: drawer Ubah pengguna dengan dua centang akses, Staf dengan akses melihat tombol
 // tulis Timeline dan Important Notes; akses Staf dikembalikan ke nilai semula).
+// E2E_ONLY=beranda (revisi 39: login tanpa tujuan masuk Timeline, login dari tautan task kembali ke task itu, "/" dan
+// tujuan ke situs lain berakhir di Timeline, urutan menu, logo ke Timeline; membuat satu task uji lalu menghapusnya).
 // Keluar dengan kode 1 bila ada yang gagal.
 import { chromium } from "playwright-core";
 
@@ -3489,6 +3491,140 @@ async function checkAkses(width) {
 }
 
 if (ONLY === "akses") for (const w of [360, 1280]) await checkAkses(w);
+
+// Revisi 39: halaman awal Timeline dan urutan menu. Login lewat form sungguhan dua kali (tanpa tujuan di 360,
+// dari tautan task di 1280), supaya limiter login tidak tersentuh berlebihan.
+async function checkBeranda(width) {
+  const where = (what) => `beranda ${width} ${what}`;
+  const expect = (cond, w, msg) => {
+    checks++;
+    if (!cond) fail(where(w), msg);
+  };
+  const mgr = await apiAs("manajer");
+  const made = await mgr.call("POST", "/tasks", {
+    title: `E2E beranda ${width} ${Date.now()}`,
+    urgency: "low",
+    pic_ids: [mgr.me.id],
+    label_ids: [],
+    subtasks: [],
+  });
+  const taskId = made.body?.id;
+  const ctx = await browser.newContext({
+    viewport: { width, height: width < 768 ? 800 : 900 },
+  });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(`pageerror ${e.message}`));
+  const masuk = async () => {
+    await page.getByLabel("Username").fill(ROLES.staf.user);
+    await page.getByLabel("Password").fill(ROLES.staf.pass);
+    // Limiter login (10 percobaan, satu kembali tiap 30 detik) bisa habis bila E2E dijalankan berulang;
+    // jawaban 429 ditunggu sesuai Retry-After lalu dicoba sekali lagi, supaya hasilnya tidak bergantung jeda run.
+    for (let i = 0; i < 2; i++) {
+      const [res] = await Promise.all([
+        page.waitForResponse((r) => r.url().endsWith("/api/auth/login")),
+        page.getByRole("button", { name: "Masuk" }).click(),
+      ]);
+      if (res.status() !== 429) return;
+      const wait = Math.min(Number(res.headers()["retry-after"] ?? 30), 90);
+      info.push(`beranda ${width}: limiter login, menunggu ${wait} detik`);
+      await page.waitForTimeout(wait * 1000 + 500);
+    }
+  };
+  try {
+    if (width < 768) {
+      // Login tanpa tujuan: masuk ke Timeline.
+      await page.goto(BASE + "/");
+      await masuk();
+      const ok = await page
+        .waitForURL(/\/timeline$/, { timeout: 10000 })
+        .then(() => true)
+        .catch(() => false);
+      expect(
+        ok,
+        "login",
+        `setelah login tanpa tujuan ada di ${new URL(page.url()).pathname}`,
+      );
+    } else {
+      // Login dari tautan task langsung: kembali ke task itu.
+      await page.goto(BASE + `/task/${taskId}`);
+      await page.waitForURL(/kembali=/, { timeout: 10000 });
+      await masuk();
+      const ok = await page
+        .waitForURL(new RegExp(`/task/${taskId}$`), { timeout: 10000 })
+        .then(() => true)
+        .catch(() => false);
+      expect(
+        ok,
+        "login",
+        `setelah login dari tautan task ada di ${new URL(page.url()).pathname}`,
+      );
+    }
+    // Sudah login: "/" ke Timeline, dan tujuan ke situs lain diabaikan.
+    for (const path of ["/", "/?kembali=//contoh.test/curang"]) {
+      await page.goto(BASE + path);
+      await page.waitForURL(/\/timeline$/, { timeout: 10000 }).catch(() => {});
+      expect(
+        new URL(page.url()).pathname === "/timeline",
+        "awal",
+        `${path} membuka ${page.url()}`,
+      );
+    }
+
+    // Urutan menu. Di layar lebar dari top bar, di ponsel dari bar bawah lalu menu Lainnya.
+    const nav = page
+      .getByRole("navigation", { name: "Navigasi utama" })
+      .locator("visible=true")
+      .first();
+    const labels = (await nav.getByRole("link").allTextContents()).map((t) =>
+      t.trim(),
+    );
+    const mau =
+      width >= 768
+        ? ["Timeline", "Task", "Aktivitas", "Arsip", "Profil"]
+        : ["Timeline", "Task", "Arsip"];
+    expect(
+      JSON.stringify(labels) === JSON.stringify(mau),
+      "urutan",
+      `menu ${JSON.stringify(labels)}, mau ${JSON.stringify(mau)}`,
+    );
+    if (width < 768) {
+      await nav.getByRole("button", { name: /Lainnya/ }).click();
+      // Menu Lainnya berisi tautan biasa, bukan role menuitem.
+      const lain = (
+        await page.locator("#menu-lainnya a").allTextContents()
+      ).map((t) => t.trim());
+      expect(
+        lain[0] === "Aktivitas" && lain.includes("Profil"),
+        "Lainnya",
+        `menu Lainnya ${JSON.stringify(lain)}`,
+      );
+      await page.keyboard.press("Escape");
+    }
+
+    // Logo ke Timeline, bisa dipakai lewat keyboard.
+    await page.goto(BASE + "/task");
+    await page.waitForLoadState("networkidle");
+    const logo = page.getByRole("link", { name: /Internal, ke Timeline/ });
+    await logo.focus();
+    await page.keyboard.press("Enter");
+    const keTimeline = await page
+      .waitForURL(/\/timeline$/, { timeout: 10000 })
+      .then(() => true)
+      .catch(() => false);
+    expect(keTimeline, "logo", "logo tidak membuka Timeline");
+    await audit(page, errors, where("timeline"));
+  } finally {
+    const d = taskId
+      ? (await mgr.call("GET", `/tasks/${taskId}`)).body?.task
+      : null;
+    if (d) await mgr.call("DELETE", `/tasks/${taskId}?version=${d.version}`);
+    await mgr.ctx.close();
+    await ctx.close();
+  }
+}
+
+if (ONLY === "beranda") for (const w of [360, 1280]) await checkBeranda(w);
 
 await browser.close();
 console.log(

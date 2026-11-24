@@ -2,11 +2,10 @@ import type { RouteLocationRaw, Router } from 'vue-router'
 import type { SessionUser } from '../stores/session'
 import { returnTarget } from './redirect'
 
-// Admin ke Pengguna; Manajer dan Staf ke Papan Task.
+// Halaman awal semua peran adalah Timeline (revisi 39); sebelumnya Admin ke Pengguna, Manajer dan Staf ke Papan
+// Task. Semua peran boleh membaca Timeline.
 export function homeFor(user: SessionUser | null): RouteLocationRaw {
-  if (user?.role === 'admin') return { name: 'users' }
-  if (user) return { name: 'tasks' }
-  return { name: 'login' }
+  return user ? { name: 'timeline' } : { name: 'login' }
 }
 
 // Setelah login atau ganti password paksa: ke ?kembali= bila sah, selain itu ke halaman awal.

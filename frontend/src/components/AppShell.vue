@@ -11,25 +11,29 @@ import { roleLabel, type Role } from '../utils/roles'
 type NavItem = { to: string; label: string; iconPath: string; roles?: Role[]; primary?: boolean }
 
 // Hanya halaman yang sudah ada yang boleh masuk sini. primary: tampil di bar bawah ponsel, sisanya di menu Lainnya.
+// Urutan revisi 39: Timeline (halaman awal), Task, Aktivitas, Arsip, lalu sisanya. Bar bawah ponsel memakai urutan
+// yang sama untuk item primary-nya; karena bar bawah paling banyak empat item termasuk Lainnya, Profil pindah ke
+// menu Lainnya saat Timeline masuk bar bawah.
 const navItems: NavItem[] = [
+  {
+    to: '/timeline',
+    label: 'Timeline',
+    primary: true,
+    iconPath: 'M8 2v4M16 2v4M4 6h16a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1M3 10h18',
+  },
   {
     to: '/task',
     label: 'Task',
     primary: true,
     iconPath: 'M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11',
   },
+  { to: '/aktivitas', label: 'Aktivitas', iconPath: 'M12 8v4l3 2M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18' },
   {
     to: '/arsip',
     label: 'Arsip',
     primary: true,
     iconPath:
       'M3 3h18a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4',
-  },
-  { to: '/aktivitas', label: 'Aktivitas', iconPath: 'M12 8v4l3 2M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18' },
-  {
-    to: '/timeline',
-    label: 'Timeline',
-    iconPath: 'M8 2v4M16 2v4M4 6h16a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1M3 10h18',
   },
   {
     to: '/pengguna',
@@ -56,7 +60,6 @@ const navItems: NavItem[] = [
   {
     to: '/profil',
     label: 'Profil',
-    primary: true,
     iconPath: 'M20 21a8 8 0 0 0-16 0M12 13a4 4 0 1 0 0-8 4 4 0 0 0 0 8',
   },
 ]
@@ -141,11 +144,15 @@ const contentWidth = computed(() =>
       <div class="flex h-14 items-center gap-4 lg:gap-6" :class="gutter">
         <!-- Logo resmi NVM diikuti "Internal". Di lebar md kata itu hanya untuk pembaca layar, karena tujuh item navigasi
              Manajer dan Admin tidak muat bersama teksnya. -->
-        <span class="flex shrink-0 items-center gap-2">
+        <!-- Logo mengarah ke halaman awal, Timeline (revisi 39). -->
+        <RouterLink
+          :to="{ name: 'timeline' }"
+          aria-label="NVM Internal, ke Timeline"
+          class="flex min-h-11 shrink-0 items-center gap-2 rounded-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
+        >
           <BrandLogo class="h-5" />
-          <span class="sr-only">NVM </span>
           <span class="font-bold whitespace-nowrap max-lg:sr-only max-md:not-sr-only">Internal</span>
-        </span>
+        </RouterLink>
         <nav aria-label="Navigasi utama" class="hidden md:flex md:gap-1">
           <RouterLink
             v-for="item in visibleNav"

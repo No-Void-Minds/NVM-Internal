@@ -79,7 +79,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 12a | Halaman Timeline | Kalender bersama launching, produksi, dan kehadiran, plus Important Notes; hanya Manajer yang menulis |
 | 12b | Hapus task berulang dan hak PIC atas sub task | Dialog hapus memilih nasib seri, pengaman ticker, PIC task mengatur semua sub task di task-nya |
 | 12d | Hak centang sub task, Output beberapa tautan, tempel dan seret lampiran | Centang untuk PIC sub task, PIC task, pembuat task, dan Manajer; setiap URL di Output Aktivitas jadi tombol; Ctrl+V dan seret-lepas di lampiran task dan sub task |
-| 12e | Aktivitas mundur 2 hari kerja dan akses tambahan per pengguna | Staf mengisi aktivitas sampai 2 hari kerja ke belakang; akses Kelola Timeline dan Kelola Important Notes per pengguna; alasan Kehadiran terbuka untuk semua |
+| 12e | Aktivitas mundur 2 hari kerja dan akses tambahan per pengguna | Staf mengisi aktivitas sampai 2 hari kerja ke belakang; akses Kelola Timeline dan Kelola Important Notes per pengguna; alasan Kehadiran terbuka untuk semua; Timeline jadi halaman awal |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -1544,7 +1544,19 @@ Keputusan teknis:
 - Alasan Kehadiran terbuka untuk semua pengguna yang login (transparan): Staf, Manajer, dan Admin menerima jenis alasan dan keterangannya lengkap, termasuk sakit, izin pribadi, dan cuti. Penyamaran "Tidak hadir" dihapus dari backend dan frontend. Keputusan ini menggantikan keputusan privasi revisi 30 yang menunggu Manajer, dan pertanyaannya dihapus dari daftar "Menunggu jawaban Manajer". Form Kehadiran menyebut "Alasan dan keterangan terlihat oleh semua anggota tim."
 - Akses "Lihat alasan Kehadiran" yang sempat dirancang dihapus sebelum commit, karena alasan kini terbuka untuk semua. Migrasi 000022 diubah langsung (belum pernah naik ke produksi); DB dev dan test DB lokal diturunkan satu versi lalu dinaikkan lagi dengan migrasi yang baru.
 
-**Selesai kalau:** `scripts/pra-deploy.sh` LOLOS dengan migrasi 000022 di test DB, DB dev di versi 22, dan E2E `aktivitasmundur` serta `akses` lolos di 360 dan 1280 px.
+**Revisi 39 (urutan navbar dan halaman awal):**
+
+- [x] S12e-06 Urutan menu dan halaman awal Timeline, logo ke Timeline, E2E `E2E_ONLY=beranda`. Hanya frontend.
+
+**Keputusan revisi 39:**
+- Urutan menu top bar: Timeline, Task, Aktivitas, Arsip, lalu sisanya dengan urutan lama (Pengguna, Pengaturan, Audit Log, Status, Profil). Aturan peran tiap menu tidak berubah.
+- Bar bawah ponsel paling banyak empat item termasuk Lainnya (keputusan Sprint 9 dan 11). Timeline masuk bar bawah, jadi isinya Timeline, Task, Arsip, dan Lainnya. Profil pindah ke menu Lainnya karena urutan prioritasnya paling akhir; Aktivitas tetap di Lainnya seperti sebelumnya, di urutan pertama.
+- Halaman awal semua peran adalah Timeline (`homeFor`), termasuk Admin yang sebelumnya diarahkan ke Pengguna. Semua peran sudah bisa membuka Timeline (rutenya tanpa batas peran, dan backend mengizinkan semua pengguna yang login membaca), jadi tidak ada aturan yang diubah. Yang memakai `homeFor`: "/" untuk pengguna yang sudah login, setelah login dan ganti password paksa tanpa tujuan, dan rute yang tidak boleh dibuka peran itu.
+- Tujuan asal tetap dihormati lewat `?kembali=` yang sudah ada sejak S12-16. Validasinya tidak berubah: hanya path internal (diawali "/", bukan `//` atau `/\`, dan bukan halaman login itu sendiri) atau host https yang tercantum di `VITE_ALLOWED_RETURN_HOSTS`. Tujuan ke situs lain diabaikan dan pengguna masuk ke Timeline.
+- Logo "Internal" di kiri atas menjadi tautan ke Timeline dengan nama aksesibel "NVM Internal, ke Timeline", tinggi minimal 44 px, dan focus ring.
+- E2E `beranda` login lewat form dua kali per run. Limiter login (10 percobaan per IP, satu kembali tiap 30 detik) bisa habis bila E2E dijalankan berulang dalam beberapa menit; test menunggu sesuai `Retry-After` bila mendapat 429.
+
+**Selesai kalau:** `scripts/pra-deploy.sh` LOLOS dengan migrasi 000022 di test DB, DB dev di versi 22, dan E2E `aktivitasmundur`, `akses`, dan `beranda` lolos di 360 dan 1280 px.
 
 ## Sprint 12: Persiapan deploy dan migrasi data
 
@@ -1738,10 +1750,11 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 36 | 2026-11-23 | Tempel (Ctrl+V) dan seret-lepas berkas di lampiran Arahan dan Hasil sub task serta lampiran task, dengan antrean berprogres dan coba lagi | Sprint 12d |
 | 37 | 2026-11-24 | Staf mengisi Aktivitas Harian sampai 2 hari kerja ke belakang, kartu di papan bisa mundur tanggal, ekspor Drive ikut menulis ulang bulan lalu | Sprint 12e |
 | 38 | 2026-11-24 | Akses tambahan per pengguna: Kelola Timeline dan Kelola Important Notes, diatur di halaman Pengguna; alasan Kehadiran terbuka untuk semua pengguna | Sprint 12e |
+| 39 | 2026-11-24 | Urutan navbar Timeline, Task, Aktivitas, Arsip; Timeline jadi halaman awal semua peran dan tujuan logo | Sprint 12e |
 | 33b | 2026-11-20 | Poles tampilan kartu Aktivitas: tombol rantai pindah ke celah antar isian dan jadi ikon kecil tanpa bingkai, tombol mati tidak dirender, jam tersambung menyatu dengan jam kepalanya, status simpan punya baris tetap, Tambah berkas di sel tabel tanpa bingkai | Sprint 12c |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat ketiga puluh delapan revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat ketiga puluh sembilan revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 
