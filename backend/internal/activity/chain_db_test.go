@@ -150,9 +150,9 @@ func TestRantaiDitolak(t *testing.T) {
 	if err := f.link(t, f.admin, f.dina.ID, 3, true); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("Admin: mau ErrForbidden, dapat %v", err)
 	}
-	err = f.svc.Link(context.Background(), f.dina, LinkInput{UserID: f.dina.ID, Date: kemarin, Slot: 2, Linked: true})
+	err = f.svc.Link(context.Background(), f.dina, LinkInput{UserID: f.dina.ID, Date: diLuarRentang, Slot: 2, Linked: true})
 	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("hari lalu: mau ErrForbidden, dapat %v", err)
+		t.Fatalf("di luar rentang: mau ErrForbidden, dapat %v", err)
 	}
 }
 

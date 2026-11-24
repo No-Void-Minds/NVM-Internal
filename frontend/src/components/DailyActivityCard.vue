@@ -13,13 +13,17 @@ import { useActivitySave } from '../composables/useActivitySave'
 import { filledHours } from '../utils/activity'
 import { pasteName } from '../utils/activityFile'
 import { formatLong } from '../utils/recurrence'
+import { dayLabel, shiftDay } from '../utils/activityWeek'
 
-// Kartu Aktivitas hari ini di papan task (revisi 21), hanya untuk Staf. Isian hari lain diubah di /aktivitas.
+// Kartu Aktivitas di papan task (revisi 21), hanya untuk Staf. Revisi 37: bisa mundur sampai 2 hari kerja; daftar
+// tanggal yang boleh diisi datang dari server (editable_dates), frontend tidak menghitungnya sendiri.
 const id = useId()
 const lipatKey = 'nvm-aktivitas-lipat'
 
 const open = ref(true)
 const date = ref('')
+const today = ref('')
+const editable = ref<string[]>([])
 const cells = ref<ActivityCell[]>([])
 // Nilai terakhir dari server, jadi sel yang tidak berubah tidak ikut dikirim saat kehilangan fokus.
 const saved = ref<Record<number, { activity: string; output: string }>>({})
@@ -27,7 +31,9 @@ const loadState = ref<'loading' | 'ready' | 'error'>('loading')
 const loadError = ref('')
 
 const terisi = computed(() => filledHours(cells.value))
-const { status, message, save, retry } = useActivitySave((_userId, slot, cell, day) => {
+const { status, message, save, retry } = useActivitySave((_userId, slot, cell, day, savedDate) => {
+  // Simpan saat kotak kehilangan fokus bisa selesai setelah tanggal diganti; hasilnya milik tanggal lama.
+  if (savedDate !== date.value) return
   const i = cells.value.findIndex((c) => c.slot === slot)
   if (i === -1) return
   cells.value[i] = cell
@@ -82,17 +88,36 @@ function remember(list: ActivityCell[]) {
   saved.value = Object.fromEntries(list.map((c) => [c.slot, { activity: c.activity, output: c.output }]))
 }
 
-async function load() {
+async function load(day = date.value) {
   loadState.value = 'loading'
   try {
-    const res = await getMyActivities()
+    const res = await getMyActivities(day)
     date.value = res.date
+    today.value = res.today
+    editable.value = res.editable_dates
+    status.value = {}
+    message.value = {}
     remember(res.cells)
     loadState.value = 'ready'
   } catch (err) {
-    loadError.value = err instanceof ApiError ? err.message : 'Tidak bisa memuat aktivitas hari ini.'
+    loadError.value = err instanceof ApiError ? err.message : 'Tidak bisa memuat aktivitas.'
     loadState.value = 'error'
   }
+}
+
+// editable_dates urut dari hari ini mundur, jadi "sebelumnya" adalah elemen berikutnya di daftar.
+const at = computed(() => editable.value.indexOf(date.value))
+const prevDate = computed(() => (at.value >= 0 ? (editable.value[at.value + 1] ?? '') : ''))
+const nextDate = computed(() => (at.value > 0 ? editable.value[at.value - 1] : ''))
+const isToday = computed(() => date.value !== '' && date.value === today.value)
+const title = computed(() => {
+  if (!date.value || isToday.value) return 'Aktivitas hari ini'
+  return date.value === shiftDay(today.value, -1) ? 'Aktivitas kemarin' : 'Aktivitas'
+})
+
+function go(day: string) {
+  if (!day || loadState.value === 'loading') return
+  void load(day)
 }
 
 // Sel disimpan saat kehilangan fokus, hanya kalau isinya memang berubah.
@@ -161,6 +186,8 @@ function onPaste(e: ClipboardEvent, c: ActivityCell) {
 }
 
 const cellDrop = 'rounded-card transition-colors motion-reduce:transition-none'
+const navButton =
+  'inline-flex size-11 shrink-0 items-center justify-center rounded-card text-ink hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark disabled:cursor-not-allowed disabled:text-ink-muted disabled:hover:bg-transparent'
 
 function toggle() {
   open.value = !open.value
@@ -183,39 +210,96 @@ onMounted(() => {
 
 <template>
   <section class="mt-4 rounded-card border border-line bg-surface">
-    <h2>
+    <!-- Tombol tanggal berdiri di samping tombol lipat, bukan di dalamnya: tombol tidak boleh bersarang. -->
+    <div class="flex items-center gap-1 pr-2">
+      <h2 class="min-w-0 flex-1">
+        <button
+          type="button"
+          class="flex min-h-11 w-full flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-2 text-left font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
+          :aria-expanded="open"
+          :aria-controls="id"
+          @click="toggle"
+        >
+          <span class="flex items-center gap-2">
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 24 24"
+              class="size-5 shrink-0 transition-transform motion-reduce:transition-none"
+              :class="open ? 'rotate-90' : ''"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.75"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M9 6l6 6-6 6" />
+            </svg>
+            {{ title }}<template v-if="date">,</template>
+            <span v-if="date" class="font-normal text-ink-muted">{{ formatLong(date) }}</span>
+          </span>
+          <span class="text-sm font-normal text-ink-muted"
+            >{{ terisi }} dari {{ cells.length || 8 }} jam terisi</span
+          >
+        </button>
+      </h2>
       <button
         type="button"
-        class="flex min-h-11 w-full flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-2 text-left font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
-        :aria-expanded="open"
-        :aria-controls="id"
-        @click="toggle"
+        :class="navButton"
+        :disabled="!prevDate || loadState === 'loading'"
+        :aria-label="
+          prevDate
+            ? `Aktivitas sebelumnya, ${dayLabel(prevDate)}`
+            : 'Aktivitas sebelumnya, sudah batas paling awal'
+        "
+        @click="go(prevDate)"
       >
-        <span class="flex items-center gap-2">
-          <svg
-            aria-hidden="true"
-            viewBox="0 0 24 24"
-            class="size-5 shrink-0 transition-transform motion-reduce:transition-none"
-            :class="open ? 'rotate-90' : ''"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.75"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <path d="M9 6l6 6-6 6" />
-          </svg>
-          Aktivitas hari ini
-          <span v-if="date" class="font-normal text-ink-muted">{{ formatLong(date) }}</span>
-        </span>
-        <span class="text-sm font-normal text-ink-muted"
-          >{{ terisi }} dari {{ cells.length || 8 }} jam terisi</span
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          class="size-5"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.75"
+          stroke-linecap="round"
+          stroke-linejoin="round"
         >
+          <path d="M15 6l-6 6 6 6" />
+        </svg>
       </button>
-    </h2>
+      <button
+        type="button"
+        :class="navButton"
+        :disabled="!nextDate || loadState === 'loading'"
+        :aria-label="
+          nextDate ? `Aktivitas berikutnya, ${dayLabel(nextDate)}` : 'Aktivitas berikutnya, sudah hari ini'
+        "
+        @click="go(nextDate)"
+      >
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          class="size-5"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.75"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M9 6l6 6-6 6" />
+        </svg>
+      </button>
+    </div>
 
     <div v-show="open" :id="id" class="border-t border-line p-4">
-      <LoadingSkeleton v-if="loadState === 'loading'" label="Memuat aktivitas hari ini..." />
+      <!-- Tanggal lalu ditandai jelas, supaya tidak ada yang mengira sedang mengisi hari ini. -->
+      <p
+        v-if="date && !isToday"
+        role="status"
+        class="mb-3 rounded-card border border-line bg-canvas px-3 py-2 text-sm font-medium"
+      >
+        Kamu sedang mengisi aktivitas {{ dayLabel(date) }}.
+      </p>
+      <LoadingSkeleton v-if="loadState === 'loading'" label="Memuat aktivitas..." />
 
       <div v-else-if="loadState === 'error'" role="alert" class="rounded-card bg-danger-bg p-4 text-danger">
         <p class="font-medium">{{ loadError }}</p>

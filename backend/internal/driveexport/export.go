@@ -248,23 +248,51 @@ func (s *Service) stageActivityFiles(ctx context.Context, m *Manifest, taken *ta
 	return nil
 }
 
-// stageMonthlyExport menulis ekspor Excel bulan berjalan, memakai kode ekspor Aktivitas yang sudah ada.
-// Berkas ini ditimpa setiap malam, jadi tidak dicatat di drive_exports.
+// stageMonthlyExport menulis ekspor Excel bulanan, memakai kode ekspor Aktivitas yang sudah ada. Berkas ini
+// ditimpa setiap malam, jadi tidak dicatat di drive_exports, dan isian terlambat ikut terkirim pada malam
+// berikutnya karena seluruh bulannya ditulis ulang. Revisi 37: Staf boleh mengisi sampai 2 hari kerja ke belakang,
+// jadi bulan lalu ikut ditulis ulang selama tanggal terawal yang masih boleh diisi, atau kemarin, ada di bulan itu.
+// Kemarin ikut dihitung karena job berjalan dini hari, sebelum isian hari terakhir bulan sempat masuk ekspor.
 func (s *Service) stageMonthlyExport(ctx context.Context, m *Manifest) error {
-	now := s.now()
-	first := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
-	data, _, err := s.activities.Export(ctx, first.Format("2006-01-02"), now.Format("2006-01-02"))
-	if err != nil {
-		return fmt.Errorf("ekspor Excel bulanan: %w", err)
+	for _, month := range ExportMonths(s.now()) {
+		first, last := month[0], month[1]
+		data, _, err := s.activities.Export(ctx, first, last)
+		if err != nil {
+			return fmt.Errorf("ekspor Excel bulanan %s: %w", first[:7], err)
+		}
+		day, _ := time.Parse("2006-01-02", first)
+		rel := MonthlyExportPath(day)
+		if err := s.write(rel, data); err != nil {
+			return err
+		}
+		m.Extra = append(m.Extra, rel)
+		m.Bytes += int64(len(data))
+		m.count(KindExport, 1)
 	}
-	rel := MonthlyExportPath(now)
-	if err := s.write(rel, data); err != nil {
-		return err
-	}
-	m.Extra = append(m.Extra, rel)
-	m.Bytes += int64(len(data))
-	m.count(KindExport, 1)
 	return nil
+}
+
+// ExportMonths: rentang [awal, akhir] setiap bulan yang perlu ditulis ulang malam ini, dari bulan terawal yang
+// masih bisa menerima isian sampai bulan berjalan. Bulan lalu ditulis sampai hari terakhirnya, bulan berjalan
+// sampai hari ini, semuanya menurut zona kantor.
+func ExportMonths(now time.Time) [][2]string {
+	today := activity.OfficeDay(now)
+	days := activity.EditableDays(today)
+	t, _ := time.Parse("2006-01-02", today)
+	from := t.AddDate(0, 0, -1).Format("2006-01-02")
+	if earliest := days[len(days)-1]; earliest < from {
+		from = earliest
+	}
+	start, _ := time.Parse("2006-01-02", from)
+	var out [][2]string
+	for m := time.Date(start.Year(), start.Month(), 1, 0, 0, 0, 0, time.UTC); !m.After(t); m = m.AddDate(0, 1, 0) {
+		last := m.AddDate(0, 1, -1)
+		if last.After(t) {
+			last = t
+		}
+		out = append(out, [2]string{m.Format("2006-01-02"), last.Format("2006-01-02")})
+	}
+	return out
 }
 
 // stageDumps membaca tar dari stdin dan menulis tiap dump terenkripsi age ke staging. Dump mengalir lewat pipe,

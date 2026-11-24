@@ -21,15 +21,21 @@ func activityActor(c *gin.Context) activity.Actor {
 	return activity.Actor{ID: u.ID, Role: u.Role, IP: clientAddr(c)}
 }
 
-// myActivities adalah tabel di papan task: isian sendiri untuk hari ini. Hanya Staf yang punya tabel
-// aktivitas, jadi peran lain ditolak di sini, bukan hanya disembunyikan di frontend (keputusan revisi 21).
+// myActivities adalah tabel di papan task: isian sendiri untuk hari ini, atau ?date= untuk tanggal lain yang
+// dibuka lewat tombol Sebelumnya (revisi 37; hak mengubahnya tetap diperiksa CanEdit). Hanya Staf yang punya
+// tabel aktivitas, jadi peran lain ditolak di sini, bukan hanya disembunyikan di frontend (keputusan revisi 21).
 func (s *Server) myActivities(c *gin.Context) {
 	u := currentUser(c)
 	if u.Role != sqlc.UserRoleStaff {
 		writeError(c, http.StatusForbidden, CodeForbidden, "Tabel aktivitas harian hanya untuk akun Staf.")
 		return
 	}
-	out, err := s.activities.Mine(c.Request.Context(), u.ID, s.activities.Today())
+	date, err := s.activities.ParseDay(c.Query("date"))
+	if err != nil {
+		s.writeActivityError(c, err)
+		return
+	}
+	out, err := s.activities.Mine(c.Request.Context(), u.ID, date)
 	if err != nil {
 		s.writeActivityError(c, err)
 		return
@@ -207,7 +213,7 @@ func (s *Server) writeActivityError(c *gin.Context, err error) {
 		writeError(c, http.StatusBadRequest, CodeBadRequest, ve.Message)
 	case errors.Is(err, activity.ErrForbidden):
 		writeError(c, http.StatusForbidden, CodeForbidden,
-			"Kamu hanya bisa mengisi aktivitasmu sendiri untuk hari ini.")
+			"Kamu hanya bisa mengisi aktivitasmu sendiri untuk hari ini dan 2 hari kerja sebelumnya.")
 	default:
 		s.internalError(c, err)
 	}

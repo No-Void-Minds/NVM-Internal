@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -34,6 +35,9 @@ func setup(t *testing.T) fixture {
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	svc := NewService(pool, store, filepath.Join(root, "staging"), "", log)
+	// Jam dikunci di pertengahan bulan (Rabu 18 November 09.00 WIB): jumlah ekspor bulanan bergantung tanggal
+	// (revisi 37), jadi tanpa ini hasil test berubah di awal bulan.
+	svc.now = func() time.Time { return time.Date(2026, 11, 18, 2, 0, 0, 0, time.UTC) }
 	return fixture{pool: pool, svc: svc, store: store}
 }
 

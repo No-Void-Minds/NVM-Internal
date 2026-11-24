@@ -105,6 +105,10 @@ type Mine struct {
 	Date  string   `json:"date"`
 	Slots []string `json:"slots"`
 	Cells []Cell   `json:"cells"`
+	// Today dan EditableDates (revisi 37) dihitung server, supaya kartu di papan tidak menghitung sendiri
+	// rentang tanggal yang boleh diisi Staf. Urutannya dari hari ini mundur.
+	Today         string   `json:"today"`
+	EditableDates []string `json:"editable_dates"`
 }
 
 type SaveInput struct {
@@ -129,7 +133,33 @@ func NewService(pool *pgxpool.Pool, files *storage.Store) *Service {
 
 // Today adalah tanggal kantor hari ini dalam bentuk "2006-01-02".
 func (s *Service) Today() string {
-	return s.now().In(officeTZ).Format(dayLayout)
+	return OfficeDay(s.now())
+}
+
+// OfficeDay: tanggal t menurut zona kantor, bentuk 2006-01-02.
+func OfficeDay(t time.Time) string {
+	return t.In(officeTZ).Format(dayLayout)
+}
+
+// EditableBackDays: berapa hari kerja ke belakang yang masih boleh diisi Staf (revisi 37).
+const EditableBackDays = 2
+
+// EditableDays adalah satu-satunya hitungan tanggal yang boleh diisi Staf: hari ini (hari apa pun, termasuk
+// Sabtu dan Minggu) ditambah EditableBackDays hari kerja Senin sampai Jumat sebelumnya, jadi Senin bisa mengisi
+// Jumat dan Kamis. Urutannya dari hari ini mundur. today yang tidak terbaca menghasilkan daftar kosong.
+func EditableDays(today string) []string {
+	d, err := time.Parse(dayLayout, today)
+	if err != nil {
+		return []string{}
+	}
+	out := []string{today}
+	for len(out) <= EditableBackDays {
+		d = d.AddDate(0, 0, -1)
+		if wd := d.Weekday(); wd != time.Saturday && wd != time.Sunday {
+			out = append(out, d.Format(dayLayout))
+		}
+	}
+	return out
 }
 
 // ParseDay menolak tanggal yang tidak berbentuk 2006-01-02. Tanggal kosong berarti hari ini.
@@ -144,14 +174,15 @@ func (s *Service) ParseDay(v string) (string, error) {
 	return d.Format(dayLayout), nil
 }
 
-// CanEdit menentukan siapa yang boleh menyimpan satu sel. Staf hanya isian miliknya sendiri dan hanya untuk
-// hari ini; Manajer isian siapa pun di tanggal berapa pun; Admin hanya membaca (keputusan revisi 21).
+// CanEdit menentukan siapa yang boleh menyimpan satu sel. Staf hanya isian miliknya sendiri, untuk hari ini dan
+// dua hari kerja sebelumnya (revisi 37, EditableDays); Manajer isian siapa pun di tanggal berapa pun; Admin hanya
+// membaca (keputusan revisi 21). Dipakai juga oleh lampiran dan rantai jam, jadi aturannya sama di semua aksi.
 func CanEdit(actor Actor, targetID int64, date, today string) bool {
 	switch actor.Role {
 	case sqlc.UserRoleManager:
 		return true
 	case sqlc.UserRoleStaff:
-		return targetID == actor.ID && date == today
+		return targetID == actor.ID && slices.Contains(EditableDays(today), date)
 	default:
 		return false
 	}
@@ -232,7 +263,8 @@ func (s *Service) Save(ctx context.Context, actor Actor, in SaveInput) error {
 // menulis sendiri jam kerjanya.
 func (s *Service) Mine(ctx context.Context, userID int64, date string) (Mine, error) {
 	cells, err := dayCells(ctx, sqlc.New(s.pool), userID, date)
-	return Mine{Date: date, Slots: Slots, Cells: cells}, err
+	today := s.Today()
+	return Mine{Date: date, Slots: Slots, Cells: cells, Today: today, EditableDates: EditableDays(today)}, err
 }
 
 // WeekRange mengembalikan Senin sampai Jumat dari minggu tanggal itu. Minggu kerja dihitung mulai Senin,

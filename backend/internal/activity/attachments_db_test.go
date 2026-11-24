@@ -78,13 +78,13 @@ func TestLampiranStafHariIni(t *testing.T) {
 func TestLampiranStafDitolak(t *testing.T) {
 	f := setup(t)
 
-	if _, err := f.upload(t, f.dina, f.dina.ID, kemarin, 1, "a.png", pngBytes()); !errors.Is(err, ErrForbidden) {
-		t.Fatalf("lampiran kemarin harus ditolak, dapat %v", err)
+	if _, err := f.upload(t, f.dina, f.dina.ID, diLuarRentang, 1, "a.png", pngBytes()); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("lampiran di luar rentang harus ditolak, dapat %v", err)
 	}
 	if _, err := f.upload(t, f.dina, f.rio.ID, hariIni, 1, "a.png", pngBytes()); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("lampiran milik orang lain harus ditolak, dapat %v", err)
 	}
-	if n := f.fileCount(t, f.dina.ID, kemarin) + f.fileCount(t, f.rio.ID, hariIni); n != 0 {
+	if n := f.fileCount(t, f.dina.ID, diLuarRentang) + f.fileCount(t, f.rio.ID, hariIni); n != 0 {
 		t.Fatalf("baris tersimpan padahal ditolak: %d", n)
 	}
 	// Jenis yang tidak diizinkan ditolak dari isinya, bukan dari ekstensinya saja.

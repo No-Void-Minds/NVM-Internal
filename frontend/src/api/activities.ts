@@ -42,7 +42,14 @@ export type ActivityPerson = {
   days: Record<string, ActivityCell[]>
 }
 
-export type MyActivities = { date: string; slots: string[]; cells: ActivityCell[] }
+export type MyActivities = {
+  date: string
+  slots: string[]
+  cells: ActivityCell[]
+  // Revisi 37: dihitung server. editable_dates berisi hari ini dan 2 hari kerja sebelumnya, urut mundur.
+  today: string
+  editable_dates: string[]
+}
 
 export type ActivityRange = {
   from: string
@@ -63,8 +70,9 @@ export type SaveActivityInput = {
   output: string
 }
 
-export function getMyActivities(signal?: AbortSignal): Promise<MyActivities> {
-  return apiGet<MyActivities>('/activities/me', signal)
+// date kosong berarti hari ini.
+export function getMyActivities(date = '', signal?: AbortSignal): Promise<MyActivities> {
+  return apiGet<MyActivities>(`/activities/me${date ? `?date=${encodeURIComponent(date)}` : ''}`, signal)
 }
 
 // Satu panggilan memuat seluruh rentang: week (Senin sampai Jumat minggu tanggal itu), from dan to, atau

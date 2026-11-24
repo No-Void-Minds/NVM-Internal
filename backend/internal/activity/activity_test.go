@@ -70,7 +70,10 @@ func TestCanEdit(t *testing.T) {
 		want   bool
 	}{
 		{"staf isian sendiri hari ini", staf, 4, today, true},
-		{"staf isian sendiri kemarin", staf, 4, "2026-11-17", false},
+		{"staf isian sendiri kemarin", staf, 4, "2026-11-17", true},
+		{"staf isian sendiri 2 hari kerja lalu", staf, 4, "2026-11-16", true},
+		{"staf isian sendiri 3 hari kerja lalu", staf, 4, "2026-11-13", false},
+		{"staf isian sendiri besok", staf, 4, "2026-11-19", false},
 		{"staf isian orang lain hari ini", staf, 5, today, false},
 		{"manajer isian orang lain hari lampau", manajer, 4, "2026-10-01", true},
 		{"admin isian orang lain", admin, 4, today, false},

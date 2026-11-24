@@ -18,9 +18,10 @@ import (
 )
 
 const (
-	hariIni   = "2026-11-18"
-	kemarin   = "2026-11-17"
-	bulanLalu = "2026-10-05"
+	hariIni = "2026-11-18" // Rabu
+	// diLuarRentang: Jumat pekan lalu, di luar hari ini dan 2 hari kerja sebelumnya (Selasa dan Senin, revisi 37).
+	diLuarRentang = "2026-11-13"
+	bulanLalu     = "2026-10-05"
 )
 
 // sheetOf membaca sheet1.xml dari .xlsx hasil ekspor, supaya isinya bisa diperiksa tanpa pustaka tambahan.
@@ -156,9 +157,9 @@ func TestStafTidakBisaMengubahIsianLain(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
 
-	err := f.svc.Save(ctx, f.dina, SaveInput{UserID: f.dina.ID, Date: kemarin, Slot: 2, Activity: "Lupa diisi"})
+	err := f.svc.Save(ctx, f.dina, SaveInput{UserID: f.dina.ID, Date: diLuarRentang, Slot: 2, Activity: "Lupa diisi"})
 	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("isian kemarin harus ditolak, dapat %v", err)
+		t.Fatalf("isian di luar rentang 2 hari kerja harus ditolak, dapat %v", err)
 	}
 	err = f.svc.Save(ctx, f.dina, SaveInput{UserID: f.rio.ID, Date: hariIni, Slot: 2, Activity: "Punya orang lain"})
 	if !errors.Is(err, ErrForbidden) {
@@ -168,7 +169,7 @@ func TestStafTidakBisaMengubahIsianLain(t *testing.T) {
 	if err := f.svc.Save(ctx, f.admin, SaveInput{UserID: f.admin.ID, Date: hariIni, Slot: 1}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("Admin harus ditolak, dapat %v", err)
 	}
-	if n := f.countRows(t, f.dina.ID, kemarin, 2); n != 0 {
+	if n := f.countRows(t, f.dina.ID, diLuarRentang, 2); n != 0 {
 		t.Fatalf("baris tersimpan padahal ditolak: %d", n)
 	}
 }
