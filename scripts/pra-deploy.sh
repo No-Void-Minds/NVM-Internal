@@ -135,13 +135,16 @@ report skip
 
 # Paket yang gagal tanpa test (mis. galat kompilasi) tidak punya baris "Test"; tetap harus menggagalkan gerbang.
 pkg_fail=$(grep '"Action":"fail"' "$json" | grep -vc '"Test":' || true)
-# Paket dengan test FAIL selalu ikut gagal di tingkat paket, jadi bagian ini hanya dicetak bila penyebabnya lain.
-if { [ "$pkg_fail" -gt 0 ] && [ "$fail" -eq 0 ]; } || [ -s "$log_dir/test.err" ]; then
+# stderr go test di CI berisi "go: downloading ..." dari modul yang belum ada di cache; itu bukan galat.
+test_err=$({ grep -v '^go: downloading ' "$log_dir/test.err" || true; } | mask)
+# Hanya dicetak bila go test memang gagal. Paket dengan test FAIL selalu ikut gagal di tingkat paket dan sudah
+# dilaporkan di atas, jadi bagian ini untuk penyebab lain: paket gagal tanpa test atau galat di stderr.
+if [ "$test_exit" -ne 0 ] && { { [ "$pkg_fail" -gt 0 ] && [ "$fail" -eq 0 ]; } || [ -n "$test_err" ]; }; then
   echo "--- Paket gagal tanpa nama test atau galat kompilasi:"
   grep '"Action":"fail"' "$json" | grep -v '"Test":' | sed -E 's/.*"Package":"([^"]*)".*/    \1/' || true
   { grep -E '"Action":"(build-output|output)"' "$json" | grep -v '"Test":' || true; } | output_of |
     { grep -iE 'FAIL|error|cannot|undefined' || true; } | sed 's/^/    /' | mask
-  mask <"$log_dir/test.err" | sed 's/^/    /'
+  if [ -n "$test_err" ]; then printf '%s\n' "$test_err" | sed 's/^/    /'; fi
 fi
 
 [ "$fail" -eq 0 ] || die "Ada $fail test yang FAIL."
