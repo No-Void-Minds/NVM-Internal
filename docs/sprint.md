@@ -79,7 +79,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 12a | Halaman Timeline | Kalender bersama launching, produksi, dan kehadiran, plus Important Notes; hanya Manajer yang menulis |
 | 12b | Hapus task berulang dan hak PIC atas sub task | Dialog hapus memilih nasib seri, pengaman ticker, PIC task mengatur semua sub task di task-nya |
 | 12d | Hak centang sub task, Output beberapa tautan, tempel dan seret lampiran | Centang untuk PIC sub task, PIC task, pembuat task, dan Manajer; setiap URL di Output Aktivitas jadi tombol; Ctrl+V dan seret-lepas di lampiran task dan sub task |
-| 12e | Aktivitas mundur 2 hari kerja dan akses tambahan per pengguna | Staf mengisi aktivitas sampai 2 hari kerja ke belakang; akses Kelola Timeline dan Kelola Important Notes per pengguna; alasan Kehadiran terbuka untuk semua; Timeline jadi halaman awal |
+| 12e | Aktivitas mundur 2 hari kerja dan akses tambahan per pengguna | Staf mengisi aktivitas sampai 2 hari kerja ke belakang; akses Kelola Timeline dan Kelola Important Notes per pengguna; alasan Kehadiran terbuka untuk semua; Timeline jadi halaman awal; kolom Completed maksimal 10 |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -1556,7 +1556,19 @@ Keputusan teknis:
 - Logo "Internal" di kiri atas menjadi tautan ke Timeline dengan nama aksesibel "NVM Internal, ke Timeline", tinggi minimal 44 px, dan focus ring.
 - E2E `beranda` login lewat form dua kali per run. Limiter login (10 percobaan per IP, satu kembali tiap 30 detik) bisa habis bila E2E dijalankan berulang dalam beberapa menit; test menunggu sesuai `Retry-After` bila mendapat 429.
 
-**Selesai kalau:** `scripts/pra-deploy.sh` LOLOS dengan migrasi 000022 di test DB, DB dev di versi 22, dan E2E `aktivitasmundur`, `akses`, dan `beranda` lolos di 360 dan 1280 px.
+**Revisi 40 (kolom Completed maksimal 10):**
+
+- [x] S12e-07 `Service.Board` memotong kolom Completed menjadi 10 task terbaru setelah semua filter, `count` kolom berisi total yang cocok; keterangan dan tautan Arsip di papan; test DB `TestKolomCompletedMaksimalSepuluh` dan `TestSortCompletedPemecahSeri`; E2E `E2E_ONLY=completed`. Tanpa migrasi.
+
+**Keputusan revisi 40:**
+- Kolom Completed di papan (Task saya dan Semua task) paling banyak 10 task (`task.CompletedLimit`). Kolom lain tidak berubah.
+- Urutan memakai `solved_date`. Kolom itu `timestamptz` yang diisi `now()` setiap kali task masuk Completed dan dikosongkan saat keluar (`SetTaskStatus`, CHECK `tasks_solved_only_when_completed`), jadi nilainya sudah waktu presisi perpindahan terakhir ke Completed, termasuk task yang pernah dikembalikan lalu Completed lagi. Riwayat status tidak perlu dibaca. Pemecah seri: nomor task terbesar dulu, dibandingkan sebagai angka supaya T-10000 tetap di atas T-9999.
+- Batas 10 diambil setelah aturan 7 hari dan semua filter papan (cari, orang, divisi, label, urgency, deadline), karena semuanya sudah diterapkan di query `ListBoardTasks`. Pemotongan dilakukan di backend sebelum PIC, label, dan `move_to` dimuat, jadi kartu yang tidak tampil tidak ikut dikirim.
+- `count` tiap kolom adalah total yang cocok dengan filter; di Completed bisa lebih dari jumlah kartu yang dikirim. Lencana jumlah di judul kolom, tombol pilih kolom di ponsel, dan jumlah total papan memakai `count`, jadi semuanya menampilkan total.
+- Bila total Completed lebih dari 10, di bawah kartu terakhir tampil "Menampilkan 10 dari <total> task." dan tautan "Lihat semua di Arsip". Arsip memang hanya berisi task Completed; tautannya membawa filter papan yang juga dikenal Arsip (cari, cakupan, orang, divisi, label, urgency). Filter deadline tidak ada di Arsip, jadi tidak dibawa. Bila total 10 atau kurang, keterangannya tidak tampil.
+- Seret ke Completed dan pindah lewat dialog tetap memuat ulang papan dari server setelah berhasil, jadi kartu yang baru selesai langsung muncul di paling atas dan yang ke-11 tergeser keluar.
+
+**Selesai kalau:** `scripts/pra-deploy.sh` LOLOS dengan migrasi 000022 di test DB, DB dev di versi 22, dan E2E `aktivitasmundur`, `akses`, `beranda`, dan `completed` lolos di 360 dan 1280 px.
 
 ## Sprint 12: Persiapan deploy dan migrasi data
 
@@ -1751,10 +1763,11 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 37 | 2026-11-24 | Staf mengisi Aktivitas Harian sampai 2 hari kerja ke belakang, kartu di papan bisa mundur tanggal, ekspor Drive ikut menulis ulang bulan lalu | Sprint 12e |
 | 38 | 2026-11-24 | Akses tambahan per pengguna: Kelola Timeline dan Kelola Important Notes, diatur di halaman Pengguna; alasan Kehadiran terbuka untuk semua pengguna | Sprint 12e |
 | 39 | 2026-11-24 | Urutan navbar Timeline, Task, Aktivitas, Arsip; Timeline jadi halaman awal semua peran dan tujuan logo | Sprint 12e |
+| 40 | 2026-11-24 | Kolom Completed di papan task paling banyak 10 task terbaru, dengan total dan tautan ke Arsip | Sprint 12e |
 | 33b | 2026-11-20 | Poles tampilan kartu Aktivitas: tombol rantai pindah ke celah antar isian dan jadi ikon kecil tanpa bingkai, tombol mati tidak dirender, jam tersambung menyatu dengan jam kepalanya, status simpan punya baris tetap, Tambah berkas di sel tabel tanpa bingkai | Sprint 12c |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat ketiga puluh sembilan revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat keempat puluh revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

@@ -41,6 +41,8 @@
 // tulis Timeline dan Important Notes; akses Staf dikembalikan ke nilai semula).
 // E2E_ONLY=beranda (revisi 39: login tanpa tujuan masuk Timeline, login dari tautan task kembali ke task itu, "/" dan
 // tujuan ke situs lain berakhir di Timeline, urutan menu, logo ke Timeline; membuat satu task uji lalu menghapusnya).
+// E2E_ONLY=completed (revisi 40: kolom Completed paling banyak 10 task dengan keterangan dan tautan Arsip; membuat 11
+// task uji milik Manajer per lebar layar lalu menghapusnya).
 // Keluar dengan kode 1 bila ada yang gagal.
 import { chromium } from "playwright-core";
 
@@ -3625,6 +3627,109 @@ async function checkBeranda(width) {
 }
 
 if (ONLY === "beranda") for (const w of [360, 1280]) await checkBeranda(w);
+
+// Revisi 40: kolom Completed paling banyak 10 task. 11 task uji berjudul unik diselesaikan Manajer, papan
+// disaring dengan kata kunci itu, lalu keterangan "Menampilkan 10 dari 11 task." dan tautan Arsip diperiksa.
+async function checkBatasCompleted(width) {
+  const where = (what) => `completed ${width} ${what}`;
+  const expect = (cond, w, msg) => {
+    checks++;
+    if (!cond) fail(where(w), msg);
+  };
+  const mgr = await apiAs("manajer");
+  const kunci = `E2E batas ${width} ${Date.now()}`;
+  const made = [];
+  const { ctx, page, errors } = await open("manajer", width, "terang");
+  try {
+    for (let i = 1; i <= 11; i++) {
+      const r = await mgr.call("POST", "/tasks", {
+        title: `${kunci} nomor ${i}`,
+        urgency: "low",
+        pic_ids: [mgr.me.id],
+        label_ids: [],
+        subtasks: [],
+      });
+      if (r.status !== 201) throw new Error(`buat task ${r.status}`);
+      made.push(r.body.id);
+      let v = (await mgr.call("GET", `/tasks/${r.body.id}`)).body.task.version;
+      for (const to of ["on_progress", "ready", "completed"]) {
+        const m = await mgr.call("POST", `/tasks/${r.body.id}/move`, {
+          version: v,
+          to,
+          note: "",
+        });
+        if (m.status !== 200)
+          throw new Error(
+            `pindah ke ${to} ${m.status} ${JSON.stringify(m.body)}`,
+          );
+        v = m.body.version;
+      }
+    }
+    const query = new URLSearchParams({ scope: "all", q: kunci }).toString();
+    await page.goto(BASE + `/task?${query}`);
+    await page.waitForLoadState("networkidle");
+    const pilih = page.locator("[aria-label='Pilih kolom']");
+    if (await pilih.isVisible())
+      await pilih.getByRole("button", { name: /^Completed/ }).click();
+    const kolom = page.locator("section", {
+      has: page.locator("#kolom-completed"),
+    });
+    const kartu = await kolom.locator("article").count();
+    expect(
+      kartu === 10,
+      "kartu",
+      `kolom Completed berisi ${kartu} kartu, mau 10`,
+    );
+    const lencana = (
+      await kolom.locator("#kolom-completed .font-mono").textContent()
+    )?.trim();
+    expect(lencana?.startsWith("11"), "lencana", `lencana ${lencana}, mau 11`);
+    const ket = kolom.getByText("Menampilkan 10 dari 11 task.");
+    expect(
+      (await ket.count()) === 1,
+      "keterangan",
+      "keterangan Menampilkan 10 dari 11 task tidak tampil",
+    );
+    // Yang paling baru selesai (nomor 11) ada paling atas, nomor 1 tergeser keluar.
+    const pertama = (
+      await kolom.locator("article h3").first().textContent()
+    )?.trim();
+    expect(
+      pertama === `${kunci} nomor 11`,
+      "urutan",
+      `kartu teratas "${pertama}"`,
+    );
+    expect(
+      (await kolom.getByText(`${kunci} nomor 1`, { exact: true }).count()) ===
+        0,
+      "urutan",
+      "task tertua masih tampil",
+    );
+    await audit(page, errors, where("papan"));
+
+    const tautan = kolom.getByRole("link", { name: "Lihat semua di Arsip" });
+    await tautan.focus();
+    await page.keyboard.press("Enter");
+    await page.waitForURL(/\/arsip\?/, { timeout: 10000 }).catch(() => {});
+    const url = new URL(page.url());
+    // Untuk Manajer "Semua task" adalah bawaan, jadi scope tidak ikut di URL papan maupun Arsip.
+    expect(
+      url.pathname === "/arsip" && url.searchParams.get("q") === kunci,
+      "Arsip",
+      `tautan membuka ${page.url()}`,
+    );
+  } finally {
+    for (const id of made) {
+      const d = (await mgr.call("GET", `/tasks/${id}`)).body?.task;
+      if (d) await mgr.call("DELETE", `/tasks/${id}?version=${d.version}`);
+    }
+    await mgr.ctx.close();
+    await ctx.close();
+  }
+}
+
+if (ONLY === "completed")
+  for (const w of [360, 1280]) await checkBatasCompleted(w);
 
 await browser.close();
 console.log(
