@@ -7,7 +7,8 @@ Sumber kebenaran urutan kerja, aturan bisnis, keputusan, dan revisi: `docs/sprin
 ## Stack
 
 - Backend: Go 1.27, Gin, pgx/v5, sqlc 1.31.1 (membaca skema dari `backend/migrations`), golang-migrate.
-- Database: PostgreSQL 18 di Docker pada VM `nvm-server` 192.168.68.69 (Ubuntu 26.04, Hyper-V di PC tim 192.168.68.68). Diakses lewat tunnel SSH di `127.0.0.1:15432`. Database dev `nvm_internal`, database test `nvm_internal_test`. VM lama 192.168.68.144 tidak dipakai lagi.
+- Database dev dan test: PostgreSQL 18 lokal di laptop, `localhost:5432`, role `nvm_dev` (bukan superuser), database dev `nvm_internal`, database test `nvm_internal_test`. Cara membuatnya ada di `README.md`. Tunnel SSH ke port 15432 tidak dipakai lagi untuk dev dan test.
+- Database produksi: PostgreSQL 18 di Docker pada VM `nvm-server` 192.168.68.69 (Ubuntu 26.04, Hyper-V di PC tim 192.168.68.68). VM lama 192.168.68.144 tidak dipakai lagi.
 - Frontend: Vue 3.5, TypeScript, Vite, Tailwind CSS v4, Pinia. ESLint dan Prettier (tanpa titik koma, kutip tunggal, printWidth 110).
 - PC kantor Windows (MSYS2 UCRT64). Terminal utama MSYS2 UCRT64 bash. Python dipanggil `py -3` atau `python`, bukan `python3`.
 

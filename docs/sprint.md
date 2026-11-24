@@ -1570,6 +1570,8 @@ Keputusan teknis:
 
 **Selesai kalau:** `scripts/pra-deploy.sh` LOLOS dengan migrasi 000022 di test DB, DB dev di versi 22, dan E2E `aktivitasmundur`, `akses`, `beranda`, dan `completed` lolos di 360 dan 1280 px.
 
+**Catatan infrastruktur dev (2026-11-24):** database dev `nvm_internal` dan test `nvm_internal_test` pindah dari Postgres di VM (lewat tunnel SSH port 15432) ke PostgreSQL 18 lokal di laptop, `localhost:5432`, role `nvm_dev` yang bukan superuser dan memiliki kedua database. Database dev dan test lama di VM sudah dihapus. Cara membuat role dan database serta format `DATABASE_URL` dan `TEST_DATABASE_URL` ada di `README.md`. `scripts/pra-deploy.sh` memigrasikan test DB sendiri. Penyebutan tunnel SSH di retro Sprint 0 dan S7-00 adalah catatan sejarah. Waktu `go test` sebelum tanggal ini (sekitar 330 sampai 1046 detik) diukur lewat tunnel, jadi tidak bisa dibandingkan langsung dengan run sesudahnya.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
