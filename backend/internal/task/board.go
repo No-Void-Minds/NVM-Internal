@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	// Zona waktu ikut dikompilasi karena Windows dan image Docker yang ramping tidak selalu punya data zoneinfo.
@@ -53,7 +54,13 @@ type BoardFilter struct {
 type BoardColumn struct {
 	Status Status
 	Tasks  []Summary
+	// Total: jumlah task yang cocok dengan filter, bisa lebih besar dari len(Tasks) di kolom Completed (revisi 40).
+	Total int
 }
+
+// CompletedLimit: kolom Completed di papan paling banyak menampilkan sekian task terbaru (revisi 40). Sisanya
+// dibuka lewat Arsip.
+const CompletedLimit = 10
 
 var boardOrder = []Status{Requested, OnProgress, Ready, Completed}
 
@@ -69,10 +76,22 @@ func (s *Service) Board(ctx context.Context, f BoardFilter, now time.Time) ([]Bo
 	if err != nil {
 		return nil, err
 	}
-	list := make([]sqlc.ListTasksRow, len(rows))
-	for i, r := range rows {
-		list[i] = sqlc.ListTasksRow(r)
+	// Completed dipotong sebelum PIC dan label dimuat, supaya task yang tidak tampil tidak ikut diproses.
+	list := make([]sqlc.ListTasksRow, 0, len(rows))
+	var done []sqlc.ListTasksRow
+	for _, r := range rows {
+		if Status(r.Status) == Completed {
+			done = append(done, sqlc.ListTasksRow(r))
+		} else {
+			list = append(list, sqlc.ListTasksRow(r))
+		}
 	}
+	sortCompleted(done)
+	completedTotal := len(done)
+	if len(done) > CompletedLimit {
+		done = done[:CompletedLimit]
+	}
+	list = append(list, done...)
 	summaries, err := attachPeopleAndLabels(ctx, q, list)
 	if err != nil {
 		return nil, err
@@ -88,12 +107,31 @@ func (s *Service) Board(ctx context.Context, f BoardFilter, now time.Time) ([]Bo
 		i := index[Status(sm.Task.Status)]
 		cols[i].Tasks = append(cols[i].Tasks, sm)
 	}
-	// Di kolom Completed yang penting kapan selesainya, bukan urgency-nya.
-	done := cols[index[Completed]].Tasks
-	sort.SliceStable(done, func(a, b int) bool {
-		return done[a].Task.SolvedDate.Time.After(done[b].Task.SolvedDate.Time)
-	})
+	for i := range cols {
+		cols[i].Total = len(cols[i].Tasks)
+	}
+	cols[index[Completed]].Total = completedTotal
 	return cols, nil
+}
+
+// sortCompleted: yang paling baru masuk Completed di atas. solved_date adalah timestamptz yang diisi now() setiap
+// kali task masuk Completed dan dikosongkan saat keluar, jadi nilainya selalu waktu perpindahan terakhir, termasuk
+// task yang pernah dikembalikan lalu Completed lagi. Seri dipecah dengan nomor task terbesar dulu.
+func sortCompleted(done []sqlc.ListTasksRow) {
+	sort.SliceStable(done, func(a, b int) bool {
+		ta, tb := done[a].SolvedDate.Time, done[b].SolvedDate.Time
+		if !ta.Equal(tb) {
+			return ta.After(tb)
+		}
+		return taskNumber(done[a].ID) > taskNumber(done[b].ID)
+	})
+}
+
+// taskNumber membaca angka dari "T-0012". Dibandingkan sebagai angka, bukan teks, supaya T-10000 tetap lebih
+// besar dari T-9999.
+func taskNumber(id string) int {
+	n, _ := strconv.Atoi(strings.TrimPrefix(id, "T-"))
+	return n
 }
 
 func (f BoardFilter) params(now time.Time) (sqlc.ListBoardTasksParams, error) {

@@ -79,7 +79,8 @@ func (s *Server) board(c *gin.Context) {
 		for _, r := range col.Tasks {
 			items = append(items, withMoveTo(actor, r, mine[r.Task.ID]))
 		}
-		out = append(out, boardColumn{Status: string(col.Status), Count: len(items), Tasks: items})
+		// count adalah total yang cocok dengan filter; di Completed bisa lebih dari kartu yang dikirim (revisi 40).
+		out = append(out, boardColumn{Status: string(col.Status), Count: col.Total, Tasks: items})
 	}
 	c.JSON(http.StatusOK, gin.H{"columns": out, "completed_days": task.CompletedDays})
 }

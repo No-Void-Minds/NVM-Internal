@@ -2,6 +2,7 @@
 import LoadingSkeleton from '../components/LoadingSkeleton.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { toArchiveRouteQuery } from '../utils/archiveQuery'
 import KeywordSearch from '../components/KeywordSearch.vue'
 import TaskCard from '../components/TaskCard.vue'
 import TaskDetailPanel from '../components/TaskDetailPanel.vue'
@@ -55,6 +56,22 @@ const staffUsername = computed(() => (isStaff.value ? (session.user?.username ??
 
 // URL adalah sumber filter: bisa di-refresh, dibagikan, dan tombol Back browser tetap bekerja.
 const query = computed(() => parseBoardQuery(route.query, staffUsername.value))
+// Revisi 40: kolom Completed paling banyak 10 task dari server. Tautan ke Arsip (yang isinya memang hanya task
+// Completed) membawa filter papan yang juga dikenal Arsip; filter deadline tidak ada di Arsip.
+const archiveLink = computed(() => {
+  const b = query.value
+  return {
+    name: 'archive',
+    query: toArchiveRouteQuery({
+      q: b.q,
+      scope: b.scope,
+      pic: b.pic,
+      division: b.division,
+      label: b.label,
+      urgency: b.urgency,
+    }),
+  }
+})
 const filtered = computed(() => hasFilters(query.value))
 // Kata kunci tidak dihitung: kolom cari selalu terlihat, jumlah ini untuk tombol Filter yang dilipat di ponsel.
 const activeFilterCount = computed(
@@ -635,6 +652,18 @@ const buttonSecondary =
                   </li>
                 </TransitionGroup>
                 <p v-else class="px-1 py-4 text-center text-sm text-ink-muted">Tidak ada task.</p>
+                <p
+                  v-if="col.status === 'completed' && col.count > col.tasks.length"
+                  class="px-1 pt-3 text-sm text-ink-muted"
+                >
+                  Menampilkan {{ col.tasks.length }} dari {{ col.count }} task.
+                  <RouterLink
+                    :to="archiveLink"
+                    class="inline-flex min-h-11 items-center font-medium text-ink underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
+                  >
+                    Lihat semua di Arsip
+                  </RouterLink>
+                </p>
               </section>
             </div>
           </div>
