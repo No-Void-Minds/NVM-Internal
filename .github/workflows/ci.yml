@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Nama job ini dibaca deploy/rilis.sh lewat API check-runs. Mengganti namanya berarti mengganti rilis.sh juga.
+  pra-deploy:
+    name: pra-deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18
+        # Tanpa password: log "Initialize containers" mencetak nilai env service, dan log repo publik terbuka
+        # untuk siapa saja. Port hanya ada di runner sementara ini. Role aplikasi dibuat di langkah bawah.
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      # Sama dengan frontend/Dockerfile (node:24-alpine); package.json tidak punya engines dan tidak ada .nvmrc.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Uji pembaca status CI rilis.sh
+        run: ./scripts/uji-cek-ci.sh
+
+      - name: npm ci
+        working-directory: frontend
+        run: npm ci
+
+      # Role dan database dibuat persis seperti setup laptop di README: nvm_dev bukan superuser dan memiliki
+      # kedua database. URL disusun di dalam langkah ini, tidak lewat env: atau GITHUB_ENV, karena keduanya
+      # dicetak di kepala log langkah. Passwordnya acak per run dan disamarkan.
+      - name: pra-deploy.sh
+        env:
+          PG_ID: ${{ job.services.postgres.id }}
+        run: |
+          pw=$(openssl rand -hex 16)
+          echo "::add-mask::$pw"
+          psql_su() { docker exec "$PG_ID" psql -U postgres -v ON_ERROR_STOP=1 -q "$@"; }
+          psql_su -c "CREATE ROLE nvm_dev LOGIN PASSWORD '$pw'"
+          psql_su -c "CREATE DATABASE nvm_internal OWNER nvm_dev"
+          psql_su -c "CREATE DATABASE nvm_internal_test OWNER nvm_dev"
+          export DATABASE_URL="postgres://nvm_dev:$pw@localhost:5432/nvm_internal?sslmode=disable"
+          export TEST_DATABASE_URL="postgres://nvm_dev:$pw@localhost:5432/nvm_internal_test?sslmode=disable"
+          echo "::add-mask::$DATABASE_URL"
+          echo "::add-mask::$TEST_DATABASE_URL"
+          ./scripts/pra-deploy.sh
+
+      - name: Simpan output -json test
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: go-test-json
+          path: backend/tmp/pra-deploy-test.json
+          retention-days: 7
+          if-no-files-found: ignore

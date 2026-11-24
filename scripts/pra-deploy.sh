@@ -13,6 +13,11 @@ fail=0
 skip=0
 log_dir=$(mktemp -d)
 trap 'rm -rf "$log_dir"' EXIT
+# Output -json test disimpan di luar folder sementara supaya test yang lambat bisa dilacak sesudahnya (run 1046
+# detik di revisi 40 tidak bisa diperiksa karena berkasnya ikut terhapus). Ditimpa setiap run; CI mengunggahnya.
+json_out=${PRA_DEPLOY_JSON:-backend/tmp/pra-deploy-test.json}
+# Berkas run sebelumnya dibuang dulu, supaya run yang gagal sebelum test tidak menunjuk hasil lama.
+rm -f "$json_out"
 
 # Menyamarkan URL database di keluaran perintah lain, berjaga-jaga bila galatnya menyebut DSN.
 mask() { sed -E 's#postgres(ql)?://[^[:space:]"]*#postgres://***#g'; }
@@ -24,6 +29,7 @@ summary() {
   echo "Versi migrasi test DB : $mig_version"
   echo "Test backend          : PASS $pass, FAIL $fail, SKIP $skip"
   echo "Durasi                : $(($(date +%s) - start)) detik"
+  if [ -s "$json_out" ]; then echo "Output -json test     : $json_out"; fi
   if [ "$status" = 0 ]; then echo "PRA-DEPLOY LOLOS"; else echo "PRA-DEPLOY GAGAL"; fi
   exit "$status"
 }
@@ -97,6 +103,8 @@ set +e
 (cd backend && go test -count=1 -p 1 -json ./...) >"$log_dir/test.json" 2>"$log_dir/test.err"
 test_exit=$?
 set -e
+mkdir -p "$(dirname "$json_out")"
+mask <"$log_dir/test.json" >"$json_out"
 
 json=$log_dir/test.json
 count() { grep -E "\"Action\":\"$1\"" "$json" | grep -c '"Test":' || true; }

@@ -14,6 +14,9 @@ backend/.data/
 /secrets/
 # Folder staging salinan Drive di VM, isinya symlink sementara ke storage.
 /drive-staging/
+# Catatan dan kunci deploy/rilis.sh di VM.
+/deploy/rilis.log
+/deploy/.rilis.lock
 backend/storage/
 
 node_modules/

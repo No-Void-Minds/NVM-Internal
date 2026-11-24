@@ -1,5 +1,7 @@
 # Sistem Internal NVM
 
+[![CI](https://github.com/No-Void-Minds/NVM-Internal/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/No-Void-Minds/NVM-Internal/actions/workflows/ci.yml)
+
 Autentikasi dan Task Tracker untuk tim NVM. Kebutuhan lengkap ada di docs/SRS_Sistem_Internal_NVM.docx, rencana kerja di docs/sprint.md.
 
 ## Versi alat

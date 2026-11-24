@@ -556,6 +556,46 @@ Di laptop dev, sebelum commit fitur backend dan sebelum `git pull` di VM, jalank
 
 Baris terakhirnya harus `PRA-DEPLOY LOLOS`. Skrip ini memuat `backend/.env` bila `TEST_DATABASE_URL` belum ada di env, menolak database test yang tidak berakhiran `_test` atau sama dengan database dev, memigrasikan `nvm_internal_test` di PostgreSQL lokal laptop ke versi terbaru (hanya `up`, jadi test DB tidak perlu dimigrasikan manual), menjalankan seluruh test backend tanpa cache, lalu `./scripts/check.sh`. Test yang SKIP dihitung gagal, tanpa pengecualian: bug 500 hapus task dengan `stop_series` (revisi 31) lolos ke produksi karena test DB yang menangkapnya SKIP tanpa ada yang sadar.
 
+Output `-json` test disimpan di `backend/tmp/pra-deploy-test.json` (ditimpa setiap run, URL database disamarkan), untuk melacak test yang lambat.
+
+Skrip yang sama dijalankan GitHub Actions (`.github/workflows/ci.yml`, job `pra-deploy`) untuk setiap push dan pull request ke `main`, dengan PostgreSQL 18 sementara dan role `nvm_dev` seperti di laptop. Output `-json`-nya tersimpan 7 hari sebagai artifact `go-test-json` di halaman run.
+
+### Rilis dengan `deploy/rilis.sh`
+
+Cara biasa menaikkan versi. Dijalankan di VM sebagai `nvmadmin`:
+
+```bash
+cd /srv/nvm-internal
+./deploy/rilis.sh --uji     # cek saja, tidak mengubah apa pun
+./deploy/rilis.sh           # rilis, minta konfirmasi "ya"
+./deploy/rilis.sh --kembali # kembalikan image :sebelum, minta konfirmasi "ya"
+```
+
+Urutan `rilis.sh` tanpa opsi:
+
+1. `git fetch`, target `origin/main`. Kalau sama dengan `HEAD`: "Tidak ada yang baru." dan selesai. Repo harus di branch `main`, tanpa perubahan lokal, dan bisa fast-forward.
+2. Status CI commit target lewat GitHub API publik tanpa token: check run `pra-deploy` dari GitHub Actions harus `completed` dan `success`. Belum selesai, gagal, atau tidak ditemukan berarti berhenti. Tidak ada opsi untuk melewati cek ini. Tanpa token batasnya 60 permintaan per jam per IP.
+3. Versi migrasi produksi harus terbaca dan tidak dirty.
+4. Ringkasan: commit yang akan naik, migrasi baru (berkas di target dengan nomor di atas versi produksi), apakah `deploy/sql` berubah, dan peringatan bila `deploy/.env.example` berubah. Lanjut hanya bila diketik `ya`.
+5. `./deploy/backup.sh`; baris terakhir `backup.log` harus `OK`.
+6. Tag `nvm-internal-backend` dan `nvm-internal-frontend` `:latest` menjadi `:sebelum`.
+7. `git merge --ff-only <commit target>`. Bukan `git pull`, supaya yang naik tepat commit yang CI-nya sudah dicek.
+8. Bila ada migrasi baru: `migrate up` (image `migrate/migrate:v4.18.3` di `PG_NETWORK` dengan `MIGRATOR_URL`), lalu versi harus sama dengan migrasi terbaru dan tidak dirty. Bila ada migrasi baru atau `deploy/sql` berubah: `10-grants.sql` dijalankan sebagai `nvm_internal_migrator`. Berkas itu aman diulang, dan migrasi yang menambah tabel selalu butuh grants ulang walaupun `deploy/sql` tidak berubah. Cek keluarannya tetap delapan tabel DELETE.
+9. `docker compose up -d --build`.
+10. Health check `http://127.0.0.1:8094/api/health` berulang sampai 60 detik.
+11. Bila build atau health gagal:
+    - Rilis tanpa migrasi: image `:sebelum` dipasang lagi, repo kembali ke commit lama, pesan "Rilis dibatalkan, versi lama dipulihkan".
+    - Rilis dengan migrasi: tidak ada yang dibalik. Skrip menampilkan langkah manual dan keluar dengan kode gagal. Tidak pernah `migrate down`.
+12. Satu baris di `deploy/rilis.log` (tidak masuk git), dipisah tab: waktu, commit lama, commit baru, migrasi (`-` bila tidak ada), hasil.
+
+Dua `rilis.sh` tidak bisa jalan bersamaan (`flock` pada `deploy/.rilis.lock`). Isi `deploy/.env` dimuat tanpa dicetak, dan URL database disamarkan di keluaran migrate.
+
+`--kembali` memasang lagi image `:sebelum` dan menjalankan ulang container tanpa build. Bila entri rilis terakhir di log punya migrasi, skrip memperingatkan bahwa skema tidak ikut kembali. Bila rilis terakhir `BERHASIL` dan repo masih di commit barunya, repo ikut dikembalikan ke commit lama, supaya rilis berikutnya melihat `origin/main` sebagai hal baru.
+
+### Darurat (manual)
+
+Hanya bila `rilis.sh` tidak bisa dipakai, misalnya GitHub API tidak bisa dihubungi saat perbaikan mendesak. Langkah ini tidak mengecek CI, jadi jalankan `./scripts/pra-deploy.sh` di laptop dulu.
+
 Update:
 
 ```bash
@@ -594,7 +634,7 @@ Rollback kode (tanpa migrasi baru): kembalikan image sebelumnya, tanpa build.
 docker tag nvm-internal-backend:sebelum nvm-internal-backend:latest
 docker tag nvm-internal-frontend:sebelum nvm-internal-frontend:latest
 docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --no-build
-git checkout <commit sebelumnya>     # supaya repo sama dengan yang jalan
+git reset --hard <commit sebelumnya>  # supaya repo sama dengan yang jalan; tetap di branch main untuk rilis.sh
 ```
 
 Rollback bila migrasi baru ternyata bermasalah: jangan `migrate down` di produksi tanpa membaca isi berkas `.down.sql` (bisa menghapus data). Pilihan yang lebih aman adalah memulihkan dump dari backup sebelum update (bagian 8), lalu kembalikan image.

@@ -30,7 +30,7 @@ Sumber kebenaran urutan kerja, aturan bisnis, keputusan, dan revisi: `docs/sprin
 - Migrasi dev, dari folder `backend`: `migrate -path migrations -database "$DATABASE_URL" up`. Rifky yang memuat `DATABASE_URL`. Kalau variabel itu kosong, minta Rifky menjalankannya, jangan membaca `.env`.
 - Uji API manual, dari folder `backend`: `API=http://127.0.0.1:8080`, lalu `../scripts/dev-login.sh` (menyimpan cookie `/tmp/admin.txt`, `/tmp/staf.txt`, `/tmp/manajer.txt`). POST dan PUT wajib memakai `-H "Origin: $API" -H "Content-Type: application/json"`.
 - Backend dijalankan Rifky di terminalnya sendiri. Setelah kode Go berubah, minta dia me-restart backend sebelum uji curl: `go build` tidak mengganti proses yang sedang jalan.
-- Deploy ke produksi: ikuti `docs/runbook-deploy.md` bagian "Update versi". Urutannya backup, tandai image lama, `git pull`, migrasi, baru build. Bila migrasi menambah tabel baru, `deploy/sql/10-grants.sql` wajib dijalankan ulang, karena hak DELETE diberikan per tabel. Rifky yang menjalankan semuanya di VM.
+- Deploy ke produksi: `./deploy/rilis.sh` di VM (`docs/runbook-deploy.md` bagian 10). Skrip itu hanya menaikkan commit yang job CI `pra-deploy`-nya lolos, lalu backup, tandai image lama, migrasi, grants, build, dan health check. Blok manual hanya untuk darurat. Rifky yang menjalankannya di VM.
 
 ## Aturan kerja (wajib)
 
