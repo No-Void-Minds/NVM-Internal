@@ -529,6 +529,8 @@ type User struct {
 	UpdatedAt          pgtype.Timestamptz
 	JobTitle           pgtype.Text
 	AvatarID           pgtype.UUID
+	CanManageTimeline  bool
+	CanManageNotes     bool
 }
 
 type UserSession struct {

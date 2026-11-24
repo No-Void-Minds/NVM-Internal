@@ -27,7 +27,7 @@
 // melompat saat pilih berkas diklik, Escape tetap menutup, dan halaman /task/baru; membuat satu task uji per lebar
 // di database dev lewat form, dengan Manajer sebagai PIC).
 // E2E_ONLY=timeline (revisi 30: grid dan agenda, keyboard dan popover tanggal, Manajer membuat satu kartu per
-// kategori di hari ini lalu menghapusnya, Staf tanpa tombol tulis dan tanpa alasan kehadiran Manajer).
+// kategori di hari ini lalu menghapusnya, Staf tanpa tombol tulis; alasan kehadiran terbuka sejak revisi 38).
 // E2E_ONLY=chain (revisi 33: rantai sambung jam di kartu Aktivitas hari ini milik Staf, termasuk melintasi istirahat,
 // 360 dan 1280 px; menulis lalu mengosongkan jam 11.00-12.00 sampai 16.00-17.00 hari ini).
 // E2E_ONLY=centang (revisi 34: PIC task mencentang dan membatalkan centang sub task milik Manajer, nama pencentang
@@ -36,6 +36,9 @@
 // papan, tabel /aktivitas, dan dialog detail tanpa gulir horizontal; jam 7 dan 8 Staf dikosongkan sesudahnya).
 // E2E_ONLY=paste (revisi 36: tempel gambar di Hasil dan Arahan sub task masuk ke bagiannya, tempelan teks tetap teks,
 // berkas di atas 50 MB ditolak; membuat satu task uji milik Manajer lalu menghapusnya).
+// E2E_ONLY=aktivitasmundur (revisi 37: kartu Aktivitas mundur sampai 2 hari kerja dan batasnya; tidak menulis isian
+// baru). E2E_ONLY=akses (revisi 38: drawer Ubah pengguna dengan dua centang akses, Staf dengan akses melihat tombol
+// tulis Timeline dan Important Notes; akses Staf dikembalikan ke nilai semula).
 // Keluar dengan kode 1 bila ada yang gagal.
 import { chromium } from "playwright-core";
 
@@ -2582,14 +2585,12 @@ async function checkTimeline(width) {
         "staf",
         "tombol tulis tampil di popover Staf",
       );
+      // Revisi 38: alasan dan keterangan kehadiran terbuka untuk semua pengguna.
       expect(
-        (await pop
-          .getByText(`${nama}: Tidak hadir`, { exact: true })
-          .count()) === 1 &&
-          (await pop.getByText(`${nama}: Sakit`).count()) === 0 &&
-          (await pop.getByText("E2E Timeline rahasia").count()) === 0,
-        "privasi",
-        "Staf melihat alasan atau keterangan kehadiran Manajer",
+        (await pop.getByText(`${nama}: Sakit`, { exact: true }).count()) ===
+          1 && (await pop.getByText("E2E Timeline rahasia").count()) === 1,
+        "alasan terbuka",
+        "Staf tidak melihat alasan atau keterangan kehadiran Manajer",
       );
       await lebarAman(s.page, "staf");
       await audit(s.page, s.errors, where("popover Staf"));
@@ -3246,6 +3247,248 @@ async function checkPaste(width) {
 }
 
 if (ONLY === "paste") for (const w of [360, 1280]) await checkPaste(w);
+
+// Revisi 37: kartu Aktivitas mundur sampai 2 hari kerja. Tidak menulis isian baru: simpan di tanggal terawal
+// memakai isi yang sudah ada, dan tanggal di luar rentang harus ditolak 403.
+async function checkAktivitasMundur(width) {
+  const where = (what) => `aktivitas mundur ${width} ${what}`;
+  const expect = (cond, w, msg) => {
+    checks++;
+    if (!cond) fail(where(w), msg);
+  };
+  const staf = await apiAs("staf");
+  const { ctx, page, errors } = await open("staf", width, "terang");
+  try {
+    const me = (await staf.call("GET", "/activities/me")).body;
+    const editable = me.editable_dates;
+    expect(
+      editable.length === 3 && editable[0] === me.today,
+      "api",
+      `editable_dates ${JSON.stringify(editable)}`,
+    );
+    const earliest = editable[editable.length - 1];
+
+    await page.goto(BASE + "/task");
+    await page.waitForLoadState("networkidle");
+    const judul = page
+      .getByRole("button", { name: /Aktivitas (hari ini|kemarin)|Aktivitas,/ })
+      .first();
+    if ((await judul.getAttribute("aria-expanded")) === "false")
+      await judul.click();
+    const prev = page.getByRole("button", { name: /^Aktivitas sebelumnya/ });
+    // Keterangan tanggal lalu sudah tampil sejak klik pertama, jadi yang ditunggu jawaban API tanggal barunya.
+    const pindah = (btn) =>
+      Promise.all([
+        page.waitForResponse((r) =>
+          r.url().includes("/api/activities/me?date="),
+        ),
+        btn.click(),
+      ]).then(() => page.waitForLoadState("networkidle"));
+    const next = page.getByRole("button", { name: /^Aktivitas berikutnya/ });
+    expect(await next.isDisabled(), "hari ini", "Berikutnya aktif di hari ini");
+    expect(
+      (await judul.textContent()).includes("Aktivitas hari ini"),
+      "hari ini",
+      "judul bukan Aktivitas hari ini",
+    );
+    expect(
+      (await page.getByText("Kamu sedang mengisi aktivitas").count()) === 0,
+      "hari ini",
+      "keterangan tampil di hari ini",
+    );
+
+    for (let i = 1; i < editable.length; i++) {
+      expect(
+        await prev.isEnabled(),
+        `mundur ${i}`,
+        "Sebelumnya mati sebelum batas",
+      );
+      await pindah(prev);
+      await page
+        .getByText("Kamu sedang mengisi aktivitas")
+        .waitFor({ timeout: 8000 });
+      await page.waitForLoadState("networkidle");
+      expect(
+        !(await judul.textContent()).includes("Aktivitas hari ini"),
+        `mundur ${i}`,
+        "judul tetap hari ini",
+      );
+      expect(
+        /\d+ dari \d+ jam terisi/.test(await judul.textContent()),
+        `mundur ${i}`,
+        "hitungan jam hilang",
+      );
+    }
+    expect(
+      await prev.isDisabled(),
+      "batas",
+      "Sebelumnya masih aktif di batas paling awal",
+    );
+    expect(
+      (await prev.getAttribute("aria-label")) ===
+        "Aktivitas sebelumnya, sudah batas paling awal",
+      "batas",
+      `aria-label ${await prev.getAttribute("aria-label")}`,
+    );
+    await audit(page, errors, where("batas"));
+
+    // Simpan di tanggal terawal dengan isi yang sama: diterima. Sehari sebelumnya: ditolak.
+    const past = (
+      await staf.call("GET", `/activities/me?date=${earliest}`)
+    ).body.cells.find((c) => !c.linked);
+    const ok = await staf.call("PUT", "/activities", {
+      date: earliest,
+      slot: past.slot,
+      activity: past.activity,
+      output: past.output,
+    });
+    expect(ok.status === 200, "simpan", `simpan di ${earliest}: ${ok.status}`);
+    const before = new Date(earliest + "T00:00:00Z");
+    before.setUTCDate(before.getUTCDate() - 1);
+    const tolak = await staf.call("PUT", "/activities", {
+      date: before.toISOString().slice(0, 10),
+      slot: 1,
+      activity: "x",
+      output: "",
+    });
+    expect(
+      tolak.status === 403,
+      "simpan",
+      `di luar rentang ${tolak.status}, mau 403`,
+    );
+
+    for (let i = 1; i < editable.length; i++) {
+      await pindah(next);
+      await page.waitForLoadState("networkidle");
+    }
+    await judul
+      .filter({ hasText: "Aktivitas hari ini" })
+      .waitFor({ timeout: 8000 });
+    expect(
+      await next.isDisabled(),
+      "kembali",
+      "Berikutnya aktif setelah kembali ke hari ini",
+    );
+  } finally {
+    await staf.ctx.close();
+    await ctx.close();
+  }
+}
+
+if (ONLY === "aktivitasmundur")
+  for (const w of [360, 1280]) await checkAktivitasMundur(w);
+
+// Revisi 38: drawer Ubah pengguna dengan dua centang akses, dan Staf dengan akses melihat tombol tulis Timeline
+// dan Important Notes. Akses Staf dikembalikan ke nilai semula di akhir.
+async function checkAkses(width) {
+  const where = (what) => `akses ${width} ${what}`;
+  const expect = (cond, w, msg) => {
+    checks++;
+    if (!cond) fail(where(w), msg);
+  };
+  const mgr = await apiAs("manajer");
+  const staf = await apiAs("staf");
+  const users = (await mgr.call("GET", "/users")).body.users;
+  const s = users.find((u) => u.id === staf.me.id);
+  const put = (access) =>
+    mgr.call("PUT", `/users/${s.id}`, {
+      name: s.name,
+      role: s.role,
+      division_id: s.division_id,
+      ...access,
+    });
+  const asli = {
+    can_manage_timeline: s.can_manage_timeline,
+    can_manage_notes: s.can_manage_notes,
+  };
+  const m = await open("manajer", width, "terang");
+  try {
+    await m.page.goto(BASE + "/pengguna");
+    await m.page.waitForLoadState("networkidle");
+    await m.page
+      .getByRole("button", { name: `Aksi untuk ${s.name}` })
+      .locator("visible=true")
+      .first()
+      .click();
+    await m.page.getByRole("menuitem", { name: "Ubah" }).click();
+    const dlg = m.page.locator("dialog[open]");
+    await dlg.waitFor();
+    for (const label of ["Kelola Timeline", "Kelola Important Notes"]) {
+      const box = dlg.getByRole("checkbox", { name: new RegExp(label) });
+      expect(
+        (await box.count()) === 1 && (await box.isEnabled()),
+        "drawer Staf",
+        `centang "${label}" tidak ada atau mati`,
+      );
+    }
+    // Ganti peran ke Manajer di form (tanpa menyimpan): keduanya tercentang dan nonaktif.
+    await dlg.locator("label", { hasText: "Manajer" }).first().click();
+    expect(
+      (await dlg.getByText("Manajer selalu punya akses ini.").count()) === 1,
+      "drawer Manajer",
+      "teks Manajer tidak tampil",
+    );
+    const mbox = dlg.getByRole("checkbox", { name: /Kelola Timeline/ });
+    expect(
+      (await mbox.isDisabled()) && (await mbox.isChecked()),
+      "drawer Manajer",
+      "centang Manajer tidak tercentang dan nonaktif",
+    );
+    await audit(m.page, m.errors, where("drawer"));
+    await m.page.keyboard.press("Escape");
+  } finally {
+    await m.ctx.close();
+  }
+
+  const st = await open("staf", width, "terang");
+  try {
+    const tulis = async () => {
+      await st.page.goto(BASE + "/timeline");
+      await st.page.waitForLoadState("networkidle");
+      await st.page
+        .getByText("Memuat jadwal...")
+        .waitFor({ state: "detached" })
+        .catch(() => {});
+      await st.page
+        .getByText("Memuat catatan...")
+        .waitFor({ state: "detached" })
+        .catch(() => {});
+      return [
+        await st.page.getByRole("button", { name: "Buat kartu" }).count(),
+        await st.page.getByLabel("Judul catatan baru").count(),
+      ];
+    };
+    let r = await put({
+      can_manage_timeline: true,
+      can_manage_notes: true,
+    });
+    expect(r.status === 204, "beri", `beri akses ${r.status}`);
+    const [kartu, catatan] = await tulis();
+    expect(
+      kartu === 1 && catatan === 1,
+      "dengan akses",
+      `tombol Buat kartu ${kartu}, form catatan ${catatan}`,
+    );
+    await audit(st.page, st.errors, where("Staf dengan akses"));
+    r = await put({
+      can_manage_timeline: false,
+      can_manage_notes: false,
+    });
+    const [k2, c2] = await tulis();
+    expect(
+      k2 === 0 && c2 === 0,
+      "dicabut",
+      `setelah dicabut: Buat kartu ${k2}, form catatan ${c2}`,
+    );
+  } finally {
+    await put(asli);
+    await st.ctx.close();
+    await staf.ctx.close();
+    await mgr.ctx.close();
+  }
+}
+
+if (ONLY === "akses") for (const w of [360, 1280]) await checkAkses(w);
 
 await browser.close();
 console.log(

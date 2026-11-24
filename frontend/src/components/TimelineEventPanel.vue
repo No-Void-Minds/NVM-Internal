@@ -166,10 +166,7 @@ const optionClass =
             {{ a.label }}
           </label>
         </div>
-        <p class="mt-2 text-sm text-ink-muted">
-          Sakit, izin pribadi, dan cuti hanya terlihat oleh Manajer dan orangnya. Yang lain melihat "Tidak
-          hadir".
-        </p>
+        <p class="mt-2 text-sm text-ink-muted">Alasan dan keterangan terlihat oleh semua anggota tim.</p>
       </fieldset>
 
       <div>

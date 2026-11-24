@@ -79,6 +79,7 @@ Revisi terakhir: 2026-11-13 (sisa build pindah ke Claude Code, lihat Pembagian k
 | 12a | Halaman Timeline | Kalender bersama launching, produksi, dan kehadiran, plus Important Notes; hanya Manajer yang menulis |
 | 12b | Hapus task berulang dan hak PIC atas sub task | Dialog hapus memilih nasib seri, pengaman ticker, PIC task mengatur semua sub task di task-nya |
 | 12d | Hak centang sub task, Output beberapa tautan, tempel dan seret lampiran | Centang untuk PIC sub task, PIC task, pembuat task, dan Manajer; setiap URL di Output Aktivitas jadi tombol; Ctrl+V dan seret-lepas di lampiran task dan sub task |
+| 12e | Aktivitas mundur 2 hari kerja dan akses tambahan per pengguna | Staf mengisi aktivitas sampai 2 hari kerja ke belakang; akses Kelola Timeline dan Kelola Important Notes per pengguna; alasan Kehadiran terbuka untuk semua |
 | 12 | Persiapan deploy dan migrasi data | Impor Excel, file deploy, skrip backup (belum dijalankan) |
 | 13 | Pengujian | Test otomatis oleh Claude Code, p95, peta AC |
 | 14 | Deploy, UAT, go-live | Aplikasi di VM, semua AC lolos, sistem dipakai tim |
@@ -1389,7 +1390,7 @@ Keputusan teknis:
 - Important Notes sengaja dibedakan dari kartu krem To Do (permintaan Rifky 2026-11-19), supaya terbaca sebagai pengumuman penting: garis `urgent` tebal (kiri 8 px), latar `danger-bg`, ikon peringatan dan klip kertas `urgent`, judul `danger`, dan chip "Penting" `on-urgent` di atas `urgent`. Tidak ada warna baru. Kontras terang dan gelap: teks `ink` 14,08:1 dan 14,55:1, `ink-muted` 5,30:1 dan 5,42:1, judul `danger` 6,81:1 dan 8,67:1, chip 6,93:1 dan 7,83:1, garis `urgent` 5,72:1 dan 7,99:1, pemisah `line` 3,19:1 dan 3,54:1. Urutan lewat tombol naik dan turun, tanpa seret. Urutkan mengirim seluruh daftar dan ditolak bila daftarnya sudah berubah di tempat lain. Paling banyak 50 catatan.
 - Bulan yang dibuka tersimpan di query `?bulan=YYYY-MM` (kosong untuk bulan ini), supaya tautan dan tombol Kembali membuka bulan yang sama.
 
-**Menunggu jawaban Manajer:** privasi alasan kehadiran, lihat bagian "Menunggu jawaban Manajer".
+**Diganti revisi 38 (Sprint 12e):** alasan dan keterangan kehadiran terbuka untuk semua pengguna yang login; penyamaran "Tidak hadir" di atas tidak berlaku lagi.
 
 **Selesai kalau:** `./scripts/check.sh` lolos, migrasi 000020 jalan di dev, test DB Timeline lolos, dan `E2E_ONLY=timeline` lolos di 360 dan 1280 px.
 
@@ -1513,6 +1514,37 @@ Keputusan teknis:
 - Dropzone lampiran task di dalam bagian sudah menangani drop sendiri; `FileDropTarget` melewati event yang sudah ditangani (`defaultPrevented`) supaya berkas tidak terunggah dua kali.
 
 **Selesai kalau:** `scripts/pra-deploy.sh` LOLOS dan E2E revisi 34, 35, dan 36 lolos di 360 dan 1280 px.
+
+## Sprint 12e: Aktivitas mundur 2 hari kerja dan akses tambahan per pengguna
+
+**Tujuan:** revisi 37 dan 38 Manajer.
+
+- [x] S12e-01 Revisi 37 backend: `activity.EditableDays` (satu-satunya hitungan rentang), `CanEdit` memakainya untuk isian, lampiran, dan rantai jam; `GET /api/activities/me?date=` mengirim `today` dan `editable_dates`; pesan 403 menyebut batasnya. Tanpa migrasi.
+- [x] S12e-02 Revisi 37 frontend: kartu Aktivitas di papan dengan tombol Sebelumnya dan Berikutnya, judul per tanggal, dan keterangan saat mengisi tanggal lalu.
+- [x] S12e-03 Revisi 37 ekspor Drive: `ExportMonths` menulis ulang Excel setiap bulan yang masih bisa menerima isian.
+- [x] S12e-04 Revisi 38: migrasi `000022_user_access`, akses dibaca bersama data sesi, Timeline dan Important Notes memeriksa akses masing-masing, alasan Kehadiran tidak lagi disamarkan, drawer Ubah pengguna dan form Tambah pengguna punya bagian "Akses tambahan", Audit Log menyebut perubahan akses.
+- [x] S12e-05 Test: unit `TestEditableDays`, `TestExportMonths`, `TestCanEdit`; DB `TestStafMengisiDuaHariKerjaKeBelakang`, `TestEksporMengambilIsianTerlambat`, `TestAksesTambahanPerPengguna`; E2E `E2E_ONLY=aktivitasmundur` dan `E2E_ONLY=akses`.
+
+**Keputusan revisi 37:**
+- Staf boleh mengisi dan mengubah aktivitas, lampiran, dan rantai jam miliknya untuk hari ini dan 2 hari kerja Senin sampai Jumat sebelumnya, menurut zona Asia/Jakarta. Senin bisa mengisi Jumat dan Kamis. Hari ini selalu boleh, juga bila hari ini Sabtu atau Minggu; Sabtu dan Minggu sebelumnya tidak ikut dihitung dan tidak bisa diisi mundur. Tanggal masa depan ditolak. Manajer semua tanggal, Admin hanya membaca.
+- Hitungan rentangnya satu fungsi di backend (`activity.EditableDays`), dikirim lewat `editable_dates` di `GET /api/activities/me`. Frontend hanya mengikuti daftar itu untuk tombol Sebelumnya dan Berikutnya; kata "kemarin" di judul hanya label tampilan untuk tanggal kalender kemarin.
+- Pesan 403: "Kamu hanya bisa mengisi aktivitasmu sendiri untuk hari ini dan 2 hari kerja sebelumnya."
+- Judul kartu: "Aktivitas hari ini", "Aktivitas kemarin", atau "Aktivitas", diikuti tanggal lengkap. Tombol Sebelumnya nonaktif di batas paling awal, Berikutnya nonaktif di hari ini, dengan `aria-label` yang menyebut tanggalnya (atau batasnya bila nonaktif). Hitungan "x dari 8 jam terisi" mengikuti tanggal yang tampil. Saat bukan hari ini, keterangan "Kamu sedang mengisi aktivitas <hari, tanggal>." tampil di atas tabel.
+- Simpan otomatis yang terpicu saat kotak kehilangan fokus bisa selesai setelah tanggal diganti. Composable simpan meneruskan tanggal jawaban server, dan kartu mengabaikan jawaban untuk tanggal yang sudah ditinggalkan, supaya isian tanggal lama tidak menimpa tampilan tanggal baru.
+- Ekspor Drive: Excel bulanan ditulis ulang utuh setiap malam, jadi isian terlambat di bulan yang sama selalu ikut di malam berikutnya. Celahnya di pergantian bulan: dulu hanya bulan berjalan yang ditulis, sehingga isian akhir bulan lalu (termasuk hari terakhir bulan, karena job berjalan 03.45 WIB) tidak pernah terkirim. Sekarang `ExportMonths` menulis setiap bulan dari tanggal terawal yang masih boleh diisi Staf, atau kemarin bila lebih awal, sampai hari ini. Lampiran aktivitas tidak butuh perubahan: yang disusun adalah semua lampiran yang belum tercatat di `drive_exports`, apa pun tanggalnya.
+
+**Keputusan revisi 38:**
+- Dua kolom boolean di `users` (`can_manage_timeline`, `can_manage_notes`), bukan tabel izin terpisah: aksesnya tetap dua, dan kolom di `users` ikut terbaca oleh `GetSessionUser` yang sudah dijalankan di setiap permintaan. Akses tidak disimpan di token sesi, jadi pemberian dan pencabutan langsung berlaku di permintaan berikutnya tanpa login ulang.
+- Hanya Staf yang menyimpan akses. Manajer selalu punya keduanya (dihitung di kode, tidak disimpan). Admin tetap hanya membaca Timeline dan Important Notes sesuai aturan Admin yang ada; aksesnya tidak bisa diberikan. CHECK `users_access_staff_only` menolak akses tersimpan untuk peran selain Staf, dan backend mengosongkannya saat peran diganti dari Staf.
+- Drawer Ubah pengguna dan form Tambah pengguna punya bagian "Akses tambahan" dengan dua kotak centang dan satu baris keterangan masing-masing. Untuk Manajer keduanya tercentang dan nonaktif dengan teks "Manajer selalu punya akses ini.", untuk Admin tidak tercentang dan nonaktif dengan alasannya. Yang boleh mengubah akses sama dengan yang boleh mengubah pengguna: grup rute `manage` (Admin dan Manajer).
+- `PUT /api/users/:id` yang tidak mengirim kolom akses tidak mengubah akses, supaya klien lama atau skrip yang hanya mengubah nama tidak mencabutnya diam-diam.
+- Penegakan di backend: tambah, ubah, dan hapus agenda memakai Kelola Timeline; tulis, ubah, urutkan, dan hapus catatan memakai Kelola Important Notes. `can_write` di daftar agenda dan daftar catatan dihitung dari akses masing-masing. Pesan 403: "Akunmu tidak punya akses untuk mengubah bagian ini. Minta Manajer menambahkan aksesnya di halaman Pengguna."
+- Audit Log: perubahan akses tercatat di `user_updated` dengan kunci per akses beserta nilai sebelum dan sesudah; Audit Log menulisnya "akses "Kelola Timeline" nonaktif menjadi aktif". Akun baru mencatat aksesnya di `user_created`.
+- Grants: tidak ada tabel baru, dan hak SELECT, INSERT, UPDATE pada `users` diberikan per tabel (`ALTER DEFAULT PRIVILEGES` di `00-bootstrap.sql`), jadi kolom baru otomatis tercakup. `10-grants.sql` tidak berubah dan tidak perlu dijalankan ulang.
+- Alasan Kehadiran terbuka untuk semua pengguna yang login (transparan): Staf, Manajer, dan Admin menerima jenis alasan dan keterangannya lengkap, termasuk sakit, izin pribadi, dan cuti. Penyamaran "Tidak hadir" dihapus dari backend dan frontend. Keputusan ini menggantikan keputusan privasi revisi 30 yang menunggu Manajer, dan pertanyaannya dihapus dari daftar "Menunggu jawaban Manajer". Form Kehadiran menyebut "Alasan dan keterangan terlihat oleh semua anggota tim."
+- Akses "Lihat alasan Kehadiran" yang sempat dirancang dihapus sebelum commit, karena alasan kini terbuka untuk semua. Migrasi 000022 diubah langsung (belum pernah naik ke produksi); DB dev dan test DB lokal diturunkan satu versi lalu dinaikkan lagi dengan migrasi yang baru.
+
+**Selesai kalau:** `scripts/pra-deploy.sh` LOLOS dengan migrasi 000022 di test DB, DB dev di versi 22, dan E2E `aktivitasmundur` serta `akses` lolos di 360 dan 1280 px.
 
 ## Sprint 12: Persiapan deploy dan migrasi data
 
@@ -1704,10 +1736,12 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 34 | 2026-11-23 | Sub task bisa dicentang dan dibatalkan PIC sub task, PIC task, pembuat task, dan Manajer saat On Progress; PIC task dan Manajer boleh membuka lagi sub task pilihan saat mengembalikan Ready ke On Progress | Sprint 12d |
 | 35 | 2026-11-23 | Output Aktivitas dengan beberapa tautan: setiap URL jadi tombol berlabel, dialog detail tanpa gulir horizontal | Sprint 12d |
 | 36 | 2026-11-23 | Tempel (Ctrl+V) dan seret-lepas berkas di lampiran Arahan dan Hasil sub task serta lampiran task, dengan antrean berprogres dan coba lagi | Sprint 12d |
+| 37 | 2026-11-24 | Staf mengisi Aktivitas Harian sampai 2 hari kerja ke belakang, kartu di papan bisa mundur tanggal, ekspor Drive ikut menulis ulang bulan lalu | Sprint 12e |
+| 38 | 2026-11-24 | Akses tambahan per pengguna: Kelola Timeline dan Kelola Important Notes, diatur di halaman Pengguna; alasan Kehadiran terbuka untuk semua pengguna | Sprint 12e |
 | 33b | 2026-11-20 | Poles tampilan kartu Aktivitas: tombol rantai pindah ke celah antar isian dan jadi ikon kecil tanpa bingkai, tombol mati tidak dirender, jam tersambung menyatu dengan jam kepalanya, status simpan punya baris tetap, Tambah berkas di sel tabel tanpa bingkai | Sprint 12c |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat ketiga puluh enam revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat ketiga puluh delapan revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 
@@ -1719,7 +1753,6 @@ SRS v1.0 belum memuat ketiga puluh enam revisi (revisi 5 di S14-17). SRS diperba
 - Aturan centang: Manajer boleh mencentang sub task siapa pun kecuali yang dipegang Manajer lain. Sejak revisi 6 sub task tanpa pemilik (buatan Manajer) juga boleh dicentang PIC task mana pun. Setuju?
 - Revisi 6: apakah PIC boleh menandai task Ready tanpa membuat sub task sama sekali? Sekarang boleh, karena syarat Ready hanya "tidak ada sub task yang belum tercentang".
 - Revisi 32, mengurutkan sub task: belum ada pengurutan sub task di detail task, hanya di form Ubah task (Manajer dan pembuat selama Requested). Apakah PIC task perlu tombol naik dan turun di daftar sub task? Sementara tidak ditambah.
-- Revisi 30, privasi kehadiran: alasan sakit, izin pribadi, cuti pribadi, dan cuti khusus beserta keterangannya hanya dikirim server ke Manajer dan orang yang bersangkutan. Staf lain dan Admin menerima "Tidak hadir" tanpa alasan dan keterangan. Tukar libur dan tukar shift tampil apa adanya untuk semua. Dipakai pilihan yang paling aman sambil menunggu konfirmasi.
 - Revisi 33: rantai ditolak bila jam sebelumnya kosong ("Isi jam sebelumnya dulu untuk menyambung."), supaya jam kosong tidak terhitung terisi. Ini tambahan dari kami, tidak ada di permintaan. Setuju? Tombol rantai juga hanya ada di kartu papan task, belum di dialog sel halaman Aktivitas untuk Manajer.
 
 ## Setelah go-live (belum dijadwalkan)

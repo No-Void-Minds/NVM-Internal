@@ -24,6 +24,9 @@ type userItem struct {
 	LastLoginAt  *time.Time `json:"last_login_at"`
 	JobTitle     *string    `json:"job_title"`
 	AvatarID     *string    `json:"avatar_id"`
+	// Akses tambahan yang tersimpan (revisi 38). Manajer selalu false di sini karena aksesnya melekat pada
+	// perannya; frontend menampilkannya tercentang dan nonaktif.
+	account.Access
 }
 
 // listUsers mengembalikan semua akun sekaligus. Dengan sekitar 10 pengguna, filter peran, divisi,
@@ -47,6 +50,9 @@ func (s *Server) listUsers(c *gin.Context) {
 			Status:       "aktif",
 			JobTitle:     textPtr(r.JobTitle),
 			AvatarID:     avatarID(r.AvatarID),
+			Access: account.Access{
+				ManageTimeline: r.CanManageTimeline, ManageNotes: r.CanManageNotes,
+			},
 		}
 		if r.LockedUntil.Valid && r.LockedUntil.Time.After(now) {
 			item.Status = "terkunci"
@@ -69,6 +75,7 @@ type createUserRequest struct {
 	Role       string `json:"role"`
 	DivisionID int64  `json:"division_id"`
 	Password   string `json:"password"`
+	account.Access
 }
 
 func (s *Server) createUser(c *gin.Context) {
@@ -83,6 +90,7 @@ func (s *Server) createUser(c *gin.Context) {
 		Role:       sqlc.UserRole(req.Role),
 		DivisionID: req.DivisionID,
 		Password:   req.Password,
+		Access:     req.Access,
 	})
 	if err != nil {
 		s.writeAccountError(c, err)
@@ -95,6 +103,10 @@ type updateUserRequest struct {
 	Name       string `json:"name"`
 	Role       string `json:"role"`
 	DivisionID int64  `json:"division_id"`
+	// Pointer: akses yang tidak dikirim tidak diubah, supaya klien lama yang belum mengenal akses tambahan
+	// (revisi 38) tidak mencabutnya diam-diam saat mengubah nama atau divisi.
+	ManageTimeline *bool `json:"can_manage_timeline"`
+	ManageNotes    *bool `json:"can_manage_notes"`
 }
 
 func (s *Server) updateUser(c *gin.Context) {
@@ -111,6 +123,9 @@ func (s *Server) updateUser(c *gin.Context) {
 		Name:       req.Name,
 		Role:       sqlc.UserRole(req.Role),
 		DivisionID: req.DivisionID,
+		Access: account.AccessPatch{
+			ManageTimeline: req.ManageTimeline, ManageNotes: req.ManageNotes,
+		},
 	})
 	if err != nil {
 		s.writeAccountError(c, err)

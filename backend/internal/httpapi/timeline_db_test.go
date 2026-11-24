@@ -153,9 +153,9 @@ func TestTimelineBulanMenangkapRentang(t *testing.T) {
 	}
 }
 
-// Revisi 30: alasan kehadiran yang pribadi hanya sampai ke Manajer dan orangnya sendiri. Staf lain dan Admin
-// menerima "Tidak hadir" tanpa jenis dan keterangan. Tukar shift tampil apa adanya untuk semua.
-func TestTimelinePrivasiKehadiran(t *testing.T) {
+// Revisi 38: alasan dan keterangan kehadiran terbuka untuk semua pengguna yang login (transparan), menggantikan
+// penyamaran "Tidak hadir" revisi 30. Manajer, orangnya sendiri, Staf lain, dan Admin menerima isi yang sama.
+func TestTimelineAlasanKehadiranTerbuka(t *testing.T) {
 	tm := newTaskTeam(t)
 	sick := tm.createEvent(t, fmt.Sprintf(`{"category":"kehadiran","start_date":"2026-11-12","user_id":%d,"absence_type":"sakit","description":"Demam, surat dokter menyusul"}`, tm.picID))
 	swap := tm.createEvent(t, fmt.Sprintf(`{"category":"kehadiran","start_date":"2026-11-13","user_id":%d,"absence_type":"tukar_shift","description":"Masuk Sabtu"}`, tm.picID))
@@ -163,19 +163,14 @@ func TestTimelinePrivasiKehadiran(t *testing.T) {
 	for _, who := range []struct {
 		name string
 		c    *http.Client
-		full bool
-	}{{"Manajer", tm.manager, true}, {"orangnya sendiri", tm.pic, true}, {"Staf lain", tm.other, false}, {"Admin", tm.admin, false}} {
+	}{{"Manajer", tm.manager}, {"orangnya sendiri", tm.pic}, {"Staf lain", tm.other}, {"Admin", tm.admin}} {
 		m := tm.month(t, who.c, "2026-11")
 		e := findEvent(m, sick)
 		if e == nil || e.User == nil || e.User.ID != tm.picID {
 			t.Fatalf("%s: kehadiran tidak terbaca: %+v", who.name, e)
 		}
-		if who.full {
-			if e.AbsenceType == nil || *e.AbsenceType != "sakit" || e.AbsenceLabel != "Sakit" || e.Description == "" {
-				t.Errorf("%s harus menerima alasan lengkap: %+v", who.name, e)
-			}
-		} else if e.AbsenceType != nil || e.AbsenceLabel != "Tidak hadir" || e.Description != "" {
-			t.Errorf("%s tidak boleh menerima alasan: %+v", who.name, e)
+		if e.AbsenceType == nil || *e.AbsenceType != "sakit" || e.AbsenceLabel != "Sakit" || e.Description != "Demam, surat dokter menyusul" {
+			t.Errorf("%s harus menerima alasan lengkap: %+v", who.name, e)
 		}
 		s := findEvent(m, swap)
 		if s == nil || s.AbsenceType == nil || *s.AbsenceType != "tukar_shift" || s.Description != "Masuk Sabtu" {

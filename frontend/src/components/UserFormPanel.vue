@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import BaseDialog from './BaseDialog.vue'
 import { ApiError } from '../api/client'
-import { createUser, updateUser, type UserItem } from '../api/users'
+import { createUser, updateUser, type UserAccess, type UserItem } from '../api/users'
 import type { DivisionItem } from '../api/divisions'
 import { roleLabel, type Role } from '../utils/roles'
 import { MIN_PASSWORD_LENGTH } from '../utils/password'
@@ -18,7 +18,30 @@ const username = ref('')
 const role = ref<Role>('staff')
 const divisionId = ref<number | null>(null)
 const password = ref('')
+const access = ref<UserAccess>({ can_manage_timeline: false, can_manage_notes: false })
 const showPassword = ref(false)
+
+// Akses tambahan (revisi 38). Hanya berlaku untuk Staf: Manajer selalu punya keduanya, Admin hanya membaca
+// Timeline dan Important Notes. Untuk dua peran itu kotaknya nonaktif, dan backend menyimpan false.
+const accessItems: { key: keyof UserAccess; label: string; hint: string }[] = [
+  {
+    key: 'can_manage_timeline',
+    label: 'Kelola Timeline',
+    hint: 'Menambah, mengubah, dan menghapus agenda Launching, Produksi, dan Kehadiran.',
+  },
+  {
+    key: 'can_manage_notes',
+    label: 'Kelola Important Notes',
+    hint: 'Menulis, mengubah, mengurutkan, dan menghapus Important Notes.',
+  },
+]
+const accessNote = computed(() =>
+  role.value === 'manager'
+    ? 'Manajer selalu punya akses ini.'
+    : role.value === 'admin'
+      ? 'Admin hanya membaca Timeline dan Important Notes, jadi akses ini tidak berlaku.'
+      : '',
+)
 const submitting = ref(false)
 const error = ref<string | null>(null)
 
@@ -37,6 +60,10 @@ watch(
     name.value = props.user?.name ?? ''
     username.value = props.user?.username ?? ''
     role.value = props.user?.role ?? 'staff'
+    access.value = {
+      can_manage_timeline: props.user?.can_manage_timeline ?? false,
+      can_manage_notes: props.user?.can_manage_notes ?? false,
+    }
     divisionId.value = props.user?.division_id ?? divisionOptions.value[0]?.id ?? null
   },
 )
@@ -59,7 +86,14 @@ async function submit() {
   if (error.value || divisionId.value === null) return
 
   submitting.value = true
-  const profile = { name: name.value.trim(), role: role.value, division_id: divisionId.value }
+  const staff = role.value === 'staff'
+  const profile = {
+    name: name.value.trim(),
+    role: role.value,
+    division_id: divisionId.value,
+    can_manage_timeline: staff && access.value.can_manage_timeline,
+    can_manage_notes: staff && access.value.can_manage_notes,
+  }
   try {
     if (props.user) {
       await updateUser(props.user.id, profile)
@@ -132,6 +166,41 @@ const optionClass =
           <label v-for="d in divisionOptions" :key="d.id" :class="optionClass">
             <input v-model="divisionId" type="radio" name="user-division" :value="d.id" class="sr-only" />
             {{ d.name }}{{ d.is_active ? '' : ' (nonaktif)' }}
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset aria-describedby="user-access-note">
+        <legend class="text-sm font-medium">Akses tambahan</legend>
+        <p id="user-access-note" class="mt-1 text-sm text-ink-muted">
+          {{ accessNote || 'Berlaku langsung, tanpa perlu masuk ulang.' }}
+        </p>
+        <div class="mt-1 space-y-1">
+          <label
+            v-for="a in accessItems"
+            :key="a.key"
+            class="flex min-h-11 items-start gap-3 rounded-card py-2"
+            :class="role === 'staff' ? 'cursor-pointer' : 'cursor-not-allowed'"
+          >
+            <input
+              v-if="role === 'staff'"
+              v-model="access[a.key]"
+              type="checkbox"
+              :name="`user-${a.key}`"
+              class="mt-0.5 size-5 shrink-0 accent-mark"
+            />
+            <input
+              v-else
+              type="checkbox"
+              :name="`user-${a.key}`"
+              :checked="role === 'manager'"
+              disabled
+              class="mt-0.5 size-5 shrink-0 accent-mark"
+            />
+            <span class="min-w-0">
+              <span class="block text-sm font-medium">{{ a.label }}</span>
+              <span class="block text-sm text-ink-muted">{{ a.hint }}</span>
+            </span>
           </label>
         </div>
       </fieldset>

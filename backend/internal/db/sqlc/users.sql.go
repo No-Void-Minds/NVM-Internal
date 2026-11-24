@@ -12,17 +12,21 @@ import (
 )
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO users (name, username, password_hash, role, division_id, must_change_password)
-VALUES ($1, $2, $3, $4, $5, true)
+INSERT INTO users (name, username, password_hash, role, division_id, must_change_password,
+                   can_manage_timeline, can_manage_notes)
+VALUES ($1, $2, $3, $4, $5, true,
+        $6, $7)
 RETURNING id
 `
 
 type CreateUserParams struct {
-	Name         string
-	Username     string
-	PasswordHash string
-	Role         UserRole
-	DivisionID   int64
+	Name              string
+	Username          string
+	PasswordHash      string
+	Role              UserRole
+	DivisionID        int64
+	CanManageTimeline bool
+	CanManageNotes    bool
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (int64, error) {
@@ -32,6 +36,8 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (int64, 
 		arg.PasswordHash,
 		arg.Role,
 		arg.DivisionID,
+		arg.CanManageTimeline,
+		arg.CanManageNotes,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -126,20 +132,23 @@ func (q *Queries) GetUserAvatar(ctx context.Context, id int64) (pgtype.UUID, err
 }
 
 const getUserForUpdate = `-- name: GetUserForUpdate :one
-SELECT id, name, username, role, division_id, is_active, locked_until
+SELECT id, name, username, role, division_id, is_active, locked_until,
+       can_manage_timeline, can_manage_notes
 FROM users
 WHERE id = $1
 FOR UPDATE
 `
 
 type GetUserForUpdateRow struct {
-	ID          int64
-	Name        string
-	Username    string
-	Role        UserRole
-	DivisionID  int64
-	IsActive    bool
-	LockedUntil pgtype.Timestamptz
+	ID                int64
+	Name              string
+	Username          string
+	Role              UserRole
+	DivisionID        int64
+	IsActive          bool
+	LockedUntil       pgtype.Timestamptz
+	CanManageTimeline bool
+	CanManageNotes    bool
 }
 
 func (q *Queries) GetUserForUpdate(ctx context.Context, id int64) (GetUserForUpdateRow, error) {
@@ -153,31 +162,36 @@ func (q *Queries) GetUserForUpdate(ctx context.Context, id int64) (GetUserForUpd
 		&i.DivisionID,
 		&i.IsActive,
 		&i.LockedUntil,
+		&i.CanManageTimeline,
+		&i.CanManageNotes,
 	)
 	return i, err
 }
 
 const listUsers = `-- name: ListUsers :many
 SELECT u.id, u.name, u.username, u.role, u.division_id, d.name AS division_name,
-       u.is_active, u.locked_until, u.last_login_at, u.created_at, u.job_title, u.avatar_id
+       u.is_active, u.locked_until, u.last_login_at, u.created_at, u.job_title, u.avatar_id,
+       u.can_manage_timeline, u.can_manage_notes
 FROM users u
 JOIN divisions d ON d.id = u.division_id
 ORDER BY u.is_active DESC, lower(u.name)
 `
 
 type ListUsersRow struct {
-	ID           int64
-	Name         string
-	Username     string
-	Role         UserRole
-	DivisionID   int64
-	DivisionName string
-	IsActive     bool
-	LockedUntil  pgtype.Timestamptz
-	LastLoginAt  pgtype.Timestamptz
-	CreatedAt    pgtype.Timestamptz
-	JobTitle     pgtype.Text
-	AvatarID     pgtype.UUID
+	ID                int64
+	Name              string
+	Username          string
+	Role              UserRole
+	DivisionID        int64
+	DivisionName      string
+	IsActive          bool
+	LockedUntil       pgtype.Timestamptz
+	LastLoginAt       pgtype.Timestamptz
+	CreatedAt         pgtype.Timestamptz
+	JobTitle          pgtype.Text
+	AvatarID          pgtype.UUID
+	CanManageTimeline bool
+	CanManageNotes    bool
 }
 
 func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
@@ -202,6 +216,8 @@ func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 			&i.CreatedAt,
 			&i.JobTitle,
 			&i.AvatarID,
+			&i.CanManageTimeline,
+			&i.CanManageNotes,
 		); err != nil {
 			return nil, err
 		}
@@ -327,15 +343,18 @@ func (q *Queries) UpdateOwnProfile(ctx context.Context, arg UpdateOwnProfilePara
 
 const updateUserProfile = `-- name: UpdateUserProfile :exec
 UPDATE users
-SET name = $1, role = $2, division_id = $3
-WHERE id = $4
+SET name = $1, role = $2, division_id = $3,
+    can_manage_timeline = $4, can_manage_notes = $5
+WHERE id = $6
 `
 
 type UpdateUserProfileParams struct {
-	Name       string
-	Role       UserRole
-	DivisionID int64
-	ID         int64
+	Name              string
+	Role              UserRole
+	DivisionID        int64
+	CanManageTimeline bool
+	CanManageNotes    bool
+	ID                int64
 }
 
 func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) error {
@@ -343,6 +362,8 @@ func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfilePa
 		arg.Name,
 		arg.Role,
 		arg.DivisionID,
+		arg.CanManageTimeline,
+		arg.CanManageNotes,
 		arg.ID,
 	)
 	return err

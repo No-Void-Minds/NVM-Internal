@@ -66,12 +66,49 @@ type CreateInput struct {
 	Role       sqlc.UserRole
 	DivisionID int64
 	Password   string
+	Access     Access
 }
 
 type UpdateInput struct {
 	Name       string
 	Role       sqlc.UserRole
 	DivisionID int64
+	Access     AccessPatch
+}
+
+// AccessPatch: nil berarti akses itu tidak diubah.
+type AccessPatch struct {
+	ManageTimeline, ManageNotes *bool
+}
+
+func (p AccessPatch) apply(a Access) Access {
+	if p.ManageTimeline != nil {
+		a.ManageTimeline = *p.ManageTimeline
+	}
+	if p.ManageNotes != nil {
+		a.ManageNotes = *p.ManageNotes
+	}
+	return a
+}
+
+// Access adalah akses tambahan per pengguna (revisi 38). Hanya disimpan untuk Staf: Manajer selalu punya
+// keduanya dan Admin hanya membaca, jadi untuk dua peran itu nilainya dikosongkan (CHECK users_access_staff_only).
+type Access struct {
+	ManageTimeline bool `json:"can_manage_timeline"`
+	ManageNotes    bool `json:"can_manage_notes"`
+}
+
+func (a Access) forRole(role sqlc.UserRole) Access {
+	if role != sqlc.UserRoleStaff {
+		return Access{}
+	}
+	return a
+}
+
+func (a Access) audit() map[string]any {
+	return map[string]any{
+		"can_manage_timeline": a.ManageTimeline, "can_manage_notes": a.ManageNotes,
+	}
 }
 
 type Service struct {
@@ -106,6 +143,7 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (int6
 		return 0, err
 	}
 
+	access := in.Access.forRole(in.Role)
 	var id int64
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := sqlc.New(tx)
@@ -113,11 +151,13 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (int6
 			return err
 		}
 		id, err = q.CreateUser(ctx, sqlc.CreateUserParams{
-			Name:         in.Name,
-			Username:     in.Username,
-			PasswordHash: hash,
-			Role:         in.Role,
-			DivisionID:   in.DivisionID,
+			Name:              in.Name,
+			Username:          in.Username,
+			PasswordHash:      hash,
+			Role:              in.Role,
+			DivisionID:        in.DivisionID,
+			CanManageTimeline: access.ManageTimeline,
+			CanManageNotes:    access.ManageNotes,
 		})
 		if isUniqueViolation(err) {
 			return ErrUsernameTaken
@@ -125,9 +165,13 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (int6
 		if err != nil {
 			return err
 		}
-		return record(ctx, q, actor, "user_created", id, nil, map[string]any{
+		after := map[string]any{
 			"name": in.Name, "username": in.Username, "role": in.Role, "division_id": in.DivisionID,
-		})
+		}
+		for k, v := range access.audit() {
+			after[k] = v
+		}
+		return record(ctx, q, actor, "user_created", id, nil, after)
 	})
 	return id, err
 }
@@ -173,12 +217,23 @@ func (s *Service) Update(ctx context.Context, actor Actor, id int64, in UpdateIn
 		if u.DivisionID != in.DivisionID {
 			before["division_id"], after["division_id"] = u.DivisionID, in.DivisionID
 		}
+		// Setiap akses yang berubah dicatat sendiri, supaya Audit Log menyebut akses apa dan nilai sebelum
+		// serta sesudahnya (revisi 38). Peran yang berganti dari Staf ikut mengosongkan aksesnya.
+		old := Access{ManageTimeline: u.CanManageTimeline, ManageNotes: u.CanManageNotes}
+		access := in.Access.apply(old).forRole(in.Role)
+		oldMap, newMap := old.audit(), access.audit()
+		for k, v := range newMap {
+			if oldMap[k] != v {
+				before[k], after[k] = oldMap[k], v
+			}
+		}
 		if len(after) == 0 {
 			return nil
 		}
 
 		if err := q.UpdateUserProfile(ctx, sqlc.UpdateUserProfileParams{
 			ID: id, Name: in.Name, Role: in.Role, DivisionID: in.DivisionID,
+			CanManageTimeline: access.ManageTimeline, CanManageNotes: access.ManageNotes,
 		}); err != nil {
 			return err
 		}

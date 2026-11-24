@@ -2,7 +2,7 @@
 // utils/activityWeek.ts, supaya tidak bergeser di zona waktu browser mana pun; "hari ini" dari officeToday.
 import { parseDay, shiftDay, weekStart } from './activityWeek.ts'
 
-// Alasan kehadiran yang pribadi sudah disaring server: absence_type null berarti pembaca ini tidak berhak melihatnya.
+// Alasan kehadiran dikirim lengkap ke semua pengguna (revisi 38); absence_type null hanya untuk launching dan produksi.
 export type TimelineCategory = 'launching' | 'produksi' | 'kehadiran'
 export type AbsenceType =
   'sakit' | 'izin_pribadi' | 'cuti_pribadi' | 'cuti_khusus' | 'tukar_libur' | 'tukar_shift'
@@ -74,10 +74,8 @@ export function eventCovers(e: TimelineEvent, date: string): boolean {
   return e.start_date <= date && (e.end_date ?? e.start_date) >= date
 }
 
-// Teks ringkas satu entri, dipakai di sel, agenda, dan nama aksesibel. Kehadiran tanpa alasan memakai label
-// dari server ("Tidak hadir"), bukan tebakan frontend.
+// Teks ringkas satu entri, dipakai di sel, agenda, dan nama aksesibel. Label alasan kehadiran datang dari server.
 export function eventSummary(e: TimelineEvent): string {
-  if (e.category === 'kehadiran')
-    return `${e.user?.name ?? 'Tanpa nama'}: ${e.absence_label ?? 'Tidak hadir'}`
+  if (e.category === 'kehadiran') return `${e.user?.name ?? 'Tanpa nama'}: ${e.absence_label ?? ''}`
   return e.title
 }

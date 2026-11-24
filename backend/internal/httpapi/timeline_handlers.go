@@ -16,12 +16,15 @@ import (
 
 func timelineActor(c *gin.Context) timeline.Actor {
 	u := currentUser(c)
-	return timeline.Actor{ID: u.ID, Role: u.Role, IP: clientAddr(c)}
+	return timeline.Actor{
+		ID: u.ID, Role: u.Role, IP: clientAddr(c),
+		ManageTimeline: u.CanManageTimeline, ManageNotes: u.CanManageNotes,
+	}
 }
 
 func (s *Server) listTimelineEvents(c *gin.Context) {
 	actor := timelineActor(c)
-	events, err := s.timeline.Events(c.Request.Context(), actor, c.Query("month"))
+	events, err := s.timeline.Events(c.Request.Context(), c.Query("month"))
 	if err != nil {
 		s.writeTimelineError(c, err)
 		return
@@ -78,7 +81,7 @@ func (s *Server) listTimelineNotes(c *gin.Context) {
 		s.writeTimelineError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"notes": notes, "can_write": timeline.CanWrite(timelineActor(c))})
+	c.JSON(http.StatusOK, gin.H{"notes": notes, "can_write": timeline.CanWriteNotes(timelineActor(c))})
 }
 
 func (s *Server) createTimelineNote(c *gin.Context) {
@@ -157,7 +160,8 @@ func (s *Server) writeTimelineError(c *gin.Context, err error) {
 	case errors.As(err, &ve):
 		writeError(c, http.StatusBadRequest, CodeBadRequest, ve.Message)
 	case errors.Is(err, timeline.ErrForbidden):
-		writeError(c, http.StatusForbidden, CodeForbidden, "Hanya Manajer yang bisa mengubah Timeline.")
+		writeError(c, http.StatusForbidden, CodeForbidden,
+			"Akunmu tidak punya akses untuk mengubah bagian ini. Minta Manajer menambahkan aksesnya di halaman Pengguna.")
 	case errors.Is(err, timeline.ErrNotFound):
 		writeError(c, http.StatusNotFound, CodeNotFound, "Isi Timeline tidak ditemukan. Mungkin sudah dihapus.")
 	default:

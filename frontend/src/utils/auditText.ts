@@ -22,6 +22,12 @@ function role(v: unknown): string {
 
 // describeAudit mengubah satu baris audit log menjadi kalimat, mis. "Menonaktifkan akun Staf C".
 // divisionName dipakai untuk perubahan divisi akun, yang di audit log hanya menyimpan id divisi.
+const accessLabel: Record<string, string> = {
+  can_manage_timeline: '"Kelola Timeline"',
+  can_manage_notes: '"Kelola Important Notes"',
+}
+const onOff = (v: unknown) => (v === true ? 'aktif' : 'nonaktif')
+
 export function describeAudit(e: AuditEntry, divisionName: (id: number) => string): string {
   const target = e.target?.name ?? `#${e.target?.id ?? ''}`
   const before = e.old_value ?? {}
@@ -56,6 +62,10 @@ export function describeAudit(e: AuditEntry, divisionName: (id: number) => strin
         changes.push(
           `divisi ${divisionName(Number(before.division_id))} menjadi ${divisionName(Number(after.division_id))}`,
         )
+      }
+      // Revisi 38: setiap akses tambahan yang berubah disebut dengan nilai sebelum dan sesudahnya.
+      for (const [key, label] of Object.entries(accessLabel)) {
+        if (key in after) changes.push(`akses ${label} ${onOff(before[key])} menjadi ${onOff(after[key])}`)
       }
       return `Mengubah akun ${target}: ${changes.join(', ')}`
     }

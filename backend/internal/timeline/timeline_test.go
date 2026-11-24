@@ -3,8 +3,6 @@ package timeline
 import (
 	"context"
 	"testing"
-
-	"nvm-internal/internal/db/sqlc"
 )
 
 // Aturan tanggal dan judul launching atau produksi tidak menyentuh database, jadi bisa diuji tanpa TEST_DATABASE_URL.
@@ -37,13 +35,7 @@ func TestCleanRentang(t *testing.T) {
 	}
 }
 
-func TestPrivateAbsence(t *testing.T) {
-	for typ, label := range absenceLabels {
-		public := typ == sqlc.AbsenceTypeTukarLibur || typ == sqlc.AbsenceTypeTukarShift
-		if privateAbsence(typ) == public {
-			t.Errorf("%s (%s): pribadi %v", typ, label, privateAbsence(typ))
-		}
-	}
+func TestMonthRange(t *testing.T) {
 	if from, to, err := MonthRange("2026-02"); err != nil || from.Day() != 1 || to.Day() != 28 {
 		t.Errorf("Februari 2026: %v %v %v", from, to, err)
 	}

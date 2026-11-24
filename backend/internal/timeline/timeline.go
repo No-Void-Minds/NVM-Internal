@@ -43,18 +43,31 @@ var officeTZ = func() *time.Location {
 	return loc
 }()
 
+// Actor membawa akses tambahan pengguna (revisi 38) yang dibaca dari database di setiap permintaan bersama data
+// sesi, jadi akses yang dicabut langsung berlaku tanpa login ulang.
 type Actor struct {
-	ID   int64
-	Role sqlc.UserRole
-	IP   *netip.Addr
+	ID             int64
+	Role           sqlc.UserRole
+	IP             *netip.Addr
+	ManageTimeline bool
+	ManageNotes    bool
 }
 
-func (a Actor) canWrite() bool { return a.Role == sqlc.UserRoleManager }
+// Manajer selalu punya kedua akses. Akses tambahan hanya berlaku untuk Staf; Admin tetap hanya membaca walau
+// datanya entah bagaimana berisi true.
+func (a Actor) has(flag bool) bool {
+	return a.Role == sqlc.UserRoleManager || (a.Role == sqlc.UserRoleStaff && flag)
+}
+
+func (a Actor) canWrite() bool      { return a.has(a.ManageTimeline) }
+func (a Actor) canWriteNotes() bool { return a.has(a.ManageNotes) }
 
 func (a Actor) audit() audit.Actor { return audit.Actor{ID: a.ID, IP: a.IP} }
 
-// CanWrite dipakai handler untuk can_write di respons, supaya frontend tidak menghitung aturannya sendiri.
-func CanWrite(a Actor) bool { return a.canWrite() }
+// CanWrite dan CanWriteNotes dipakai handler untuk can_write di respons, supaya frontend tidak menghitung
+// aturannya sendiri.
+func CanWrite(a Actor) bool      { return a.canWrite() }
+func CanWriteNotes(a Actor) bool { return a.canWriteNotes() }
 
 var absenceLabels = map[sqlc.AbsenceType]string{
 	sqlc.AbsenceTypeSakit:       "Sakit",
@@ -63,15 +76,6 @@ var absenceLabels = map[sqlc.AbsenceType]string{
 	sqlc.AbsenceTypeCutiKhusus:  "Cuti khusus",
 	sqlc.AbsenceTypeTukarLibur:  "Tukar libur",
 	sqlc.AbsenceTypeTukarShift:  "Tukar shift",
-}
-
-// HiddenAbsenceLabel menggantikan alasan pribadi bagi yang tidak berhak melihatnya.
-const HiddenAbsenceLabel = "Tidak hadir"
-
-// privateAbsence: alasan yang menyangkut kesehatan atau urusan pribadi. Tukar libur dan tukar shift adalah urusan
-// jadwal kerja yang perlu diketahui semua orang, jadi tampil apa adanya.
-func privateAbsence(t sqlc.AbsenceType) bool {
-	return t != sqlc.AbsenceTypeTukarLibur && t != sqlc.AbsenceTypeTukarShift
 }
 
 type Person struct {
@@ -113,9 +117,9 @@ func pgDate(t time.Time) pgtype.Date { return pgtype.Date{Time: t, Valid: !t.IsZ
 
 func dateString(d pgtype.Date) string { return d.Time.Format("2006-01-02") }
 
-// Events mengembalikan event yang beririsan dengan bulan itu. Alasan kehadiran yang pribadi disaring di sini,
-// bukan di frontend: yang tidak berhak tidak pernah menerima alasannya, keterangannya, maupun jenisnya.
-func (s *Service) Events(ctx context.Context, viewer Actor, month string) ([]Event, error) {
+// Events mengembalikan event yang beririsan dengan bulan itu. Alasan dan keterangan kehadiran dikirim lengkap ke
+// semua pengguna yang login (revisi 38, transparan), menggantikan penyamaran "Tidak hadir" revisi 30.
+func (s *Service) Events(ctx context.Context, month string) ([]Event, error) {
 	from, to, err := MonthRange(month)
 	if err != nil {
 		return nil, err
@@ -141,14 +145,9 @@ func (s *Service) Events(ctx context.Context, viewer Actor, month string) ([]Eve
 		}
 		if r.AbsenceType.Valid {
 			t := r.AbsenceType.AbsenceType
-			if privateAbsence(t) && !viewer.canWrite() && viewer.ID != r.UserID.Int64 {
-				e.AbsenceLabel = HiddenAbsenceLabel
-				e.Description = ""
-			} else {
-				v := string(t)
-				e.AbsenceType = &v
-				e.AbsenceLabel = absenceLabels[t]
-			}
+			v := string(t)
+			e.AbsenceType = &v
+			e.AbsenceLabel = absenceLabels[t]
 		}
 		out = append(out, e)
 	}
@@ -392,7 +391,7 @@ func (s *Service) Notes(ctx context.Context) ([]Note, error) {
 }
 
 func (s *Service) CreateNote(ctx context.Context, actor Actor, in NoteInput) (Note, error) {
-	if !actor.canWrite() {
+	if !actor.canWriteNotes() {
 		return Note{}, ErrForbidden
 	}
 	title, body, err := cleanNote(in)
@@ -425,7 +424,7 @@ func (s *Service) CreateNote(ctx context.Context, actor Actor, in NoteInput) (No
 }
 
 func (s *Service) UpdateNote(ctx context.Context, actor Actor, id int64, in NoteInput) error {
-	if !actor.canWrite() {
+	if !actor.canWriteNotes() {
 		return ErrForbidden
 	}
 	title, body, err := cleanNote(in)
@@ -453,7 +452,7 @@ func (s *Service) UpdateNote(ctx context.Context, actor Actor, id int64, in Note
 }
 
 func (s *Service) DeleteNote(ctx context.Context, actor Actor, id int64) error {
-	if !actor.canWrite() {
+	if !actor.canWriteNotes() {
 		return ErrForbidden
 	}
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
@@ -476,7 +475,7 @@ func (s *Service) DeleteNote(ctx context.Context, actor Actor, id int64) error {
 // ReorderNotes menyusun ulang semua catatan sesuai urutan id. Daftarnya harus lengkap, supaya dua Manajer yang
 // mengurutkan bersamaan tidak meninggalkan posisi ganda. Urutan tidak dicatat di audit: isinya tidak berubah.
 func (s *Service) ReorderNotes(ctx context.Context, actor Actor, ids []int64) error {
-	if !actor.canWrite() {
+	if !actor.canWriteNotes() {
 		return ErrForbidden
 	}
 	seen := map[int64]bool{}

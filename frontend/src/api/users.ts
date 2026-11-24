@@ -15,9 +15,15 @@ export type UserItem = {
   last_login_at: string | null
   job_title: string | null
   avatar_id: string | null
+} & UserAccess
+
+// Akses tambahan per pengguna (revisi 38). Tersimpan hanya untuk Staf; Manajer selalu punya keduanya.
+export type UserAccess = {
+  can_manage_timeline: boolean
+  can_manage_notes: boolean
 }
 
-export type UserProfileInput = { name: string; role: Role; division_id: number }
+export type UserProfileInput = { name: string; role: Role; division_id: number } & UserAccess
 export type NewUserInput = UserProfileInput & { username: string; password: string }
 
 export async function listUsers(): Promise<UserItem[]> {

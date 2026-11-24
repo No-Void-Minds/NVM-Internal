@@ -78,7 +78,8 @@ func (q *Queries) GetPasswordHash(ctx context.Context, id int64) (string, error)
 
 const getSessionUser = `-- name: GetSessionUser :one
 SELECT u.id, u.name, u.username, u.role, u.division_id, d.name AS division_name,
-       u.is_active, u.must_change_password, u.token_version, u.job_title, u.avatar_id
+       u.is_active, u.must_change_password, u.token_version, u.job_title, u.avatar_id,
+       u.can_manage_timeline, u.can_manage_notes
 FROM users u
 JOIN divisions d ON d.id = u.division_id
 WHERE u.id = $1
@@ -96,6 +97,8 @@ type GetSessionUserRow struct {
 	TokenVersion       int32
 	JobTitle           pgtype.Text
 	AvatarID           pgtype.UUID
+	CanManageTimeline  bool
+	CanManageNotes     bool
 }
 
 func (q *Queries) GetSessionUser(ctx context.Context, id int64) (GetSessionUserRow, error) {
@@ -113,6 +116,8 @@ func (q *Queries) GetSessionUser(ctx context.Context, id int64) (GetSessionUserR
 		&i.TokenVersion,
 		&i.JobTitle,
 		&i.AvatarID,
+		&i.CanManageTimeline,
+		&i.CanManageNotes,
 	)
 	return i, err
 }

@@ -1,6 +1,7 @@
 -- name: ListUsers :many
 SELECT u.id, u.name, u.username, u.role, u.division_id, d.name AS division_name,
-       u.is_active, u.locked_until, u.last_login_at, u.created_at, u.job_title, u.avatar_id
+       u.is_active, u.locked_until, u.last_login_at, u.created_at, u.job_title, u.avatar_id,
+       u.can_manage_timeline, u.can_manage_notes
 FROM users u
 JOIN divisions d ON d.id = u.division_id
 ORDER BY u.is_active DESC, lower(u.name);
@@ -14,7 +15,8 @@ ORDER BY id
 FOR UPDATE;
 
 -- name: GetUserForUpdate :one
-SELECT id, name, username, role, division_id, is_active, locked_until
+SELECT id, name, username, role, division_id, is_active, locked_until,
+       can_manage_timeline, can_manage_notes
 FROM users
 WHERE id = @id
 FOR UPDATE;
@@ -23,13 +25,16 @@ FOR UPDATE;
 SELECT id, name FROM divisions WHERE id = @id AND is_active;
 
 -- name: CreateUser :one
-INSERT INTO users (name, username, password_hash, role, division_id, must_change_password)
-VALUES (@name, @username, @password_hash, @role, @division_id, true)
+INSERT INTO users (name, username, password_hash, role, division_id, must_change_password,
+                   can_manage_timeline, can_manage_notes)
+VALUES (@name, @username, @password_hash, @role, @division_id, true,
+        @can_manage_timeline, @can_manage_notes)
 RETURNING id;
 
 -- name: UpdateUserProfile :exec
 UPDATE users
-SET name = @name, role = @role, division_id = @division_id
+SET name = @name, role = @role, division_id = @division_id,
+    can_manage_timeline = @can_manage_timeline, can_manage_notes = @can_manage_notes
 WHERE id = @id;
 
 -- name: SetUserActive :exec
