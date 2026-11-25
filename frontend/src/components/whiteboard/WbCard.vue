@@ -7,7 +7,9 @@ import { fileUrl, type ChecklistOp, type TableOp } from '../../api/whiteboard'
 import { formatBytes } from '../../utils/attachment'
 import { placeCaret, type CaretHint } from './caret'
 import {
+  LOD_ZOOM,
   cardLabel,
+  cardTitle,
   refSummary,
   type CaptionContent,
   type Card,
@@ -68,6 +70,15 @@ const colorClass: Record<string, string> = {
   krem: 'bg-tag text-tag-ink wb-card-krem',
   merah: 'bg-danger-bg',
 }
+
+// Level of detail (W4, rancangan bagian 7): di bawah zoom 40% isi tidak terbaca, jadi kartu hanya menampilkan
+// judul ringkas dan warnanya. Ukuran huruf dibagi zoom supaya di layar tetap sekitar 14 px, dan baris dipotong di
+// tinggi kartu. Gambar tetap menampilkan pratinjaunya; kartu yang sedang diedit selalu utuh.
+const lod = computed(() => props.zoom < LOD_ZOOM && !props.editing && props.card.kind !== 'image')
+const lodStyle = computed(() => ({
+  fontSize: `${14 / props.zoom}px`,
+  maxHeight: `${Math.max(20, props.card.h + props.dh - 24)}px`,
+}))
 
 // Posisi lewat CSSOM (:style), yang tidak diatur CSP style-src. Garis pilihan dibagi zoom supaya tetap 2 px di layar.
 const style = computed(() => ({
@@ -254,7 +265,15 @@ function onPointerDown(e: PointerEvent) {
     :style="style"
     @pointerdown="onPointerDown"
   >
-    <template v-if="card.kind === 'note'">
+    <p
+      v-if="lod"
+      class="overflow-hidden leading-tight font-bold break-words [overflow-wrap:anywhere]"
+      :style="lodStyle"
+      data-testid="wb-lod"
+    >
+      {{ cardTitle(card) }}
+    </p>
+    <template v-else-if="card.kind === 'note'">
       <WbNoteEditor
         v-if="editing"
         :doc="(card.content as NoteContent).doc"

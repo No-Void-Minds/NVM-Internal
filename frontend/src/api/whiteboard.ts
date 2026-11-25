@@ -14,10 +14,13 @@ import type {
 
 export type Crumb = { id: string; title: string }
 export type SearchResult = { id: string; title: string; path: string }
+// Hasil pencarian isi kartu (W4): board adalah jalur papan tempat kartu itu, dari papan akar.
+export type CardHit = { id: string; board_id: string; board: string; kind: CardKind; snippet: string }
 export type BoardView = {
   id: string
   title: string
   is_root: boolean
+  is_template: boolean
   version: number
   seq: number
   crumbs: Crumb[]
@@ -76,7 +79,27 @@ export type ChecklistOp =
   | { op: 'move'; item_id: string; index: number }
 
 export function searchBoards(q: string, signal?: AbortSignal) {
-  return apiGet<{ results: SearchResult[] }>(`/whiteboard/search?q=${encodeURIComponent(q)}`, signal)
+  return apiGet<{ results: SearchResult[]; cards: CardHit[] }>(
+    `/whiteboard/search?q=${encodeURIComponent(q)}`,
+    signal,
+  )
+}
+
+// Template papan (W4): papan mana pun selain papan akar bisa ditandai template, lalu disalin ke papan lain.
+export type TemplateInfo = { id: string; title: string; path: string; cards: number }
+export function listTemplates(signal?: AbortSignal) {
+  return apiGet<{ templates: TemplateInfo[] }>('/whiteboard/templates', signal)
+}
+export function setTemplate(id: string, isTemplate: boolean) {
+  return apiPut<{ board: { id: string; is_template: boolean } }>(`/whiteboard/boards/${id}/template`, {
+    is_template: isTemplate,
+  })
+}
+export function fromTemplate(
+  board: string,
+  input: { template_id: string; id: string; x: number; y: number; w: number; h: number },
+) {
+  return apiPost<{ card: Card }>(`/whiteboard/boards/${board}/from-template`, input)
 }
 
 export function getBoard(id: string, signal?: AbortSignal) {

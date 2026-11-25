@@ -12,6 +12,9 @@ import WbMoveDialog from '../components/whiteboard/WbMoveDialog.vue'
 import WbLinkDialog from '../components/whiteboard/WbLinkDialog.vue'
 import WbInk from '../components/whiteboard/WbInk.vue'
 import WbPenBar from '../components/whiteboard/WbPenBar.vue'
+import WbTemplateDialog from '../components/whiteboard/WbTemplateDialog.vue'
+import WbExportDialog from '../components/whiteboard/WbExportDialog.vue'
+import WbListView from '../components/whiteboard/WbListView.vue'
 import { inkColor, penColors } from '../components/whiteboard/wbColors'
 import { caretHint, type CaretHint } from '../components/whiteboard/caret'
 import { ApiError, notifyUnauthorized } from '../api/client'
@@ -25,22 +28,26 @@ import {
   deleteConnector,
   drawingOp,
   fetchPreview,
+  fromTemplate,
   getBoard,
   moveCards,
   patchCards,
   renameBoard,
   restoreBatch,
   searchBoards,
+  setTemplate,
   tableOp,
   updateConnector,
   uploadFile,
   type BoardView,
+  type CardHit,
   type CardPatch,
   type ChecklistOp,
   type NewCard,
   type PenStroke,
   type SearchResult,
   type TableOp,
+  type TemplateInfo,
 } from '../api/whiteboard'
 import { formatBytes } from '../utils/attachment'
 import { pastedFiles } from '../utils/pasteFiles'
@@ -195,6 +202,7 @@ async function load(keepView = false) {
       measure()
       fit()
     }
+    void jumpToQueryCard()
   } catch (e) {
     if (ctrl.signal.aborted) return
     loadError.value =
@@ -272,6 +280,8 @@ function onTitleKey(e: KeyboardEvent) {
 const searchOpen = ref(false)
 const query = ref('')
 const results = shallowRef<SearchResult[] | null>(null)
+// Kartu yang isinya cocok (W4), di semua papan.
+const cardHits = shallowRef<CardHit[]>([])
 const searchError = ref('')
 const searchBox = ref<HTMLElement | null>(null)
 
@@ -284,7 +294,9 @@ async function search() {
     return
   }
   try {
-    results.value = (await searchBoards(q)).results
+    const res = await searchBoards(q)
+    cardHits.value = res.cards ?? []
+    results.value = res.results
   } catch (e) {
     searchError.value = e instanceof ApiError ? e.message : 'Pencarian gagal. Coba lagi.'
   }
@@ -292,6 +304,7 @@ async function search() {
 
 function closeSearch() {
   results.value = null
+  cardHits.value = []
   searchError.value = ''
 }
 
@@ -331,8 +344,20 @@ watch(canvas, (el, old) => {
   }
 })
 
+// Di bawah 768 px bar pilihan (dua baris) menempati sekitar 110 px teratas kanvas, dan kontrol zoom serta tombol
+// Tambah sekitar 110 px terbawah.
+const FIT_TOP_PHONE = 160
+const FIT_BOTTOM_PHONE = 120
 function fit() {
-  view.value = fitView(shownCards.value, size.value.w, size.value.h)
+  const w = size.value.w
+  const phone = w < 768
+  view.value = fitView(
+    shownCards.value,
+    w,
+    size.value.h,
+    phone ? FIT_TOP_PHONE : 48,
+    phone ? FIT_BOTTOM_PHONE : 48,
+  )
 }
 function zoomBy(factor: number) {
   view.value = zoomAt(view.value, size.value.w / 2, size.value.h / 2, view.value.zoom * factor)
@@ -429,6 +454,113 @@ async function focusCard(id: string) {
   cardRefs.get(id)?.focus()
 }
 
+// Lompat ke kartu dari hasil pencarian isi (W4): ?kartu=<id>. Hanya setelah papan tujuan selesai dimuat, dan
+// parameternya dibuang sesudah dipakai supaya muat ulang halaman tidak melompat lagi.
+async function jumpToQueryCard() {
+  const id = typeof route.query.kartu === 'string' ? route.query.kartu : ''
+  const b = board.value
+  if (
+    !id ||
+    state.value !== 'ok' ||
+    !b ||
+    (b.id !== boardKey.value && !(boardKey.value === 'root' && b.is_root))
+  )
+    return
+  void router.replace({ query: { ...route.query, kartu: undefined } })
+  if (!byId.value.has(id)) {
+    showToast('Kartu itu sudah tidak ada di papan ini.')
+    return
+  }
+  listMode.value = false
+  await nextTick()
+  select([id])
+  await focusCard(id)
+}
+watch(
+  () => route.query.kartu,
+  () => void jumpToQueryCard(),
+)
+
+// Tampilan Daftar (W4): kanvas tetap terpasang (tersembunyi), jadi kembali ke kanvas tidak memuat ulang papan.
+const listMode = ref(false)
+async function toCanvas(id: string) {
+  listMode.value = false
+  await nextTick()
+  measure()
+  select([id])
+}
+async function listShow(id: string) {
+  await toCanvas(id)
+  await focusCard(id)
+}
+async function listEdit(id: string) {
+  await toCanvas(id)
+  startEdit(id)
+}
+function listOpen(id: string) {
+  const c = byId.value.get(id)
+  if (c) openBoard(c)
+}
+function listMove(id: string) {
+  select([id])
+  moveError.value = ''
+  moveOpen.value = true
+}
+function listRemove(id: string) {
+  select([id])
+  void removeSelected()
+}
+
+// Template (W4)
+const templateOpen = ref(false)
+const templateBusy = ref(false)
+const templateError = ref('')
+async function placeTemplate(t: TemplateInfo) {
+  if (!canWrite.value || templateBusy.value) return
+  const dim = defaultSize.board
+  const c = toolAt ?? centerWorld()
+  templateBusy.value = true
+  templateError.value = ''
+  try {
+    const res = await fromTemplate(bid.value, {
+      template_id: t.id,
+      id: newId(),
+      x: clamp(snap(c.x - dim.w / 2, gridOn.value), -COORD_LIMIT, COORD_LIMIT),
+      y: clamp(snap(c.y - dim.h / 2, gridOn.value), -COORD_LIMIT, COORD_LIMIT),
+      w: dim.w,
+      h: dim.h,
+    })
+    upsert([res.card])
+    record({ kind: 'create', ids: [res.card.id] })
+    templateOpen.value = false
+    select([res.card.id])
+    await focusCard(res.card.id)
+    announce.value = `Papan ${t.title} dibuat dari template.`
+  } catch (e) {
+    templateError.value = e instanceof ApiError ? e.message : 'Papan gagal dibuat dari template. Coba lagi.'
+  } finally {
+    templateBusy.value = false
+  }
+}
+async function toggleTemplate() {
+  const b = board.value
+  if (!b || b.is_root || !canWrite.value) return
+  sheetOpen.value = false
+  try {
+    const res = await setTemplate(b.id, !b.is_template)
+    board.value = { ...b, is_template: res.board.is_template }
+    announce.value = res.board.is_template ? 'Papan ini sekarang template.' : 'Papan ini bukan template lagi.'
+  } catch (e) {
+    showToast(e instanceof ApiError ? e.message : 'Status template gagal diubah. Coba lagi.')
+  }
+}
+
+const exportOpen = ref(false)
+function openExport() {
+  sheetOpen.value = false
+  exportOpen.value = true
+}
+
 function openBoard(card: Card) {
   if (card.kind !== 'board' || !card.ref) return
   router.push({ name: 'whiteboard-board', params: { id: card.ref.id } })
@@ -443,9 +575,10 @@ const sockState = ref<SocketState>('connecting')
 // netDown: ada perubahan yang gagal terkirim karena jaringan atau backend tidak menjawab; menunggu di antrean.
 const netDown = ref(false)
 const offlineQueue: (() => Promise<unknown>)[] = []
+// Teks pendek supaya bar atas tidak pindah baris saat terputus; kalimat lengkapnya ada di penanda tengah kanvas.
 const saveLabel = computed(() =>
   sockState.value !== 'open' || netDown.value
-    ? 'Terputus, menyambung ulang'
+    ? 'Terputus'
     : saveError.value
       ? 'Gagal disimpan'
       : pending.value > 0
@@ -1607,7 +1740,7 @@ onMounted(() => document.addEventListener('paste', onPaste))
 // ---------------------------------------------------------------------------------------------------------------
 // Alat: klik menaruh kartu di tengah layar, seret menaruhnya di titik lepas.
 
-type ToolKind = CardKind | 'upload'
+type ToolKind = CardKind | 'upload' | 'template'
 const tools: { kind: ToolKind; label: string; path: string }[] = [
   { kind: 'note', label: 'Catatan', path: 'M5 4h10l4 4v12H5zM15 4v4h4M8 12h8M8 16h5' },
   { kind: 'heading', label: 'Judul', path: 'M6 5v14M18 5v14M6 12h12' },
@@ -1622,12 +1755,14 @@ const tools: { kind: ToolKind; label: string; path: string }[] = [
   { kind: 'column', label: 'Kolom', path: 'M5 4h6v16H5zM13 4h6v10h-6z' },
   { kind: 'drawing', label: 'Gambar', path: 'M4 20l4-1 11-11-3-3L5 16zM14 7l3 3' },
   { kind: 'table', label: 'Tabel', path: 'M4 5h16v14H4zM4 10h16M4 15h16M10 5v14' },
+  { kind: 'template', label: 'Template', path: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM16.5 13v7M13 16.5h7' },
 ]
 
 // Alat yang membuka pilihan dulu (berkas, tautan) mengingat titik lepasnya.
 let toolAt: { x: number; y: number } | undefined
 function useTool(kind: ToolKind, at?: { x: number; y: number }) {
   toolAt = at
+  listMode.value = false
   if (kind === 'drawing') {
     if (penOn.value) stopPen()
     else startPen()
@@ -1635,7 +1770,10 @@ function useTool(kind: ToolKind, at?: { x: number; y: number }) {
   }
   stopPen()
   if (kind === 'upload') fileInput.value?.click()
-  else if (kind === 'link') {
+  else if (kind === 'template') {
+    templateError.value = ''
+    templateOpen.value = true
+  } else if (kind === 'link') {
     linkError.value = ''
     linkOpen.value = true
   } else addCard(kind, at)
@@ -2962,6 +3100,8 @@ const btn =
   'inline-flex min-h-11 items-center justify-center gap-1.5 rounded-card border border-line bg-surface px-3 font-medium hover:bg-canvas active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark'
 const iconBtn =
   'inline-flex size-11 shrink-0 items-center justify-center rounded-card border border-line bg-surface hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark aria-pressed:bg-accent aria-pressed:text-on-accent disabled:opacity-50'
+// Tombol toggle bergaya sama dengan btn; keadaan tertekan memakai warna accent seperti iconBtn.
+const pressed = 'aria-pressed:bg-accent aria-pressed:text-on-accent aria-pressed:hover:bg-accent-hover'
 const toolBtn =
   'flex min-h-14 w-full flex-col items-center justify-center gap-0.5 rounded-card px-1 text-xs text-ink hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-mark touch-none'
 </script>
@@ -2970,7 +3110,7 @@ const toolBtn =
   <div class="flex h-full min-h-0 flex-col">
     <!-- Bar atas: lokasi, judul, cari, status simpan, riwayat. -->
     <div class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line bg-surface px-3 py-1.5">
-      <nav aria-label="Lokasi papan" class="hidden min-w-0 md:block">
+      <nav aria-label="Lokasi papan" class="hidden min-w-0 max-xl:order-first md:block">
         <ol class="flex flex-wrap items-center gap-x-1 text-sm text-ink-muted">
           <template v-for="(c, i) in crumbs.slice(0, -1)" :key="c.id">
             <li class="min-w-0">
@@ -3000,7 +3140,7 @@ const toolBtn =
         v-if="parentCrumb"
         :to="crumbLink(crumbs.length - 2)"
         :class="iconBtn"
-        class="md:hidden"
+        class="max-xl:order-first md:hidden"
         :aria-label="`Kembali ke ${parentCrumb.title}`"
       >
         <svg
@@ -3016,7 +3156,9 @@ const toolBtn =
         </svg>
       </RouterLink>
 
-      <div class="flex min-w-0 flex-1 items-center gap-1">
+      <!-- Di bawah 1280 px lokasi dan judul mengisi baris pertama, kontrol di baris kedua (pemisah basis-full di bawah),
+           supaya judul selalu terbaca dan tinggi bar tidak berubah saat penanda simpan berganti teks. -->
+      <div class="flex min-w-0 flex-1 items-center gap-1 max-xl:order-first">
         <template v-if="titleEditing">
           <label :for="`${uid}-title`" class="sr-only">Judul papan</label>
           <input
@@ -3061,6 +3203,8 @@ const toolBtn =
         </template>
       </div>
 
+      <div aria-hidden="true" class="hidden basis-full max-xl:order-first max-xl:block"></div>
+
       <!-- Kehadiran (W2): orang lain di papan ini, warna tetap per orang, redup saat diam. Klik mengikuti kursornya. -->
       <ul v-if="others.length" aria-label="Orang lain di papan ini" class="flex items-center">
         <li v-for="p in others.slice(0, 5)" :key="p.id">
@@ -3089,7 +3233,7 @@ const toolBtn =
           class="md:hidden"
           :aria-expanded="searchOpen"
           :aria-controls="`${uid}-search`"
-          aria-label="Cari papan"
+          aria-label="Cari papan dan isi kartu"
           @click="searchOpen = !searchOpen"
         >
           <svg
@@ -3112,14 +3256,14 @@ const toolBtn =
           novalidate
           @submit.prevent="search"
         >
-          <label :for="`${uid}-q`" class="sr-only">Cari judul papan</label>
+          <label :for="`${uid}-q`" class="sr-only">Cari papan dan isi kartu</label>
           <input
             :id="`${uid}-q`"
             v-model="query"
             type="search"
             enterkeyhint="search"
             maxlength="100"
-            placeholder="Cari papan"
+            placeholder="Cari papan dan kartu"
             :aria-invalid="searchError ? 'true' : undefined"
             :aria-describedby="searchError ? `${uid}-qerr` : undefined"
             class="min-h-11 w-full rounded-card border border-line bg-surface px-3 md:w-56"
@@ -3131,20 +3275,40 @@ const toolBtn =
             <p v-if="searchError" :id="`${uid}-qerr`" role="alert" class="p-3 text-sm text-danger">
               {{ searchError }}
             </p>
-            <p v-else-if="results && results.length === 0" role="status" class="p-3 text-sm text-ink-muted">
-              Tidak ada papan dengan judul itu.
+            <p
+              v-else-if="results && results.length === 0 && cardHits.length === 0"
+              role="status"
+              class="p-3 text-sm text-ink-muted"
+            >
+              Tidak ada papan atau kartu yang cocok.
             </p>
-            <ul v-else-if="results" aria-label="Hasil pencarian papan">
-              <li v-for="r in results" :key="r.id">
-                <RouterLink
-                  :to="{ name: 'whiteboard-board', params: { id: r.id } }"
-                  class="flex min-h-11 flex-col justify-center px-3 py-2 hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-mark"
-                >
-                  <span class="font-semibold break-words">{{ r.title }}</span>
-                  <span class="text-sm text-ink-muted">{{ r.path }}</span>
-                </RouterLink>
-              </li>
-            </ul>
+            <template v-else-if="results">
+              <p v-if="results.length" :id="`${uid}-qb`" class="px-3 pt-2 text-sm font-semibold">Papan</p>
+              <ul v-if="results.length" :aria-labelledby="`${uid}-qb`">
+                <li v-for="r in results" :key="r.id">
+                  <RouterLink
+                    :to="{ name: 'whiteboard-board', params: { id: r.id } }"
+                    class="flex min-h-11 flex-col justify-center px-3 py-2 hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-mark"
+                  >
+                    <span class="font-semibold break-words">{{ r.title }}</span>
+                    <span class="text-sm text-ink-muted">{{ r.path }}</span>
+                  </RouterLink>
+                </li>
+              </ul>
+              <p v-if="cardHits.length" :id="`${uid}-qc`" class="px-3 pt-2 text-sm font-semibold">Kartu</p>
+              <ul v-if="cardHits.length" :aria-labelledby="`${uid}-qc`" data-testid="wb-search-cards">
+                <li v-for="h in cardHits" :key="h.id">
+                  <RouterLink
+                    :to="{ name: 'whiteboard-board', params: { id: h.board_id }, query: { kartu: h.id } }"
+                    class="flex min-h-11 flex-col justify-center px-3 py-2 hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-mark"
+                    @click="closeSearch"
+                  >
+                    <span class="break-words [overflow-wrap:anywhere]">{{ h.snippet }}</span>
+                    <span class="text-sm text-ink-muted">{{ kindLabel[h.kind] }} di {{ h.board }}</span>
+                  </RouterLink>
+                </li>
+              </ul>
+            </template>
           </div>
         </form>
       </div>
@@ -3169,7 +3333,70 @@ const toolBtn =
         <span data-testid="wb-save">{{ saveLabel }}</span>
         <span v-if="saveError" class="sr-only">: {{ saveError }}</span>
       </p>
-      <button type="button" :class="btn" @click="openHistory">Riwayat</button>
+      <!-- Di ponsel Riwayat dan Daftar hanya ikon: bar atas 360 px yang penuh pindah ke dua baris saat penanda
+           simpan berubah teks, dan kanvas yang bergeser di tengah klik membuat klik mendarat di elemen lain. -->
+      <button
+        type="button"
+        :class="btn"
+        class="max-md:w-11 max-md:px-0"
+        title="Riwayat papan"
+        @click="openHistory"
+      >
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          class="size-5 md:hidden"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.75"
+          stroke-linecap="round"
+        >
+          <path d="M12 7v5l3 2M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18" />
+        </svg>
+        <span class="max-md:sr-only">Riwayat</span>
+      </button>
+      <!-- W4: Tampilan Daftar (jalur pembaca layar dan ponsel kecil), ekspor, dan tanda template. -->
+      <button
+        type="button"
+        :class="[btn, pressed]"
+        :aria-pressed="listMode ? 'true' : 'false'"
+        title="Tampilkan kartu sebagai daftar"
+        class="max-md:w-11 max-md:px-0"
+        @click="listMode = !listMode"
+      >
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          class="size-5 md:hidden"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.75"
+          stroke-linecap="round"
+        >
+          <path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" />
+        </svg>
+        <span class="max-md:sr-only">Daftar</span>
+      </button>
+      <button v-if="state === 'ok'" type="button" :class="btn" class="max-md:hidden" @click="openExport">
+        Ekspor
+      </button>
+      <button
+        v-if="canWrite && board && !board.is_root"
+        type="button"
+        :class="[btn, pressed]"
+        class="max-md:hidden"
+        :aria-pressed="board.is_template ? 'true' : 'false'"
+        title="Tandai papan ini sebagai template yang bisa disalin dari papan lain"
+        @click="toggleTemplate"
+      >
+        Jadikan template
+      </button>
+      <span
+        v-else-if="board?.is_template"
+        class="inline-flex min-h-11 items-center rounded-chip border border-line px-2 text-sm"
+      >
+        Template
+      </span>
       <p v-if="saveError" class="w-full text-sm text-danger">{{ saveError }}</p>
     </div>
 
@@ -3243,7 +3470,7 @@ const toolBtn =
         </div>
 
         <div
-          v-show="state === 'ok'"
+          v-show="state === 'ok' && !listMode"
           :id="`${uid}-canvas`"
           ref="canvas"
           role="application"
@@ -3387,7 +3614,7 @@ const toolBtn =
         </div>
 
         <WbPenBar
-          v-if="state === 'ok' && penOn"
+          v-if="state === 'ok' && penOn && !listMode"
           :color="penColor"
           :width="penWidth"
           :eraser="penEraser"
@@ -3400,7 +3627,7 @@ const toolBtn =
         />
         <!-- Pilihan: warna, ubah isi, hapus. -->
         <div
-          v-if="state === 'ok' && canWrite && selected.size > 0 && !penOn"
+          v-if="state === 'ok' && canWrite && selected.size > 0 && !penOn && !listMode"
           class="absolute top-2 left-2 z-20 flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-2 rounded-card border border-line bg-surface p-1.5 shadow-menu"
           @click.capture="guardTap"
         >
@@ -3491,7 +3718,7 @@ const toolBtn =
 
         <!-- Minimap (mulai 768 px): dekoratif untuk pembaca layar; navigasi aksesibel lewat panah dan Pas ke layar. -->
         <svg
-          v-if="state === 'ok' && minimap"
+          v-if="state === 'ok' && minimap && !listMode"
           aria-hidden="true"
           :width="MINI_W"
           :height="MINI_H"
@@ -3516,9 +3743,23 @@ const toolBtn =
           />
         </svg>
 
+        <WbListView
+          v-if="state === 'ok' && listMode"
+          class="absolute inset-0"
+          :cards="shownCards"
+          :can-write="canWrite"
+          :board-title="board?.title ?? ''"
+          @show="listShow"
+          @edit="listEdit"
+          @open="listOpen"
+          @move="listMove"
+          @remove="listRemove"
+          @checklist="onChecklist"
+        />
+
         <!-- Kontrol tampilan di kanan bawah; tombol Tambah di kiri bawah untuk ponsel. -->
         <div
-          v-if="state === 'ok'"
+          v-if="state === 'ok' && !listMode"
           class="absolute right-2 bottom-2 z-20 flex flex-wrap items-center justify-end gap-1 rounded-card border border-line bg-surface p-1 shadow-menu max-md:max-w-[calc(100%-9rem)]"
         >
           <template v-if="canWrite">
@@ -3683,7 +3924,7 @@ const toolBtn =
           </button>
         </div>
         <button
-          v-if="state === 'ok'"
+          v-if="state === 'ok' && !listMode"
           type="button"
           class="absolute bottom-2 left-2 z-20 inline-flex min-h-11 items-center gap-1.5 rounded-card bg-accent px-4 font-medium text-on-accent shadow-menu hover:bg-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark md:hidden"
           @click="sheetOpen = true"
@@ -3783,6 +4024,17 @@ const toolBtn =
             {{ t.label }}
           </button>
         </template>
+        <button type="button" :class="btn" class="col-span-2 min-h-14" @click="openExport">Ekspor</button>
+        <button
+          v-if="canWrite && board && !board.is_root"
+          type="button"
+          :class="[btn, pressed]"
+          class="col-span-2 min-h-14"
+          :aria-pressed="board.is_template ? 'true' : 'false'"
+          @click="toggleTemplate"
+        >
+          Jadikan template
+        </button>
         <button type="button" :class="btn" class="col-span-2 min-h-14" @click="openTrash">
           Tempat sampah
         </button>
@@ -3790,6 +4042,22 @@ const toolBtn =
     </BaseDialog>
 
     <WbTrashPanel :open="trashOpen" @close="trashOpen = false" @restored="onRestored" />
+    <WbTemplateDialog
+      :open="templateOpen"
+      :current="bid"
+      :busy="templateBusy"
+      :error="templateError"
+      @close="templateOpen = false"
+      @pick="placeTemplate"
+    />
+    <WbExportDialog
+      :open="exportOpen"
+      :title="board?.title ?? 'papan'"
+      :cards="shownCards"
+      :connectors="connectors"
+      :selected="selected"
+      @close="exportOpen = false"
+    />
 
     <input
       ref="fileInput"

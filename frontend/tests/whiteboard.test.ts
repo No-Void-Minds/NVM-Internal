@@ -44,6 +44,18 @@ test('pas ke layar memuat semua kartu dan tidak memperbesar di atas 100%', () =>
   assert.equal(fitView([r('a', 0, 0)], 1000, 600).zoom, 1)
 })
 
+test('pas ke layar dengan jarak atas dan bawah: kartu tidak masuk area bar pilihan dan kontrol ponsel', () => {
+  const cards = [r('a', 0, 0, 240, 120), r('b', 0, 400, 360, 120)]
+  const v = fitView(cards, 360, 580, 160, 120)
+  // Tepi atas kartu teratas di layar = v.y + 0 * zoom.
+  assert.ok(v.y >= 160 - 1e-9, `atas ${v.y}`)
+  const bottom = v.y + 520 * v.zoom
+  assert.ok(bottom <= 580 - 120 + 1e-9, `bawah ${bottom}`)
+  // Bawaan 48 sama dengan perilaku lama: isi di tengah tinggi kanvas.
+  const d = fitView(cards, 1000, 600)
+  assert.ok(Math.abs(d.y + (520 * d.zoom) / 2 - 300) < 1e-9)
+})
+
 test('urutan baca: baris dulu, lalu kiri ke kanan, toleransi 24 px', () => {
   const order = readingOrder([r('c', 0, 200), r('b', 300, 10), r('a', 0, 0)]).map((c) => c.id)
   assert.deepEqual(order, ['a', 'b', 'c'])
@@ -261,4 +273,77 @@ test('zoom roda sebanding, simetris, dan dibatasi per event', () => {
   assert.ok(Math.abs(wheelZoomFactor(100) * wheelZoomFactor(-100) - 1) < 1e-12)
   assert.equal(wheelZoomFactor(10000), wheelZoomFactor(240))
   assert.ok(wheelZoomFactor(-2) > 1 && wheelZoomFactor(-2) < 1.01)
+})
+
+// W4: judul ringkas (level of detail, Tampilan Daftar) dan baris teks ekspor.
+import { cardLines, cardTitle } from '../src/utils/whiteboard.ts'
+
+const base = {
+  board_id: 'b',
+  x: 0,
+  y: 0,
+  w: 240,
+  h: 120,
+  z: 1,
+  color: null,
+  version: 1,
+  content_version: 1,
+  seq: 1,
+  updated_by: 1,
+  updated_at: '',
+}
+const doc = (...content: unknown[]) => ({ doc: { type: 'doc', content } })
+const para = (text: string) => ({ type: 'paragraph', content: [{ type: 'text', text }] })
+
+test('cardTitle memberi judul ringkas untuk setiap jenis kartu', () => {
+  const t = (c: Partial<Card>) => cardTitle({ ...base, id: 'x', ...c } as Card)
+  assert.equal(t({ kind: 'note', content: doc(para('Rencana konten')) as Card['content'] }), 'Rencana konten')
+  assert.equal(t({ kind: 'note', content: doc() as Card['content'] }), 'Catatan kosong')
+  assert.equal(t({ kind: 'checklist', content: { title: '', items: [] } }), 'Checklist tanpa judul')
+  assert.equal(t({ kind: 'link', content: { url: 'https://contoh.test/a', preview_id: '' } }), 'contoh.test')
+  assert.equal(t({ kind: 'drawing', content: { strokes: [] } }), 'Gambar bebas')
+  assert.equal(t({ kind: 'table', content: { header: true, rows: [] } }), 'Tabel')
+})
+
+test('cardLines: paragraf, judul, daftar bernomor, dan checklist dengan penanda selesai', () => {
+  const lines = cardLines({
+    ...base,
+    id: 'n',
+    kind: 'note',
+    content: doc(
+      { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'Judul' }] },
+      para('Isi'),
+      { type: 'orderedList', attrs: { start: 3 }, content: [{ type: 'listItem', content: [para('tiga')] }] },
+      { type: 'bulletList', content: [{ type: 'listItem', content: [para('poin')] }] },
+    ) as Card['content'],
+  } as Card)
+  assert.deepEqual(
+    lines.map((l) => [l.text, !!l.bold]),
+    [
+      ['Judul', true],
+      ['Isi', false],
+      ['3. tiga', false],
+      ['• poin', false],
+    ],
+  )
+  const check = cardLines({
+    ...base,
+    id: 'c',
+    kind: 'checklist',
+    content: {
+      title: 'Rilis',
+      items: [
+        { id: '1', text: 'Foto', done: true },
+        { id: '2', text: 'Copy', done: false },
+      ],
+    },
+  } as Card)
+  assert.deepEqual(
+    check.map((l) => [l.text, !!l.muted]),
+    [
+      ['Rilis', false],
+      ['☑ Foto', true],
+      ['☐ Copy', false],
+    ],
+  )
 })

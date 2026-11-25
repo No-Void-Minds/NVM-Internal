@@ -48,7 +48,50 @@ func (s *Server) wbSearch(c *gin.Context) {
 		s.writeWbError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"results": out})
+	hits, err := s.whiteboard.SearchCards(c.Request.Context(), c.Query("q"))
+	if err != nil {
+		s.writeWbError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"results": out, "cards": hits})
+}
+
+func (s *Server) wbSetTemplate(c *gin.Context) {
+	var in struct {
+		IsTemplate bool `json:"is_template"`
+	}
+	if !bindJSON(c, &in) {
+		return
+	}
+	out, err := s.whiteboard.SetTemplate(c.Request.Context(), wbActor(c), c.Param("id"), in.IsTemplate)
+	if err != nil {
+		s.writeWbError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"board": out})
+}
+
+func (s *Server) wbTemplates(c *gin.Context) {
+	out, err := s.whiteboard.Templates(c.Request.Context())
+	if err != nil {
+		s.writeWbError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"templates": out})
+}
+
+func (s *Server) wbFromTemplate(c *gin.Context) {
+	var in whiteboard.TemplateInput
+	if !bindJSON(c, &in) {
+		return
+	}
+	card, err := s.whiteboard.FromTemplate(c.Request.Context(), wbActor(c), c.Param("id"), in)
+	if err != nil {
+		s.writeWbError(c, err)
+		return
+	}
+	s.hub.Changed(card.BoardID, []whiteboard.Card{card}, currentUser(c).ID)
+	c.JSON(http.StatusCreated, gin.H{"card": card})
 }
 
 func (s *Server) wbRenameBoard(c *gin.Context) {

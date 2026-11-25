@@ -13,7 +13,7 @@ ON CONFLICT ((true)) WHERE is_root DO NOTHING
 RETURNING id;
 
 -- name: GetWbBoard :one
-SELECT id, is_root, parent_id, title, seq, version, updated_at
+SELECT id, is_root, parent_id, title, seq, version, updated_at, is_template
 FROM wb_boards WHERE id = @id AND deleted_at IS NULL;
 
 -- name: GetWbBoardForUpdate :one
@@ -455,3 +455,67 @@ UPDATE wb_cards SET seq = @seq WHERE id = @id AND deleted_at IS NULL RETURNING b
 SELECT from_card_id, to_card_id FROM wb_connectors
 WHERE id = @id AND board_id = @board_id AND deleted_at IS NULL
 FOR UPDATE;
+
+-- W4: template, pencarian isi.
+
+-- name: SetWbTemplate :one
+-- Papan akar tidak bisa menjadi template (yang disalin selalu papan anak beserta turunannya).
+UPDATE wb_boards SET is_template = @is_template, updated_by = @actor_id
+WHERE id = @id AND deleted_at IS NULL AND NOT is_root
+RETURNING id, is_template;
+
+-- name: ListWbTemplates :many
+SELECT b.id, b.title, b.parent_id,
+       (SELECT count(*) FROM wb_cards k WHERE k.board_id = b.id AND k.deleted_at IS NULL)::bigint AS cards
+FROM wb_boards b
+WHERE b.is_template AND b.deleted_at IS NULL
+ORDER BY lower(b.title), b.id;
+
+-- name: ListWbSubtreeBoards :many
+-- Papan ini dan semua turunannya yang hidup, induk selalu sebelum anaknya.
+WITH RECURSIVE down AS (
+  SELECT b.id, b.parent_id, b.title, b.is_template, 0 AS depth FROM wb_boards b WHERE b.id = @id AND b.deleted_at IS NULL
+  UNION ALL
+  SELECT c.id, c.parent_id, c.title, c.is_template, down.depth + 1
+  FROM wb_boards c JOIN down ON c.parent_id = down.id
+  WHERE c.deleted_at IS NULL AND down.depth < 64
+)
+SELECT id, parent_id, title, is_template, depth::int AS depth FROM down ORDER BY depth, id;
+
+-- name: ListWbCardsForCopy :many
+-- Kolom lebih dulu, supaya column_id isi kolom salinan menunjuk kolom yang sudah ada.
+SELECT id, board_id, kind, ref_board_id, file_id, column_id, col_order, x, y, w, h, z, color, content, plain
+FROM wb_cards
+WHERE board_id = ANY(@board_ids::uuid[]) AND deleted_at IS NULL
+ORDER BY (column_id IS NOT NULL), board_id, z, id;
+
+-- name: InsertWbCardCopy :exec
+INSERT INTO wb_cards (id, board_id, kind, ref_board_id, file_id, column_id, col_order, x, y, w, h, z, color, content,
+                      plain, created_by, updated_by)
+VALUES (@id, @board_id, @kind, sqlc.narg(ref_board_id), sqlc.narg(file_id), sqlc.narg(column_id), sqlc.narg(col_order),
+        @x, @y, @w, @h, @z, sqlc.narg(color), @content, @plain, @actor_id, @actor_id);
+
+-- name: ListWbConnectorsForCopy :many
+SELECT board_id, from_card_id, to_card_id, geometry, style, label, label_start, label_end
+FROM wb_connectors
+WHERE board_id = ANY(@board_ids::uuid[]) AND deleted_at IS NULL
+ORDER BY created_at, id;
+
+-- name: SearchWbCards :many
+-- Isi kartu (plain memuat teks catatan, judul, checklist, tabel, keterangan atau nama berkas, URL tautan) lewat
+-- indeks trigram, ditambah judul pratinjau tautan. Dua cabang UNION supaya cabang plain tetap memakai indeksnya.
+WITH hits AS (
+  SELECT c.id FROM wb_cards c
+  WHERE c.deleted_at IS NULL AND c.kind <> 'board' AND c.plain ILIKE '%' || @q::text || '%'
+  UNION
+  SELECT c.id FROM wb_link_previews lp
+  JOIN wb_cards c ON c.kind = 'link' AND c.deleted_at IS NULL AND c.content->>'preview_id' = lp.id::text
+  WHERE lp.title ILIKE '%' || @q::text || '%'
+)
+SELECT c.id, c.board_id, c.kind, c.plain, coalesce(lp.title, '')::text AS preview_title
+FROM hits
+JOIN wb_cards c ON c.id = hits.id
+JOIN wb_boards b ON b.id = c.board_id AND b.deleted_at IS NULL
+LEFT JOIN wb_link_previews lp ON c.kind = 'link' AND lp.id = nullif(c.content->>'preview_id', '')::uuid
+ORDER BY c.updated_at DESC, c.id
+LIMIT 50;

@@ -243,6 +243,9 @@ func New(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.Engine, 
 	wbWrite.POST("/boards/:id/cards/:cardId/comments", s.wbAddComment)
 	wbWrite.PUT("/comments/:commentId", s.wbEditComment)
 	wbWrite.DELETE("/comments/:commentId", s.wbDeleteComment)
+	wb.GET("/templates", s.wbTemplates)
+	wbWrite.PUT("/boards/:id/template", s.wbSetTemplate)
+	wbWrite.POST("/boards/:id/from-template", s.wbFromTemplate)
 
 	return r, s, nil
 }

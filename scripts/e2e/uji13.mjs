@@ -50,8 +50,12 @@
 // wbputus, wbundo, wbduatab) ditambah navbar (semua halaman, tiga peran, 768, 1024, 1279, dan 1280 px).
 // E2E_ONLY=wb3 untuk semua skenario Whiteboard W3 (atau satu per satu: wbberkas, wbtautan, wbkolom, wbpenghubung,
 // wbkomentar, wbgambar, wbtabel, wbpindah, wbzoom, wbdobel, wbketik).
+// E2E_ONLY=wb4 untuk semua skenario Whiteboard W4 (atau satu per satu: wbtemplate, wbekspor, wbcari, wbdaftar,
+// wbperforma; wbperforma mengisi satu papan uji dengan 500 kartu lewat API dan hanya di 1280 px).
 // Keluar dengan kode 1 bila ada yang gagal.
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -4022,19 +4026,22 @@ async function checkWbDasar(width) {
     else await page.getByRole("link", { name: /^Kembali ke / }).click();
     await page.waitForURL(/\/whiteboard$/);
     const cardText = await page.locator(`[data-card="${boardCard.id}"]`).textContent();
-    // Catatan dan checklist, ditambah judul yang diseret dari sidebar mulai 768 px.
+    // Catatan dan checklist, ditambah judul yang diseret dari sidebar mulai 768 px. Ringkasan dibaca dari label kartu:
+    // papan akar dev penuh kartu, jadi pas ke layar bisa di bawah zoom 40% dan level of detail (W4) hanya
+    // menampilkan judul di kartunya.
     const isi = width >= 768 ? "3 kartu" : "2 kartu";
-    expect(cardText.includes(`${kunci} baru`) && cardText.includes(isi), "ringkasan", `kartu papan: ${cardText}, mau ${isi}`);
+    const label = await cardLabelOf(page, boardCard.id);
+    expect(cardText.includes(`${kunci} baru`) && label.includes(isi), "ringkasan", `kartu papan: ${cardText} / ${label}, mau ${isi}`);
     // Tombol kembali browser membuka papan anak lagi.
     await page.goBack();
     await page.waitForURL(new RegExp(`/whiteboard/${boardId}$`));
     expect(true, "kembali browser", "");
 
-    // Cari judul papan.
-    if (width < 768) await page.getByRole("button", { name: "Cari papan" }).click();
-    await page.getByLabel("Cari judul papan").fill(`${kunci} baru`);
-    await page.getByLabel("Cari judul papan").press("Enter");
-    const hit = page.getByRole("list", { name: "Hasil pencarian papan" }).getByRole("link").first();
+    // Cari judul papan. Sejak W4 kotak yang sama juga mencari isi kartu; hasil papan ada di daftar "Papan".
+    if (width < 768) await page.getByRole("button", { name: "Cari papan dan isi kartu" }).click();
+    await page.getByRole("searchbox", { name: "Cari papan dan isi kartu" }).fill(`${kunci} baru`);
+    await page.getByRole("searchbox", { name: "Cari papan dan isi kartu" }).press("Enter");
+    const hit = page.getByRole("list", { name: "Papan", exact: true }).getByRole("link").first();
     await hit.waitFor({ timeout: 10000 });
     await audit(page, errors, where("cari"));
     expect((await hit.textContent()).includes(`${kunci} baru`), "cari", "hasil cari tidak memuat papan uji");
@@ -5439,6 +5446,350 @@ if (ONLY === "wb3")
     await checkWbDobel(w);
     await checkWbKetik(w);
   }
+
+// Whiteboard W4: template, ekspor PNG dan PDF, pencarian isi kartu, Tampilan Daftar, dan performa 500 kartu dengan
+// level of detail. Setiap skenario memakai papan uji sendiri yang dipindah ke Tempat sampah di akhir.
+
+// Alat di lembar ponsel atau tombol di bar atas: Ekspor dan Jadikan template di bar atas mulai 768 px, di bawahnya
+// lewat tombol Tambah.
+async function wbMenu(page, width, label) {
+  if (width >= 768) await page.getByRole("button", { name: label, exact: true }).first().click();
+  else {
+    await page.getByRole("button", { name: "Tambah", exact: true }).click();
+    await page.locator("dialog[open]").getByRole("button", { name: label, exact: true }).click();
+  }
+}
+
+// Template: tandai papan sebagai template, papan akar ditolak, lalu buat papan dari template di papan lain lewat alat
+// Template. Salinannya memuat kartu template dan bukan template.
+async function checkWbTemplate(width) {
+  const expect = wbExpect("wbtemplate", width);
+  const stamp = Date.now();
+  const src = await wbSetup("staf", `E2E wbtemplate sumber ${width} ${stamp}`);
+  const dst = await wbSetup("staf", `E2E wbtemplate tujuan ${width} ${stamp}`);
+  const api = src.api;
+  const errors = [];
+  const cs = await wbContext("staf", width);
+  try {
+    await wbCard(api, src.board, "heading", 0, 0, { text: "Isi template", level: 1 });
+    await wbCard(api, src.board, "checklist", 0, 200, { title: "Langkah", items: [{ id: crypto.randomUUID(), text: "Brief", done: false }] });
+    const root = await api.call("PUT", "/whiteboard/boards/root/template", { is_template: true });
+    expect(root.status === 400, "akar", `papan akar dijadikan template: ${root.status}`);
+
+    const ps = await wbPage(cs, src.board, errors);
+    await wbMenu(ps, width, "Jadikan template");
+    await ps.waitForTimeout(400);
+    expect((await wbBoardView(api, src.board)).is_template === true, "tandai", "papan tidak menjadi template");
+    if (width >= 768)
+      expect((await ps.getByRole("button", { name: "Jadikan template" }).getAttribute("aria-pressed")) === "true", "tekan", "tombol Jadikan template tidak tertekan");
+
+    await ps.goto(BASE + `/whiteboard/${dst.board}`);
+    await wbSaved(ps);
+    await wbTool(ps, width, "Template");
+    const dlg = ps.getByRole("dialog", { name: "Buat papan dari template" });
+    await dlg.waitFor({ timeout: 5000 });
+    await dlg.getByRole("radio", { name: new RegExp(`E2E wbtemplate sumber ${width} ${stamp}`) }).check();
+    await dlg.getByRole("button", { name: "Buat papan" }).click();
+    await dlg.waitFor({ state: "hidden", timeout: 10000 }).catch(() => {});
+    const made = (await wbCards(api, dst.board)).find((c) => c.kind === "board");
+    expect(!!made, "buat", "papan dari template tidak dibuat");
+    if (made) {
+      const copy = await wbBoardView(api, made.ref.id);
+      const kinds = copy.cards.map((c) => c.kind).sort().join(",");
+      expect(kinds === "checklist,heading" && copy.cards.some((c) => c.content?.text === "Isi template"), "salin", `isi salinan: ${kinds}`);
+      expect(copy.is_template === false, "bukan template", "salinan ikut menjadi template");
+      expect(await ps.locator(`[data-card="${made.id}"]`).isVisible(), "tampil", "kartu papan salinan tidak tampil");
+    }
+    expect(await wbNoScroll(ps), "gulir", "halaman bisa digulir");
+    await audit(ps, errors, `wbtemplate ${width} tujuan`);
+  } finally {
+    await api.call("PUT", `/whiteboard/boards/${src.board}/template`, { is_template: false });
+    await wbCleanup(api, src.card);
+    await wbCleanup(dst.api, dst.card);
+    await api.ctx.close();
+    await dst.api.ctx.close();
+    await cs.close();
+  }
+}
+
+// Ekspor: PNG dan PDF terunduh, berukuran wajar, dan strukturnya sah (tanda tangan PNG dan ukuran dari IHDR; PDF
+// dari header, xref, dan %%EOF, ditambah pdfinfo bila terpasang). Di 1280 juga papan sangat besar: skala diperkecil
+// dan keterangannya tampil.
+async function checkWbEkspor(width) {
+  const expect = wbExpect("wbekspor", width);
+  const { api, card, board } = await wbSetup("staf", `E2E wbekspor ${width} ${Date.now()}`);
+  const errors = [];
+  const cs = await wbContext("staf", width);
+  try {
+    const a = await wbCard(api, board, "note", 0, 0, wbNote("Rencana kampanye dengan teks yang cukup panjang supaya terbungkus ke beberapa baris di kartu"));
+    const b = await wbCard(api, board, "checklist", 320, 0, { title: "Rilis", items: [{ id: crypto.randomUUID(), text: "Foto produk", done: true }] });
+    await api.call("POST", `/whiteboard/boards/${board}/connectors`, { from: a.id, to: b.id, label: "lalu" });
+    const up = await api.ctx.request.post(BASE + `/api/whiteboard/boards/${board}/files?x=0&y=200&w=240&h=120`, {
+      headers: { Origin: BASE },
+      multipart: { file: { name: "poster.png", mimeType: "image/png", buffer: testPng(400, 200) } },
+    });
+    expect(up.status() === 201, "unggah", `gambar uji: ${up.status()}`);
+    const ps = await wbPage(cs, board, errors);
+
+    const grab = async (fmt) => {
+      await wbMenu(ps, width, "Ekspor");
+      const dlg = ps.getByRole("dialog", { name: "Ekspor papan" });
+      await dlg.waitFor({ timeout: 5000 });
+      await dlg.getByRole("radio", { name: fmt === "png" ? /^PNG/ : /^PDF/ }).check();
+      const [dl] = await Promise.all([ps.waitForEvent("download", { timeout: 20000 }), dlg.getByRole("button", { name: `Unduh ${fmt.toUpperCase()}` }).click()]);
+      const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "nvm-ekspor-")), dl.suggestedFilename());
+      await dl.saveAs(file);
+      const status = (await dlg.getByTestId("wb-export-status").textContent().catch(() => "")) ?? "";
+      await dlg.getByRole("button", { name: "Selesai" }).click();
+      return { file, buf: fs.readFileSync(file), name: dl.suggestedFilename(), status };
+    };
+
+    const png = await grab("png");
+    const w = png.buf.readUInt32BE(16);
+    const h = png.buf.readUInt32BE(20);
+    expect(png.buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), "png", "berkas PNG tidak sah");
+    expect(png.name.endsWith(".png") && png.buf.length > 5000 && png.buf.length < 20e6, "png ukuran", `${png.name} ${png.buf.length} byte`);
+    expect(w >= 600 && h >= 300, "png piksel", `${w} x ${h}`);
+    expect(png.status.includes("diunduh"), "png status", png.status);
+
+    const pdf = await grab("pdf");
+    const text = pdf.buf.toString("latin1");
+    const xref = Number(text.match(/startxref\n(\d+)\n/)?.[1]);
+    expect(text.startsWith("%PDF-1.4") && text.trimEnd().endsWith("%%EOF") && text.slice(xref, xref + 4) === "xref", "pdf", "struktur PDF tidak sah");
+    expect(pdf.buf.length > 5000 && pdf.buf.length < 20e6, "pdf ukuran", `${pdf.buf.length} byte`);
+    try {
+      const info = execFileSync("pdfinfo", [pdf.file], { encoding: "utf8" });
+      expect(/Pages:\s+1/.test(info), "pdfinfo", info.slice(0, 200));
+    } catch (e) {
+      if (e.code !== "ENOENT") fail(`wbekspor ${width} pdfinfo`, String(e.message).slice(0, 200));
+      else console.log(`catatan: wbekspor ${width} pdfinfo tidak terpasang, pemeriksaan pdfinfo dilewati`);
+    }
+
+    if (width === 1280) {
+      await wbCard(api, board, "heading", 30000, 20000, { text: "Ujung jauh", level: 1 });
+      await ps.reload();
+      await wbSaved(ps);
+      const big = await grab("png");
+      const bw = big.buf.readUInt32BE(16);
+      const bh = big.buf.readUInt32BE(20);
+      expect(bw * bh <= 16_000_000 && bw <= 16384 && bh <= 16384, "batas", `${bw} x ${bh}`);
+      expect(big.status.includes("skala"), "keterangan skala", big.status);
+    }
+    expect(await wbNoScroll(ps), "gulir", "halaman bisa digulir");
+    await audit(ps, errors, `wbekspor ${width}`);
+  } finally {
+    await wbCleanup(api, card);
+    await api.ctx.close();
+    await cs.close();
+  }
+}
+
+// Pencarian isi: teks catatan dan judul checklist di papan lain ditemukan dari papan akar, hasilnya membuka papan itu
+// dengan kartu terpilih dan terfokus, lalu ?kartu dibuang dari alamat.
+async function checkWbCari(width) {
+  const expect = wbExpect("wbcari", width);
+  const word = `zebrakuantum${Date.now()}`;
+  const { api, card, board } = await wbSetup("staf", `E2E wbcari ${width} ${Date.now()}`);
+  const errors = [];
+  const cs = await wbContext("staf", width);
+  try {
+    const note = await wbCard(api, board, "note", 600, 400, wbNote(`Catatan rapat tentang ${word} dan jadwal`));
+    await wbCard(api, board, "checklist", 0, 0, { title: `Daftar ${word}`, items: [] });
+    const ps = await wbPage(cs, "root", errors);
+    if (width < 768) await ps.getByRole("button", { name: "Cari papan dan isi kartu" }).click();
+    const box = ps.getByRole("searchbox", { name: "Cari papan dan isi kartu" });
+    await box.fill(word);
+    await box.press("Enter");
+    const hits = ps.getByTestId("wb-search-cards").getByRole("link");
+    await hits.first().waitFor({ timeout: 8000 }).catch(() => {});
+    expect((await hits.count()) === 2, "hasil", `hasil kartu: ${await hits.count()}`);
+    const noteHit = hits.filter({ hasText: "Catatan rapat" });
+    expect((await noteHit.count()) === 1 && (await noteHit.textContent()).includes(`E2E wbcari ${width}`), "jalur", `teks hasil: ${await noteHit.textContent().catch(() => "")}`);
+    await noteHit.click();
+    await ps.waitForURL(new RegExp(`/whiteboard/${board}$`), { timeout: 10000 }).catch(() => {});
+    expect(!ps.url().includes("kartu="), "alamat", `?kartu tidak dibuang: ${ps.url()}`);
+    await ps.waitForFunction((id) => document.activeElement?.getAttribute("data-card") === id, note.id, { timeout: 8000 }).catch(() => {});
+    expect((await ps.evaluate(() => document.activeElement?.getAttribute("data-card"))) === note.id, "fokus", "kartu hasil tidak terfokus");
+    expect((await cardLabelOf(ps, note.id)).includes("terpilih"), "pilih", "kartu hasil tidak terpilih");
+    expect(await ps.locator(`[data-card="${note.id}"]`).isVisible(), "tampil", "kartu hasil di luar layar");
+    expect(await wbNoScroll(ps), "gulir", "halaman bisa digulir");
+    await audit(ps, errors, `wbcari ${width}`);
+  } finally {
+    await wbCleanup(api, card);
+    await api.ctx.close();
+    await cs.close();
+  }
+}
+
+// Tampilan Daftar: kelompok per kolom, centang lewat daftar tersimpan, Lihat di kanvas memfokus kartu, Hapus
+// memindah ke Tempat sampah, dan semua tombol 44 px tanpa gulir horizontal.
+async function checkWbDaftar(width) {
+  const expect = wbExpect("wbdaftar", width);
+  const { api, card, board } = await wbSetup("staf", `E2E wbdaftar ${width} ${Date.now()}`);
+  const errors = [];
+  const cs = await wbContext("staf", width);
+  try {
+    const col = await wbCard(api, board, "column", 0, 0, { title: "Ide" });
+    const inCol = await wbCard(api, board, "note", 400, 0, wbNote("Isi kolom ide"));
+    await api.call("POST", `/whiteboard/boards/${board}/cards/patch`, { cards: [{ id: inCol.id, column_id: col.id, col_order: 1 }] });
+    const itemId = crypto.randomUUID();
+    const list = await wbCard(api, board, "checklist", 800, 0, { title: "Persiapan", items: [{ id: itemId, text: "Cetak brosur", done: false }] });
+    const ps = await wbPage(cs, board, errors);
+    await ps.getByRole("button", { name: "Daftar", exact: true }).click();
+    const items = ps.getByTestId("wb-list-item");
+    await items.first().waitFor({ timeout: 5000 });
+    expect((await items.count()) === 2, "jumlah", `butir daftar: ${await items.count()}`);
+    expect((await ps.getByRole("heading", { name: "Kolom: Ide" }).count()) === 1, "kolom", "kelompok kolom tidak tampil");
+    expect(!(await ps.locator(".wb-canvas").isVisible()), "kanvas", "kanvas tetap tampil di Tampilan Daftar");
+    await audit(ps, errors, `wbdaftar ${width} daftar`);
+
+    await ps.getByRole("checkbox", { name: "Cetak brosur" }).check();
+    await wbSaved(ps);
+    const saved = (await wbCards(api, board)).find((c) => c.id === list.id);
+    expect(saved?.content.items[0].done === true, "centang", "centang dari daftar tidak tersimpan");
+
+    await ps.getByRole("button", { name: "Lihat di kanvas: Isi kolom ide" }).click();
+    await ps.waitForFunction((id) => document.activeElement?.getAttribute("data-card") === id, inCol.id, { timeout: 5000 }).catch(() => {});
+    expect((await ps.evaluate(() => document.activeElement?.getAttribute("data-card"))) === inCol.id, "lihat", "Lihat di kanvas tidak memfokus kartunya");
+
+    await ps.getByRole("button", { name: "Daftar", exact: true }).click();
+    await ps.getByRole("button", { name: "Hapus: Persiapan" }).click();
+    await wbSaved(ps);
+    expect(!(await wbCards(api, board)).some((c) => c.id === list.id), "hapus", "Hapus dari daftar tidak memindah kartu ke Tempat sampah");
+    expect((await items.count()) === 1, "sisa", `butir setelah hapus: ${await items.count()}`);
+    expect(await wbNoScroll(ps), "gulir", "halaman bisa digulir");
+    await audit(ps, errors, `wbdaftar ${width} setelah hapus`);
+  } finally {
+    await wbCleanup(api, card);
+    await api.ctx.close();
+    await cs.close();
+  }
+}
+
+// Performa (rancangan bagian 7): papan 500 kartu (catatan, checklist, judul, 50 gambar, 20 gambar bebas) dengan 100
+// garis, diisi lewat API. Ukur waktu muat sampai kartu tampil dan durasi frame selama geser kanvas 3 detik, lalu
+// level of detail saat zoom di bawah 40%. Hanya 1280 px. Batas frame berlaku untuk build produksi: lewat Vite dev
+// (Vue mode pengembangan) p95 sekitar 27 ms, jadi di sana angkanya hanya dicatat. Build produksi untuk uji ini:
+//   cd frontend && npx vite build --outDir <tmp>/dist && VITE_API_TARGET=... npx vite preview --outDir <tmp>/dist
+// lalu E2E_BASE ke alamat preview.
+async function checkWbPerforma() {
+  const width = 1280;
+  const expect = wbExpect("wbperforma", width);
+  const { api, card, board } = await wbSetup("staf", `E2E wbperforma ${Date.now()}`);
+  const errors = [];
+  const cs = await wbContext("staf", width);
+  try {
+    const up = await api.ctx.request.post(BASE + `/api/whiteboard/boards/${board}/files?x=0&y=0&w=240&h=120`, {
+      headers: { Origin: BASE },
+      multipart: { file: { name: "foto.png", mimeType: "image/png", buffer: testPng(400, 200) } },
+    });
+    const fileId = (await up.json()).card.file.id;
+    const made = [];
+    const jobs = [];
+    for (let i = 1; i < 480; i++) {
+      const x = (i % 25) * 280;
+      const y = Math.floor(i / 25) * 180;
+      const kind = i <= 49 ? "image" : ["note", "checklist", "heading"][i % 3];
+      const content =
+        kind === "note" ? wbNote(`Catatan uji performa nomor ${i} dengan sedikit teks`) :
+        kind === "checklist" ? { title: `Checklist ${i}`, items: [{ id: crypto.randomUUID(), text: "Butir", done: i % 2 === 0 }] } :
+        kind === "heading" ? { text: `Judul ${i}`, level: 2 } : { caption: `Gambar ${i}` };
+      jobs.push(() => api.call("POST", `/whiteboard/boards/${board}/cards`, { kind, x, y, w: 240, h: 120, content, ...(kind === "image" ? { file_id: fileId } : {}) }).then((r) => r.body?.card && made.push(r.body.card)));
+    }
+    for (let i = 0; i < 20; i++)
+      jobs.push(() =>
+        api.call("POST", `/whiteboard/boards/${board}/drawings`, {
+          id: crypto.randomUUID(),
+          stroke: { color: "tinta", width: 4, points: [i * 300, 3600, i * 300 + 120, 3650, i * 300 + 200, 3600] },
+        }).then((r) => r.body?.card && made.push(r.body.card)),
+      );
+    // Delapan permintaan sekaligus: cukup cepat tanpa membanjiri backend dev.
+    for (let i = 0; i < jobs.length; i += 8) await Promise.all(jobs.slice(i, i + 8).map((j) => j()));
+    const plain = made.filter((c) => c.kind !== "drawing");
+    for (let i = 0; i + 1 < plain.length && i < 200; i += 2)
+      await api.call("POST", `/whiteboard/boards/${board}/connectors`, { from: plain[i].id, to: plain[i + 1].id });
+    const total = (await wbCards(api, board)).length;
+    expect(total >= 500, "isi", `kartu di papan uji: ${total}`);
+
+    const ps = await cs.newPage();
+    ps.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+    // Halaman lain dulu supaya bundle Whiteboard sudah di cache; yang diukur muat papannya.
+    await ps.goto(BASE + "/whiteboard");
+    await ps.waitForLoadState("networkidle");
+    const t0 = Date.now();
+    await ps.goto(BASE + `/whiteboard/${board}`);
+    await ps.waitForFunction(() => document.querySelectorAll("[data-card]").length > 20, null, { timeout: 15000 });
+    const loadMs = Date.now() - t0;
+    expect(loadMs < 2000, "muat", `papan 500 kartu dimuat ${loadMs} ms`);
+    await wbSaved(ps);
+
+    // Pan 3 detik dengan mouse tengah tidak tersedia; seret area kosong dengan Spasi ditahan, sambil mencatat frame.
+    const canvas = ps.locator(".wb-canvas");
+    const cb = await canvas.boundingBox();
+    await ps.evaluate(() => {
+      window.__frames = [];
+      let last = performance.now();
+      const tick = (t) => {
+        window.__frames.push(t - last);
+        last = t;
+        if (window.__frames.length < 1000) window.__raf = requestAnimationFrame(tick);
+      };
+      window.__raf = requestAnimationFrame(tick);
+    });
+    await canvas.focus();
+    await ps.keyboard.down("Space");
+    await ps.mouse.move(cb.x + cb.width / 2, cb.y + cb.height / 2);
+    await ps.mouse.down();
+    const start = Date.now();
+    let k = 0;
+    while (Date.now() - start < 3000) {
+      k++;
+      await ps.mouse.move(cb.x + cb.width / 2 - (k % 120) * 4, cb.y + cb.height / 2 - (k % 80) * 3);
+    }
+    await ps.mouse.up();
+    await ps.keyboard.up("Space");
+    const frames = await ps.evaluate(() => {
+      cancelAnimationFrame(window.__raf);
+      return window.__frames.slice(2);
+    });
+    frames.sort((x, y) => x - y);
+    const p95 = frames[Math.floor(frames.length * 0.95)] ?? 999;
+    const dev = await ps.evaluate(() => !!document.querySelector('script[src*="/@vite/client"]'));
+    if (dev) console.log("catatan: wbperforma lewat Vite dev, batas frame 20 ms tidak dinilai (jalankan terhadap build produksi)");
+    else expect(p95 < 20, "frame", `p95 frame ${p95.toFixed(1)} ms dari ${frames.length} frame`);
+    console.log(`catatan: wbperforma${dev ? " (Vite dev)" : " (build produksi)"} muat ${loadMs} ms, p95 frame ${p95.toFixed(1)} ms (${frames.length} frame), ${total} kartu`);
+
+    // Level of detail: pas ke layar membuat zoom di bawah 40% untuk papan selebar ini.
+    await ps.getByRole("button", { name: "Pas ke layar" }).click();
+    await ps.waitForTimeout(400);
+    const zoom = parseInt((await ps.getByTestId("wb-zoom").textContent()).trim(), 10);
+    const lod = await ps.getByTestId("wb-lod").count();
+    expect(zoom < 40 && lod > 0, "lod", `zoom ${zoom}%, kartu ringkas ${lod}`);
+    const lodFont = await ps.getByTestId("wb-lod").first().evaluate((el) => parseFloat(getComputedStyle(el).fontSize) * (parseInt(document.querySelector("[data-testid=wb-zoom]").textContent, 10) / 100));
+    expect(lodFont >= 12 && lodFont <= 16, "lod huruf", `huruf ringkas di layar ${lodFont.toFixed(1)} px`);
+    expect(await wbNoScroll(ps), "gulir", "halaman bisa digulir");
+    await audit(ps, errors, "wbperforma 1280");
+  } finally {
+    await wbCleanup(api, card);
+    await api.ctx.close();
+    await cs.close();
+  }
+}
+
+if (ONLY === "wbtemplate") for (const w of [360, 1280]) await checkWbTemplate(w);
+if (ONLY === "wbekspor") for (const w of [360, 1280]) await checkWbEkspor(w);
+if (ONLY === "wbcari") for (const w of [360, 1280]) await checkWbCari(w);
+if (ONLY === "wbdaftar") for (const w of [360, 1280]) await checkWbDaftar(w);
+if (ONLY === "wbperforma") await checkWbPerforma();
+if (ONLY === "wb4") {
+  for (const w of [360, 1280]) {
+    await checkWbTemplate(w);
+    await checkWbEkspor(w);
+    await checkWbCari(w);
+    await checkWbDaftar(w);
+  }
+  await checkWbPerforma();
+}
 
 await browser.close();
 console.log(

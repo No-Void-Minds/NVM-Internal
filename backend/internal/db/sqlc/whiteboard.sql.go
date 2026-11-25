@@ -150,18 +150,19 @@ func (q *Queries) GetWbActivityToMerge(ctx context.Context, arg GetWbActivityToM
 }
 
 const getWbBoard = `-- name: GetWbBoard :one
-SELECT id, is_root, parent_id, title, seq, version, updated_at
+SELECT id, is_root, parent_id, title, seq, version, updated_at, is_template
 FROM wb_boards WHERE id = $1 AND deleted_at IS NULL
 `
 
 type GetWbBoardRow struct {
-	ID        pgtype.UUID
-	IsRoot    bool
-	ParentID  pgtype.UUID
-	Title     string
-	Seq       int64
-	Version   int32
-	UpdatedAt pgtype.Timestamptz
+	ID         pgtype.UUID
+	IsRoot     bool
+	ParentID   pgtype.UUID
+	Title      string
+	Seq        int64
+	Version    int32
+	UpdatedAt  pgtype.Timestamptz
+	IsTemplate bool
 }
 
 func (q *Queries) GetWbBoard(ctx context.Context, id pgtype.UUID) (GetWbBoardRow, error) {
@@ -175,6 +176,7 @@ func (q *Queries) GetWbBoard(ctx context.Context, id pgtype.UUID) (GetWbBoardRow
 		&i.Seq,
 		&i.Version,
 		&i.UpdatedAt,
+		&i.IsTemplate,
 	)
 	return i, err
 }
@@ -639,6 +641,54 @@ func (q *Queries) InsertWbCard(ctx context.Context, arg InsertWbCardParams) erro
 	return err
 }
 
+const insertWbCardCopy = `-- name: InsertWbCardCopy :exec
+INSERT INTO wb_cards (id, board_id, kind, ref_board_id, file_id, column_id, col_order, x, y, w, h, z, color, content,
+                      plain, created_by, updated_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7,
+        $8, $9, $10, $11, $12, $13, $14, $15, $16, $16)
+`
+
+type InsertWbCardCopyParams struct {
+	ID         pgtype.UUID
+	BoardID    pgtype.UUID
+	Kind       string
+	RefBoardID pgtype.UUID
+	FileID     pgtype.UUID
+	ColumnID   pgtype.UUID
+	ColOrder   pgtype.Float8
+	X          float64
+	Y          float64
+	W          float64
+	H          float64
+	Z          float64
+	Color      pgtype.Text
+	Content    []byte
+	Plain      string
+	ActorID    int64
+}
+
+func (q *Queries) InsertWbCardCopy(ctx context.Context, arg InsertWbCardCopyParams) error {
+	_, err := q.db.Exec(ctx, insertWbCardCopy,
+		arg.ID,
+		arg.BoardID,
+		arg.Kind,
+		arg.RefBoardID,
+		arg.FileID,
+		arg.ColumnID,
+		arg.ColOrder,
+		arg.X,
+		arg.Y,
+		arg.W,
+		arg.H,
+		arg.Z,
+		arg.Color,
+		arg.Content,
+		arg.Plain,
+		arg.ActorID,
+	)
+	return err
+}
+
 const insertWbComment = `-- name: InsertWbComment :one
 INSERT INTO wb_comments (card_id, user_id, body) VALUES ($1, $2, $3)
 RETURNING id, created_at
@@ -1050,6 +1100,68 @@ func (q *Queries) ListWbCards(ctx context.Context, boardID pgtype.UUID) ([]ListW
 	return items, nil
 }
 
+const listWbCardsForCopy = `-- name: ListWbCardsForCopy :many
+SELECT id, board_id, kind, ref_board_id, file_id, column_id, col_order, x, y, w, h, z, color, content, plain
+FROM wb_cards
+WHERE board_id = ANY($1::uuid[]) AND deleted_at IS NULL
+ORDER BY (column_id IS NOT NULL), board_id, z, id
+`
+
+type ListWbCardsForCopyRow struct {
+	ID         pgtype.UUID
+	BoardID    pgtype.UUID
+	Kind       string
+	RefBoardID pgtype.UUID
+	FileID     pgtype.UUID
+	ColumnID   pgtype.UUID
+	ColOrder   pgtype.Float8
+	X          float64
+	Y          float64
+	W          float64
+	H          float64
+	Z          float64
+	Color      pgtype.Text
+	Content    []byte
+	Plain      string
+}
+
+// Kolom lebih dulu, supaya column_id isi kolom salinan menunjuk kolom yang sudah ada.
+func (q *Queries) ListWbCardsForCopy(ctx context.Context, boardIds []pgtype.UUID) ([]ListWbCardsForCopyRow, error) {
+	rows, err := q.db.Query(ctx, listWbCardsForCopy, boardIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWbCardsForCopyRow{}
+	for rows.Next() {
+		var i ListWbCardsForCopyRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BoardID,
+			&i.Kind,
+			&i.RefBoardID,
+			&i.FileID,
+			&i.ColumnID,
+			&i.ColOrder,
+			&i.X,
+			&i.Y,
+			&i.W,
+			&i.H,
+			&i.Z,
+			&i.Color,
+			&i.Content,
+			&i.Plain,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWbCardsSince = `-- name: ListWbCardsSince :many
 SELECT c.id, c.board_id, c.kind, c.ref_board_id, c.x, c.y, c.w, c.h, c.z, c.color, c.content, c.version,
        c.content_version, c.seq, c.updated_by, c.updated_at, c.file_id, c.column_id, c.col_order,
@@ -1314,6 +1426,53 @@ func (q *Queries) ListWbConnectors(ctx context.Context, boardID pgtype.UUID) ([]
 	return items, nil
 }
 
+const listWbConnectorsForCopy = `-- name: ListWbConnectorsForCopy :many
+SELECT board_id, from_card_id, to_card_id, geometry, style, label, label_start, label_end
+FROM wb_connectors
+WHERE board_id = ANY($1::uuid[]) AND deleted_at IS NULL
+ORDER BY created_at, id
+`
+
+type ListWbConnectorsForCopyRow struct {
+	BoardID    pgtype.UUID
+	FromCardID pgtype.UUID
+	ToCardID   pgtype.UUID
+	Geometry   []byte
+	Style      []byte
+	Label      string
+	LabelStart string
+	LabelEnd   string
+}
+
+func (q *Queries) ListWbConnectorsForCopy(ctx context.Context, boardIds []pgtype.UUID) ([]ListWbConnectorsForCopyRow, error) {
+	rows, err := q.db.Query(ctx, listWbConnectorsForCopy, boardIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWbConnectorsForCopyRow{}
+	for rows.Next() {
+		var i ListWbConnectorsForCopyRow
+		if err := rows.Scan(
+			&i.BoardID,
+			&i.FromCardID,
+			&i.ToCardID,
+			&i.Geometry,
+			&i.Style,
+			&i.Label,
+			&i.LabelStart,
+			&i.LabelEnd,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWbConnectorsSince = `-- name: ListWbConnectorsSince :many
 SELECT n.id, n.board_id, n.from_card_id, n.to_card_id, n.geometry, n.style, n.label, n.label_start, n.label_end,
        n.version, n.seq,
@@ -1407,6 +1566,92 @@ func (q *Queries) ListWbExpiredBatches(ctx context.Context, before pgtype.Timest
 	for rows.Next() {
 		var i ListWbExpiredBatchesRow
 		if err := rows.Scan(&i.Batch, &i.Boards, &i.Cards); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWbSubtreeBoards = `-- name: ListWbSubtreeBoards :many
+WITH RECURSIVE down AS (
+  SELECT b.id, b.parent_id, b.title, b.is_template, 0 AS depth FROM wb_boards b WHERE b.id = $1 AND b.deleted_at IS NULL
+  UNION ALL
+  SELECT c.id, c.parent_id, c.title, c.is_template, down.depth + 1
+  FROM wb_boards c JOIN down ON c.parent_id = down.id
+  WHERE c.deleted_at IS NULL AND down.depth < 64
+)
+SELECT id, parent_id, title, is_template, depth::int AS depth FROM down ORDER BY depth, id
+`
+
+type ListWbSubtreeBoardsRow struct {
+	ID         pgtype.UUID
+	ParentID   pgtype.UUID
+	Title      string
+	IsTemplate bool
+	Depth      int32
+}
+
+// Papan ini dan semua turunannya yang hidup, induk selalu sebelum anaknya.
+func (q *Queries) ListWbSubtreeBoards(ctx context.Context, id pgtype.UUID) ([]ListWbSubtreeBoardsRow, error) {
+	rows, err := q.db.Query(ctx, listWbSubtreeBoards, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWbSubtreeBoardsRow{}
+	for rows.Next() {
+		var i ListWbSubtreeBoardsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ParentID,
+			&i.Title,
+			&i.IsTemplate,
+			&i.Depth,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWbTemplates = `-- name: ListWbTemplates :many
+SELECT b.id, b.title, b.parent_id,
+       (SELECT count(*) FROM wb_cards k WHERE k.board_id = b.id AND k.deleted_at IS NULL)::bigint AS cards
+FROM wb_boards b
+WHERE b.is_template AND b.deleted_at IS NULL
+ORDER BY lower(b.title), b.id
+`
+
+type ListWbTemplatesRow struct {
+	ID       pgtype.UUID
+	Title    string
+	ParentID pgtype.UUID
+	Cards    int64
+}
+
+func (q *Queries) ListWbTemplates(ctx context.Context) ([]ListWbTemplatesRow, error) {
+	rows, err := q.db.Query(ctx, listWbTemplates)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWbTemplatesRow{}
+	for rows.Next() {
+		var i ListWbTemplatesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.ParentID,
+			&i.Cards,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1946,6 +2191,87 @@ func (q *Queries) SearchWbBoards(ctx context.Context, q_ string) ([]SearchWbBoar
 		return nil, err
 	}
 	return items, nil
+}
+
+const searchWbCards = `-- name: SearchWbCards :many
+WITH hits AS (
+  SELECT c.id FROM wb_cards c
+  WHERE c.deleted_at IS NULL AND c.kind <> 'board' AND c.plain ILIKE '%' || $1::text || '%'
+  UNION
+  SELECT c.id FROM wb_link_previews lp
+  JOIN wb_cards c ON c.kind = 'link' AND c.deleted_at IS NULL AND c.content->>'preview_id' = lp.id::text
+  WHERE lp.title ILIKE '%' || $1::text || '%'
+)
+SELECT c.id, c.board_id, c.kind, c.plain, coalesce(lp.title, '')::text AS preview_title
+FROM hits
+JOIN wb_cards c ON c.id = hits.id
+JOIN wb_boards b ON b.id = c.board_id AND b.deleted_at IS NULL
+LEFT JOIN wb_link_previews lp ON c.kind = 'link' AND lp.id = nullif(c.content->>'preview_id', '')::uuid
+ORDER BY c.updated_at DESC, c.id
+LIMIT 50
+`
+
+type SearchWbCardsRow struct {
+	ID           pgtype.UUID
+	BoardID      pgtype.UUID
+	Kind         string
+	Plain        string
+	PreviewTitle string
+}
+
+// Isi kartu (plain memuat teks catatan, judul, checklist, tabel, keterangan atau nama berkas, URL tautan) lewat
+// indeks trigram, ditambah judul pratinjau tautan. Dua cabang UNION supaya cabang plain tetap memakai indeksnya.
+func (q *Queries) SearchWbCards(ctx context.Context, q_ string) ([]SearchWbCardsRow, error) {
+	rows, err := q.db.Query(ctx, searchWbCards, q_)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SearchWbCardsRow{}
+	for rows.Next() {
+		var i SearchWbCardsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BoardID,
+			&i.Kind,
+			&i.Plain,
+			&i.PreviewTitle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setWbTemplate = `-- name: SetWbTemplate :one
+
+UPDATE wb_boards SET is_template = $1, updated_by = $2
+WHERE id = $3 AND deleted_at IS NULL AND NOT is_root
+RETURNING id, is_template
+`
+
+type SetWbTemplateParams struct {
+	IsTemplate bool
+	ActorID    int64
+	ID         pgtype.UUID
+}
+
+type SetWbTemplateRow struct {
+	ID         pgtype.UUID
+	IsTemplate bool
+}
+
+// W4: template, pencarian isi.
+// Papan akar tidak bisa menjadi template (yang disalin selalu papan anak beserta turunannya).
+func (q *Queries) SetWbTemplate(ctx context.Context, arg SetWbTemplateParams) (SetWbTemplateRow, error) {
+	row := q.db.QueryRow(ctx, setWbTemplate, arg.IsTemplate, arg.ActorID, arg.ID)
+	var i SetWbTemplateRow
+	err := row.Scan(&i.ID, &i.IsTemplate)
+	return i, err
 }
 
 const softDeleteWbComment = `-- name: SoftDeleteWbComment :exec

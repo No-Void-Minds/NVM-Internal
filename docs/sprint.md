@@ -1651,6 +1651,48 @@ Keputusan teknis:
 
 **Selesai kalau:** `scripts/pra-deploy.sh` LOLOS, `./scripts/check.sh` lolos, DB dev di versi 24, dan E2E `wb1`, `wb2`, dan `wb3` lolos di 360 dan 1280 px.
 
+**W4 (template, ekspor, pencarian isi, Tampilan Daftar, level of detail, performa):**
+
+- [x] S12f-15 Backend tanpa migrasi (kolom `wb_boards.is_template` sudah ada sejak `000023`): `internal/whiteboard/w4.go` dengan `SetTemplate`, `Templates`, `FromTemplate` (salin subtree papan, kartu, isi kolom, dan garis dalam satu transaksi), dan `SearchCards`; rute `GET /api/whiteboard/templates`, `PUT /api/whiteboard/boards/:id/template`, `POST /api/whiteboard/boards/:id/from-template`; `GET /api/whiteboard/search` kini menjawab `results` (papan) dan `cards` (kartu). Query baru di `whiteboard.sql`: `SetWbTemplate`, `ListWbTemplates`, `ListWbSubtreeBoards`, `ListWbCardsForCopy`, `InsertWbCardCopy`, `ListWbConnectorsForCopy`, `SearchWbCards`.
+- [x] S12f-16 Frontend: tombol Jadikan template di bar atas (lembar Tambah di ponsel) dan alat Template yang membuka dialog pilih template; kotak cari mencari papan dan isi kartu, hasil kartu membuka papannya dengan kartu itu terpilih dan terfokus (`?kartu=` dibuang setelah dipakai); dialog Ekspor (PNG atau PDF, seluruh papan atau kartu terpilih) dengan penggambar kanvas `components/whiteboard/exportBoard.ts` dan penulis PDF `utils/wbExport.ts`; Tampilan Daftar (`WbListView.vue`); level of detail di `WbCard.vue`.
+- [x] S12f-17 Poles yang ditemukan uji W4: bar atas dua baris di bawah 1280 px (lokasi dan judul di baris pertama, kontrol di baris kedua), Riwayat dan Daftar hanya ikon di bawah 768 px, label simpan saat putus cukup "Terputus", Pas ke layar di ponsel mengosongkan 160 px atas dan 120 px bawah.
+- [x] S12f-18 Test: unit Go `TestSnippet`, `TestSearchTerm`; DB `TestWbTemplate`, `TestWbCariIsi`, `TestWbExplain5000` (EXPLAIN ANALYZE SQL sqlc asli dengan 5.000 kartu), `TestTemplateBerkasBertahanSetelahTemplateDihapusPermanen` (template berisi gambar dihapus permanen setelah 31 hari: kartu salinan, baris `wb_files`, berkas, dan thumbnail bertahan dan masih bisa dibuka; setelah salinan juga dihapus permanen barulah berkas dibuang sebagai yatim; aturan FK dikunci di test), rute W4 di `TestWhiteboardAdminHanyaMembaca`; unit frontend `tests/wbExport.test.ts` (skala, struktur PDF: header, offset xref ke tiap objek, startxref, panjang stream, byte JPEG utuh, batas halaman; nama berkas; pemecah baris) dan `cardTitle`, `cardLines`, `fitView` dengan jarak atas dan bawah di `tests/whiteboard.test.ts`; E2E `E2E_ONLY=wb4` (`wbtemplate`, `wbekspor`, `wbcari`, `wbdaftar`, `wbperforma`).
+- [x] S12f-19 Audit aksesibilitas dan kontras W4 (lihat keputusan di bawah). Ekspor Drive diperiksa: hanya lampiran task dan Aktivitas, jadi berkas Whiteboard tidak ikut (pertanyaan 2, bawaan "tidak", tanpa perubahan kode).
+
+**Keputusan W4:**
+- Template: papan mana pun kecuali papan akar boleh ditandai template oleh Staf dan Manajer (pertanyaan 4, bawaan). Papan akar ditolak 400. Membuat dari template menyalin papan beserta semua papan turunannya, kartu, isi kolom, dan garis yang kedua ujungnya ikut tersalin; komentar, riwayat, dan kartu di Tempat sampah tidak ikut. Salinan bukan template. Kartu gambar dan berkas memakai berkas yang sama (`file_id`), seperti salin tempel, bukan hardlink seperti rancangan W0: tidak ada byte yang disalin, dan job harian sudah menjaga berkas yang masih dipakai kartu mana pun. Batas 2.000 kartu per salinan dan batas kedalaman papan tetap berlaku. Template yang sedang dibuka tidak bisa dipilih di papannya sendiri, supaya template tidak membesar berisi salinan dirinya.
+- Pencarian isi: kata kunci 2 sampai 100 karakter (`%` dan `_` dicari apa adanya), mencari teks kartu (`plain`, sudah mencakup catatan, judul, checklist, tabel, keterangan berkas) dan judul pratinjau tautan, hanya kartu yang tidak di Tempat sampah, paling banyak 50 hasil. Tiap hasil membawa jalur papannya dan cuplikan sekitar kata kunci.
+- Ekspor: dikerjakan di peramban, tidak ada yang dikirim ke server. Digambar ulang dari data kartu (bukan tangkapan DOM, karena kartu di luar layar tidak di-mount dan tangkapan DOM butuh pustaka tambahan): teks polos per baris tanpa format huruf, gambar dari thumbnail, tabel sebagai kisi, goresan, dan garis dengan panah dan label. Warna selalu token mode terang supaya layak dicetak. Skala 2x, diperkecil bila melewati 16 juta piksel atau 16.384 px per sisi, dengan keterangan skala di dialog. PDF satu halaman berisi JPEG (DCTDecode) dengan ukuran halaman 96 dpi, maksimal 14.400 poin per sisi. Nama berkas dari judul papan.
+- Tampilan Daftar: tombol Daftar (toggle) mengganti kanvas menjadi daftar per kolom lalu "Di luar kolom", urutan baca. Aksi sama dengan kanvas lewat fungsi halaman yang sama: Lihat di kanvas, Buka papan, Ubah, centang butir checklist, Pindah ke papan lain, Hapus (ke Tempat sampah dengan Urungkan). Kanvas tetap terpasang, jadi kembali ke kanvas tidak memuat ulang papan.
+- Level of detail: di bawah zoom 40% kartu hanya menampilkan judul ringkas dan warnanya, huruf dibagi zoom supaya sekitar 14 px di layar. Gambar tetap menampilkan pratinjaunya; kartu yang sedang diedit selalu utuh. Label aksesibel kartu tidak berubah.
+- Performa (build produksi, `vite preview`, 1280 px, papan 500 kartu termasuk 50 gambar dan 20 gambar bebas, 100 garis): muat 187 sampai 223 ms, p95 frame 13,4 ms saat geser 3 detik (batas 2 detik dan 20 ms). Lewat Vite dev p95 berkisar 13 sampai 27 ms karena Vue mode pengembangan, jadi E2E hanya menilai batas frame di build produksi. EXPLAIN 5.000 kartu di test DB: muat papan 15,5 ms memakai `wb_cards_board_idx`; cari 3,1 ms dengan seq scan (planner tidak memilih indeks trigram di 5.000 baris; ditinjau ulang bila papan jauh lebih besar).
+- Kontras W4 (terhitung): teks redup Tampilan Daftar dan dialog 6,42:1 (terang) dan 5,97:1 (gelap) di surface; tombol toggle tertekan memakai pasangan accent yang sudah ada, 10,16:1 dan 14,99:1 saat hover; judul ringkas level of detail 13,87:1 di kartu kuning terang dan 13,67:1 gelap. Tanpa warna baru.
+- Aksesibilitas W4: tombol aksi Tampilan Daftar memakai `aria-label` yang diawali teks terlihatnya (label in name) lalu judul kartu, karena span `sr-only` yang absolut dihitung sebagai blok dan menambah spasi di nama tombol. Dialog Ekspor tidak memakai wadah `aria-live` tersendiri; pesan memakai `role="status"` dan `role="alert"`. Tombol penutup dialog Ekspor bernama Selesai supaya tidak kembar dengan tombol Tutup bawaan dialog. Toggle Jadikan template dan alat Template berbeda nama karena aksinya berbeda.
+- Bar atas: di bawah 1280 px dua baris (lokasi dan judul, lalu kontrol), karena satu baris tidak cukup untuk judul di 360, 768, dan 1024 px (judul tinggal 0 sampai 45 px) dan pergantian teks penanda simpan memindah bar ke dua baris di tengah klik, sehingga klik mendarat di elemen lain. Tinggi bar kini tetap untuk Tersimpan, Menyimpan..., Gagal disimpan, dan Terputus.
+- Pas ke layar di bawah 768 px mengosongkan 160 px atas (bar pilihan dua baris) dan 120 px bawah (kontrol zoom dan Tambah), supaya kartu yang baru diketuk tidak tertutup bar pilihannya sendiri.
+
+**Selesai kalau:** `scripts/pra-deploy.sh` LOLOS, `./scripts/check.sh` lolos, unit test frontend lolos, E2E `wb1` sampai `wb4` lolos di 360 dan 1280 px, dan `wbperforma` lolos di build produksi.
+
+## Sprint 12g: Task saya untuk peminta, edit To Do, dan papan task realtime (revisi 45 sampai 47)
+
+**Tujuan:** tiga revisi papan task yang menyela Whiteboard W4. Kodenya sudah di-commit dan dirilis per revisi; bagian ini mencatat aturan yang diuji Sprint 13.
+
+- [x] S12g-01 Revisi 45: "Task saya" (papan `scope=mine` dan angka kartu profil) memuat task yang dipegang sebagai PIC task, PIC sub task, atau diminta (`requested_by`), juga untuk Manajer dan kemunculan task berulang. Penanda "Kamu peminta" bila hanya peminta. Test `TestTaskSayaMemuatPeminta`, E2E `scripts/e2e/uji-r45.mjs`.
+- [x] S12g-02 Revisi 46: ubah To Do di kartu profil lewat dobel klik atau dobel ketuk dengan kursor di posisi klik. E2E `scripts/e2e/uji-r46.mjs`, bagian todo `uji13.mjs` disesuaikan.
+- [x] S12g-03 Revisi 47: papan task realtime lewat WebSocket `GET /api/tasks/ws`, tiga keputusan tambahan Manajer (lihat keputusan). Test `TestTaskLiveEvents`, tambahan Arsip dan `/tasks` di `TestTaskSayaMemuatPeminta`, E2E `scripts/e2e/uji-r47.mjs`, skenario papan task di `uji-restart.mjs`, `frontend/nginx.conf` mendapat `location = /api/tasks/ws`.
+
+**Keputusan:**
+- Revisi 45: satu baris per task walau cocok lewat beberapa jalur. Hak akses tidak berubah: peminta Staf tetap tidak bisa memindahkan task orang lain (`move_to` kosong, 403). Filter Orang tidak berubah: `pic=<nama>` hanya PIC task dan PIC sub task. Batas 10 kartu Completed tetap. `requester_only` dihitung server; penanda "Kamu peminta" kontras 15,23:1 (terang) dan 16,66:1 (gelap).
+- Revisi 46: klik sekali tidak membuka isian (klik kedua dobel klik akan jatuh di isian dan menyeleksi kata); Enter atau Spasi di judul membuka isian dengan kursor di akhir. Enter dan blur menyimpan, Escape membatalkan dan fokus kembali ke judul. Isian textarea selebar baris yang tumbuh dan membungkus teks; baris baru di isian diganti spasi saat disimpan. Di layar sentuh posisi kursor dipasang ulang selama 600 ms karena gestur dobel ketuk bawaan menyeleksi satu kata.
+- Revisi 47, event: setelah handler task menjawab 2xx (sesudah commit) server menyiarkan `{task_id, version, aksi, pelaku}` ke semua koneksi, tanpa isi task. Aksi: `baru` (buat, kemunculan dari ticker dengan pelaku "Sistem"), `ubah` (task, label, deliverable, hentikan seri, sub task, lampiran), `pindah`, `centang`, `hapus`. 4xx termasuk 409 tidak menghasilkan event. Semua yang login boleh membaca semua task, jadi siaran ke semua koneksi hanya membuka id task dan nama pelaku; akses tetap dicek saat klien mengambil ulang lewat REST.
+- Revisi 47, klien: satu koneksi per tab dipakai bersama papan, Arsip, detail, dan dialog Pindahkan; ditutup sedetik setelah halaman terakhir pergi. Tab yang mengubah mengirim `X-Tab-Id` dan tidak memberi tahu dirinya sendiri. Papan dan Arsip mengambil ulang lewat REST, digabung 300 ms. Selama drag papan tidak dimuat ulang; setelah dilepas, kartu yang berubah tidak ikut dipindah dan toast "<ID> sudah dipindah <nama> ke <status>". Detail dan dialog Pindahkan menampilkan penanda dengan tombol Muat ulang, tanpa memuat ulang sendiri; catatan revisi di dialog tetap ada. Sambung ulang memuat ulang papan sekali; penanda "Terputus" kecil hanya saat koneksi putus.
+- Revisi 47, 409: pesan menyebut orang yang lebih dulu mengubah dari baris audit terakhir task itu ("sudah diubah <nama> lebih dulu", atau "sudah kamu ubah di tab lain"), field `by` di galat. Papan dimuat ulang otomatis.
+- Revisi 47, keputusan Manajer 1: klik angka di kartu profil membuka Task saya untuk Staf dan Manajer. Manajer mendapat saklar Task saya dan Semua task di papan dan Arsip; bawaannya Semua task, jadi `scope=mine` miliknya ditulis ke URL. Filter Orang nama sendiri di akun Manajer tetap filter Orang.
+- Revisi 47, keputusan Manajer 2: Arsip `scope=mine` dan `GET /api/tasks?scope=mine` memakai aturan revisi 45 (PIC task, PIC sub task, atau peminta); penanda "Kamu peminta" juga di Arsip.
+- Revisi 47, keputusan Manajer 3: kontrol To Do (naik, turun, hapus) hanya tampil di mode Atur, di baris sendiri di bawah teks. Ruang tetap di kanan tidak dipakai karena kartu 17rem tidak muat lima tombol 44 px. Ikon buka tautan di slot 44 px tetap di samping teks. Teks tidak pernah tertutup dan baris tidak bergeser saat hover.
+
+**Tindak lanjut (belum dikerjakan):** realtime untuk Aktivitas Harian dan Timeline memakai koneksi yang sama (event jenis baru di hub `taskLive`). Arsip sudah ikut di revisi 47.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -1849,10 +1891,13 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 42 | 2026-11-25 | Whiteboard W3 revisi A: gambar bebas tanpa kartu (mode pena di kanvas, objek gambar di atas kartu) | Sprint 12f W3 |
 | 43 | 2026-11-25 | Whiteboard W3 revisi B: kartu Tabel punya judul | Sprint 12f W3 |
 | 44 | 2026-11-25 | Whiteboard revisi C: bentuk dan diagram (tahap W5), model garis dirancang di W3 | Sprint 12f W3 dan W5 |
+| 45 | 2026-11-25 | "Task saya" dan angka kartu profil memuat task yang diminta pengguna, dengan penanda "Kamu peminta" | Sprint 12g |
+| 46 | 2026-11-25 | Ubah To Do lewat dobel klik dengan kursor di posisi klik, isian selebar baris, mode Atur tidak menyempitkan teks | Sprint 12g |
+| 47 | 2026-11-25 | Papan task realtime lewat WebSocket bersama, Task saya untuk Manajer dan Arsip, kontrol To Do hanya di mode Atur | Sprint 12g |
 | 33b | 2026-11-20 | Poles tampilan kartu Aktivitas: tombol rantai pindah ke celah antar isian dan jadi ikon kecil tanpa bingkai, tombol mati tidak dirender, jam tersambung menyatu dengan jam kepalanya, status simpan punya baris tetap, Tambah berkas di sel tabel tanpa bingkai | Sprint 12c |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat keempat puluh satu revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat keempat puluh tujuh revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 
@@ -1882,6 +1927,11 @@ SRS v1.0 belum memuat keempat puluh satu revisi (revisi 5 di S14-17). SRS diperb
   2. Jenis berkas Whiteboard: daftar lampiran task ditambah WebP dan GIF, tanpa SVG, ZIP, dan video.
   3. Gambar bebas paling banyak 300 goresan dan 6.000 titik per kartu (rancangan menyebut 500 goresan).
   4. Garis yang terputus karena salah satu kartunya dipindah ke papan lain masuk Tempat sampah, bukan ikut pindah.
+- Whiteboard W4, bawaan dipakai, menunggu konfirmasi:
+  1. Ekspor PNG dan PDF selalu memakai warna mode terang, dan teks catatan diekspor tanpa format huruf (tebal, miring, tautan).
+  2. Salinan template memakai berkas gambar yang sama dengan templatenya, bukan salinan berkas; menghapus template tidak merusak salinannya.
+  3. Di bawah zoom 40% kartu hanya menampilkan judul ringkas (level of detail).
+- Revisi 47: event papan task (id task dan nama pelaku, tanpa isi) disiarkan ke semua yang login, karena semua peran boleh membaca semua task. Setuju, atau perlu dibatasi per divisi kalau aturan baca berubah?
 
 ## Setelah go-live (belum dijadwalkan)
 

@@ -89,6 +89,8 @@ func TestWhiteboardAdminHanyaMembaca(t *testing.T) {
 		{http.MethodPost, "/api/whiteboard/boards/" + board + "/cards/" + card.Card.ID + "/comments", `{"body":"x"}`},
 		{http.MethodPut, "/api/whiteboard/comments/" + card.Card.ID, `{"body":"x"}`},
 		{http.MethodDelete, "/api/whiteboard/comments/" + card.Card.ID, ""},
+		{http.MethodPut, "/api/whiteboard/boards/" + board + "/template", `{"is_template":true}`},
+		{http.MethodPost, "/api/whiteboard/boards/root/from-template", `{"template_id":"` + board + `","x":0,"y":0,"w":200,"h":120}`},
 	}
 	for _, w := range writes {
 		code, body := tm.rawSend(t, tm.admin, w.method, w.path, w.body)

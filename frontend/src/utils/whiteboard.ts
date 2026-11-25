@@ -224,12 +224,20 @@ export function bounds(rects: Rect[]): Rect | null {
 
 // Pas ke layar: semua kartu terlihat dengan tepi 48 px, zoom tidak lebih dari 100% supaya papan kecil tidak
 // diperbesar berlebihan.
-export function fitView(rects: Rect[], width: number, height: number): Viewport {
+// top dan bottom: jarak yang dikosongkan di atas dan bawah. Di ponsel bar pilihan menempati bagian atas kanvas dan
+// kontrol zoom serta tombol Tambah bagian bawahnya, jadi kartu tidak boleh ditaruh di bawah keduanya; tanpa itu
+// kartu yang baru diketuk langsung tertutup bar pilihannya sendiri.
+export function fitView(rects: Rect[], width: number, height: number, top = 48, bottom = 48): Viewport {
   const b = bounds(rects)
-  if (!b || width <= 0 || height <= 0) return { x: 48, y: 48, zoom: 1 }
+  if (!b || width <= 0 || height <= 0) return { x: 48, y: top, zoom: 1 }
   const pad = 48
-  const zoom = clamp(Math.min((width - pad * 2) / b.w, (height - pad * 2) / b.h, 1), MIN_ZOOM, MAX_ZOOM)
-  return { zoom, x: (width - b.w * zoom) / 2 - b.x * zoom, y: (height - b.h * zoom) / 2 - b.y * zoom }
+  const room = Math.max(1, height - top - bottom)
+  const zoom = clamp(Math.min((width - pad * 2) / b.w, room / b.h, 1), MIN_ZOOM, MAX_ZOOM)
+  return {
+    zoom,
+    x: (width - b.w * zoom) / 2 - b.x * zoom,
+    y: top + (room - b.h * zoom) / 2 - b.y * zoom,
+  }
 }
 
 // Area dunia yang terlihat plus satu layar margin di setiap sisi: kartu di luar ini tidak di-mount (culling).
@@ -554,7 +562,13 @@ export function activityText(a: Activity): string {
     case 'board_renamed':
       return `mengganti judul papan dari "${String(s.from ?? '')}" menjadi "${String(s.to ?? '')}"`
     case 'card_created':
-      return `menambah ${label}${ex}`
+      return typeof s.template === 'string'
+        ? `menambah papan dari template "${s.template}"`
+        : `menambah ${label}${ex}`
+    case 'board_template':
+      return s.on ? 'menjadikan papan ini template' : 'melepas papan ini dari daftar template'
+    case 'board_from_template':
+      return `membuat papan ini dari template "${String(s.template ?? '')}"`
     case 'card_edited':
       return `mengubah isi ${label}${ex}`
     case 'cards_arranged':
@@ -575,5 +589,130 @@ export function activityText(a: Activity): string {
       return `mengomentari kartu${ex}`
     default:
       return 'mengubah papan'
+  }
+}
+
+// Di bawah zoom ini isi kartu tidak terbaca, jadi kartu hanya menampilkan judul ringkas dan warnanya (rancangan
+// bagian 7, level of detail).
+export const LOD_ZOOM = 0.4
+
+// Judul ringkas satu kartu untuk level of detail, Tampilan Daftar, dan ekspor.
+export function cardTitle(card: Card): string {
+  switch (card.kind) {
+    case 'note':
+      return excerpt(plainText((card.content as NoteContent).doc), 80) || 'Catatan kosong'
+    case 'heading':
+      return (card.content as HeadingContent).text || 'Judul kosong'
+    case 'checklist':
+      return (card.content as ChecklistContent).title || 'Checklist tanpa judul'
+    case 'board':
+      return card.ref?.title ?? 'Papan'
+    case 'image':
+    case 'file':
+      return (card.content as CaptionContent).caption || card.file?.name || kindLabel[card.kind]
+    case 'link': {
+      const p = card.preview
+      if (p?.status === 'ok' && p.title) return p.title
+      const url = (card.content as LinkContent).url
+      try {
+        return new URL(url).host
+      } catch {
+        return url
+      }
+    }
+    case 'column':
+      return (card.content as ColumnContent).title || 'Kolom tanpa judul'
+    case 'drawing':
+      return 'Gambar bebas'
+    case 'table':
+      return (card.content as TableContent).title || 'Tabel'
+  }
+}
+
+export type TextLine = { text: string; size: number; bold?: boolean; muted?: boolean }
+
+function inlineText(node: PMNode): string {
+  if (node.type === 'text') return node.text ?? ''
+  if (node.type === 'hardBreak') return '\n'
+  return (node.content ?? []).map(inlineText).join('')
+}
+
+function docLines(node: PMNode, out: TextLine[], prefix: string) {
+  const kids = node.content ?? []
+  switch (node.type) {
+    case 'paragraph':
+      out.push({ text: prefix + inlineText(node), size: 14 })
+      return
+    case 'heading': {
+      const level = Number(node.attrs?.level ?? 1)
+      out.push({
+        text: prefix + inlineText(node),
+        size: level === 1 ? 20 : level === 2 ? 17 : 15,
+        bold: true,
+      })
+      return
+    }
+    case 'bulletList':
+    case 'orderedList': {
+      const start = Number(node.attrs?.start ?? 1)
+      kids.forEach((item, i) =>
+        (item.content ?? []).forEach((block, j) =>
+          docLines(block, out, j > 0 ? '   ' : node.type === 'bulletList' ? '• ' : `${start + i}. `),
+        ),
+      )
+      return
+    }
+    default:
+      kids.forEach((k) => docLines(k, out, prefix))
+  }
+}
+
+// Baris teks kartu untuk ekspor PNG dan PDF (teks polos; format huruf di dalam paragraf tidak ikut). Gambar, tabel,
+// dan goresan digambar terpisah oleh penggambar ekspor.
+export function cardLines(card: Card): TextLine[] {
+  switch (card.kind) {
+    case 'note': {
+      const out: TextLine[] = []
+      docLines((card.content as NoteContent).doc, out, '')
+      return out
+    }
+    case 'heading': {
+      const h = card.content as HeadingContent
+      return [{ text: h.text, size: h.level === 2 ? 18 : 22, bold: true }]
+    }
+    case 'checklist': {
+      const c = card.content as ChecklistContent
+      return [
+        ...(c.title ? [{ text: c.title, size: 15, bold: true }] : []),
+        ...c.items.map((i) => ({ text: `${i.done ? '☑' : '☐'} ${i.text}`, size: 14, muted: i.done })),
+      ]
+    }
+    case 'board':
+      return [
+        { text: card.ref?.title ?? '', size: 15, bold: true },
+        { text: refSummary(card.ref), size: 13, muted: true },
+      ]
+    case 'image':
+    case 'file': {
+      const cap = (card.content as CaptionContent).caption
+      const name = card.kind === 'file' ? [{ text: card.file?.name ?? '', size: 14, bold: true }] : []
+      return [...name, ...(cap ? [{ text: cap, size: 13 }] : [])]
+    }
+    case 'link': {
+      const p = card.preview?.status === 'ok' ? card.preview : undefined
+      return [
+        { text: cardTitle(card), size: 15, bold: true },
+        ...(p?.description ? [{ text: p.description, size: 13 }] : []),
+        { text: (card.content as LinkContent).url, size: 12, muted: true },
+      ]
+    }
+    case 'column':
+      return [{ text: cardTitle(card), size: 15, bold: true }]
+    case 'table': {
+      const t = (card.content as TableContent).title
+      return t ? [{ text: t, size: 15, bold: true }] : []
+    }
+    case 'drawing':
+      return []
   }
 }

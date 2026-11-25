@@ -293,6 +293,7 @@ type BoardView struct {
 	ID         string      `json:"id"`
 	Title      string      `json:"title"`
 	IsRoot     bool        `json:"is_root"`
+	IsTemplate bool        `json:"is_template"`
 	Version    int32       `json:"version"`
 	Seq        int64       `json:"seq"`
 	Crumbs     []Crumb     `json:"crumbs"`
@@ -331,7 +332,7 @@ func (s *Service) Board(ctx context.Context, actor Actor, idText string) (BoardV
 	for _, r := range conns {
 		connectors = append(connectors, connectorOf(sqlc.InsertWbConnectorRow(r)))
 	}
-	return BoardView{ID: idString(n.ID), Title: n.Title, IsRoot: n.IsRoot, Version: n.Version, Seq: n.Seq, Crumbs: crumbs,
+	return BoardView{ID: idString(n.ID), Title: n.Title, IsRoot: n.IsRoot, IsTemplate: n.IsTemplate, Version: n.Version, Seq: n.Seq, Crumbs: crumbs,
 		Cards: cards, Connectors: connectors}, nil
 }
 
@@ -393,17 +394,12 @@ type SearchResult struct {
 	Path string `json:"path"`
 }
 
-// Search mencari judul papan. Pencarian isi kartu menyusul di W4.
+// Search mencari judul papan; isi kartu dicari SearchCards (W4).
 func (s *Service) Search(ctx context.Context, term string) ([]SearchResult, error) {
-	term = strings.TrimSpace(term)
-	if utf8.RuneCountInString(term) < 2 {
-		return nil, apperr.Invalid("Ketik minimal 2 huruf untuk mencari.")
+	esc, err := searchTerm(term)
+	if err != nil {
+		return nil, err
 	}
-	if utf8.RuneCountInString(term) > 100 {
-		return nil, apperr.Invalid("Kata kunci maksimal 100 karakter.")
-	}
-	// % dan _ di kata kunci dicari apa adanya, bukan sebagai wildcard.
-	esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(term)
 	q := sqlc.New(s.pool)
 	rows, err := q.SearchWbBoards(ctx, esc)
 	if err != nil {
@@ -411,15 +407,11 @@ func (s *Service) Search(ctx context.Context, term string) ([]SearchResult, erro
 	}
 	out := make([]SearchResult, 0, len(rows))
 	for _, r := range rows {
-		crumbs, err := ancestors(ctx, q, r.ParentID)
+		path, err := crumbPath(ctx, q, r.ParentID)
 		if err != nil {
 			return nil, err
 		}
-		names := make([]string, len(crumbs))
-		for i, c := range crumbs {
-			names[i] = c.Title
-		}
-		out = append(out, SearchResult{ID: idString(r.ID), Title: r.Title, Path: strings.Join(names, " / ")})
+		out = append(out, SearchResult{ID: idString(r.ID), Title: r.Title, Path: path})
 	}
 	return out, nil
 }
