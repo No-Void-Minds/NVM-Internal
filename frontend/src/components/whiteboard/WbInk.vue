@@ -28,7 +28,6 @@ const style = computed(() => ({
   width: `${props.card.w}px`,
   height: `${props.card.h}px`,
   '--wb-ring': `${2 / props.zoom}px`,
-  '--wb-remote': props.remote ? `var(--color-collab-${props.remote.color})` : undefined,
 }))
 
 function path(s: Stroke) {
@@ -47,6 +46,7 @@ function path(s: Stroke) {
     :tabindex="focusable ? 0 : -1"
     :aria-label="cardLabel(card) + (selected ? ', terpilih' : '') + (remote ? `, ${remote.label}` : '')"
     aria-roledescription="gambar bebas"
+    :data-collab="remote?.color"
     class="wb-card wb-ink pointer-events-none absolute top-0 left-0 z-[1000000001] rounded-card"
     :class="[selected ? 'wb-ink-selected' : '', !selected && remote ? 'wb-card-remote' : '']"
     :style="style"

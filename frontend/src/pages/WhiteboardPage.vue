@@ -1004,12 +1004,20 @@ const cursorList = computed(() => {
       ([, c]) =>
         c.user !== myId.value && now - c.at < 10000 && !people.value.find((p) => p.id === c.user)?.idle,
     )
-    .map(([key, c]) => ({
-      key,
-      name: c.name,
-      color: c.color,
-      style: { transform: `translate(${c.x * v.zoom + v.x}px, ${c.y * v.zoom + v.y}px)` },
-    }))
+    .map(([key, c]) => {
+      const sx = c.x * v.zoom + v.x
+      const sy = c.y * v.zoom + v.y
+      // Perkiraan lebar label (teks xs sekitar 7 px per huruf plus padding); cukup untuk memilih sisi.
+      const labelW = c.name.length * 7.5 + 32
+      return {
+        key,
+        name: c.name,
+        color: c.color,
+        flipX: sx + 20 + labelW > size.value.w,
+        flipY: sy + 30 > size.value.h,
+        style: { transform: `translate(${sx}px, ${sy}px)` },
+      }
+    })
 })
 // Kursor dan gerakan seret yang berhenti dibersihkan berkala; kartu orang yang putus di tengah seret kembali ke
 // posisi tersimpan setelah 3 detik.
@@ -3600,7 +3608,7 @@ const toolBtn =
             type="button"
             class="inline-flex size-11 items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-mark"
             :class="p.idle ? 'opacity-50' : ''"
-            :style="{ '--wb-remote': `var(--color-collab-${p.color})` }"
+            :data-collab="p.color"
             :aria-label="`${p.name}${p.editing ? ', sedang mengedit' : ''}${p.idle ? ', diam' : ''}${p.tabs > 1 ? `, ${p.tabs} tab` : ''}. Ikuti kursornya`"
             :title="`${p.name}${p.idle ? ' (diam)' : ''}`"
             data-testid="wb-presence"
@@ -3981,12 +3989,16 @@ const toolBtn =
             :key="cur.key"
             aria-hidden="true"
             class="pointer-events-none absolute top-0 left-0 z-10 flex items-start"
-            :style="[cur.style, { '--wb-remote': `var(--color-collab-${cur.color})` }]"
+            :style="cur.style"
+            :data-collab="cur.color"
             data-testid="wb-cursor"
           >
             <svg viewBox="0 0 16 16" class="wb-cursor-arrow size-4"><path d="M1 1l5 14 2-6 6-2z" /></svg>
+            <!-- Di dekat tepi kanan label pindah ke kiri panah, di dekat tepi bawah naik ke atasnya, supaya tidak
+                 terpotong kanvas. -->
             <span
-              class="wb-remote-label ml-1 rounded-chip px-1.5 py-0.5 text-xs font-medium whitespace-nowrap"
+              class="wb-remote-label absolute rounded-chip px-1.5 py-0.5 text-xs font-medium whitespace-nowrap"
+              :class="[cur.flipX ? 'right-5' : 'left-5', cur.flipY ? 'bottom-1' : 'top-0']"
             >
               {{ cur.name }}
             </span>

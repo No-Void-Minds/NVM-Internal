@@ -63,19 +63,6 @@
   --color-danger: #8c2f22;
   --color-danger-bg: #f6e6e2;
 
-  /* Warna kolaborasi Whiteboard (W2): kursor, bingkai, dan label nama orang lain, satu warna tetap per orang. Token
-     baru karena token status hanya empat latar pucat yang tidak cukup berbeda untuk kursor. Terhitung: label teks
-     on-collab di atas warna minimal 5,48:1, warna terhadap canvas dan surface minimal 4,9:1. */
-  --color-collab-1: #b42318;
-  --color-collab-2: #1d4ed8;
-  --color-collab-3: #047857;
-  --color-collab-4: #6d28d9;
-  --color-collab-5: #a1440b;
-  --color-collab-6: #0e6f87;
-  --color-collab-7: #b0175a;
-  --color-collab-8: #4d6a0f;
-  --color-on-collab: #ffffff;
-
   --radius-card: 4px;
   --radius-chip: 2px;
 
@@ -95,6 +82,35 @@
   --shadow-menu: 0 4px 12px rgb(0 0 0 / 0.1);
   --shadow-dialog: 0 12px 32px rgb(0 0 0 / 0.18);
   --shadow-drag: 0 8px 20px rgb(0 0 0 / 0.16);
+}
+
+/* Warna kolaborasi Whiteboard (W2): kursor, bingkai, dan label nama orang lain, satu warna tetap per orang. Token
+   baru karena token status hanya empat latar pucat yang tidak cukup berbeda untuk kursor.
+   Sengaja di :root biasa, bukan @theme: Tailwind v4 hanya mengeluarkan variabel @theme yang dirujuk utilitas atau
+   CSS, dan warna ini dipilih per orang lewat indeks. Saat di @theme, nilai mode terang indeks 1 dan 3 sampai 8 tidak
+   pernah ada di CSS hasil build (hanya indeks 2 yang dirujuk .wb-card-krem), sehingga label di mode terang
+   transparan dengan teks putih (bug produksi, tertangkap scripts/e2e/uji-kursor.mjs). Hitungan kontras lama memakai
+   nilai di berkas sumber, bukan warna yang terpasang di halaman.
+   Terhitung mode terang: teks on-collab di atas warna 5,48 sampai 7,10:1; warna terhadap canvas minimal 4,90:1 dan
+   surface minimal 5,48:1. */
+:root {
+  --color-collab-1: #b42318;
+  --color-collab-2: #1d4ed8;
+  --color-collab-3: #047857;
+  --color-collab-4: #6d28d9;
+  --color-collab-5: #a1440b;
+  --color-collab-6: #0e6f87;
+  --color-collab-7: #b0175a;
+  --color-collab-8: #4d6a0f;
+  /* Teks label per warna: putih di atas kedelapan warna mode terang (terendah indeks 3, 5,48:1). */
+  --color-on-collab-1: #ffffff;
+  --color-on-collab-2: #ffffff;
+  --color-on-collab-3: #ffffff;
+  --color-on-collab-4: #ffffff;
+  --color-on-collab-5: #ffffff;
+  --color-on-collab-6: #ffffff;
+  --color-on-collab-7: #ffffff;
+  --color-on-collab-8: #ffffff;
 }
 
 /* Mode gelap: warna dari tema Shopify NVM. data-theme dipasang /tema.js sebelum halaman digambar. */
@@ -134,7 +150,15 @@
   --color-collab-6: #5fd8f0;
   --color-collab-7: #ff8fc8;
   --color-collab-8: #b5e06a;
-  --color-on-collab: #1a1c20;
+  /* Teks label per warna: tinta di atas kedelapan warna mode gelap (terendah indeks 1, 7,45:1). */
+  --color-on-collab-1: #1a1c20;
+  --color-on-collab-2: #1a1c20;
+  --color-on-collab-3: #1a1c20;
+  --color-on-collab-4: #1a1c20;
+  --color-on-collab-5: #1a1c20;
+  --color-on-collab-6: #1a1c20;
+  --color-on-collab-7: #1a1c20;
+  --color-on-collab-8: #1a1c20;
 }
 
 :root {
@@ -406,9 +430,45 @@ img.ProseMirror-separator {
 .wb-card-remote-strong {
   box-shadow: 0 0 0 calc(var(--wb-ring) * 2) var(--wb-remote);
 }
+/* Warna orang lain per indeks (data-collab): latar solid dan teks yang dihitung untuk warna itu. Dirujuk eksplisit di
+   sini, jadi tidak bergantung pada Tailwind mengeluarkan variabelnya. */
+[data-collab='1'] {
+  --wb-remote: var(--color-collab-1);
+  --wb-remote-on: var(--color-on-collab-1);
+}
+[data-collab='2'] {
+  --wb-remote: var(--color-collab-2);
+  --wb-remote-on: var(--color-on-collab-2);
+}
+[data-collab='3'] {
+  --wb-remote: var(--color-collab-3);
+  --wb-remote-on: var(--color-on-collab-3);
+}
+[data-collab='4'] {
+  --wb-remote: var(--color-collab-4);
+  --wb-remote-on: var(--color-on-collab-4);
+}
+[data-collab='5'] {
+  --wb-remote: var(--color-collab-5);
+  --wb-remote-on: var(--color-on-collab-5);
+}
+[data-collab='6'] {
+  --wb-remote: var(--color-collab-6);
+  --wb-remote-on: var(--color-on-collab-6);
+}
+[data-collab='7'] {
+  --wb-remote: var(--color-collab-7);
+  --wb-remote-on: var(--color-on-collab-7);
+}
+[data-collab='8'] {
+  --wb-remote: var(--color-collab-8);
+  --wb-remote-on: var(--color-on-collab-8);
+}
 .wb-remote-label {
   background-color: var(--wb-remote);
-  color: var(--color-on-collab);
+  color: var(--wb-remote-on);
+  /* Di atas gambar dan kartu berwarna tetap terbaca: latar solid ditambah tepi tipis warna kanvas. */
+  box-shadow: 0 0 0 1px var(--color-canvas);
 }
 .wb-presence-ring {
   box-shadow: 0 0 0 2px var(--wb-remote);

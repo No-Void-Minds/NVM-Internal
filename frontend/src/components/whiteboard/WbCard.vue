@@ -100,7 +100,6 @@ const style = computed(() => ({
   minHeight: `${props.card.h + props.dh}px`,
   zIndex: props.editing ? 100000 : Math.round(props.card.z),
   '--wb-ring': `${2 / props.zoom}px`,
-  '--wb-remote': props.remote ? `var(--color-collab-${props.remote.color})` : undefined,
 }))
 
 // Pegangan bentuk: gambar 10 px dan area sentuh 44 px di layar pada zoom berapa pun.
@@ -304,6 +303,7 @@ function onPointerDown(e: PointerEvent) {
     :data-card="card.id"
     :tabindex="focusable ? 0 : -1"
     :aria-label="label"
+    :data-collab="remote?.color"
     aria-roledescription="kartu"
     class="wb-card absolute top-0 left-0 flex flex-col text-ink select-none"
     :class="[
@@ -587,7 +587,7 @@ function onPointerDown(e: PointerEvent) {
     >
       Hanya baca: {{ readonlyBy }} sedang mengedit. Teksnya berubah langsung di sini.
     </p>
-    <!-- Label orang lain di atas kartu; warnanya warna orang itu, teksnya on-collab (kontras dihitung di style.css). -->
+    <!-- Label orang lain di atas kartu; warnanya warna orang itu, teksnya on-collab per warna lewat data-collab (kontras dihitung di style.css). -->
     <span
       v-if="remote"
       aria-hidden="true"

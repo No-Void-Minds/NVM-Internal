@@ -1694,6 +1694,12 @@ Keputusan teknis:
 
 **Selesai kalau:** `scripts/pra-deploy.sh` LOLOS dengan migrasi 000025 di test DB, DB dev di versi 25, `./scripts/check.sh` lolos, E2E `wb1` sampai `wb5` lolos di 360 dan 1280 px, `wbperforma` lolos di build produksi, `uji-wss.mjs` lolos di Chrome, Edge, dan Firefox, `uji-restart.mjs` lolos, dan `uji-lebar.mjs` lolos di 768 dan 1024 px.
 
+**Perbaikan setelah rilis W5 (label kursor kolaborasi tidak terbaca di tema terang):**
+- Penyebab: token `--color-collab-1` sampai `8` ada di blok `@theme`, dan Tailwind v4 hanya mengeluarkan variabel `@theme` yang dirujuk utilitas atau CSS. Warna kolaborasi dipilih per orang lewat indeks di inline style, jadi nilai mode terang indeks 1 dan 3 sampai 8 tidak pernah ada di CSS hasil build; hanya indeks 2 yang dirujuk `.wb-card-krem`. Label tampil transparan dengan teks putih (1,12:1), bingkai kartu orang lain tidak tergambar. Mode gelap aman karena tokennya di blok CSS biasa. Hitungan kontras W2 lolos karena memakai nilai di berkas sumber, bukan warna yang terpasang di halaman.
+- Perbaikan: token kolaborasi dan token teks per warna `--color-on-collab-1` sampai `8` di blok `:root` biasa untuk kedua tema; aturan `[data-collab='n']` memasang `--wb-remote` (latar solid) dan `--wb-remote-on` (teks) per indeks, dipakai kursor, label kursor, label dan bingkai kartu, gambar bebas, dan avatar kehadiran. Label diberi tepi tipis warna kanvas supaya tetap terbaca di atas gambar. Label kursor pindah ke kiri panah di dekat tepi kanan dan naik di dekat tepi bawah, supaya tidak terpotong kanvas.
+- Terhitung: teks label mode terang putih 5,48 sampai 7,10:1, mode gelap tinta 7,45 sampai 11,24:1; panah dan bingkai terhadap kanvas minimal 4,90:1 (terang) dan 8,70:1 (gelap).
+- Test: `scripts/e2e/uji-kursor.mjs` membaca `getComputedStyle` (latar, teks, isian panah, warna bayangan bingkai, opacity efektif termasuk induk) untuk kedelapan indeks di tema terang dan gelap, di 360 dan 1280 px, lalu menghitung kontrasnya; juga label kursor di tepi kanan dan bawah. Gagal di kode sebelum perbaikan (71 dari 200 pemeriksaan), lolos sesudahnya.
+
 ## Sprint 12g: Task saya untuk peminta, edit To Do, dan papan task realtime (revisi 45 sampai 47)
 
 **Tujuan:** tiga revisi papan task yang menyela Whiteboard W4. Kodenya sudah di-commit dan dirilis per revisi; bagian ini mencatat aturan yang diuji Sprint 13.
