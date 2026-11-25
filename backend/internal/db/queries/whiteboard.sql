@@ -73,17 +73,29 @@ RETURNING seq;
 -- name: ListWbCards :many
 -- Kartu papan membawa judul papan anak dan ringkasan isinya ("3 papan, 12 kartu").
 SELECT c.id, c.board_id, c.kind, c.ref_board_id, c.x, c.y, c.w, c.h, c.z, c.color, c.content, c.version,
-       c.content_version, c.seq, c.updated_by, c.updated_at,
+       c.content_version, c.seq, c.updated_by, c.updated_at, c.file_id, c.column_id, c.col_order,
        coalesce(rb.title, '')::text AS ref_title, coalesce(rb.version, 0)::int AS ref_version,
        (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind = 'board')::bigint AS ref_boards,
-       (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind <> 'board')::bigint AS ref_cards
+       (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind <> 'board')::bigint AS ref_cards,
+       coalesce(f.original_name, '')::text AS file_name, coalesce(f.mime_type, '')::text AS file_mime,
+       coalesce(f.size_bytes, 0)::bigint AS file_size, coalesce(f.has_thumb, false)::bool AS file_thumb,
+       coalesce(f.width, 0)::int AS file_width, coalesce(f.height, 0)::int AS file_height,
+       lp.id AS preview_id, coalesce(lp.title, '')::text AS preview_title,
+       coalesce(lp.description, '')::text AS preview_description, coalesce(lp.site_name, '')::text AS preview_site,
+       coalesce(lp.final_url, '')::text AS preview_final_url, coalesce(lp.status, '')::text AS preview_status,
+       lp.image_file_id AS preview_image,
+       (SELECT count(*) FROM wb_comments m WHERE m.card_id = c.id AND m.deleted_at IS NULL)::bigint AS comment_count,
+       coalesce(cu.name, '')::text AS created_by_name
 FROM wb_cards c
 LEFT JOIN wb_boards rb ON rb.id = c.ref_board_id
+LEFT JOIN wb_files f ON f.id = c.file_id
+LEFT JOIN wb_link_previews lp ON c.kind = 'link' AND lp.id = nullif(c.content->>'preview_id', '')::uuid
+LEFT JOIN users cu ON cu.id = c.created_by
 WHERE c.board_id = @board_id AND c.deleted_at IS NULL
 ORDER BY c.z, c.created_at, c.id;
 
 -- name: GetWbCardForUpdate :one
-SELECT id, board_id, kind, ref_board_id, content, content_version
+SELECT id, board_id, kind, ref_board_id, content, content_version, column_id
 FROM wb_cards
 WHERE id = @id AND board_id = @board_id AND deleted_at IS NULL
 FOR UPDATE;
@@ -95,9 +107,9 @@ SELECT EXISTS (SELECT 1 FROM wb_cards WHERE id = @id)::bool;
 SELECT coalesce(max(z), 0)::double precision FROM wb_cards WHERE board_id = @board_id AND deleted_at IS NULL;
 
 -- name: InsertWbCard :exec
-INSERT INTO wb_cards (id, board_id, kind, ref_board_id, x, y, w, h, z, color, content, plain, seq, created_by, updated_by)
-VALUES (@id, @board_id, @kind, sqlc.narg(ref_board_id), @x, @y, @w, @h, @z, sqlc.narg(color), @content, @plain, @seq,
-        @actor_id, @actor_id);
+INSERT INTO wb_cards (id, board_id, kind, ref_board_id, file_id, x, y, w, h, z, color, content, plain, seq, created_by, updated_by)
+VALUES (@id, @board_id, @kind, sqlc.narg(ref_board_id), sqlc.narg(file_id), @x, @y, @w, @h, @z, sqlc.narg(color), @content,
+        @plain, @seq, @actor_id, @actor_id);
 
 -- name: PatchWbCard :exec
 -- Hanya field yang dikirim yang berubah (last-write-wins per field). Warna dikosongkan lewat clear_color, karena
@@ -108,6 +120,8 @@ SET x = coalesce(sqlc.narg(x), x),
     w = coalesce(sqlc.narg(w), w),
     h = coalesce(sqlc.narg(h), h),
     z = coalesce(sqlc.narg(z), z),
+    column_id = CASE WHEN @clear_column::bool THEN NULL ELSE coalesce(sqlc.narg(column_id), column_id) END,
+    col_order = CASE WHEN @clear_column::bool THEN NULL ELSE coalesce(sqlc.narg(col_order), col_order) END,
     color = CASE WHEN @clear_color::bool THEN NULL ELSE coalesce(sqlc.narg(color), color) END,
     content = coalesce(sqlc.narg(content), content),
     plain = coalesce(sqlc.narg(plain), plain),
@@ -160,6 +174,8 @@ FROM (
   SELECT wb.deleted_batch AS batch, 1 AS nb, 0 AS nc FROM wb_boards wb WHERE wb.deleted_at < @before
   UNION ALL
   SELECT wc.deleted_batch, 0, 1 FROM wb_cards wc WHERE wc.deleted_at < @before
+  UNION ALL
+  SELECT wn.deleted_batch, 0, 0 FROM wb_connectors wn WHERE wn.deleted_at < @before
 ) t
 GROUP BY t.batch
 ORDER BY t.batch;
@@ -198,12 +214,24 @@ LIMIT 200;
 
 -- name: GetWbCard :one
 SELECT c.id, c.board_id, c.kind, c.ref_board_id, c.x, c.y, c.w, c.h, c.z, c.color, c.content, c.version,
-       c.content_version, c.seq, c.updated_by, c.updated_at,
+       c.content_version, c.seq, c.updated_by, c.updated_at, c.file_id, c.column_id, c.col_order,
        coalesce(rb.title, '')::text AS ref_title, coalesce(rb.version, 0)::int AS ref_version,
        (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind = 'board')::bigint AS ref_boards,
-       (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind <> 'board')::bigint AS ref_cards
+       (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind <> 'board')::bigint AS ref_cards,
+       coalesce(f.original_name, '')::text AS file_name, coalesce(f.mime_type, '')::text AS file_mime,
+       coalesce(f.size_bytes, 0)::bigint AS file_size, coalesce(f.has_thumb, false)::bool AS file_thumb,
+       coalesce(f.width, 0)::int AS file_width, coalesce(f.height, 0)::int AS file_height,
+       lp.id AS preview_id, coalesce(lp.title, '')::text AS preview_title,
+       coalesce(lp.description, '')::text AS preview_description, coalesce(lp.site_name, '')::text AS preview_site,
+       coalesce(lp.final_url, '')::text AS preview_final_url, coalesce(lp.status, '')::text AS preview_status,
+       lp.image_file_id AS preview_image,
+       (SELECT count(*) FROM wb_comments m WHERE m.card_id = c.id AND m.deleted_at IS NULL)::bigint AS comment_count,
+       coalesce(cu.name, '')::text AS created_by_name
 FROM wb_cards c
 LEFT JOIN wb_boards rb ON rb.id = c.ref_board_id
+LEFT JOIN wb_files f ON f.id = c.file_id
+LEFT JOIN wb_link_previews lp ON c.kind = 'link' AND lp.id = nullif(c.content->>'preview_id', '')::uuid
+LEFT JOIN users cu ON cu.id = c.created_by
 WHERE c.id = @id AND c.deleted_at IS NULL;
 
 -- name: GetWbCardKind :one
@@ -216,12 +244,214 @@ SELECT count(*)::bigint FROM wb_cards WHERE board_id = @board_id AND seq > @seq;
 -- Sinkron ulang setelah koneksi putus: semua kartu yang berubah sesudah seq itu, termasuk yang masuk Tempat sampah
 -- (deleted true) supaya klien bisa membuangnya.
 SELECT c.id, c.board_id, c.kind, c.ref_board_id, c.x, c.y, c.w, c.h, c.z, c.color, c.content, c.version,
-       c.content_version, c.seq, c.updated_by, c.updated_at,
+       c.content_version, c.seq, c.updated_by, c.updated_at, c.file_id, c.column_id, c.col_order,
        coalesce(rb.title, '')::text AS ref_title, coalesce(rb.version, 0)::int AS ref_version,
        (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind = 'board')::bigint AS ref_boards,
        (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind <> 'board')::bigint AS ref_cards,
+       coalesce(f.original_name, '')::text AS file_name, coalesce(f.mime_type, '')::text AS file_mime,
+       coalesce(f.size_bytes, 0)::bigint AS file_size, coalesce(f.has_thumb, false)::bool AS file_thumb,
+       coalesce(f.width, 0)::int AS file_width, coalesce(f.height, 0)::int AS file_height,
+       lp.id AS preview_id, coalesce(lp.title, '')::text AS preview_title,
+       coalesce(lp.description, '')::text AS preview_description, coalesce(lp.site_name, '')::text AS preview_site,
+       coalesce(lp.final_url, '')::text AS preview_final_url, coalesce(lp.status, '')::text AS preview_status,
+       lp.image_file_id AS preview_image,
+       (SELECT count(*) FROM wb_comments m WHERE m.card_id = c.id AND m.deleted_at IS NULL)::bigint AS comment_count,
+       coalesce(cu.name, '')::text AS created_by_name,
        (c.deleted_at IS NOT NULL)::bool AS deleted
 FROM wb_cards c
 LEFT JOIN wb_boards rb ON rb.id = c.ref_board_id
+LEFT JOIN wb_files f ON f.id = c.file_id
+LEFT JOIN wb_link_previews lp ON c.kind = 'link' AND lp.id = nullif(c.content->>'preview_id', '')::uuid
+LEFT JOIN users cu ON cu.id = c.created_by
 WHERE c.board_id = @board_id AND c.seq > @seq
 ORDER BY c.seq, c.id;
+
+-- ---------------------------------------------------------------------------------------------------------------
+-- W3: berkas, pratinjau tautan, kolom, penghubung, komentar, pindah antar papan
+
+-- name: InsertWbFile :exec
+INSERT INTO wb_files (id, board_id, kind, original_name, mime_type, size_bytes, checksum, width, height, has_thumb, uploaded_by)
+VALUES (@id, sqlc.narg(board_id), @kind, @original_name, @mime_type, @size_bytes, @checksum, sqlc.narg(width),
+        sqlc.narg(height), @has_thumb, sqlc.narg(uploaded_by));
+
+-- name: GetWbFile :one
+SELECT id, board_id, kind, original_name, mime_type, size_bytes, has_thumb, created_at FROM wb_files WHERE id = @id;
+
+-- name: GetWbPreviewByHash :one
+SELECT id, url, final_url, title, description, site_name, image_file_id, status, message, fetched_at
+FROM wb_link_previews WHERE url_hash = @url_hash;
+
+-- name: GetWbPreview :one
+SELECT id, url, final_url, title, description, site_name, image_file_id, status, message, fetched_at
+FROM wb_link_previews WHERE id = @id;
+
+-- name: UpsertWbPreview :one
+INSERT INTO wb_link_previews (url_hash, url, final_url, title, description, site_name, image_file_id, status, message, fetched_at)
+VALUES (@url_hash, @url, @final_url, @title, @description, @site_name, sqlc.narg(image_file_id), @status, @message, now())
+ON CONFLICT (url_hash) DO UPDATE
+SET url = EXCLUDED.url, final_url = EXCLUDED.final_url, title = EXCLUDED.title, description = EXCLUDED.description,
+    site_name = EXCLUDED.site_name, image_file_id = EXCLUDED.image_file_id, status = EXCLUDED.status,
+    message = EXCLUDED.message, fetched_at = now()
+RETURNING id, url, final_url, title, description, site_name, image_file_id, status, message, fetched_at;
+
+-- name: ListWbColumnChildren :many
+SELECT id FROM wb_cards WHERE column_id = ANY(@ids::uuid[]) AND deleted_at IS NULL;
+
+-- name: MaxWbColOrder :one
+SELECT coalesce(max(col_order), 0)::double precision FROM wb_cards WHERE column_id = @column_id AND deleted_at IS NULL;
+
+-- name: ListWbConnectors :many
+-- Penghubung yang ujung menempelnya hidup (ujung bebas tidak punya kartu); ujung di Tempat sampah menyembunyikannya.
+SELECT n.id, n.board_id, n.from_card_id, n.to_card_id, n.geometry, n.style, n.label, n.label_start, n.label_end,
+       n.version, n.seq
+FROM wb_connectors n
+LEFT JOIN wb_cards a ON a.id = n.from_card_id
+LEFT JOIN wb_cards b ON b.id = n.to_card_id
+WHERE n.board_id = @board_id AND n.deleted_at IS NULL
+  AND (n.from_card_id IS NULL OR a.deleted_at IS NULL) AND (n.to_card_id IS NULL OR b.deleted_at IS NULL)
+ORDER BY n.created_at, n.id;
+
+-- name: ListWbConnectorsSince :many
+SELECT n.id, n.board_id, n.from_card_id, n.to_card_id, n.geometry, n.style, n.label, n.label_start, n.label_end,
+       n.version, n.seq,
+       (n.deleted_at IS NOT NULL OR a.deleted_at IS NOT NULL OR b.deleted_at IS NOT NULL)::bool AS hidden
+FROM wb_connectors n
+LEFT JOIN wb_cards a ON a.id = n.from_card_id
+LEFT JOIN wb_cards b ON b.id = n.to_card_id
+WHERE n.board_id = @board_id AND n.seq > @seq;
+
+-- name: InsertWbConnector :one
+INSERT INTO wb_connectors (board_id, from_card_id, to_card_id, geometry, style, label, label_start, label_end, seq,
+                           created_by, updated_by)
+VALUES (@board_id, sqlc.narg(from_card_id), sqlc.narg(to_card_id), @geometry, @style, @label, @label_start, @label_end,
+        @seq, @actor_id, @actor_id)
+RETURNING id, board_id, from_card_id, to_card_id, geometry, style, label, label_start, label_end, version, seq;
+
+-- name: UpdateWbConnector :one
+UPDATE wb_connectors
+SET style = coalesce(sqlc.narg(style), style), geometry = coalesce(sqlc.narg(geometry), geometry),
+    label = coalesce(sqlc.narg(label), label), label_start = coalesce(sqlc.narg(label_start), label_start),
+    label_end = coalesce(sqlc.narg(label_end), label_end), version = version + 1,
+    seq = @seq, updated_by = @actor_id
+WHERE id = @id AND board_id = @board_id AND deleted_at IS NULL
+RETURNING id, board_id, from_card_id, to_card_id, geometry, style, label, label_start, label_end, version, seq;
+
+-- name: TrashWbConnectors :many
+-- Penghubung yang dipilih atau yang menempel di kartu yang dihapus atau dipindah, ke batch yang sama.
+UPDATE wb_connectors
+SET deleted_at = now(), deleted_by = @actor_id::bigint, deleted_batch = @batch, seq = @seq, updated_by = @actor_id
+WHERE board_id = @board_id AND deleted_at IS NULL
+  AND (id = ANY(@ids::uuid[]) OR from_card_id = ANY(@cards::uuid[]) OR to_card_id = ANY(@cards::uuid[]))
+RETURNING id;
+
+-- name: RestoreWbConnectors :many
+UPDATE wb_connectors SET deleted_at = NULL, deleted_by = NULL, deleted_batch = NULL, updated_by = @actor_id,
+                         seq = (SELECT b.seq FROM wb_boards b WHERE b.id = wb_connectors.board_id)
+WHERE wb_connectors.deleted_batch = @batch
+RETURNING id, board_id;
+
+-- name: ListWbTrashConnectors :many
+SELECT n.deleted_batch, n.deleted_at, n.board_id, u.name AS deleted_by_name, b.title AS board_title,
+       (b.deleted_at IS NOT NULL)::bool AS board_in_trash
+FROM wb_connectors n
+JOIN users u ON u.id = n.deleted_by
+JOIN wb_boards b ON b.id = n.board_id
+WHERE n.deleted_at IS NOT NULL;
+
+-- name: DeleteWbExpiredConnectors :execrows
+DELETE FROM wb_connectors WHERE deleted_at < @before;
+
+-- name: DeleteWbUnusedFiles :execrows
+-- Berkas yang tidak lagi dipakai kartu mana pun (termasuk kartu di Tempat sampah) atau pratinjau, dan sudah berumur
+-- lebih dari satu hari (unggahan yang sedang dipakai kartu baru tidak tersentuh). Berkas di disk dibersihkan pembersih
+-- berkas yatim pada run berikutnya.
+DELETE FROM wb_files f
+WHERE f.created_at < @before
+  AND NOT EXISTS (SELECT 1 FROM wb_cards c WHERE c.file_id = f.id)
+  AND NOT EXISTS (SELECT 1 FROM wb_link_previews p WHERE p.image_file_id = f.id);
+
+-- name: DeleteWbOldPreviews :execrows
+-- Cache pratinjau lebih dari 7 hari yang tidak dipakai kartu tautan mana pun (termasuk di Tempat sampah).
+DELETE FROM wb_link_previews p
+WHERE p.fetched_at < @before
+  AND NOT EXISTS (SELECT 1 FROM wb_cards c WHERE c.kind = 'link' AND c.content->>'preview_id' = p.id::text);
+
+-- name: ListWbComments :many
+SELECT m.id, m.card_id, m.user_id, u.name AS user_name, u.avatar_id, m.body, m.created_at, m.edited_at
+FROM wb_comments m
+JOIN users u ON u.id = m.user_id
+WHERE m.card_id = @card_id AND m.deleted_at IS NULL
+ORDER BY m.created_at, m.id;
+
+-- name: InsertWbComment :one
+INSERT INTO wb_comments (card_id, user_id, body) VALUES (@card_id, @user_id, @body)
+RETURNING id, created_at;
+
+-- name: GetWbCommentForUpdate :one
+SELECT m.id, m.card_id, m.user_id, m.body, c.board_id
+FROM wb_comments m JOIN wb_cards c ON c.id = m.card_id
+WHERE m.id = @id AND m.deleted_at IS NULL AND c.deleted_at IS NULL
+FOR UPDATE OF m;
+
+-- name: UpdateWbComment :exec
+UPDATE wb_comments SET body = @body, edited_at = now() WHERE id = @id;
+
+-- name: SoftDeleteWbComment :exec
+UPDATE wb_comments SET deleted_at = now(), deleted_by = @actor_id::bigint WHERE id = @id;
+
+-- name: ListWbBoards :many
+-- Semua papan hidup untuk pilihan "Pindahkan ke papan"; jumlah papan tim kecil, jadi pohonnya disusun di klien.
+SELECT id, title, parent_id, is_root FROM wb_boards WHERE deleted_at IS NULL ORDER BY lower(title), id;
+
+-- name: MoveWbCards :many
+-- Pindah kartu ke papan lain. Kartu yang tetap berada di kolomnya (kolomnya ikut pindah) mempertahankan column_id;
+-- yang lain keluar dari kolom.
+UPDATE wb_cards
+SET board_id = @to_board, seq = @seq, updated_by = @actor_id, version = version + 1,
+    x = x + @dx::double precision, y = y + @dy::double precision,
+    column_id = CASE WHEN column_id = ANY(@ids::uuid[]) THEN column_id ELSE NULL END,
+    col_order = CASE WHEN column_id = ANY(@ids::uuid[]) THEN col_order ELSE NULL END
+WHERE board_id = @from_board AND deleted_at IS NULL AND id = ANY(@ids::uuid[])
+RETURNING id, ref_board_id;
+
+-- name: ReparentWbBoards :exec
+UPDATE wb_boards SET parent_id = @parent_id, updated_by = @actor_id WHERE id = ANY(@ids::uuid[]) AND NOT is_root;
+
+-- name: WbSubtreeDepth :one
+-- Kedalaman terdalam di bawah papan ini (0 bila tanpa papan anak), supaya pindah kartu papan tidak melewati batas.
+WITH RECURSIVE down AS (
+  SELECT b.id, 0 AS depth FROM wb_boards b WHERE b.id = @id
+  UNION ALL
+  SELECT c.id, down.depth + 1
+  FROM wb_boards c JOIN down ON c.parent_id = down.id
+  WHERE c.deleted_at IS NULL AND down.depth < 64
+)
+SELECT max(depth)::int FROM down;
+
+-- name: MoveWbConnectors :many
+-- Penghubung yang kedua ujungnya ikut pindah, pindah bersama kartunya.
+UPDATE wb_connectors SET board_id = @to_board, seq = @seq, updated_by = @actor_id
+WHERE board_id = @from_board AND deleted_at IS NULL
+  AND from_card_id = ANY(@ids::uuid[]) AND to_card_id = ANY(@ids::uuid[])
+RETURNING id;
+
+-- name: MarkWbResync :exec
+UPDATE wb_boards SET resync_seq = seq WHERE id = @id;
+
+-- name: GetWbResyncSeq :one
+SELECT resync_seq FROM wb_boards WHERE id = @id;
+
+-- name: ListWbCardBounds :one
+-- Batas kanan dan atas isi papan, untuk menaruh kartu pindahan di sebelah kanan isi yang sudah ada.
+SELECT coalesce(max(x + w), 0)::double precision AS right_edge, coalesce(min(y), 0)::double precision AS top_edge,
+       count(*)::bigint AS n
+FROM wb_cards WHERE board_id = @board_id AND deleted_at IS NULL AND column_id IS NULL;
+
+-- name: TouchWbCard :one
+-- Menaikkan seq kartu tanpa mengubah isinya (jumlah komentar berubah), supaya ikut sinkron ulang.
+UPDATE wb_cards SET seq = @seq WHERE id = @id AND deleted_at IS NULL RETURNING board_id;
+
+-- name: GetWbConnectorEnds :one
+SELECT from_card_id, to_card_id FROM wb_connectors
+WHERE id = @id AND board_id = @board_id AND deleted_at IS NULL
+FOR UPDATE;

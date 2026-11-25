@@ -2,10 +2,16 @@
 import { nextTick, ref, useId, watch } from 'vue'
 import type { ChecklistOp } from '../../api/whiteboard'
 import { newId, type ChecklistContent } from '../../utils/whiteboard'
+import { placeCaret, type CaretHint } from './caret'
 
 // Checklist di kartu. Setiap perubahan dikirim sebagai operasi per butir (centang, teks, tambah, hapus), bukan isi
 // utuh, jadi dua orang yang mengubah butir berbeda tidak saling menimpa. Centang boleh tanpa membuka editor.
-const props = defineProps<{ content: ChecklistContent; editing: boolean; canWrite: boolean }>()
+const props = defineProps<{
+  content: ChecklistContent
+  editing: boolean
+  canWrite: boolean
+  caret?: CaretHint | null
+}>()
 const emit = defineEmits<{ op: [op: ChecklistOp]; close: [] }>()
 
 const uid = useId()
@@ -13,6 +19,19 @@ const root = ref<HTMLElement | null>(null)
 
 // Editor ditutup tanpa blur (klik di kanvas melepas input dari DOM, jadi change tidak terpanggil): isian yang
 // berubah dikirim sebelum DOM diperbarui. Watch bawaan berjalan sebelum render, saat input masih ada.
+// Dobel klik pada teks butir: kursor diletakkan di butir itu, di posisi klik.
+watch(
+  () => props.editing,
+  async (on) => {
+    if (!on || !props.caret?.item) return
+    await nextTick()
+    placeCaret(
+      root.value?.querySelector<HTMLInputElement>(`[data-item="${props.caret.item}"]`),
+      props.caret.offset,
+    )
+  },
+)
+
 watch(
   () => props.editing,
   (on, was) => {
@@ -140,6 +159,8 @@ function onKeydown(e: KeyboardEvent) {
           v-else
           class="min-w-0 flex-1 break-words"
           :class="item.done ? 'text-ink-muted line-through' : ''"
+          :data-item-text="item.id"
+          :data-caret="item.text ? '' : undefined"
         >
           {{ item.text || 'Butir kosong' }}
         </span>

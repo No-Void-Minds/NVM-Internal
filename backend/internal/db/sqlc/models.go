@@ -576,6 +576,7 @@ type WbBoard struct {
 	DeletedAt    pgtype.Timestamptz
 	DeletedBy    pgtype.Int8
 	DeletedBatch pgtype.UUID
+	ResyncSeq    int64
 }
 
 type WbCard struct {
@@ -601,4 +602,68 @@ type WbCard struct {
 	DeletedAt      pgtype.Timestamptz
 	DeletedBy      pgtype.Int8
 	DeletedBatch   pgtype.UUID
+	FileID         pgtype.UUID
+	ColumnID       pgtype.UUID
+	ColOrder       pgtype.Float8
+}
+
+type WbComment struct {
+	ID        pgtype.UUID
+	CardID    pgtype.UUID
+	UserID    int64
+	Body      string
+	CreatedAt pgtype.Timestamptz
+	EditedAt  pgtype.Timestamptz
+	DeletedAt pgtype.Timestamptz
+	DeletedBy pgtype.Int8
+}
+
+type WbConnector struct {
+	ID           pgtype.UUID
+	BoardID      pgtype.UUID
+	FromCardID   pgtype.UUID
+	ToCardID     pgtype.UUID
+	Geometry     []byte
+	Style        []byte
+	Label        string
+	LabelStart   string
+	LabelEnd     string
+	Version      int32
+	Seq          int64
+	CreatedBy    int64
+	UpdatedBy    int64
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+	DeletedAt    pgtype.Timestamptz
+	DeletedBy    pgtype.Int8
+	DeletedBatch pgtype.UUID
+}
+
+type WbFile struct {
+	ID           pgtype.UUID
+	BoardID      pgtype.UUID
+	Kind         string
+	OriginalName string
+	MimeType     string
+	SizeBytes    int64
+	Checksum     string
+	Width        pgtype.Int4
+	Height       pgtype.Int4
+	HasThumb     bool
+	UploadedBy   pgtype.Int8
+	CreatedAt    pgtype.Timestamptz
+}
+
+type WbLinkPreview struct {
+	ID          pgtype.UUID
+	UrlHash     string
+	Url         string
+	FinalUrl    string
+	Title       string
+	Description string
+	SiteName    string
+	ImageFileID pgtype.UUID
+	Status      string
+	Message     string
+	FetchedAt   pgtype.Timestamptz
 }

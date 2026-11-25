@@ -87,6 +87,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 		avatars:      account.NewAvatars(pool, files, log),
 	}
 
+	s.whiteboard.UseStorage(files)
 	s.hub = whiteboard.NewHub(s.whiteboard)
 	// Hub hidup selama proses; Sweep melepas kunci kartu yang kehilangan detak.
 	go s.hub.Run(context.Background())
@@ -214,6 +215,21 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	wbWrite.POST("/boards/:id/cards/:cardId/checklist", s.wbChecklist)
 	wb.GET("/trash", s.wbTrash)
 	wbWrite.POST("/trash/:batch/restore", s.wbRestore)
+	wb.GET("/boards", s.wbBoards)
+	wb.GET("/files/:fileId", s.wbFile)
+	wbWrite.POST("/boards/:id/files", s.wbUpload)
+	wbWrite.POST("/preview", s.wbPreview)
+	wbWrite.POST("/boards/:id/cards/:cardId/table", s.wbTable)
+	wbWrite.POST("/boards/:id/drawings", s.wbCreateDrawing)
+	wbWrite.POST("/boards/:id/cards/:cardId/drawing", s.wbDrawing)
+	wbWrite.POST("/boards/:id/move", s.wbMove)
+	wbWrite.POST("/boards/:id/connectors", s.wbCreateConnector)
+	wbWrite.PUT("/boards/:id/connectors/:connectorId", s.wbUpdateConnector)
+	wbWrite.DELETE("/boards/:id/connectors/:connectorId", s.wbDeleteConnector)
+	wb.GET("/boards/:id/cards/:cardId/comments", s.wbComments)
+	wbWrite.POST("/boards/:id/cards/:cardId/comments", s.wbAddComment)
+	wbWrite.PUT("/comments/:commentId", s.wbEditComment)
+	wbWrite.DELETE("/comments/:commentId", s.wbDeleteComment)
 
 	return r, nil
 }

@@ -377,6 +377,12 @@ img.ProseMirror-separator {
   --color-on-accent: #e8e3d5;
   --color-mark: #1a1c20;
   --color-danger: #8c2f22;
+  /* Warna pena gambar bebas (W3, wbColors.ts): nilai mode terang, minimal 4,95:1 terhadap krem. */
+  --color-requested-fg: #3d4048;
+  --color-progress-fg: #2f4433;
+  --color-ready-fg: #5b4720;
+  --color-high: #7a5a1c;
+  --color-collab-2: #1d4ed8;
   color-scheme: light;
 }
 
@@ -420,4 +426,17 @@ img.ProseMirror-separator {
   fill: none;
   stroke: var(--color-mark);
   stroke-width: 1.5;
+}
+/* Label garis penghubung: teks tinta dengan halo warna kanvas, supaya tetap terbaca di atas garis (W3). */
+.wb-connector-label {
+  fill: var(--color-ink);
+  paint-order: stroke;
+  stroke: var(--color-canvas);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+/* Objek gambar bebas terpilih (revisi A): bingkai putus-putus hanya saat terpilih; objeknya sendiri tanpa bingkai. */
+.wb-ink-selected {
+  outline: var(--wb-ring) dashed var(--color-mark);
+  outline-offset: calc(var(--wb-ring) * 2);
 }

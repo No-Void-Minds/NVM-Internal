@@ -252,6 +252,10 @@ type In struct {
 	Card    string          `json:"card"`
 	Content json.RawMessage `json:"content"`
 	Force   bool            `json:"force"`
+	// Goresan yang sedang digambar (revisi A): titik koordinat dunia sejauh ini.
+	Points []int  `json:"points"`
+	Color  string `json:"color"`
+	Width  int    `json:"width"`
 }
 
 type Move struct {
@@ -283,7 +287,7 @@ func (h *Hub) Handle(ctx context.Context, c *Client, raw []byte) {
 		return
 	}
 	board := c.board
-	writeOnly := in.T == "select" || in.T == "grab" || in.T == "move" || in.T == "release" || in.T == "draft" || in.T == "unlock"
+	writeOnly := in.T == "select" || in.T == "grab" || in.T == "move" || in.T == "release" || in.T == "draft" || in.T == "unlock" || in.T == "ink" || in.T == "ink_end"
 	if writeOnly && !c.CanWrite {
 		h.send(c, msg{"t": "denied", "for": in.T, "message": "Admin hanya bisa melihat Whiteboard, tidak bisa mengubahnya."})
 		return
@@ -312,6 +316,21 @@ func (h *Hub) Handle(ctx context.Context, c *Client, raw []byte) {
 		if len(moves) > 0 {
 			h.broadcast(board, c, msg{"t": "moving", "user": person(c), "moves": moves})
 		}
+	case "ink":
+		// Goresan langsung hanya tampilan; yang tersimpan tetap lewat REST. Titik divalidasi seperti di server supaya
+		// klien lain tidak menerima goresan yang tidak akan diterima.
+		if !h.allow(c) || len(in.Points) < 2 || len(in.Points)%2 != 0 || len(in.Points) > MaxStrokePoints*2 ||
+			(in.Color != drawingInk && !Colors[in.Color]) || !DrawingWidths[in.Width] {
+			return
+		}
+		for _, p := range in.Points {
+			if p < -maxCoord || p > maxCoord {
+				return
+			}
+		}
+		h.broadcast(board, c, msg{"t": "ink", "user": person(c), "points": in.Points, "color": in.Color, "width": in.Width})
+	case "ink_end":
+		h.broadcast(board, c, msg{"t": "ink_end", "user": person(c)})
 	case "release":
 		ids := []string{}
 		for _, id := range in.IDs {
@@ -360,14 +379,11 @@ func (h *Hub) join(ctx context.Context, c *Client, in In) {
 		h.send(c, msg{"t": "board_missing", "board": in.Board})
 		return
 	}
-	var cards []Card
-	var deleted []string
+	var sync Sync
 	resync := false
 	if in.LastSeq > 0 {
-		cards, deleted, resync, err = h.svc.Since(ctx, board, in.LastSeq)
-		if err != nil {
-			resync = true
-		}
+		sync, err = h.svc.Since(ctx, board, in.LastSeq)
+		resync = err != nil || sync.TooMany
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -403,8 +419,10 @@ func (h *Hub) join(ctx context.Context, c *Client, in In) {
 	case resync:
 		reply["resync"] = true
 	case in.LastSeq > 0:
-		reply["cards"] = cards
-		reply["deleted"] = deleted
+		reply["cards"] = sync.Cards
+		reply["deleted"] = sync.Deleted
+		reply["connectors"] = sync.Connectors
+		reply["connectors_gone"] = sync.ConnectorsGone
 	}
 	h.send(c, reply)
 	h.broadcastPresence(board)
@@ -569,4 +587,41 @@ func (h *Hub) Renamed(board, title string, version int32) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.broadcast(board, nil, msg{"t": "renamed", "board": board, "title": title, "version": version})
+}
+
+// Connectors menyiarkan garis yang dibuat atau diubah; ConnectorsGone garis yang masuk Tempat sampah.
+func (h *Hub) Connectors(board string, items []Connector) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.broadcast(board, nil, msg{"t": "connectors", "items": items})
+}
+
+func (h *Hub) ConnectorsGone(board string, ids []string, batch string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.broadcast(board, nil, msg{"t": "connectors_gone", "ids": ids, "batch": batch})
+}
+
+// Moved: kartu keluar dari papan asal (kunci dan genggamannya dilepas), papan tujuan dimuat ulang.
+func (h *Hub) Moved(res MoveResult, byName string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, id := range res.Moved {
+		delete(h.locks, id)
+		delete(h.grabs, id)
+	}
+	h.broadcast(res.From, nil, msg{"t": "moved", "ids": res.Moved, "connectors_gone": res.ConnectorsGone, "to": res.To, "by": byName})
+	h.broadcast(res.To, nil, msg{"t": "resync"})
+	h.broadcastPresence(res.From)
+}
+
+// LockedByOther mengembalikan nama pemegang kunci kartu bila kuncinya dipegang akun lain. Tabel dan gambar bebas
+// hanya bisa diubah pemegang kunci (atau siapa pun bila tidak ada yang memegang), sama dengan editor catatan.
+func (h *Hub) LockedByOther(card string, userID int64) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if l := h.locks[card]; l != nil && l.holder.UserID != userID {
+		return l.holder.Name
+	}
+	return ""
 }

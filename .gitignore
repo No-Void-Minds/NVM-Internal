@@ -29,3 +29,5 @@ frontend/dist/
 Thumbs.db
 .DS_Store
 .claude/settings.local.json
+# Sesi login E2E yang dipakai ulang antar run (berisi cookie sesi akun dev).
+scripts/e2e/.auth/

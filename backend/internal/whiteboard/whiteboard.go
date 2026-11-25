@@ -24,6 +24,8 @@ import (
 	"nvm-internal/internal/apperr"
 	"nvm-internal/internal/audit"
 	"nvm-internal/internal/db/sqlc"
+	"nvm-internal/internal/linkpreview"
+	"nvm-internal/internal/storage"
 )
 
 const (
@@ -68,15 +70,25 @@ func (e *ConflictError) Error() string { return "whiteboard: isi kartu sudah diu
 type Actor struct {
 	ID int64
 	IP *netip.Addr
+	// Manager: Manajer boleh menghapus komentar siapa pun (keputusan bawaan W3); aturan lain sama untuk Staf.
+	Manager bool
 }
 
 func (a Actor) audit() audit.Actor { return audit.Actor{ID: a.ID, IP: a.IP} }
 
 type Service struct {
-	pool *pgxpool.Pool
+	pool    *pgxpool.Pool
+	store   *storage.Store
+	preview *linkpreview.Fetcher
+	rate    *previewRate
 }
 
-func NewService(pool *pgxpool.Pool) *Service { return &Service{pool: pool} }
+func NewService(pool *pgxpool.Pool) *Service {
+	return &Service{pool: pool, preview: linkpreview.New(), rate: newPreviewRate()}
+}
+
+// UseStorage memasang penyimpanan berkas untuk kartu gambar dan berkas (W3).
+func (s *Service) UseStorage(st *storage.Store) { s.store = st }
 
 // ParseID mengubah id teks menjadi UUID. Teks yang bukan UUID diperlakukan sebagai tidak ditemukan, jadi URL acak
 // tidak pernah menjadi galat 500.
@@ -208,6 +220,34 @@ type Card struct {
 	UpdatedBy      int64           `json:"updated_by"`
 	UpdatedAt      string          `json:"updated_at"`
 	Ref            *RefSummary     `json:"ref,omitempty"`
+	File           *FileInfo       `json:"file,omitempty"`
+	Preview        *PreviewInfo    `json:"preview,omitempty"`
+	ColumnID       *string         `json:"column_id"`
+	ColOrder       *float64        `json:"col_order"`
+	Comments       int64           `json:"comments"`
+	CreatedByName  string          `json:"created_by_name"`
+}
+
+// FileInfo: berkas kartu gambar atau berkas. Thumb true berarti ada thumbnail JPEG untuk ditampilkan di kanvas.
+type FileInfo struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	MIME   string `json:"mime"`
+	Size   int64  `json:"size"`
+	Thumb  bool   `json:"thumb"`
+	Width  int32  `json:"width"`
+	Height int32  `json:"height"`
+}
+
+// PreviewInfo: pratinjau kartu tautan. Status ok, blocked, atau failed; Image id berkas gambar pratinjau.
+type PreviewInfo struct {
+	ID          string  `json:"id"`
+	Title       string  `json:"title"`
+	Description string  `json:"description"`
+	Site        string  `json:"site"`
+	FinalURL    string  `json:"final_url"`
+	Status      string  `json:"status"`
+	Image       *string `json:"image"`
 }
 
 func cardOf(r sqlc.ListWbCardsRow) Card {
@@ -223,6 +263,21 @@ func cardOf(r sqlc.ListWbCardsRow) Card {
 	if r.RefBoardID.Valid {
 		c.Ref = &RefSummary{ID: idString(r.RefBoardID), Title: r.RefTitle, Version: r.RefVersion, Boards: r.RefBoards, Cards: r.RefCards}
 	}
+	if r.FileID.Valid {
+		c.File = &FileInfo{ID: idString(r.FileID), Name: r.FileName, MIME: r.FileMime, Size: r.FileSize, Thumb: r.FileThumb,
+			Width: r.FileWidth, Height: r.FileHeight}
+	}
+	if r.PreviewID.Valid {
+		c.Preview = &PreviewInfo{ID: idString(r.PreviewID), Title: r.PreviewTitle, Description: r.PreviewDescription,
+			Site: r.PreviewSite, FinalURL: r.PreviewFinalUrl, Status: r.PreviewStatus, Image: optID(r.PreviewImage)}
+	}
+	c.ColumnID = optID(r.ColumnID)
+	if r.ColOrder.Valid {
+		v := r.ColOrder.Float64
+		c.ColOrder = &v
+	}
+	c.Comments = r.CommentCount
+	c.CreatedByName = r.CreatedByName
 	return c
 }
 
@@ -235,13 +290,14 @@ func getCard(ctx context.Context, q *sqlc.Queries, id pgtype.UUID) (Card, error)
 }
 
 type BoardView struct {
-	ID      string  `json:"id"`
-	Title   string  `json:"title"`
-	IsRoot  bool    `json:"is_root"`
-	Version int32   `json:"version"`
-	Seq     int64   `json:"seq"`
-	Crumbs  []Crumb `json:"crumbs"`
-	Cards   []Card  `json:"cards"`
+	ID         string      `json:"id"`
+	Title      string      `json:"title"`
+	IsRoot     bool        `json:"is_root"`
+	Version    int32       `json:"version"`
+	Seq        int64       `json:"seq"`
+	Crumbs     []Crumb     `json:"crumbs"`
+	Cards      []Card      `json:"cards"`
+	Connectors []Connector `json:"connectors"`
 }
 
 // Board memuat satu papan ("root" untuk papan akar) beserta breadcrumb dan semua kartunya.
@@ -267,7 +323,16 @@ func (s *Service) Board(ctx context.Context, actor Actor, idText string) (BoardV
 	for _, r := range rows {
 		cards = append(cards, cardOf(r))
 	}
-	return BoardView{ID: idString(n.ID), Title: n.Title, IsRoot: n.IsRoot, Version: n.Version, Seq: n.Seq, Crumbs: crumbs, Cards: cards}, nil
+	conns, err := q.ListWbConnectors(ctx, id)
+	if err != nil {
+		return BoardView{}, err
+	}
+	connectors := make([]Connector, 0, len(conns))
+	for _, r := range conns {
+		connectors = append(connectors, connectorOf(sqlc.InsertWbConnectorRow(r)))
+	}
+	return BoardView{ID: idString(n.ID), Title: n.Title, IsRoot: n.IsRoot, Version: n.Version, Seq: n.Seq, Crumbs: crumbs,
+		Cards: cards, Connectors: connectors}, nil
 }
 
 type BoardTitle struct {
@@ -410,6 +475,8 @@ type CardInput struct {
 	Content json.RawMessage `json:"content"`
 	// Title: judul papan baru, hanya untuk kartu jenis board.
 	Title string `json:"title"`
+	// FileID: berkas yang sudah diunggah, untuk kartu gambar atau berkas hasil salin tempel.
+	FileID string `json:"file_id"`
 }
 
 // CreateCard menaruh kartu baru di atas tumpukan. Kartu jenis board sekaligus membuat papan anak di papan ini.
@@ -433,7 +500,7 @@ func (s *Service) CreateCard(ctx context.Context, actor Actor, boardText string,
 			return Card{}, err
 		}
 		content = []byte(`{}`)
-	case KindNote, KindHeading, KindChecklist:
+	case KindNote, KindHeading, KindChecklist, KindLink, KindColumn, KindDrawing, KindTable, KindImage, KindFile:
 		raw := in.Content
 		if len(raw) == 0 || string(raw) == "null" {
 			raw = DefaultContent(in.Kind)
@@ -452,6 +519,12 @@ func (s *Service) CreateCard(ctx context.Context, actor Actor, boardText string,
 	} else if err := cardID.Scan(newUUIDString()); err != nil {
 		return Card{}, err
 	}
+	var fileID pgtype.UUID
+	if in.Kind == KindImage || in.Kind == KindFile {
+		if fileID, err = ParseID(in.FileID); err != nil {
+			return Card{}, apperr.Invalid("Kartu gambar dan berkas dibuat lewat unggahan.")
+		}
+	}
 	var out Card
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := sqlc.New(tx)
@@ -465,6 +538,16 @@ func (s *Service) CreateCard(ctx context.Context, actor Actor, boardText string,
 		}
 		if exists {
 			return apperr.Invalid("Id kartu sudah dipakai. Muat ulang papan, lalu coba lagi.")
+		}
+		if fileID.Valid {
+			// Salin tempel memakai berkas yang sama; jenis kartu harus cocok dengan jenis berkasnya.
+			f, err := q.GetWbFile(ctx, fileID)
+			if err != nil || f.Kind != in.Kind {
+				return apperr.Invalid("Berkas kartu ini tidak ditemukan. Unggah ulang berkasnya.")
+			}
+			if plain == "" {
+				plain = f.OriginalName
+			}
 		}
 		var ref pgtype.UUID
 		if in.Kind == KindBoard {
@@ -486,7 +569,7 @@ func (s *Service) CreateCard(ctx context.Context, actor Actor, boardText string,
 			return err
 		}
 		if err := q.InsertWbCard(ctx, sqlc.InsertWbCardParams{
-			ID: cardID, BoardID: boardID, Kind: in.Kind, RefBoardID: ref, X: in.X, Y: in.Y, W: in.W, H: in.H, Z: math.Min(z+1, maxZ),
+			ID: cardID, BoardID: boardID, Kind: in.Kind, RefBoardID: ref, FileID: fileID, X: in.X, Y: in.Y, W: in.W, H: in.H, Z: math.Min(z+1, maxZ),
 			Color: pgtype.Text{String: in.Color, Valid: in.Color != ""}, Content: content, Plain: plain, Seq: seq, ActorID: actor.ID,
 		}); err != nil {
 			return err
@@ -511,6 +594,9 @@ type CardPatch struct {
 	Color              *string         `json:"color"`
 	Content            json.RawMessage `json:"content"`
 	BaseContentVersion int32           `json:"base_content_version"`
+	// ColumnID: id kartu kolom tujuan, atau "" untuk keluar dari kolom. ColOrder urutan di dalam kolom.
+	ColumnID *string  `json:"column_id"`
+	ColOrder *float64 `json:"col_order"`
 }
 
 func f8(v *float64) pgtype.Float8 {
@@ -595,6 +681,12 @@ func (s *Service) PatchCards(ctx context.Context, actor Actor, boardText string,
 				params.ClearColor = *p.Color == ""
 				params.Color = pgtype.Text{String: *p.Color, Valid: *p.Color != ""}
 			}
+			if err := columnPatch(ctx, q, boardID, id, cur.Kind, p, &params); err != nil {
+				return err
+			}
+			if cur.Kind == KindDrawing && (p.hasContent() || p.W != nil || p.H != nil) {
+				return apperr.Invalid("Gambar bebas diubah lewat pena, tidak lewat isi atau ukuran.")
+			}
 			var plain string
 			if p.hasContent() {
 				if cur.Kind == KindBoard {
@@ -628,7 +720,7 @@ func (s *Service) PatchCards(ctx context.Context, actor Actor, boardText string,
 					return err
 				}
 			}
-			if p.X != nil || p.Y != nil || p.W != nil || p.H != nil || p.Z != nil || p.Color != nil {
+			if p.X != nil || p.Y != nil || p.W != nil || p.H != nil || p.Z != nil || p.Color != nil || p.ColumnID != nil || p.ColOrder != nil {
 				layoutIDs = append(layoutIDs, idString(id))
 			}
 		}
@@ -829,12 +921,22 @@ func (s *Service) DeleteCards(ctx context.Context, actor Actor, boardText string
 				return err
 			}
 		}
+		// Isi kolom ikut terhapus bersama kolomnya, dan garis yang menempel di kartu mana pun ikut ke batch yang sama.
+		children, err := q.ListWbColumnChildren(ctx, uuids)
+		if err != nil {
+			return err
+		}
+		uuids = append(uuids, children...)
 		rows, err := q.TrashWbCards(ctx, sqlc.TrashWbCardsParams{ActorID: actor.ID, Batch: batch, Seq: seq, BoardID: boardID, Ids: uuids})
 		if err != nil {
 			return err
 		}
 		if len(rows) == 0 {
 			return ErrNotFound
+		}
+		if _, err := q.TrashWbConnectors(ctx, sqlc.TrashWbConnectorsParams{ActorID: actor.ID, Batch: batch, Seq: seq,
+			BoardID: boardID, Ids: []pgtype.UUID{}, Cards: uuids}); err != nil {
+			return err
 		}
 		refs := []pgtype.UUID{}
 		excerpts := make([]string, 0, len(rows))
@@ -879,15 +981,17 @@ type TrashBatch struct {
 	// BoardTitle: papan asal kartu yang dihapus (tempat kartu kembali saat dipulihkan).
 	BoardTitle string `json:"board_title"`
 	// Boards: judul papan yang ikut terhapus (papan teratas lebih dulu). Cards: kartu selain kartu papan.
-	Boards    []string `json:"boards"`
-	Cards     int64    `json:"cards"`
-	Excerpts  []string `json:"excerpts"`
-	BlockedBy string   `json:"blocked_by,omitempty"`
+	Boards     []string `json:"boards"`
+	Cards      int64    `json:"cards"`
+	Connectors int      `json:"connectors"`
+	Excerpts   []string `json:"excerpts"`
+	BlockedBy  string   `json:"blocked_by,omitempty"`
 }
 
 type trashData struct {
-	boards []sqlc.ListWbTrashBoardsRow
-	cards  []sqlc.ListWbTrashCardsRow
+	boards     []sqlc.ListWbTrashBoardsRow
+	cards      []sqlc.ListWbTrashCardsRow
+	connectors []sqlc.ListWbTrashConnectorsRow
 }
 
 func loadTrash(ctx context.Context, q *sqlc.Queries) (trashData, error) {
@@ -896,7 +1000,11 @@ func loadTrash(ctx context.Context, q *sqlc.Queries) (trashData, error) {
 		return trashData{}, err
 	}
 	c, err := q.ListWbTrashCards(ctx)
-	return trashData{boards: b, cards: c}, err
+	if err != nil {
+		return trashData{}, err
+	}
+	n, err := q.ListWbTrashConnectors(ctx)
+	return trashData{boards: b, cards: c, connectors: n}, err
 }
 
 // batches menyusun satu baris per batch dari kartu yang dihapus dan papan yang ikut terhapus. BlockedBy terisi
@@ -941,6 +1049,16 @@ func (d trashData) batches() []TrashBatch {
 			t.Boards = append([]string{b.Title}, t.Boards...)
 		} else {
 			t.Boards = append(t.Boards, b.Title)
+		}
+	}
+	for _, n := range d.connectors {
+		t := get(n.DeletedBatch, n.DeletedAt, n.DeletedByName)
+		t.Connectors++
+		if t.BoardTitle == "" {
+			t.BoardTitle = n.BoardTitle
+		}
+		if n.BoardInTrash && t.Cards == 0 && len(t.Boards) == 0 {
+			t.BlockedBy = n.BoardTitle
 		}
 	}
 	out := make([]TrashBatch, 0, len(order))
@@ -1000,6 +1118,11 @@ func (s *Service) Restore(ctx context.Context, actor Actor, batchText string) (R
 				out.BoardID = idString(c.BoardID)
 			}
 		}
+		for _, n := range d.connectors {
+			if n.DeletedBatch == batch {
+				bump[idString(n.BoardID)] = n.BoardID
+			}
+		}
 		for _, b := range bump {
 			if _, err := q.BumpWbBoardSeq(ctx, b); err != nil {
 				return notFound(err)
@@ -1011,6 +1134,13 @@ func (s *Service) Restore(ctx context.Context, actor Actor, batchText string) (R
 		restored, err := q.RestoreWbCards(ctx, sqlc.RestoreWbCardsParams{ActorID: actor.ID, Batch: batch})
 		if err != nil {
 			return err
+		}
+		conns, err := q.RestoreWbConnectors(ctx, sqlc.RestoreWbConnectorsParams{ActorID: actor.ID, Batch: batch})
+		if err != nil {
+			return err
+		}
+		if out.BoardID == "" && len(conns) > 0 {
+			out.BoardID = idString(conns[0].BoardID)
 		}
 		if len(restored) > 0 {
 			if err := record(ctx, q, restored[0].BoardID, actor.ID, "cards_restored", pgtype.UUID{},
@@ -1036,13 +1166,28 @@ func Purge(ctx context.Context, pool *pgxpool.Pool, now time.Time, dryRun bool) 
 			return err
 		}
 		n = len(batches)
-		if dryRun || n == 0 {
+		if dryRun {
 			return nil
+		}
+		// Berkas yang tidak dipakai kartu mana pun (umur lebih dari satu hari) dan cache pratinjau lama yang tidak
+		// dipakai kartu tautan: barisnya dihapus di sini, berkasnya dibersihkan pembersih berkas yatim.
+		if _, err := q.DeleteWbOldPreviews(ctx, pgtype.Timestamptz{Time: now.AddDate(0, 0, -PreviewDays), Valid: true}); err != nil {
+			return err
+		}
+		if n == 0 {
+			_, err := q.DeleteWbUnusedFiles(ctx, pgtype.Timestamptz{Time: now.Add(-unusedFileAge), Valid: true})
+			return err
+		}
+		if _, err := q.DeleteWbExpiredConnectors(ctx, before); err != nil {
+			return err
 		}
 		if _, err := q.DeleteWbExpiredCards(ctx, before); err != nil {
 			return err
 		}
 		if _, err := q.DeleteWbExpiredBoards(ctx, before); err != nil {
+			return err
+		}
+		if _, err := q.DeleteWbUnusedFiles(ctx, pgtype.Timestamptz{Time: now.Add(-unusedFileAge), Valid: true}); err != nil {
 			return err
 		}
 		for _, b := range batches {
@@ -1190,34 +1335,67 @@ func (s *Service) CardKind(ctx context.Context, boardText, cardText string) (str
 // MaxSyncRows: selisih lebih dari ini membuat klien memuat ulang papan utuh, bukan menerima daftar perubahan.
 const MaxSyncRows = 2000
 
-// Since mengembalikan kartu yang berubah sesudah seq (hidup) dan id kartu yang masuk Tempat sampah sesudahnya.
-// tooMany true berarti selisihnya melewati MaxSyncRows.
-func (s *Service) Since(ctx context.Context, boardText string, seq int64) (cards []Card, deleted []string, tooMany bool, err error) {
+// Sync berisi perubahan sejak seq tertentu: kartu dan penghubung yang hidup, serta id yang harus dibuang klien.
+// TooMany berarti selisihnya melewati MaxSyncRows, jadi klien memuat ulang papan utuh.
+type Sync struct {
+	Cards          []Card      `json:"cards"`
+	Deleted        []string    `json:"deleted"`
+	Connectors     []Connector `json:"connectors"`
+	ConnectorsGone []string    `json:"connectors_gone"`
+	TooMany        bool        `json:"-"`
+}
+
+// Since mengembalikan semua yang berubah di papan sesudah seq itu, termasuk yang masuk Tempat sampah.
+func (s *Service) Since(ctx context.Context, boardText string, seq int64) (Sync, error) {
+	out := Sync{Cards: []Card{}, Deleted: []string{}, Connectors: []Connector{}, ConnectorsGone: []string{}}
 	b, err := ParseID(boardText)
 	if err != nil {
-		return nil, nil, false, err
+		return out, err
 	}
 	q := sqlc.New(s.pool)
+	moved, err := q.GetWbResyncSeq(ctx, b)
+	if err != nil || moved > seq {
+		out.TooMany = err == nil
+		return out, notFound(err)
+	}
 	n, err := q.CountWbCardsSince(ctx, sqlc.CountWbCardsSinceParams{BoardID: b, Seq: seq})
 	if err != nil || n > MaxSyncRows {
-		return nil, nil, n > MaxSyncRows, err
+		out.TooMany = n > MaxSyncRows
+		return out, err
 	}
 	rows, err := q.ListWbCardsSince(ctx, sqlc.ListWbCardsSinceParams{BoardID: b, Seq: seq})
 	if err != nil {
-		return nil, nil, false, err
+		return out, err
 	}
-	cards, deleted = []Card{}, []string{}
 	for _, r := range rows {
 		if r.Deleted {
-			deleted = append(deleted, idString(r.ID))
+			out.Deleted = append(out.Deleted, idString(r.ID))
 			continue
 		}
-		cards = append(cards, cardOf(sqlc.ListWbCardsRow{
+		out.Cards = append(out.Cards, cardOf(sqlc.ListWbCardsRow{
 			ID: r.ID, BoardID: r.BoardID, Kind: r.Kind, RefBoardID: r.RefBoardID, X: r.X, Y: r.Y, W: r.W, H: r.H, Z: r.Z,
 			Color: r.Color, Content: r.Content, Version: r.Version, ContentVersion: r.ContentVersion, Seq: r.Seq,
-			UpdatedBy: r.UpdatedBy, UpdatedAt: r.UpdatedAt, RefTitle: r.RefTitle, RefVersion: r.RefVersion,
-			RefBoards: r.RefBoards, RefCards: r.RefCards,
+			UpdatedBy: r.UpdatedBy, UpdatedAt: r.UpdatedAt, FileID: r.FileID, ColumnID: r.ColumnID, ColOrder: r.ColOrder,
+			RefTitle: r.RefTitle, RefVersion: r.RefVersion, RefBoards: r.RefBoards, RefCards: r.RefCards,
+			FileName: r.FileName, FileMime: r.FileMime, FileSize: r.FileSize, FileThumb: r.FileThumb, FileWidth: r.FileWidth,
+			FileHeight: r.FileHeight, PreviewID: r.PreviewID, PreviewTitle: r.PreviewTitle, PreviewDescription: r.PreviewDescription,
+			PreviewSite: r.PreviewSite, PreviewFinalUrl: r.PreviewFinalUrl, PreviewStatus: r.PreviewStatus,
+			PreviewImage: r.PreviewImage, CommentCount: r.CommentCount, CreatedByName: r.CreatedByName,
 		}))
 	}
-	return cards, deleted, false, nil
+	conns, err := q.ListWbConnectorsSince(ctx, sqlc.ListWbConnectorsSinceParams{BoardID: b, Seq: seq})
+	if err != nil {
+		return out, err
+	}
+	for _, r := range conns {
+		if r.Hidden {
+			out.ConnectorsGone = append(out.ConnectorsGone, idString(r.ID))
+			continue
+		}
+		out.Connectors = append(out.Connectors, connectorOf(sqlc.InsertWbConnectorRow{
+			ID: r.ID, BoardID: r.BoardID, FromCardID: r.FromCardID, ToCardID: r.ToCardID, Geometry: r.Geometry, Style: r.Style,
+			Label: r.Label, LabelStart: r.LabelStart, LabelEnd: r.LabelEnd, Version: r.Version, Seq: r.Seq,
+		}))
+	}
+	return out, nil
 }

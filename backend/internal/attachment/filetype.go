@@ -288,3 +288,24 @@ func CleanName(name string) string {
 	}
 	return name
 }
+
+// WhiteboardAllowedList dipakai pesan galat dan harus sama dengan daftar di frontend (utils/wbFiles.ts).
+const WhiteboardAllowedList = "JPG, PNG, WebP, GIF, PDF, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT, dan CSV"
+
+// whiteboardRules: daftar lampiran task ditambah gambar WebP dan GIF untuk kartu gambar Whiteboard (W3). SVG tetap
+// ditolak karena isinya XML yang bisa memuat skrip.
+var whiteboardRules = func() map[string]rule {
+	m := map[string]rule{
+		".webp": {"image/webp", riff("WEBP")},
+		".gif":  {"image/gif", anyPrefix([]byte("GIF87a"), []byte("GIF89a"))},
+	}
+	for ext, r := range rules {
+		m[ext] = r
+	}
+	return m
+}()
+
+// DetectWhiteboard memeriksa berkas kartu Whiteboard dengan aturan isi-harus-cocok-dengan-ekstensi yang sama.
+func DetectWhiteboard(f *os.File, size int64, originalName string) (string, error) {
+	return detectWith(whiteboardRules, WhiteboardAllowedList, f, size, originalName)
+}

@@ -108,6 +108,19 @@ func (s *Store) Commit(tmpPath, id string) error {
 	return os.Rename(tmpPath, dst)
 }
 
+// ThumbPath mengembalikan lokasi thumbnail JPEG gambar Whiteboard, di sebelah berkas aslinya (<id>.thumb.jpg).
+// Pembersih berkas yatim mengenali akhiran ini dan memperlakukannya sama dengan berkas aslinya.
+func (s *Store) ThumbPath(id string) (string, error) {
+	p, err := s.PathFor(id)
+	if err != nil {
+		return "", err
+	}
+	return p + ThumbSuffix, nil
+}
+
+// ThumbSuffix adalah akhiran nama thumbnail di folder attachments.
+const ThumbSuffix = ".thumb.jpg"
+
 func ValidID(id string) bool {
 	return idPattern.MatchString(id)
 }

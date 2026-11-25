@@ -89,9 +89,12 @@ func Run(ctx context.Context, pool *pgxpool.Pool, store *storage.Store, now time
 	}
 	cutoff := now.Add(-orphanGrace)
 
-	// attachments/<2 huruf>/<uuid>, nama berkas persis id baris task_attachments.
+	// attachments/<2 huruf>/<uuid>, nama berkas persis id baris task_attachments, activity_attachments, atau
+	// wb_files. Thumbnail gambar Whiteboard <uuid>.thumb.jpg ikut nasib berkas aslinya: disimpan selama barisnya ada,
+	// dibersihkan bila barisnya sudah tidak ada.
 	known := set(attachments)
 	err = walkOld(store.AttachmentsDir(), cutoff, func(path, name string) error {
+		name = strings.TrimSuffix(name, storage.ThumbSuffix)
 		switch {
 		case !storage.ValidID(name):
 			r.Unknown = append(r.Unknown, path)

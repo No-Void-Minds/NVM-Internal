@@ -92,6 +92,7 @@ export default defineComponent({
   name: 'WbRichText',
   props: { doc: { type: Object as PropType<PMNode>, required: true } },
   setup(props) {
-    return () => h('div', { class: 'wb-richtext space-y-1 break-words' }, children(props.doc))
+    return () =>
+      h('div', { class: 'wb-richtext space-y-1 break-words', 'data-richtext': '' }, children(props.doc))
   },
 })

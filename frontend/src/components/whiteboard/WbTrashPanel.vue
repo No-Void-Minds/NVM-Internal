@@ -42,13 +42,15 @@ function heading(b: TrashBatch) {
     const rest = b.boards.length - 1
     return `Papan "${b.boards[0]}"${rest > 0 ? ` beserta ${rest} papan di dalamnya` : ''}`
   }
-  return `${b.cards} kartu`
+  // Batch tanpa kartu berisi garis penghubung saja (garis yang dihapus sendiri atau terputus saat kartu dipindah).
+  return b.cards === 0 && b.connectors ? `${b.connectors} garis` : `${b.cards} kartu`
 }
 
 function detail(b: TrashBatch) {
   const parts: string[] = []
   if (b.boards.length) parts.push(`${b.cards} kartu di dalamnya`)
   else if (b.excerpts.length) parts.push(b.excerpts.join(', '))
+  if (b.cards > 0 && b.connectors) parts.push(`${b.connectors} garis`)
   parts.push(`dari papan "${b.board_title}"`)
   return parts.join(', ')
 }

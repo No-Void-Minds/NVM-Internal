@@ -1,5 +1,13 @@
-import { apiGet, apiPost, apiPut } from './client'
-import type { Activity, Card, CardColor, CardKind } from '../utils/whiteboard'
+import { ApiError, apiGet, apiPost, apiPut, notifyUnauthorized, request } from './client'
+import type {
+  Activity,
+  Card,
+  CardColor,
+  CardKind,
+  Connector,
+  ConnectorStyle,
+  PreviewInfo,
+} from '../utils/whiteboard'
 
 // Whiteboard (docs/whiteboard.md). Semua adalah papan: "root" adalah papan akar bersama. can_write dari server:
 // Staf dan Manajer menulis, Admin hanya membaca.
@@ -14,6 +22,7 @@ export type BoardView = {
   seq: number
   crumbs: Crumb[]
   cards: Card[]
+  connectors: Connector[]
 }
 export type TrashBatch = {
   batch: string
@@ -23,6 +32,7 @@ export type TrashBatch = {
   board_title: string
   boards: string[]
   cards: number
+  connectors: number
   excerpts: string[]
   blocked_by?: string
 }
@@ -38,6 +48,9 @@ export type CardPatch = {
   color?: CardColor | ''
   content?: Card['content']
   base_content_version?: number
+  // "" mengeluarkan kartu dari kolom.
+  column_id?: string
+  col_order?: number
 }
 
 export type NewCard = {
@@ -51,6 +64,8 @@ export type NewCard = {
   content?: Card['content']
   // Hanya untuk kartu papan: judul papan baru.
   title?: string
+  // Kartu gambar atau berkas hasil salin tempel memakai berkas yang sudah ada.
+  file_id?: string
 }
 
 export type ChecklistOp =
@@ -101,4 +116,152 @@ export function listTrash(signal?: AbortSignal) {
 
 export function restoreBatch(batch: string) {
   return apiPost<{ restored: { board_id: string; title: string } }>(`/whiteboard/trash/${batch}/restore`)
+}
+
+export type TableOp =
+  | { op: 'set'; row: number; col: number; text: string }
+  | { op: 'add_row' | 'add_col'; index?: number }
+  | { op: 'remove_row'; index: number }
+  | { op: 'remove_col'; index: number }
+  | { op: 'header'; on: boolean }
+  | { op: 'title'; text: string }
+
+export type PenStroke = { color: string; width: number; points: number[] }
+export type DrawingOp =
+  { op: 'add'; stroke: PenStroke } | { op: 'remove'; index: number } | { op: 'color'; color: string }
+
+// Goresan pertama sesi pena membuat objek gambar; titik dalam koordinat dunia, kotak batasnya dihitung server.
+export function createDrawing(board: string, id: string, stroke: PenStroke) {
+  return apiPost<{ card: Card }>(`/whiteboard/boards/${board}/drawings`, { id, stroke })
+}
+
+export function drawingOp(board: string, card: string, op: DrawingOp) {
+  return apiPost<{ card: Card }>(`/whiteboard/boards/${board}/cards/${card}/drawing`, op)
+}
+
+export function tableOp(board: string, card: string, op: TableOp) {
+  return apiPost<{ card: Card }>(`/whiteboard/boards/${board}/cards/${card}/table`, op)
+}
+
+export type Preview = PreviewInfo & { message: string }
+export function fetchPreview(url: string) {
+  return apiPost<{ preview: Preview }>('/whiteboard/preview', { url })
+}
+
+export function fileUrl(id: string, thumb = false) {
+  return `/api/whiteboard/files/${id}${thumb ? '?thumb=1' : ''}`
+}
+
+export type UploadHandle = { promise: Promise<Card>; abort: () => void }
+
+// XMLHttpRequest supaya progres unggahan terbaca, sama dengan lampiran task. Kartu dibuat server bersama berkasnya.
+export function uploadFile(
+  board: string,
+  at: { id: string; x: number; y: number; w: number; h: number },
+  file: File,
+  onProgress: (fraction: number) => void,
+): UploadHandle {
+  const xhr = new XMLHttpRequest()
+  const q = new URLSearchParams({
+    card_id: at.id,
+    x: String(Math.round(at.x)),
+    y: String(Math.round(at.y)),
+    w: String(at.w),
+    h: String(at.h),
+  })
+  const promise = new Promise<Card>((resolve, reject) => {
+    xhr.open('POST', `/api/whiteboard/boards/${board}/files?${q}`)
+    xhr.responseType = 'json'
+    xhr.setRequestHeader('Accept', 'application/json')
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(e.loaded / e.total)
+    }
+    xhr.onload = () => {
+      const body = xhr.response as { card?: Card; error?: { code?: string; message?: string } } | null
+      if (xhr.status === 201 && body?.card) {
+        resolve(body.card)
+        return
+      }
+      if (xhr.status === 401) notifyUnauthorized()
+      if (!body?.error?.code) {
+        const message =
+          xhr.status === 413 ? 'Berkas melebihi batas 50 MB.' : 'Server aplikasi tidak merespons.'
+        reject(new ApiError(xhr.status, 'backend_unreachable', message))
+        return
+      }
+      reject(new ApiError(xhr.status, body.error.code, body.error.message ?? 'Unggahan gagal. Coba lagi.'))
+    }
+    xhr.onerror = () =>
+      reject(new ApiError(0, 'network', 'Tidak bisa terhubung. Periksa koneksi ke jaringan kantor.'))
+    xhr.onabort = () => reject(new DOMException('Unggahan dibatalkan', 'AbortError'))
+    const form = new FormData()
+    form.append('file', file)
+    xhr.send(form)
+  })
+  return { promise, abort: () => xhr.abort() }
+}
+
+export type BoardOption = { id: string; title: string; parent_id: string | null; is_root: boolean }
+export function listBoards() {
+  return apiGet<{ boards: BoardOption[] }>('/whiteboard/boards')
+}
+
+export type MoveResult = {
+  from: string
+  to: string
+  moved: string[]
+  connectors_gone: string[]
+  batch: string
+}
+export function moveCards(board: string, ids: string[], to: string) {
+  return apiPost<{ moved: MoveResult }>(`/whiteboard/boards/${board}/move`, { ids, to })
+}
+
+export function createConnector(
+  board: string,
+  input: { from: string; to: string; style?: Partial<ConnectorStyle>; label?: string },
+) {
+  return apiPost<{ connector: Connector }>(`/whiteboard/boards/${board}/connectors`, input)
+}
+
+export function updateConnector(
+  board: string,
+  id: string,
+  patch: { style?: ConnectorStyle; label?: string },
+) {
+  return apiPut<{ connector: Connector }>(`/whiteboard/boards/${board}/connectors/${id}`, patch)
+}
+
+export function deleteConnector(board: string, id: string) {
+  return request<{ batch: string }>('DELETE', `/whiteboard/boards/${board}/connectors/${id}`)
+}
+
+export type Comment = {
+  id: string
+  card_id: string
+  user_id: number
+  user_name: string
+  avatar_id: string | null
+  body: string
+  created_at: string
+  edited_at: string | null
+}
+
+export function listComments(board: string, card: string, signal?: AbortSignal) {
+  return apiGet<{ comments: Comment[]; me: number; can_moderate: boolean }>(
+    `/whiteboard/boards/${board}/cards/${card}/comments`,
+    signal,
+  )
+}
+
+export function addComment(board: string, card: string, body: string) {
+  return apiPost<{ card: Card }>(`/whiteboard/boards/${board}/cards/${card}/comments`, { body })
+}
+
+export function editComment(id: string, body: string) {
+  return apiPut<{ card: Card }>(`/whiteboard/comments/${id}`, { body })
+}
+
+export function deleteComment(id: string) {
+  return request<{ card: Card }>('DELETE', `/whiteboard/comments/${id}`)
 }

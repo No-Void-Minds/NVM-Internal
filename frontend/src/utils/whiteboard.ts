@@ -1,7 +1,8 @@
 // Logika murni Whiteboard (docs/whiteboard.md): tipe data, geometri kanvas, navigasi keyboard antar kartu, dan teks
 // riwayat. Tanpa Vue dan tanpa klien API, supaya bisa diuji dengan node --test.
 
-export type CardKind = 'note' | 'heading' | 'checklist' | 'board'
+export type CardKind =
+  'note' | 'heading' | 'checklist' | 'board' | 'image' | 'file' | 'link' | 'column' | 'drawing' | 'table'
 export type CardColor = 'abu' | 'hijau' | 'kuning' | 'biru' | 'krem' | 'merah'
 
 export type PMMark = { type: string; attrs?: Record<string, unknown> }
@@ -20,6 +21,61 @@ export type ChecklistContent = { title: string; items: ChecklistItem[] }
 // Papan anak yang ditunjuk kartu jenis board.
 export type BoardRef = { id: string; title: string; version: number; boards: number; cards: number }
 export type BoardContent = Record<string, never>
+// W3: isi kartu gambar dan berkas hanya keterangan; berkasnya di field file.
+export type CaptionContent = { caption: string }
+export type LinkContent = { url: string; preview_id: string }
+export type ColumnContent = { title: string }
+// Goresan objek gambar bebas (revisi A): piksel dunia bilangan bulat relatif ke pojok kotak batas objek, x,y berpasangan.
+export type Stroke = { color: string; width: number; points: number[] }
+export type DrawingContent = { strokes: Stroke[] }
+export type TableContent = { title?: string; header: boolean; rows: string[][] }
+export type FileInfo = {
+  id: string
+  name: string
+  mime: string
+  size: number
+  thumb: boolean
+  width: number
+  height: number
+}
+export type PreviewInfo = {
+  id: string
+  title: string
+  description: string
+  site: string
+  final_url: string
+  status: 'ok' | 'blocked' | 'failed'
+  image: string | null
+}
+// Model garis sudah memuat kebutuhan diagram W5: ujung bebas, port, jalur, titik belok, tujuh jenis ujung, tiga label.
+export type ConnectorEndKind =
+  'none' | 'arrow' | 'open_arrow' | 'triangle' | 'diamond' | 'diamond_open' | 'circle'
+export type ConnectorStyle = {
+  start: ConnectorEndKind
+  end: ConnectorEndKind
+  line: 'solid' | 'dashed' | 'dotted'
+  color: CardColor | ''
+}
+export type ConnectorEnd = { port: string; x?: number; y?: number }
+export type ConnectorGeometry = {
+  from: ConnectorEnd
+  to: ConnectorEnd
+  route: 'straight' | 'orthogonal' | 'curved'
+  points: [number, number][]
+}
+export type Connector = {
+  id: string
+  board_id: string
+  from: string | null
+  to: string | null
+  geometry: ConnectorGeometry
+  style: ConnectorStyle
+  label: string
+  label_start: string
+  label_end: string
+  version: number
+  seq: number
+}
 
 export type Card = {
   id: string
@@ -31,8 +87,24 @@ export type Card = {
   h: number
   z: number
   color: CardColor | null
-  content: NoteContent | HeadingContent | ChecklistContent | BoardContent
+  content:
+    | NoteContent
+    | HeadingContent
+    | ChecklistContent
+    | BoardContent
+    | CaptionContent
+    | LinkContent
+    | ColumnContent
+    | DrawingContent
+    | TableContent
   ref?: BoardRef
+  file?: FileInfo
+  preview?: PreviewInfo
+  // Kartu di dalam kolom: posisinya dihitung dari kolom (columnLayout), x dan y tersimpan diabaikan.
+  column_id?: string | null
+  col_order?: number | null
+  comments?: number
+  created_by_name?: string
   version: number
   content_version: number
   seq: number
@@ -44,8 +116,8 @@ export type Rect = { x: number; y: number; w: number; h: number }
 export type Viewport = { x: number; y: number; zoom: number }
 
 export const GRID = 8
-export const MIN_ZOOM = 0.25
-export const MAX_ZOOM = 2
+export const MIN_ZOOM = 0.1
+export const MAX_ZOOM = 4
 export const MIN_SIZE = 40
 export const MAX_SIZE = 4000
 export const COORD_LIMIT = 1_000_000
@@ -55,6 +127,12 @@ export const defaultSize: Record<CardKind, { w: number; h: number }> = {
   heading: { w: 320, h: 64 },
   checklist: { w: 260, h: 120 },
   board: { w: 200, h: 120 },
+  image: { w: 240, h: 160 },
+  file: { w: 240, h: 96 },
+  link: { w: 280, h: 120 },
+  column: { w: 280, h: 200 },
+  drawing: { w: 320, h: 320 },
+  table: { w: 360, h: 120 },
 }
 
 export const kindLabel: Record<CardKind, string> = {
@@ -62,7 +140,22 @@ export const kindLabel: Record<CardKind, string> = {
   heading: 'Judul',
   checklist: 'Checklist',
   board: 'Papan',
+  image: 'Gambar',
+  file: 'Berkas',
+  link: 'Tautan',
+  column: 'Kolom',
+  drawing: 'Gambar bebas',
+  table: 'Tabel',
 }
+
+// Batas gambar bebas dan tabel, sama dengan content_w3.go. Klien menyederhanakan goresan sebelum mengirim.
+export const DRAWING_SPACE = 4000
+export const MAX_STROKES = 300
+export const MAX_STROKE_POINTS = 2000
+export const MAX_DRAWING_POINTS = 6000
+export const PEN_WIDTHS = [2, 4, 8] as const
+export const MAX_TABLE_ROWS = 100
+export const MAX_TABLE_COLS = 20
 
 export const colors: { value: CardColor | null; label: string }[] = [
   { value: null, label: 'Putih' },
@@ -92,6 +185,22 @@ export function zoomAt(v: Viewport, sx: number, sy: number, nextZoom: number): V
   const zoom = clamp(nextZoom, MIN_ZOOM, MAX_ZOOM)
   const w = toWorld(v, sx, sy)
   return { zoom, x: sx - w.x * zoom, y: sy - w.y * zoom }
+}
+
+// Jarak gulir event wheel dalam piksel. Firefox sering mengirim baris (deltaMode 1) atau halaman (2); tanpa
+// normalisasi satu tingkat roda di sana hanya bernilai sekitar 3.
+export function wheelPixels(
+  e: { deltaX: number; deltaY: number; deltaMode: number },
+  pageHeight: number,
+): { dx: number; dy: number } {
+  const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? pageHeight : 1
+  return { dx: e.deltaX * k, dy: e.deltaY * k }
+}
+
+// Faktor zoom eksponensial terhadap jarak gulir: satu tingkat roda mouse (sekitar 100 px) kira-kira 22%, pinch
+// touchpad (delta kecil berkali-kali) halus. Satu event dibatasi 240 px supaya roda cepat tidak melompat jauh.
+export function wheelZoomFactor(dy: number): number {
+  return Math.exp(-clamp(dy, -240, 240) * 0.0025)
 }
 
 export function intersects(a: Rect, b: Rect) {
@@ -194,14 +303,39 @@ export function refSummary(ref: BoardRef | undefined): string {
 
 // Label kartu untuk pembaca layar dan daftar: jenis plus awal isinya.
 export function cardLabel(card: Card): string {
-  if (card.kind === 'board') return `Papan ${card.ref?.title ?? ''}, ${refSummary(card.ref)}`
-  if (card.kind === 'note') {
-    const t = excerpt(plainText((card.content as NoteContent).doc))
-    return t ? `Catatan: ${t}` : 'Catatan kosong'
-  }
-  if (card.kind === 'heading') {
-    const t = (card.content as HeadingContent).text
-    return t ? `Judul: ${t}` : 'Judul kosong'
+  const comments = card.comments ? `, ${card.comments} komentar` : ''
+  return kindText(card) + comments
+}
+
+function kindText(card: Card): string {
+  switch (card.kind) {
+    case 'board':
+      return `Papan ${card.ref?.title ?? ''}, ${refSummary(card.ref)}`
+    case 'note': {
+      const t = excerpt(plainText((card.content as NoteContent).doc))
+      return t ? `Catatan: ${t}` : 'Catatan kosong'
+    }
+    case 'heading': {
+      const t = (card.content as HeadingContent).text
+      return t ? `Judul: ${t}` : 'Judul kosong'
+    }
+    case 'image':
+    case 'file': {
+      const cap = (card.content as CaptionContent).caption
+      return `${kindLabel[card.kind]} ${card.file?.name ?? ''}${cap ? `, ${cap}` : ''}`
+    }
+    case 'link': {
+      const p = card.preview
+      return `Tautan: ${p?.status === 'ok' && p.title ? p.title : (card.content as LinkContent).url}`
+    }
+    case 'column':
+      return `Kolom ${(card.content as ColumnContent).title || 'tanpa judul'}`
+    case 'drawing':
+      return `Gambar bebas oleh ${card.created_by_name || 'anggota tim'}, ${(card.content as DrawingContent).strokes.length} goresan`
+    case 'table': {
+      const t = card.content as TableContent
+      return `Tabel ${t.title ? `${t.title}, ` : ''}${t.rows.length} baris, ${t.rows[0]?.length ?? 0} kolom`
+    }
   }
   const c = card.content as ChecklistContent
   const done = c.items.filter((i) => i.done).length
@@ -217,7 +351,187 @@ export function emptyContent(kind: CardKind): Card['content'] {
   if (kind === 'note') return { doc: { type: 'doc', content: [{ type: 'paragraph' }] } }
   if (kind === 'heading') return { text: '', level: 1 }
   if (kind === 'board') return {}
+  if (kind === 'image' || kind === 'file') return { caption: '' }
+  if (kind === 'link') return { url: '', preview_id: '' }
+  if (kind === 'column') return { title: '' }
+  if (kind === 'drawing') return { strokes: [] }
+  if (kind === 'table')
+    return {
+      header: true,
+      rows: [
+        ['', ''],
+        ['', ''],
+      ],
+    }
   return { title: '', items: [] }
+}
+
+type Placed = Rect & {
+  id: string
+  kind: string
+  z: number
+  column_id?: string | null
+  col_order?: number | null
+}
+
+// Tata letak kolom: isi kolom ditumpuk di bawah judulnya dengan jarak tetap, selebar kolom, dan kolom memanjang
+// mengikuti isinya. Mengembalikan posisi tampil setiap isi kolom dan tinggi tampil setiap kolom.
+export const COLUMN_HEAD = 56
+export const COLUMN_GAP = 8
+export function columnLayout(cards: Placed[]): {
+  children: Map<string, Rect & { z: number }>
+  heights: Map<string, number>
+} {
+  const cols = new Map(cards.filter((c) => c.kind === 'column').map((c) => [c.id, c]))
+  const groups = new Map<string, Placed[]>()
+  for (const c of cards) {
+    if (!c.column_id || !cols.has(c.column_id)) continue
+    groups.set(c.column_id, [...(groups.get(c.column_id) ?? []), c])
+  }
+  const children = new Map<string, Rect & { z: number }>()
+  const heights = new Map<string, number>()
+  for (const [id, col] of cols) {
+    const list = (groups.get(id) ?? []).sort(
+      (a, b) => (a.col_order ?? 0) - (b.col_order ?? 0) || (a.id < b.id ? -1 : 1),
+    )
+    let y = col.y + COLUMN_HEAD
+    for (const c of list) {
+      children.set(c.id, {
+        x: col.x + COLUMN_GAP,
+        y,
+        w: Math.max(MIN_SIZE, col.w - COLUMN_GAP * 2),
+        h: c.h,
+        z: col.z,
+      })
+      y += c.h + COLUMN_GAP
+    }
+    heights.set(id, Math.max(col.h, y - col.y))
+  }
+  return { children, heights }
+}
+
+// Urutan baru di kolom untuk kartu yang dilepas di titik y: di antara dua tetangga, sebelum yang pertama, atau
+// sesudah yang terakhir.
+export function columnOrderAt(
+  siblings: { y: number; h: number; col_order?: number | null }[],
+  y: number,
+): number {
+  const list = [...siblings].sort((a, b) => a.y - b.y)
+  if (list.length === 0) return 1
+  const idx = list.findIndex((s) => y < s.y + s.h / 2)
+  if (idx === 0) return (list[0]!.col_order ?? 0) - 1
+  if (idx < 0) return (list.at(-1)!.col_order ?? 0) + 1
+  return ((list[idx - 1]!.col_order ?? 0) + (list[idx]!.col_order ?? 0)) / 2
+}
+
+// Titik tempat garis dari pusat kotak ke arah titik lain keluar dari tepi kotak, supaya garis penghubung mulai
+// dan berakhir di tepi kartu, bukan di tengahnya.
+export function edgePoint(r: Rect, toward: { x: number; y: number }): { x: number; y: number } {
+  const cx = r.x + r.w / 2
+  const cy = r.y + r.h / 2
+  const dx = toward.x - cx
+  const dy = toward.y - cy
+  if (dx === 0 && dy === 0) return { x: cx, y: cy }
+  const t = Math.min(
+    dx === 0 ? Infinity : r.w / 2 / Math.abs(dx),
+    dy === 0 ? Infinity : r.h / 2 / Math.abs(dy),
+  )
+  return { x: cx + dx * t, y: cy + dy * t }
+}
+
+// Penyederhanaan Ramer-Douglas-Peucker untuk goresan (pasangan x,y datar). Ujung goresan selalu dipertahankan.
+export function simplify(points: number[], tolerance: number): number[] {
+  const n = Math.floor(points.length / 2)
+  if (n <= 2) return points.slice(0, n * 2).map(Math.round)
+  const keep = new Uint8Array(n)
+  keep[0] = 1
+  keep[n - 1] = 1
+  const stack: [number, number][] = [[0, n - 1]]
+  while (stack.length) {
+    const [a, b] = stack.pop()!
+    const ax = points[a * 2]!
+    const ay = points[a * 2 + 1]!
+    const bx = points[b * 2]!
+    const by = points[b * 2 + 1]!
+    const len = Math.hypot(bx - ax, by - ay)
+    let worst = -1
+    let dist = 0
+    for (let i = a + 1; i < b; i++) {
+      const px = points[i * 2]!
+      const py = points[i * 2 + 1]!
+      const d =
+        len === 0
+          ? Math.hypot(px - ax, py - ay)
+          : Math.abs((bx - ax) * (ay - py) - (ax - px) * (by - ay)) / len
+      if (d > dist) {
+        dist = d
+        worst = i
+      }
+    }
+    if (worst >= 0 && dist > tolerance) {
+      keep[worst] = 1
+      stack.push([a, worst], [worst, b])
+    }
+  }
+  const out: number[] = []
+  for (let i = 0; i < n; i++)
+    if (keep[i]) out.push(Math.round(points[i * 2]!), Math.round(points[i * 2 + 1]!))
+  return out
+}
+
+// Goresan terdekat dari titik dunia (x, y) di antara objek gambar, dalam jarak tol. Jarak diukur ke ruas garis,
+// ditambah setengah ketebalan pena, supaya klik tepat di garis tebal tetap kena.
+export function hitStroke(
+  objects: { id: string; x: number; y: number; content: DrawingContent }[],
+  x: number,
+  y: number,
+  tol: number,
+): { id: string; index: number } | null {
+  let best: { id: string; index: number } | null = null
+  let bestD = Infinity
+  for (const o of objects) {
+    o.content.strokes.forEach((s, index) => {
+      const p = s.points
+      const reach = tol + s.width / 2
+      for (let i = 0; i + 1 < p.length; i += 2) {
+        const ax = o.x + p[i]!
+        const ay = o.y + p[i + 1]!
+        const bx = i + 3 < p.length ? o.x + p[i + 2]! : ax
+        const by = i + 3 < p.length ? o.y + p[i + 3]! : ay
+        const len2 = (bx - ax) ** 2 + (by - ay) ** 2
+        const t = len2 === 0 ? 0 : clamp(((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / len2, 0, 1)
+        const d = Math.hypot(x - (ax + t * (bx - ax)), y - (ay + t * (by - ay)))
+        if (d <= reach && d < bestD) {
+          bestD = d
+          best = { id: o.id, index }
+        }
+      }
+    })
+  }
+  return best
+}
+
+// Kotak batas goresan berkoordinat dunia, sama dengan perhitungan server (setengah tebal plus 2 px), untuk memutuskan
+// kapan sesi pena memulai objek baru.
+export function strokesBox(strokes: Stroke[]): Rect | null {
+  let x1 = Infinity
+  let y1 = Infinity
+  let x2 = -Infinity
+  let y2 = -Infinity
+  for (const s of strokes) {
+    const pad = s.width / 2 + 2
+    for (let i = 0; i + 1 < s.points.length; i += 2) {
+      x1 = Math.min(x1, s.points[i]! - pad)
+      x2 = Math.max(x2, s.points[i]! + pad)
+      y1 = Math.min(y1, s.points[i + 1]! - pad)
+      y2 = Math.max(y2, s.points[i + 1]! + pad)
+    }
+  }
+  return x1 === Infinity ? null : { x: x1, y: y1, w: x2 - x1, h: y2 - y1 }
+}
+
+export function drawingPoints(c: DrawingContent): number {
+  return c.strokes.reduce((s, k) => s + k.points.length / 2, 0)
 }
 
 export type Activity = {
@@ -249,6 +563,16 @@ export function activityText(a: Activity): string {
       return `memindahkan ${n} kartu ke Tempat sampah${typeof s.boards === 'number' && s.boards > 0 ? `, termasuk ${s.boards} papan` : ''}`
     case 'cards_restored':
       return `memulihkan ${n} kartu dari Tempat sampah`
+    case 'cards_moved_out':
+      return `memindahkan ${n} kartu ke papan "${String(s.board ?? '')}"`
+    case 'cards_moved_in':
+      return `memindahkan ${n} kartu ke papan ini`
+    case 'connector_created':
+      return 'menambah garis penghubung'
+    case 'connector_deleted':
+      return 'memindahkan garis penghubung ke Tempat sampah'
+    case 'comment_added':
+      return `mengomentari kartu${ex}`
     default:
       return 'mengubah papan'
   }

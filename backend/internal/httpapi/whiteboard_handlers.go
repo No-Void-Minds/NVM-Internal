@@ -31,7 +31,7 @@ func wbWriter() gin.HandlerFunc {
 }
 
 func wbActor(c *gin.Context) whiteboard.Actor {
-	return whiteboard.Actor{ID: currentUser(c).ID, IP: clientAddr(c)}
+	return whiteboard.Actor{ID: currentUser(c).ID, IP: clientAddr(c), Manager: currentUser(c).Role == sqlc.UserRoleManager}
 }
 
 func bindJSON(c *gin.Context, v any) bool {
@@ -110,6 +110,25 @@ func (s *Server) wbPatchCards(c *gin.Context) {
 	}
 	if !bindJSON(c, &req) {
 		return
+	}
+	// Isi tabel dan gambar bebas hanya diubah pemegang kunci lunaknya; catatan dijaga content_version (W2).
+	board := ""
+	for _, p := range req.Cards {
+		if len(p.Content) == 0 || string(p.Content) == "null" {
+			continue
+		}
+		if board == "" {
+			b, err := s.whiteboard.ResolveBoard(c.Request.Context(), wbActor(c), c.Param("id"))
+			if err != nil {
+				s.writeWbError(c, err)
+				return
+			}
+			board = b
+		}
+		kind, err := s.whiteboard.CardKind(c.Request.Context(), board, p.ID)
+		if err == nil && (kind == whiteboard.KindTable || kind == whiteboard.KindDrawing) && s.wbLocked(c, p.ID) {
+			return
+		}
 	}
 	cards, err := s.whiteboard.PatchCards(c.Request.Context(), wbActor(c), c.Param("id"), req.Cards)
 	if err != nil {
@@ -190,6 +209,8 @@ func (s *Server) writeWbError(c *gin.Context, err error) {
 			"error": apiError{Code: CodeConflict, Message: "Isi kartu ini baru diubah orang lain."},
 			"card":  conflict.Card,
 		})
+	case errors.Is(err, whiteboard.ErrForbidden):
+		writeError(c, http.StatusForbidden, CodeForbidden, "Hanya penulis komentar (atau Manajer untuk menghapus) yang bisa mengubahnya.")
 	case errors.Is(err, whiteboard.ErrStale):
 		writeError(c, http.StatusConflict, CodeConflict, "Judul papan ini baru diubah orang lain. Muat ulang, lalu coba lagi.")
 	case errors.Is(err, whiteboard.ErrNotFound):

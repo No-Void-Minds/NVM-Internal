@@ -5,54 +5,93 @@ import BaseDialog from '../components/BaseDialog.vue'
 import UserAvatar from '../components/UserAvatar.vue'
 import WbCard from '../components/whiteboard/WbCard.vue'
 import WbTrashPanel from '../components/whiteboard/WbTrashPanel.vue'
+import WbConnectorLayer from '../components/whiteboard/WbConnectorLayer.vue'
+import WbConnectorDialog from '../components/whiteboard/WbConnectorDialog.vue'
+import WbCommentsPanel from '../components/whiteboard/WbCommentsPanel.vue'
+import WbMoveDialog from '../components/whiteboard/WbMoveDialog.vue'
+import WbLinkDialog from '../components/whiteboard/WbLinkDialog.vue'
+import WbInk from '../components/whiteboard/WbInk.vue'
+import WbPenBar from '../components/whiteboard/WbPenBar.vue'
+import { inkColor, penColors } from '../components/whiteboard/wbColors'
+import { caretHint, type CaretHint } from '../components/whiteboard/caret'
 import { ApiError, notifyUnauthorized } from '../api/client'
 import {
   boardActivity,
   checklistOp,
   createCard,
+  createConnector,
+  createDrawing,
   deleteCards,
+  deleteConnector,
+  drawingOp,
+  fetchPreview,
   getBoard,
+  moveCards,
   patchCards,
   renameBoard,
   restoreBatch,
   searchBoards,
+  tableOp,
+  updateConnector,
+  uploadFile,
   type BoardView,
   type CardPatch,
   type ChecklistOp,
   type NewCard,
+  type PenStroke,
   type SearchResult,
+  type TableOp,
 } from '../api/whiteboard'
+import { formatBytes } from '../utils/attachment'
+import { pastedFiles } from '../utils/pasteFiles'
 import { useSessionStore } from '../stores/session'
 import { formatDateTime } from '../utils/format'
 import {
   activityText,
   bounds,
+  cardLabel,
   clamp,
   colors,
+  columnLayout,
+  columnOrderAt,
   COORD_LIMIT,
+  DRAWING_SPACE,
   defaultSize,
+  drawingPoints,
   emptyContent,
   fitView,
   GRID,
+  hitStroke,
   intersects,
   kindLabel,
+  MAX_DRAWING_POINTS,
   MAX_SIZE,
+  MAX_STROKE_POINTS,
+  MAX_STROKES,
   MAX_ZOOM,
   MIN_SIZE,
   MIN_ZOOM,
   nearestInDirection,
   newId,
   readingOrder,
+  simplify,
   snap,
+  strokesBox,
   toWorld,
   visibleWorld,
+  wheelPixels,
+  wheelZoomFactor,
   zoomAt,
   type Activity,
   type Card,
   type CardColor,
   type CardKind,
   type ChecklistContent,
+  type Connector,
+  type ConnectorStyle,
   type Direction,
+  type DrawingContent,
+  type Rect,
   type HeadingContent,
   type PMNode,
   type Viewport,
@@ -83,6 +122,34 @@ let abort: AbortController | null = null
 // Id papan yang sedang terbuka untuk API tulis; "root" sampai jawaban pertama datang.
 const bid = computed(() => board.value?.id ?? boardKey.value)
 const byId = computed(() => new Map(cards.value.map((c) => [c.id, c])))
+const connectors = shallowRef<Connector[]>([])
+
+// Geometri tampil (W3): isi kolom ditumpuk di kolomnya dan kolom memanjang mengikuti isinya. Posisi tersimpan isi
+// kolom diabaikan selama kartunya ada di kolom.
+const layout = computed(() => columnLayout(cards.value))
+function shown(c: Card): Card {
+  const ch = layout.value.children.get(c.id)
+  if (ch) return { ...c, x: ch.x, y: ch.y, w: ch.w, z: ch.z + 1 }
+  const h = layout.value.heights.get(c.id)
+  return h === undefined ? c : { ...c, h }
+}
+const shownCards = computed(() => cards.value.map(shown))
+const shownById = computed(() => new Map(shownCards.value.map((c) => [c.id, c])))
+
+function upsertConnectors(list: Connector[]) {
+  const map = new Map(connectors.value.map((c) => [c.id, c]))
+  for (const c of list) {
+    const cur = map.get(c.id)
+    if (cur && cur.version > c.version) continue
+    map.set(c.id, c)
+    lastSeq = Math.max(lastSeq, c.seq)
+  }
+  connectors.value = [...map.values()]
+}
+function removeConnectors(ids: string[]) {
+  const gone = new Set(ids)
+  connectors.value = connectors.value.filter((c) => !gone.has(c.id))
+}
 // seq terbesar yang sudah diterapkan; dikirim saat join supaya server menyusulkan perubahan yang terlewat.
 let lastSeq = 0
 
@@ -119,6 +186,7 @@ async function load(keepView = false) {
     board.value = res.board
     canWrite.value = res.can_write
     cards.value = res.board.cards
+    connectors.value = res.board.connectors ?? []
     lastSeq = res.board.seq
     state.value = 'ok'
     sendJoin()
@@ -264,7 +332,7 @@ watch(canvas, (el, old) => {
 })
 
 function fit() {
-  view.value = fitView(cards.value, size.value.w, size.value.h)
+  view.value = fitView(shownCards.value, size.value.w, size.value.h)
 }
 function zoomBy(factor: number) {
   view.value = zoomAt(view.value, size.value.w / 2, size.value.h / 2, view.value.zoom * factor)
@@ -291,7 +359,8 @@ function centerOn(x: number, y: number) {
   view.value = { zoom: z, x: size.value.w / 2 - x * z, y: size.value.h / 2 - y * z }
 }
 
-function reveal(card: Card) {
+function reveal(stored: Card) {
+  const card = shownById.value.get(stored.id) ?? stored
   const tl = toWorld(view.value, 0, 0)
   const br = toWorld(view.value, size.value.w, size.value.h)
   if (card.x >= tl.x && card.y >= tl.y && card.x + card.w <= br.x && card.y + card.h <= br.y) return
@@ -320,13 +389,29 @@ const rendered = computed(() => {
   const area = visibleWorld(view.value, size.value.w || 1, size.value.h || 1)
   const keep = new Set([...selected.value, focusedId.value, editingId.value])
   const moves = remoteMoves.value
-  const shown = cards.value.map((c) => {
+  const list = shownCards.value.map((c) => {
     const m = moves.get(c.id)
     return m ? { ...c, x: m.x, y: m.y, w: m.w, h: m.h } : c
   })
-  return readingOrder(shown.filter((c) => keep.has(c.id) || intersects(area, c)))
+  return readingOrder(list.filter((c) => keep.has(c.id) || intersects(area, c)))
 })
-const ordered = computed(() => readingOrder(cards.value))
+const ordered = computed(() => readingOrder(shownCards.value))
+
+// Kartu ikut bergeser saat diseret bila kartu itu sendiri atau kolomnya terpilih.
+function dragged(c: Card) {
+  return selected.value.has(c.id) || (!!c.column_id && selected.value.has(c.column_id))
+}
+// Geometri tampil plus geser seret, untuk ujung garis penghubung.
+const geomMap = computed(() => {
+  const { dx, dy } = dragOffset.value
+  const out = new Map<string, Rect>()
+  for (const c of shownCards.value) {
+    const d = dragged(c)
+    const r = gestureResizeId.value === c.id ? resizeDelta.value : { dw: 0, dh: 0 }
+    out.set(c.id, { x: c.x + (d ? dx : 0), y: c.y + (d ? dy : 0), w: c.w + r.dw, h: c.h + r.dh })
+  }
+  return out
+})
 const rovingId = computed(() => focusedId.value ?? ordered.value[0]?.id ?? null)
 
 const cardRefs = new Map<string, HTMLElement>()
@@ -539,6 +624,8 @@ function onSocketMessage(m: Record<string, unknown>) {
       else {
         if (Array.isArray(m.cards)) applyChanged(m.cards as Card[])
         if (Array.isArray(m.deleted)) removeLocal(m.deleted as string[])
+        if (Array.isArray(m.connectors)) upsertConnectors(m.connectors as Connector[])
+        if (Array.isArray(m.connectors_gone)) removeConnectors(m.connectors_gone as string[])
       }
       const locks: Record<string, Who> = {}
       for (const l of (m.locks as { card: string; user: Who }[]) ?? []) locks[l.card] = l.user
@@ -621,6 +708,7 @@ function onSocketMessage(m: Record<string, unknown>) {
       return
     case 'unlocked':
       remoteLocks.value = omit(remoteLocks.value, String(m.card))
+      if (readonlyFor.value?.id === m.card) readonlyFor.value = null
       return
     case 'lock_release':
       // Tab lain milik akun yang sama minta kunci kartu ini: simpan dulu, lalu lepas.
@@ -641,7 +729,26 @@ function onSocketMessage(m: Record<string, unknown>) {
     }
     case 'changed':
       applyChanged(m.cards as Card[], Number(m.by))
+      if (commentsFor.value && (m.cards as Card[]).some((c) => c.id === commentsFor.value))
+        commentsReload.value++
       return
+    case 'connectors':
+      upsertConnectors(m.items as Connector[])
+      return
+    case 'connectors_gone':
+      removeConnectors(m.ids as string[])
+      return
+    case 'moved': {
+      const ids = m.ids as string[]
+      if (editingId.value && ids.includes(editingId.value)) {
+        dirtyNotes.delete(editingId.value)
+        editingId.value = null
+        showToast(`Kartu yang sedang kamu edit dipindah ke papan lain oleh ${String(m.by)}.`)
+      }
+      removeLocal(ids)
+      removeConnectors((m.connectors_gone as string[]) ?? [])
+      return
+    }
     case 'deleted': {
       const ids = m.ids as string[]
       const mine = ids.every((id) => deletingIds.has(id))
@@ -659,6 +766,29 @@ function onSocketMessage(m: Record<string, unknown>) {
     case 'renamed':
       if (board.value?.id === m.board) applyTitle(String(m.title), Number(m.version))
       return
+    case 'ink': {
+      const u = m.user as Who
+      remoteInk.value = {
+        ...remoteInk.value,
+        [u.id]: {
+          points: m.points as number[],
+          color: String(m.color),
+          width: Number(m.width),
+          at: Date.now(),
+        },
+      }
+      return
+    }
+    case 'ink_end': {
+      const u = m.user as Who
+      // Dibiarkan sebentar sampai goresan tersimpannya datang lewat changed, supaya tidak berkedip.
+      setTimeout(() => {
+        const next = { ...remoteInk.value }
+        delete next[u.id]
+        remoteInk.value = next
+      }, 600)
+      return
+    }
     case 'resync':
       load(true)
       return
@@ -734,6 +864,10 @@ onMounted(() => {
       remoteMoves.value = new Map([...remoteMoves.value].filter(([, m]) => now - m.at <= 3000))
     }
     cursors.value = Object.fromEntries(Object.entries(cursors.value).filter(([, c]) => now - c.at < 10000))
+    if (Object.values(remoteInk.value).some((k) => now - k.at > 3000))
+      remoteInk.value = Object.fromEntries(
+        Object.entries(remoteInk.value).filter(([, k]) => now - k.at <= 3000),
+      )
     checkIdle()
   }, 1000)
 })
@@ -782,10 +916,10 @@ watch(selected, (s) => {
 // ---------------------------------------------------------------------------------------------------------------
 // Buat, ubah isi, hapus
 
-const toast = ref<{ text: string; batch?: string } | null>(null)
+const toast = ref<{ text: string; batch?: string; board?: string } | null>(null)
 let toastTimer: ReturnType<typeof setTimeout> | undefined
-function showToast(text: string, batch?: string) {
-  toast.value = { text, batch }
+function showToast(text: string, batch?: string, board?: string) {
+  toast.value = { text, batch, board }
   announce.value = text
   clearTimeout(toastTimer)
   toastTimer = setTimeout(() => (toast.value = null), 8000)
@@ -803,7 +937,7 @@ const canRedo = computed(() => historyVersion.value >= 0 && history.redo.length 
 let placed = 0
 // Kartu baru di titik dunia at (dari seret alat), atau di tengah layar dengan sedikit geser supaya kartu yang
 // dibuat beruntun tidak menumpuk persis.
-async function addCard(kind: CardKind, at?: { x: number; y: number }) {
+async function addCard(kind: CardKind, at?: { x: number; y: number }, extra?: Card['content']) {
   if (!canWrite.value) return
   const dim = defaultSize[kind]
   const c = at ?? centerWorld()
@@ -818,15 +952,17 @@ async function addCard(kind: CardKind, at?: { x: number; y: number }) {
     color: '',
   }
   if (kind === 'board') input.title = 'Papan tanpa judul'
-  else input.content = emptyContent(kind)
+  else input.content = extra ?? emptyContent(kind)
   try {
     const res = await saving(() => createCard(bid.value, input))
     if (!res) return
     upsert([res.card])
     record({ kind: 'create', ids: [res.card.id] })
     select([res.card.id])
-    startEdit(res.card.id)
+    if (kind !== 'link') startEdit(res.card.id)
+    else focusCard(res.card.id)
     announce.value = `${kindLabel[kind]} baru ditambahkan.`
+    return res.card
   } catch {
     // Pesan galat sudah tampil di penanda simpan.
   }
@@ -926,6 +1062,22 @@ function onHeadingDraft(id: string, text: string) {
   if (card) sendDraft(id, { text, level: (card.content as HeadingContent).level ?? 1 })
 }
 
+// Keterangan, judul kolom, dan goresan gambar bebas: isi utuh, dijaga content_version seperti catatan. Goresan juga
+// dikirim sebagai draf supaya orang lain melihat gambarnya bertambah langsung.
+function onContent(id: string, content: Card['content']) {
+  patchLocal(id, { content })
+  queueContent(id, content)
+}
+
+async function onTable(id: string, op: TableOp) {
+  try {
+    const res = await saving(() => tableOp(bid.value, id, op))
+    if (res) upsert([res.card])
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 409) showToast(e.message)
+  }
+}
+
 async function onRenameRef(id: string, title: string) {
   const card = byId.value.get(id)
   if (!card?.ref) return
@@ -986,14 +1138,28 @@ async function onChecklist(id: string, op: ChecklistOp, recordStep = true) {
 const editBefore = new Map<string, { content: Card['content']; version: number }>()
 let pendingForce: string | null = null
 
-function startEdit(id: string) {
-  if (!canWrite.value) return
+// Petunjuk posisi kursor dari dobel klik, dipakai editor yang dibuka (kosong untuk Enter dan tombol Ubah isi).
+const editHint = ref<(CaretHint & { id: string }) | null>(null)
+// Kartu yang dikunci orang lain dan dibuka hanya baca (dobel klik): teksnya tetap berubah langsung lewat draf.
+const readonlyFor = ref<{ id: string; name: string } | null>(null)
+watch(selected, (s) => {
+  if (readonlyFor.value && !s.has(readonlyFor.value.id)) readonlyFor.value = null
+})
+
+function startEdit(id: string, hint?: CaretHint) {
+  const kind = byId.value.get(id)?.kind
+  if (!canWrite.value || kind === 'link' || kind === 'drawing') return
   const lock = remoteLocks.value[id]
   if (lock) {
     if (lock.id === myId.value) tabPrompt.value = id
-    else showToast(`${lock.name} sedang mengedit kartu ini.`)
+    else {
+      select([id])
+      readonlyFor.value = { id, name: lock.name }
+      announce.value = `Hanya baca: ${lock.name} sedang mengedit kartu ini.`
+    }
     return
   }
+  editHint.value = hint ? { ...hint, id } : null
   send({ t: 'lock', card: id })
   beginEdit(id)
 }
@@ -1018,6 +1184,7 @@ onMounted(() => {
   // Detak kunci tiap 10 detik; tanpa detak 30 detik server melepasnya (koneksi setengah mati).
   lockBeat = setInterval(() => {
     if (editingId.value) send({ t: 'lock', card: editingId.value })
+    if (penObject.value) send({ t: 'lock', card: penObject.value })
   }, 10000)
 })
 
@@ -1107,6 +1274,21 @@ async function undoDelete() {
 
 function restoreFrom(info: { batch: string } | null) {
   if (info) restoreDeleted(info.batch)
+}
+
+// Aksi W3 di satu pilihan, supaya bar pilihan tetap pendek di ponsel dan tidak menutupi kartu.
+function onMoreAction(e: Event) {
+  const el = e.target as HTMLSelectElement
+  const first = [...selected.value][0]
+  const action = el.value
+  el.value = ''
+  if (action === 'comments' && first) commentsFor.value = first
+  else if (action === 'lines' && first) connectorIds.value = connectorsOf(first).map((c) => c.id)
+  else if (action === 'connect') connectSelected()
+  else if (action === 'move') {
+    moveError.value = ''
+    moveOpen.value = true
+  }
 }
 
 function onAlignChange(e: Event) {
@@ -1321,6 +1503,7 @@ type ClipCard = {
   color: CardColor | null
   content: Card['content']
   title?: string
+  file_id?: string
 }
 let clipMemory = ''
 
@@ -1338,6 +1521,7 @@ function clipOf(ids: string[]): string {
       color: c.color,
       content: c.content,
       title: c.ref?.title,
+      file_id: c.file?.id,
     }))
   return CLIP_PREFIX + JSON.stringify({ v: 1, board: bid.value, cards: list })
 }
@@ -1378,6 +1562,7 @@ async function pasteText(text: string, sameOffset = false) {
     // Kartu papan ditempel sebagai papan baru yang kosong; isinya tidak ikut tersalin.
     if (k.kind === 'board') input.title = `${k.title ?? 'Papan'} (salinan)`.slice(0, 120)
     else input.content = k.content
+    if (k.file_id) input.file_id = k.file_id
     try {
       const res = await saving(() => createCard(bid.value, input))
       if (res) {
@@ -1404,6 +1589,13 @@ function duplicateSelection() {
 function onPaste(e: ClipboardEvent) {
   const el = document.activeElement
   if (editingId.value || !canvas.value || !(el === canvas.value || canvas.value.contains(el))) return
+  // Tangkapan layar dan berkas dari clipboard menjadi kartu gambar atau berkas di tengah layar.
+  const files = pastedFiles(e.clipboardData, new Date())
+  if (files.length && canWrite.value) {
+    e.preventDefault()
+    uploadFiles(files)
+    return
+  }
   const text = e.clipboardData?.getData('text/plain') || clipMemory
   if (text.startsWith(CLIP_PREFIX)) {
     e.preventDefault()
@@ -1415,13 +1607,39 @@ onMounted(() => document.addEventListener('paste', onPaste))
 // ---------------------------------------------------------------------------------------------------------------
 // Alat: klik menaruh kartu di tengah layar, seret menaruhnya di titik lepas.
 
-type ToolKind = CardKind
+type ToolKind = CardKind | 'upload'
 const tools: { kind: ToolKind; label: string; path: string }[] = [
   { kind: 'note', label: 'Catatan', path: 'M5 4h10l4 4v12H5zM15 4v4h4M8 12h8M8 16h5' },
   { kind: 'heading', label: 'Judul', path: 'M6 5v14M18 5v14M6 12h12' },
   { kind: 'checklist', label: 'Checklist', path: 'M4 7l2 2 3-3M4 15l2 2 3-3M12 8h8M12 16h8' },
   { kind: 'board', label: 'Papan', path: 'M4 4h16v16H4zM8 8h3v3H8zM13 8h3M13 11h3M8 14h8' },
+  { kind: 'upload', label: 'Berkas', path: 'M12 16V4M7 9l5-5 5 5M4 16v4h16v-4' },
+  {
+    kind: 'link',
+    label: 'Tautan',
+    path: 'M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1-1',
+  },
+  { kind: 'column', label: 'Kolom', path: 'M5 4h6v16H5zM13 4h6v10h-6z' },
+  { kind: 'drawing', label: 'Gambar', path: 'M4 20l4-1 11-11-3-3L5 16zM14 7l3 3' },
+  { kind: 'table', label: 'Tabel', path: 'M4 5h16v14H4zM4 10h16M4 15h16M10 5v14' },
 ]
+
+// Alat yang membuka pilihan dulu (berkas, tautan) mengingat titik lepasnya.
+let toolAt: { x: number; y: number } | undefined
+function useTool(kind: ToolKind, at?: { x: number; y: number }) {
+  toolAt = at
+  if (kind === 'drawing') {
+    if (penOn.value) stopPen()
+    else startPen()
+    return
+  }
+  stopPen()
+  if (kind === 'upload') fileInput.value?.click()
+  else if (kind === 'link') {
+    linkError.value = ''
+    linkOpen.value = true
+  } else addCard(kind, at)
+}
 const toolDrag = ref<{
   kind: ToolKind
   x: number
@@ -1464,7 +1682,7 @@ function onToolUp(e: PointerEvent) {
   suppressClick = true
   const r = canvas.value.getBoundingClientRect()
   if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return
-  addCard(d.kind, toWorld(view.value, e.clientX - r.left, e.clientY - r.top))
+  useTool(d.kind, toWorld(view.value, e.clientX - r.left, e.clientY - r.top))
 }
 function onToolClick(kind: ToolKind) {
   if (suppressClick) {
@@ -1472,7 +1690,7 @@ function onToolClick(kind: ToolKind) {
     return
   }
   sheetOpen.value = false
-  addCard(kind)
+  useTool(kind)
 }
 const toolGhost = computed(() => {
   const d = toolDrag.value
@@ -1482,6 +1700,513 @@ const toolGhost = computed(() => {
     style: { left: `${d.x + 8}px`, top: `${d.y + 8}px` },
   }
 })
+
+// ---------------------------------------------------------------------------------------------------------------
+// Mode pena (revisi A): coret langsung di kanvas, di atas kartu. Satu sesi pena orang yang sama menjadi satu objek
+// gambar; lewat batas (300 goresan, 6.000 titik, atau 4.000 px) sesi otomatis memulai objek baru. Goresan yang
+// sedang digambar disiarkan langsung lewat WebSocket, dan disimpan lewat REST saat goresan selesai.
+
+const penOn = ref(false)
+const penColor = ref('tinta')
+const penWidth = ref(4)
+const penEraser = ref(false)
+// Objek gambar sesi ini (dikunci selama sesi, supaya penghapus orang lain ditolak dengan nama kita).
+const penObject = ref<string | null>(null)
+const live = shallowRef<PenStroke | null>(null)
+// Goresan yang sudah selesai tetapi belum dijawab server, tetap tampil supaya tidak berkedip.
+const pendingInk = shallowRef<PenStroke[]>([])
+const remoteInk = ref<Record<number, PenStroke & { at: number; color: string }>>({})
+let penChain: Promise<unknown> = Promise.resolve()
+let lastInkSent = 0
+
+function startPen() {
+  if (!canWrite.value) return
+  if (editingId.value) stopEdit()
+  select([])
+  penOn.value = true
+  penEraser.value = false
+  announce.value =
+    'Mode pena aktif. Coret di kanvas; dua jari untuk menggeser. Escape atau Selesai untuk keluar.'
+}
+
+// Escape keluar dari mode pena di mana pun fokusnya (kanvas, toolbar pena, atau halaman), kecuali di dialog.
+function onPenEscape(e: KeyboardEvent) {
+  if (e.key !== 'Escape' || !penOn.value || (e.target as HTMLElement | null)?.closest?.('dialog')) return
+  e.preventDefault()
+  stopPen()
+}
+watch(penOn, (on) => {
+  if (on) window.addEventListener('keydown', onPenEscape)
+  else window.removeEventListener('keydown', onPenEscape)
+})
+
+function stopPen() {
+  if (!penOn.value) return
+  penOn.value = false
+  live.value = null
+  if (penObject.value) send({ t: 'unlock', card: penObject.value })
+  penObject.value = null
+  announce.value = 'Mode pena selesai.'
+}
+
+function penPoint(e: PointerEvent): [number, number] {
+  const p = local(e)
+  const w = toWorld(view.value, p.x, p.y)
+  return [Math.round(w.x), Math.round(w.y)]
+}
+
+function drawingObjects() {
+  return shownCards.value.filter((c) => c.kind === 'drawing') as (Card & { content: DrawingContent })[]
+}
+
+async function eraseAt(e: PointerEvent) {
+  const [x, y] = penPoint(e)
+  const hit = hitStroke(drawingObjects(), x, y, 8 / view.value.zoom)
+  if (!hit) return
+  const lock = remoteLocks.value[hit.id]
+  if (lock && lock.id !== myId.value) {
+    showToast(`${lock.name} sedang menggambar di objek ini. Tunggu sampai selesai, lalu hapus.`)
+    return
+  }
+  const obj = byId.value.get(hit.id)
+  if (!obj) return
+  if ((obj.content as DrawingContent).strokes.length <= 1) {
+    if (penObject.value === hit.id) penObject.value = null
+    const res = await deleteIds([hit.id]).catch(() => undefined)
+    if (res) {
+      removeLocal([hit.id])
+      record({ kind: 'delete', ids: [hit.id], batch: res.batch })
+      showToast('Gambar dipindah ke Tempat sampah.', res.batch)
+    }
+    return
+  }
+  try {
+    const res = await saving(() => drawingOp(bid.value, hit.id, { op: 'remove', index: hit.index }))
+    if (res) upsert([res.card])
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 409) showToast(err.message)
+  }
+}
+
+function onPenDown(e: PointerEvent) {
+  if (!penOn.value || (e.pointerType === 'mouse' && e.button !== 0)) return
+  e.preventDefault()
+  markActive()
+  // Dua jari: goresan dibatalkan, kanvas digeser dan di-zoom seperti biasa.
+  if (trackTouch(e)) {
+    live.value = null
+    send({ t: 'ink_end' })
+    begin(e)
+    return
+  }
+  if (penEraser.value) {
+    eraseAt(e)
+    return
+  }
+  try {
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  } catch {
+    // Pointer sintetis tidak bisa di-capture; gerakan tetap terbaca selama di atas kanvas.
+  }
+  live.value = { color: penColor.value, width: penWidth.value, points: penPoint(e) }
+}
+
+function onPenMove(e: PointerEvent) {
+  if (e.pointerType === 'touch' && touches.has(e.pointerId)) touches.set(e.pointerId, local(e))
+  if (gesture?.kind === 'pinch') return
+  if (penEraser.value && e.buttons === 1) {
+    eraseAt(e)
+    return
+  }
+  const s = live.value
+  if (!s) return
+  const [x, y] = penPoint(e)
+  const n = s.points.length
+  if (n >= MAX_STROKE_POINTS * 8 || (s.points[n - 2] === x && s.points[n - 1] === y)) return
+  live.value = { ...s, points: [...s.points, x, y] }
+  const now = performance.now()
+  if (now - lastInkSent > 66) {
+    lastInkSent = now
+    send({
+      t: 'ink',
+      points: live.value.points.slice(-MAX_STROKE_POINTS * 2),
+      color: s.color,
+      width: s.width,
+    })
+  }
+}
+
+function onPenUp(e: PointerEvent) {
+  if (e.pointerType === 'touch') touches.delete(e.pointerId)
+  const s = live.value
+  live.value = null
+  if (!s) return
+  send({ t: 'ink_end' })
+  // Toleransi sekitar setengah piksel layar pada zoom sekarang.
+  const points = simplify(s.points, 0.5 / view.value.zoom).slice(0, MAX_STROKE_POINTS * 2)
+  const stroke = { ...s, points }
+  pendingInk.value = [...pendingInk.value, stroke]
+  penChain = penChain
+    .then(() => saveStroke(stroke))
+    .finally(() => {
+      pendingInk.value = pendingInk.value.filter((p) => p !== stroke)
+    })
+}
+
+// Goresan masuk objek sesi bila masih muat; kalau tidak, sesi memulai objek baru.
+function fits(obj: Card | undefined, stroke: PenStroke) {
+  if (!obj) return false
+  const c = obj.content as DrawingContent
+  if (c.strokes.length >= MAX_STROKES || drawingPoints(c) + stroke.points.length / 2 > MAX_DRAWING_POINTS)
+    return false
+  const abs = c.strokes.map((k) => ({ ...k, points: k.points.map((v, i) => v + (i % 2 ? obj.y : obj.x)) }))
+  const box = strokesBox([...abs, stroke])
+  return !!box && box.w <= DRAWING_SPACE && box.h <= DRAWING_SPACE
+}
+
+async function saveStroke(stroke: PenStroke) {
+  const obj = penObject.value ? byId.value.get(penObject.value) : undefined
+  try {
+    if (obj && fits(obj, stroke)) {
+      const res = await saving(() => drawingOp(bid.value, obj.id, { op: 'add', stroke }))
+      if (res) upsert([res.card])
+      return
+    }
+    const id = newId()
+    const res = await saving(() => createDrawing(bid.value, id, stroke))
+    if (!res) return
+    upsert([res.card])
+    record({ kind: 'create', ids: [id] })
+    if (penObject.value) send({ t: 'unlock', card: penObject.value })
+    // Objek sesi dikunci: penghapus orang lain di objek ini ditolak dengan nama kita.
+    penObject.value = penOn.value ? id : null
+    if (penObject.value) send({ t: 'lock', card: id })
+  } catch (e) {
+    if (e instanceof ApiError) showToast(e.message)
+  }
+}
+
+async function undoStroke() {
+  const obj = penObject.value ? byId.value.get(penObject.value) : undefined
+  if (!obj) return
+  const n = (obj.content as DrawingContent).strokes.length
+  await penChain
+  if (n <= 1) {
+    const res = await deleteIds([obj.id]).catch(() => undefined)
+    if (res) {
+      removeLocal([obj.id])
+      penObject.value = null
+    }
+    return
+  }
+  try {
+    const res = await saving(() => drawingOp(bid.value, obj.id, { op: 'remove', index: n - 1 }))
+    if (res) upsert([res.card])
+  } catch {
+    // Pesan galat sudah tampil di penanda simpan.
+  }
+}
+
+function inkPath(points: number[]) {
+  let d = ''
+  for (let i = 0; i + 1 < points.length; i += 2) d += `${i ? 'L' : 'M'}${points[i]} ${points[i + 1]}`
+  return points.length === 2 ? `${d}h0.1` : d
+}
+
+const inkLayer = computed(() => [
+  ...pendingInk.value,
+  ...(live.value ? [live.value] : []),
+  ...Object.values(remoteInk.value),
+])
+
+// Ganti warna semua goresan objek gambar terpilih.
+async function recolorDrawings(color: string) {
+  for (const id of selected.value) {
+    if (byId.value.get(id)?.kind !== 'drawing') continue
+    try {
+      const res = await saving(() => drawingOp(bid.value, id, { op: 'color', color }))
+      if (res) upsert([res.card])
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) showToast(e.message)
+    }
+  }
+}
+const onlyDrawings = computed(
+  () => selected.value.size > 0 && [...selected.value].every((id) => byId.value.get(id)?.kind === 'drawing'),
+)
+
+// ---------------------------------------------------------------------------------------------------------------
+// Berkas dan gambar (W3): pilih, tempel, atau seret berkas dari komputer ke kanvas. Satu berkas per waktu.
+
+const fileInput = ref<HTMLInputElement | null>(null)
+const allowedExt = [
+  'jpg',
+  'jpeg',
+  'png',
+  'webp',
+  'gif',
+  'pdf',
+  'doc',
+  'docx',
+  'xls',
+  'xlsx',
+  'ppt',
+  'pptx',
+  'txt',
+  'csv',
+]
+const acceptFiles = [...allowedExt.map((e) => `.${e}`), 'image/*'].join(',')
+const MAX_FILE = 50 * 1024 * 1024
+const uploadStatus = ref('')
+let uploadBusy = false
+const uploadWaiting: { file: File; at: { x: number; y: number } }[] = []
+
+function precheckFile(f: File): string | null {
+  const ext = f.name.includes('.') ? f.name.split('.').pop()!.toLowerCase() : ''
+  if (!allowedExt.includes(ext))
+    return `${f.name} tidak bisa diunggah. Gunakan JPG, PNG, WebP, GIF, PDF, dokumen Office, TXT, atau CSV.`
+  if (f.size === 0) return `${f.name} kosong.`
+  if (f.size > MAX_FILE) return `${f.name} berukuran ${formatBytes(f.size)}, melebihi batas 50 MB.`
+  return null
+}
+
+function onFilePicked(e: Event) {
+  const el = e.target as HTMLInputElement
+  uploadFiles([...(el.files ?? [])], toolAt)
+  el.value = ''
+}
+
+function uploadFiles(files: File[], at?: { x: number; y: number }) {
+  if (!canWrite.value || !files.length) return
+  const base = at ?? centerWorld()
+  const bad: string[] = []
+  files.forEach((file, i) => {
+    const err = precheckFile(file)
+    if (err) bad.push(err)
+    else uploadWaiting.push({ file, at: { x: base.x + i * 24, y: base.y + i * 24 } })
+  })
+  if (bad.length) showToast(bad.join(' '))
+  void runUploads()
+}
+
+async function runUploads() {
+  if (uploadBusy) return
+  uploadBusy = true
+  const made: string[] = []
+  try {
+    for (let item = uploadWaiting.shift(); item; item = uploadWaiting.shift()) {
+      const { file, at } = item
+      const dim = defaultSize[file.type.startsWith('image/') ? 'image' : 'file']
+      const left = uploadWaiting.length
+      uploadStatus.value = `Mengunggah ${file.name}${left ? `, ${left} lagi menunggu` : ''}`
+      try {
+        const card = await uploadFile(
+          bid.value,
+          {
+            id: newId(),
+            x: clamp(snap(at.x - dim.w / 2, gridOn.value), -COORD_LIMIT, COORD_LIMIT),
+            y: clamp(snap(at.y - dim.h / 2, gridOn.value), -COORD_LIMIT, COORD_LIMIT),
+            w: dim.w,
+            h: dim.h,
+          },
+          file,
+          (p) =>
+            (uploadStatus.value = `Mengunggah ${file.name} (${Math.round(p * 100)}%)${left ? `, ${left} lagi menunggu` : ''}`),
+        ).promise
+        upsert([card])
+        made.push(card.id)
+      } catch (e) {
+        showToast(`${file.name}: ${e instanceof ApiError ? e.message : 'unggahan gagal.'}`)
+      }
+    }
+  } finally {
+    uploadBusy = false
+    uploadStatus.value = ''
+  }
+  if (made.length) {
+    record({ kind: 'create', ids: made })
+    select(made)
+    announce.value = `${made.length} berkas diunggah.`
+  }
+}
+
+// Seret berkas dari komputer ke kanvas: kartu muncul di titik lepas.
+const fileOver = ref(false)
+function hasFiles(e: DragEvent) {
+  return !!e.dataTransfer && [...e.dataTransfer.types].includes('Files')
+}
+function onDragOver(e: DragEvent) {
+  if (!canWrite.value || !hasFiles(e)) return
+  e.preventDefault()
+  fileOver.value = true
+}
+function onDrop(e: DragEvent) {
+  fileOver.value = false
+  if (!canWrite.value || !hasFiles(e) || !canvas.value) return
+  e.preventDefault()
+  const r = canvas.value.getBoundingClientRect()
+  uploadFiles([...(e.dataTransfer?.files ?? [])], toWorld(view.value, e.clientX - r.left, e.clientY - r.top))
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Tautan (W3): pratinjau diambil server; bila pratinjau gagal, kartu tetap dibuat dengan alamatnya saja.
+
+const linkOpen = ref(false)
+const linkBusy = ref(false)
+const linkError = ref('')
+
+async function submitLink(url: string) {
+  if (!url) return
+  // Pesan langsung tanpa memanggil server; server tetap memeriksa hal yang sama.
+  if (!/^https?:\/\/[^/\s]/i.test(url)) {
+    linkError.value = 'Kartu tautan hanya untuk alamat http:// atau https://.'
+    return
+  }
+  linkBusy.value = true
+  linkError.value = ''
+  let previewId = ''
+  let note = ''
+  try {
+    const p = (await fetchPreview(url)).preview
+    previewId = p.id
+    if (p.status !== 'ok') note = p.message
+  } catch (e) {
+    note = e instanceof ApiError ? e.message : 'Pratinjau tidak bisa diambil.'
+  }
+  try {
+    const res = await createCard(bid.value, {
+      id: newId(),
+      kind: 'link',
+      ...placeAt('link', toolAt),
+      color: '',
+      content: { url, preview_id: previewId },
+    })
+    upsert([res.card])
+    record({ kind: 'create', ids: [res.card.id] })
+    select([res.card.id])
+    linkOpen.value = false
+    if (note) showToast(`Tautan ditambahkan tanpa pratinjau. ${note}`)
+    else announce.value = 'Tautan ditambahkan.'
+  } catch (e) {
+    linkError.value = e instanceof ApiError ? e.message : 'Tautan gagal ditambahkan. Periksa koneksi.'
+  } finally {
+    linkBusy.value = false
+  }
+}
+
+function placeAt(kind: CardKind, at?: { x: number; y: number }) {
+  const dim = defaultSize[kind]
+  const c = at ?? centerWorld()
+  return {
+    x: clamp(snap(c.x - dim.w / 2, gridOn.value), -COORD_LIMIT, COORD_LIMIT),
+    y: clamp(snap(c.y - dim.h / 2, gridOn.value), -COORD_LIMIT, COORD_LIMIT),
+    w: dim.w,
+    h: dim.h,
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Garis penghubung (W3)
+
+const connectorIds = ref<string[] | null>(null)
+const dialogConnectors = computed(() =>
+  (connectorIds.value ?? []).flatMap((id) => connectors.value.find((c) => c.id === id) ?? []),
+)
+const visibleConnectors = computed(() =>
+  connectors.value.filter((c) => (!c.from || byId.value.has(c.from)) && (!c.to || byId.value.has(c.to))),
+)
+function connectorsOf(id: string) {
+  return visibleConnectors.value.filter((c) => c.from === id || c.to === id)
+}
+function cardName(id: string) {
+  const c = byId.value.get(id)
+  return c ? cardLabel(c) : 'kartu'
+}
+
+async function connectSelected() {
+  const [from, to] = [...selected.value]
+  if (!from || !to) return
+  try {
+    const res = await saving(() => createConnector(bid.value, { from, to }))
+    if (!res) return
+    upsertConnectors([res.connector])
+    announce.value = 'Garis ditambahkan.'
+    connectorIds.value = [res.connector.id]
+  } catch {
+    // Pesan galat sudah tampil di penanda simpan.
+  }
+}
+
+async function onConnectorUpdate(id: string, patch: { style?: ConnectorStyle; label?: string }) {
+  try {
+    const res = await saving(() => updateConnector(bid.value, id, patch))
+    if (res) upsertConnectors([res.connector])
+  } catch {
+    // Pesan galat sudah tampil di penanda simpan.
+  }
+}
+
+async function onConnectorRemove(id: string) {
+  try {
+    const res = await saving(() => deleteConnector(bid.value, id))
+    if (!res) return
+    removeConnectors([id])
+    connectorIds.value = (connectorIds.value ?? []).filter((x) => x !== id)
+    if (connectorIds.value.length === 0) connectorIds.value = null
+    showToast('Garis dipindah ke Tempat sampah.', res.batch)
+  } catch {
+    // Pesan galat sudah tampil di penanda simpan.
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Pindah ke papan lain (W3): dari dialog, atau dengan melepas kartu di atas kartu papan.
+
+const moveOpen = ref(false)
+const moveBusy = ref(false)
+const moveError = ref('')
+const movingRefs = computed(() => [...selected.value].flatMap((id) => byId.value.get(id)?.ref?.id ?? []))
+
+// Isi kolom ikut kolomnya di server, jadi hanya kartu teratas yang dikirim.
+function topLevel(ids: string[]) {
+  const set = new Set(ids)
+  return ids.filter((id) => {
+    const col = byId.value.get(id)?.column_id
+    return !col || !set.has(col)
+  })
+}
+
+async function moveTo(ids: string[], to: string, title: string) {
+  const list = topLevel(ids)
+  if (!list.length) return false
+  moveBusy.value = true
+  moveError.value = ''
+  try {
+    const res = await moveCards(bid.value, list, to)
+    removeLocal(res.moved.moved)
+    removeConnectors(res.moved.connectors_gone)
+    moveOpen.value = false
+    showToast(`${res.moved.moved.length} kartu dipindah ke papan ${title}.`, undefined, to)
+    return true
+  } catch (e) {
+    moveError.value = e instanceof ApiError ? e.message : 'Kartu gagal dipindah. Periksa koneksi.'
+    if (!moveOpen.value) showToast(moveError.value)
+    return false
+  } finally {
+    moveBusy.value = false
+  }
+}
+
+function moveFromDialog(to: string) {
+  moveTo([...selected.value], to, 'tujuan')
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Komentar (W3)
+
+const commentsFor = ref<string | null>(null)
+const commentsReload = ref(0)
+const commentsCard = computed(() => (commentsFor.value ? (byId.value.get(commentsFor.value) ?? null) : null))
 
 const sheetOpen = ref(false)
 const trashOpen = ref(false)
@@ -1514,11 +2239,11 @@ function goParent() {
 const MINI_W = 160
 const MINI_H = 100
 const minimap = computed(() => {
-  if (cards.value.length === 0 || size.value.w === 0) return null
+  if (shownCards.value.length === 0 || size.value.w === 0) return null
   const v = view.value
   const tl = toWorld(v, 0, 0)
   const screen = { x: tl.x, y: tl.y, w: size.value.w / v.zoom, h: size.value.h / v.zoom }
-  const b = bounds([...cards.value, screen])!
+  const b = bounds([...shownCards.value, screen])!
   const scale = Math.min(MINI_W / b.w, MINI_H / b.h)
   const map = (r: { x: number; y: number; w: number; h: number }) => ({
     x: (r.x - b.x) * scale,
@@ -1526,7 +2251,7 @@ const minimap = computed(() => {
     w: Math.max(1, r.w * scale),
     h: Math.max(1, r.h * scale),
   })
-  return { rects: cards.value.map((c) => ({ id: c.id, ...map(c) })), screen: map(screen), b, scale }
+  return { rects: shownCards.value.map((c) => ({ id: c.id, ...map(c) })), screen: map(screen), b, scale }
 })
 
 function onMinimapClick(e: MouseEvent) {
@@ -1699,7 +2424,7 @@ function sendMoves(force = false) {
   if (g?.kind === 'move' && !g.cancelled) {
     const { dx, dy } = dragOffset.value
     const moves = g.ids.flatMap((id) => {
-      const c = byId.value.get(id)
+      const c = shownById.value.get(id)
       return c ? [{ id, x: c.x + dx, y: c.y + dy, w: c.w, h: c.h }] : []
     })
     if (moves.length) send({ t: 'move', moves })
@@ -1742,7 +2467,7 @@ function onMove(e: PointerEvent) {
       box.value = { x, y, w: Math.abs(p.x - gesture.startX), h: Math.abs(p.y - gesture.startY) }
       const a = toWorld(view.value, x, y)
       const rect = { x: a.x, y: a.y, w: box.value.w / z, h: box.value.h / z }
-      const hit = cards.value.filter((c) => intersects(rect, c)).map((c) => c.id)
+      const hit = shownCards.value.filter((c) => intersects(rect, c)).map((c) => c.id)
       selected.value = new Set([...gesture.base, ...hit])
       return
     }
@@ -1757,7 +2482,7 @@ function onMove(e: PointerEvent) {
       const dx = (p.x - gesture.startX) / z
       const dy = (p.y - gesture.startY) / z
       // Snap memakai kartu yang dipegang sebagai jangkar; kartu lain ikut dengan jarak yang sama.
-      const anchor = byId.value.get(gesture.anchor)
+      const anchor = shownById.value.get(gesture.anchor)
       if (!anchor) return
       dragOffset.value = {
         dx: snap(anchor.x + dx, gridOn.value) - anchor.x,
@@ -1791,25 +2516,31 @@ function onUp(e: PointerEvent) {
   if (g.kind === 'pan' && g.tapCard) {
     const p = local(e)
     if (Math.hypot(p.x - g.startX, p.y - g.startY) >= 8) return
-    const card = byId.value.get(g.tapCard)
-    if (card?.kind === 'board') openBoard(card)
-    else select([g.tapCard])
+    // Ketukan pertama hanya memilih (juga kartu papan); dobel ketuk membuka editor atau papannya.
+    select([g.tapCard])
+    tapSelectAt = performance.now()
+    lastTap = { id: g.tapCard, at: performance.now() }
     return
   }
   if (g.kind === 'move') {
     const { dx, dy } = dragOffset.value
     dragOffset.value = { dx: 0, dy: 0 }
     if (!g.started) {
-      // Klik pada kartu papan membukanya; ketukan pada kartu lain yang sudah terpilih membuka editornya.
+      // Klik sekali hanya memilih. Dobel klik ditangani event dblclick di kartu; dobel ketuk di layar sentuh di sini.
       const card = byId.value.get(g.anchor)
-      if (card?.kind === 'board' && !e.shiftKey) openBoard(card)
-      else if (g.touchTap && canWrite.value) startEdit(g.anchor)
+      if (g.touchTap) {
+        const double = lastTap?.id === g.anchor && performance.now() - lastTap.at < 350
+        lastTap = double ? null : { id: g.anchor, at: performance.now() }
+        if (double && card?.kind === 'board') openBoard(card)
+        else if (double) startEdit(g.anchor, caretHint(e.clientX, e.clientY, e.target))
+      }
       return
     }
     if (g.ids.length) send({ t: 'release', ids: g.ids })
     if (g.cancelled || (dx === 0 && dy === 0)) return
+    if (dropOn(g.ids, toWorld(view.value, local(e).x, local(e).y), dx, dy)) return
     const changes = g.ids.flatMap((id) => {
-      const c = byId.value.get(id)
+      const c = shownById.value.get(id)
       return c
         ? [
             {
@@ -1836,19 +2567,136 @@ function onUp(e: PointerEvent) {
   }
 }
 
+// Lepas seret (W3): di atas kartu papan memindah kartu ke papan itu; di atas kolom memasukkan kartu ke kolom (atau
+// mengubah urutannya); kartu yang keluar dari kolomnya ditaruh di titik lepas. Mengembalikan true bila ditangani.
+function dropOn(ids: string[], at: { x: number; y: number }, dx: number, dy: number): boolean {
+  const moving = new Set(ids)
+  const hit = [...shownCards.value]
+    .reverse()
+    .find(
+      (c) =>
+        !moving.has(c.id) &&
+        !(c.column_id && moving.has(c.column_id)) &&
+        (c.kind === 'board' || c.kind === 'column') &&
+        at.x >= c.x &&
+        at.x <= c.x + c.w &&
+        at.y >= c.y &&
+        at.y <= c.y + c.h,
+    )
+  if (hit?.kind === 'board' && hit.ref) {
+    moveTo(ids, hit.ref.id, hit.ref.title)
+    return true
+  }
+  const list = ids.flatMap((id) => byId.value.get(id) ?? [])
+  if (hit?.kind === 'column' && list.every((c) => c.kind !== 'column')) {
+    const siblings = shownCards.value.filter((c) => c.column_id === hit.id && !moving.has(c.id))
+    const base = columnOrderAt(siblings, at.y)
+    sendGeometry(
+      list.map((c, i) => ({ id: c.id, column_id: hit.id, col_order: base + i / (list.length + 1) })),
+    )
+    announce.value = `${list.length} kartu dimasukkan ke kolom.`
+    return true
+  }
+  const leaving = list.filter((c) => c.column_id && !moving.has(c.column_id))
+  if (!leaving.length) return false
+  sendGeometry(
+    list.map((c) => {
+      const s = shownById.value.get(c.id) ?? c
+      const p: CardPatch = {
+        id: c.id,
+        x: clamp(s.x + dx, -COORD_LIMIT, COORD_LIMIT),
+        y: clamp(s.y + dy, -COORD_LIMIT, COORD_LIMIT),
+      }
+      if (c.column_id && !moving.has(c.column_id)) {
+        p.column_id = ''
+        p.w = s.w
+      }
+      return p
+    }),
+  )
+  announce.value = `${leaving.length} kartu dikeluarkan dari kolom.`
+  return true
+}
+
+// Ketukan yang memilih kartu memunculkan bar pilihan di bawah jari; event click dari ketukan yang sama lalu jatuh
+// ke tombol bar yang baru muncul. Klik di bar diabaikan sebentar setelah ketukan pilih.
+// Dobel klik membuka editor dengan kursor di posisi klik (kartu papan: membuka papannya). Ditangani di kanvas karena
+// pointer capture saat klik mengalihkan dblclick ke elemen kanvas; kartu dicari dari titik klik. Area kosong: tidak
+// ada apa-apa, supaya tidak ada kartu tak sengaja.
+function onCanvasDblClick(e: MouseEvent) {
+  if (penOn.value) return
+  const el = document.elementFromPoint(e.clientX, e.clientY)
+  const id = el?.closest<HTMLElement>('[data-card]')?.dataset.card
+  const card = id ? byId.value.get(id) : undefined
+  if (!card || editingId.value === card.id) return
+  if (card.kind === 'board') openBoard(card)
+  else startEdit(card.id, caretHint(e.clientX, e.clientY, el))
+}
+
+let tapSelectAt = 0
+let lastTap: { id: string; at: number } | null = null
+function guardTap(e: MouseEvent) {
+  if (performance.now() - tapSelectAt < 500) {
+    e.preventDefault()
+    e.stopPropagation()
+  }
+}
+
+// Roda di kanvas: Ctrl atau Cmd (juga pinch touchpad, yang dikirim browser sebagai wheel dengan ctrlKey) zoom di
+// sekitar kursor; tanpa itu menggeser kanvas, Shift ke samping. Listener native { passive: false } supaya
+// preventDefault menahan zoom halaman browser. Event digabung per frame lewat requestAnimationFrame, tanpa transisi.
+let wheelFrame = 0
+let wheelZoom = 1
+let wheelPan = { dx: 0, dy: 0 }
+let wheelAt = { x: 0, y: 0 }
+
+// Wheel biasa di dalam editor atau bagian yang bisa digulir (mis. tabel lebar) menggulir bagian itu, bukan kanvas.
+function scrollsInside(target: EventTarget | null, dx: number, dy: number) {
+  for (let el = target as HTMLElement | null; el && el !== canvas.value; el = el.parentElement) {
+    if (el.isContentEditable) return true
+    const s = getComputedStyle(el)
+    const canY = /(auto|scroll)/.test(s.overflowY) && el.scrollHeight > el.clientHeight
+    const canX = /(auto|scroll)/.test(s.overflowX) && el.scrollWidth > el.clientWidth
+    if ((canY && dy !== 0) || (canX && dx !== 0)) return true
+  }
+  return false
+}
+
 function onWheel(e: WheelEvent) {
   markActive()
+  const zoomKey = e.ctrlKey || e.metaKey
+  let { dx, dy } = wheelPixels(e, size.value.h || 800)
+  if (!zoomKey && e.shiftKey && dx === 0) [dx, dy] = [dy, 0]
+  if (!zoomKey && scrollsInside(e.target, dx, dy)) return
+  e.preventDefault()
   const r = canvas.value!.getBoundingClientRect()
-  if (e.ctrlKey || e.metaKey) {
-    view.value = zoomAt(
-      view.value,
-      e.clientX - r.left,
-      e.clientY - r.top,
-      view.value.zoom * Math.exp(-e.deltaY * 0.01),
-    )
+  if (zoomKey) {
+    wheelZoom *= wheelZoomFactor(dy)
+    wheelAt = { x: e.clientX - r.left, y: e.clientY - r.top }
   } else {
-    view.value = { ...view.value, x: view.value.x - e.deltaX, y: view.value.y - e.deltaY }
+    wheelPan = { dx: wheelPan.dx + dx, dy: wheelPan.dy + dy }
   }
+  if (!wheelFrame) wheelFrame = requestAnimationFrame(applyWheel)
+}
+
+function applyWheel() {
+  wheelFrame = 0
+  let v = view.value
+  if (wheelZoom !== 1) v = zoomAt(v, wheelAt.x, wheelAt.y, v.zoom * wheelZoom)
+  if (wheelPan.dx || wheelPan.dy) v = { ...v, x: v.x - wheelPan.dx, y: v.y - wheelPan.dy }
+  wheelZoom = 1
+  wheelPan = { dx: 0, dy: 0 }
+  view.value = v
+}
+
+watch(canvas, (el, old) => {
+  old?.removeEventListener('wheel', onWheel)
+  el?.addEventListener('wheel', onWheel, { passive: false })
+})
+
+function resetZoom() {
+  zoomBy(1 / view.value.zoom)
+  announce.value = 'Zoom 100%.'
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -1860,7 +2708,7 @@ const nudgeStart = new Map<string, Geo>()
 function nudge(dx: number, dy: number) {
   for (const id of selected.value) {
     const c = byId.value.get(id)
-    if (!c) continue
+    if (!c || c.column_id) continue
     if (!nudgeStart.has(id)) nudgeStart.set(id, { x: c.x, y: c.y })
     patchLocal(id, {
       x: clamp(c.x + dx, -COORD_LIMIT, COORD_LIMIT),
@@ -1878,6 +2726,27 @@ function nudge(dx: number, dy: number) {
     if (entries.length) record({ kind: 'layout', cards: entries })
     sendGeometry(entries.map((e) => ({ id: e.id, x: e.after.x, y: e.after.y })))
   }, 400)
+}
+
+// Shift dan panah atas atau bawah pada kartu di kolom menukar urutannya dengan tetangga (jalur keyboard untuk seret
+// di dalam kolom).
+function reorderInColumn(c: Card, dir: 'up' | 'down') {
+  const sib = shownCards.value.filter((s) => s.column_id === c.column_id).sort((a, b) => a.y - b.y)
+  const i = sib.findIndex((s) => s.id === c.id)
+  const other = sib[dir === 'up' ? i - 1 : i + 1]
+  if (i < 0 || !other) return
+  const a = c.col_order ?? 0
+  const b = other.col_order ?? 0
+  const patches: CardPatch[] =
+    a === b
+      ? [{ id: c.id, col_order: dir === 'up' ? b - 1 : b + 1 }]
+      : [
+          { id: c.id, col_order: b },
+          { id: other.id, col_order: a },
+        ]
+  for (const p of patches) patchLocal(p.id, { col_order: p.col_order })
+  sendGeometry(patches)
+  announce.value = dir === 'up' ? 'Kartu naik satu di kolom.' : 'Kartu turun satu di kolom.'
 }
 
 const arrows: Record<string, Direction> = {
@@ -1910,6 +2779,11 @@ function onKeydown(e: KeyboardEvent) {
   if (dir) {
     e.preventDefault()
     if (e.shiftKey && canWrite.value && selected.value.size > 0) {
+      const only = selected.value.size === 1 ? byId.value.get([...selected.value][0]!) : undefined
+      if (only?.column_id && (dir === 'up' || dir === 'down')) {
+        reorderInColumn(only, dir)
+        return
+      }
       const step = mod ? GRID * 8 : GRID
       nudge(
         dir === 'left' ? -step : dir === 'right' ? step : 0,
@@ -1917,8 +2791,8 @@ function onKeydown(e: KeyboardEvent) {
       )
       return
     }
-    const from = focusedId.value ? byId.value.get(focusedId.value) : undefined
-    const next = from ? nearestInDirection(from, cards.value, dir) : ordered.value[0]
+    const from = focusedId.value ? shownById.value.get(focusedId.value) : undefined
+    const next = from ? nearestInDirection(from, shownCards.value, dir) : ordered.value[0]
     if (next) {
       select([next.id])
       focusCard(next.id)
@@ -2042,6 +2916,10 @@ watch(
     remoteSel.value = {}
     remoteMoves.value = new Map()
     cursors.value = {}
+    connectors.value = []
+    connectorIds.value = null
+    commentsFor.value = null
+    moveOpen.value = false
     history.undo.length = 0
     history.redo.length = 0
     historyVersion.value++
@@ -2057,10 +2935,14 @@ function onVisibility() {
 onMounted(() => document.addEventListener('visibilitychange', onVisibility))
 
 onBeforeUnmount(() => {
+  stopPen()
+  window.removeEventListener('keydown', onPenEscape)
   flushNotes()
   if (editingId.value) send({ t: 'unlock', card: editingId.value })
   socket?.stop()
   abort?.abort()
+  canvas.value?.removeEventListener('wheel', onWheel)
+  cancelAnimationFrame(wheelFrame)
   ro?.disconnect()
   clearTimeout(toastTimer)
   clearInterval(sweepTimer)
@@ -2373,38 +3255,97 @@ const toolBtn =
           :style="gridStyle"
           @pointerdown="onCanvasDown"
           @pointermove="onCanvasPointerMove"
-          @wheel.prevent="onWheel"
           @keydown="onKeydown"
           @keyup="onKeyup"
+          @dblclick="onCanvasDblClick"
+          @dragover="onDragOver"
+          @dragleave="fileOver = false"
+          @drop="onDrop"
         >
           <div class="wb-world absolute top-0 left-0 origin-top-left" :style="worldStyle">
-            <WbCard
-              v-for="c in rendered"
-              :key="c.id"
-              :ref="(inst) => setCardRef(c.id, inst)"
-              :card="c"
-              :selected="selected.has(c.id)"
-              :editing="editingId === c.id"
+            <WbConnectorLayer
+              :connectors="visibleConnectors"
+              :geom="geomMap"
               :can-write="canWrite"
-              :focusable="rovingId === c.id"
-              :zoom="view.zoom"
-              :dx="selected.has(c.id) ? dragOffset.dx : 0"
-              :dy="selected.has(c.id) ? dragOffset.dy : 0"
-              :dw="gestureResizeId === c.id ? resizeDelta.dw : 0"
-              :dh="gestureResizeId === c.id ? resizeDelta.dh : 0"
-              :remote="remoteFor(c.id)"
-              @focus="focusedId = c.id"
-              @grab="onCardGrab(c, $event)"
-              @resize="onResizeStart(c, $event)"
-              @edit="c.kind === 'board' ? openBoard(c) : startEdit(c.id)"
-              @close="stopEdit"
-              @note="onNoteInput(c.id, $event)"
-              @heading="onHeading(c.id, $event)"
-              @draft="onHeadingDraft(c.id, $event)"
-              @rename="onRenameRef(c.id, $event)"
-              @checklist="onChecklist(c.id, $event)"
+              @open="connectorIds = [$event]"
             />
+            <template v-for="c in rendered" :key="c.id">
+              <WbInk
+                v-if="c.kind === 'drawing'"
+                :ref="(inst) => setCardRef(c.id, inst)"
+                :card="c"
+                :selected="selected.has(c.id)"
+                :focusable="rovingId === c.id"
+                :zoom="view.zoom"
+                :dx="dragged(c) ? dragOffset.dx : 0"
+                :dy="dragged(c) ? dragOffset.dy : 0"
+                :pen="penOn"
+                :remote="remoteFor(c.id)"
+                @focus="focusedId = c.id"
+                @grab="onCardGrab(c, $event)"
+              />
+              <WbCard
+                v-else
+                :ref="(inst) => setCardRef(c.id, inst)"
+                :card="c"
+                :selected="selected.has(c.id)"
+                :editing="editingId === c.id"
+                :can-write="canWrite"
+                :focusable="rovingId === c.id"
+                :zoom="view.zoom"
+                :dx="dragged(c) ? dragOffset.dx : 0"
+                :dy="dragged(c) ? dragOffset.dy : 0"
+                :dw="gestureResizeId === c.id ? resizeDelta.dw : 0"
+                :dh="gestureResizeId === c.id ? resizeDelta.dh : 0"
+                :remote="remoteFor(c.id)"
+                :caret="editHint?.id === c.id ? editHint : null"
+                :readonly-by="readonlyFor?.id === c.id ? readonlyFor.name : null"
+                @focus="focusedId = c.id"
+                @grab="onCardGrab(c, $event)"
+                @resize="onResizeStart(c, $event)"
+                @close="stopEdit"
+                @note="onNoteInput(c.id, $event)"
+                @heading="onHeading(c.id, $event)"
+                @draft="onHeadingDraft(c.id, $event)"
+                @rename="onRenameRef(c.id, $event)"
+                @checklist="onChecklist(c.id, $event)"
+                @table="onTable(c.id, $event)"
+                @content="onContent(c.id, $event)"
+                @comments="commentsFor = c.id"
+              />
+            </template>
+            <!-- Goresan yang sedang digambar (sendiri dan orang lain) dan yang belum dijawab server. -->
+            <svg
+              v-if="inkLayer.length"
+              aria-hidden="true"
+              class="pointer-events-none absolute top-0 left-0 z-[1000000002] overflow-visible"
+              data-testid="wb-ink-live"
+              width="1"
+              height="1"
+            >
+              <path
+                v-for="(k, i) in inkLayer"
+                :key="i"
+                :d="inkPath(k.points)"
+                fill="none"
+                :stroke-width="k.width"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                :style="{ stroke: inkColor(k.color) }"
+              />
+            </svg>
           </div>
+          <!-- Mode pena: lapisan penangkap penunjuk di atas semua kartu. -->
+          <div
+            v-if="penOn"
+            class="absolute inset-0 z-[15] touch-none"
+            :class="penEraser ? 'cursor-cell' : 'cursor-crosshair'"
+            data-testid="wb-pen-surface"
+            @pointerdown="onPenDown"
+            @pointermove="onPenMove"
+            @pointerup="onPenUp"
+            @pointercancel="onPenUp"
+          />
           <div
             v-for="cur in cursorList"
             :key="cur.key"
@@ -2427,6 +3368,11 @@ const toolBtn =
             :style="{ left: `${box.x}px`, top: `${box.y}px`, width: `${box.w}px`, height: `${box.h}px` }"
           />
           <div
+            v-if="fileOver"
+            aria-hidden="true"
+            class="pointer-events-none absolute inset-2 rounded-card border-2 border-dashed border-mark"
+          />
+          <div
             v-if="cards.length === 0"
             class="pointer-events-none absolute inset-0 flex items-center justify-center p-6 text-center text-ink-muted"
           >
@@ -2440,24 +3386,76 @@ const toolBtn =
           </div>
         </div>
 
+        <WbPenBar
+          v-if="state === 'ok' && penOn"
+          :color="penColor"
+          :width="penWidth"
+          :eraser="penEraser"
+          :can-undo="!!penObject"
+          @color="penColor = $event"
+          @width="penWidth = $event"
+          @eraser="penEraser = $event"
+          @undo="undoStroke"
+          @done="stopPen"
+        />
         <!-- Pilihan: warna, ubah isi, hapus. -->
         <div
-          v-if="state === 'ok' && canWrite && selected.size > 0"
+          v-if="state === 'ok' && canWrite && selected.size > 0 && !penOn"
           class="absolute top-2 left-2 z-20 flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-2 rounded-card border border-line bg-surface p-1.5 shadow-menu"
+          @click.capture="guardTap"
         >
-          <label :for="`${uid}-color`" class="sr-only">Warna kartu terpilih</label>
-          <select
-            :id="`${uid}-color`"
-            class="min-h-11 rounded-card border border-line bg-surface px-2"
-            :value="selectionColor"
-            @change="setColor(($event.target as HTMLSelectElement).value)"
+          <template v-if="onlyDrawings">
+            <label :for="`${uid}-ink`" class="sr-only">Warna coretan terpilih</label>
+            <select
+              :id="`${uid}-ink`"
+              class="min-h-11 rounded-card border border-line bg-surface px-2"
+              value=""
+              @change="
+                (recolorDrawings(($event.target as HTMLSelectElement).value),
+                (($event.target as HTMLSelectElement).value = ''))
+              "
+            >
+              <option value="" disabled>Warna coretan...</option>
+              <option v-for="pc in penColors" :key="pc.value" :value="pc.value">
+                Coretan: {{ pc.label }}
+              </option>
+            </select>
+          </template>
+          <template v-else>
+            <label :for="`${uid}-color`" class="sr-only">Warna kartu terpilih</label>
+            <select
+              :id="`${uid}-color`"
+              class="min-h-11 rounded-card border border-line bg-surface px-2"
+              :value="selectionColor"
+              @change="setColor(($event.target as HTMLSelectElement).value)"
+            >
+              <option v-if="selectionColor === 'campuran'" value="campuran" disabled>Warna campuran</option>
+              <option v-for="c in colors" :key="c.label" :value="c.value ?? ''">Warna: {{ c.label }}</option>
+            </select>
+          </template>
+          <button
+            v-if="selected.size === 1 && byId.get([...selected][0]!)?.kind !== 'link'"
+            type="button"
+            :class="btn"
+            @click="startEdit([...selected][0]!)"
           >
-            <option v-if="selectionColor === 'campuran'" value="campuran" disabled>Warna campuran</option>
-            <option v-for="c in colors" :key="c.label" :value="c.value ?? ''">Warna: {{ c.label }}</option>
-          </select>
-          <button v-if="selected.size === 1" type="button" :class="btn" @click="startEdit([...selected][0]!)">
             {{ byId.get([...selected][0]!)?.kind === 'board' ? 'Ubah judul' : 'Ubah isi' }}
           </button>
+          <label :for="`${uid}-more`" class="sr-only">Aksi lain untuk kartu terpilih</label>
+          <select
+            :id="`${uid}-more`"
+            class="min-h-11 rounded-card border border-line bg-surface px-2"
+            value=""
+            @change="onMoreAction"
+          >
+            <option value="" disabled>Aksi lain...</option>
+            <option v-if="selected.size === 1" value="comments">Komentar</option>
+            <option v-if="selected.size === 1 && connectorsOf([...selected][0]!).length" value="lines">
+              Garis ({{ connectorsOf([...selected][0]!).length }})
+            </option>
+            <option v-if="selected.size === 2" value="connect">Hubungkan dengan garis</option>
+            <option value="move">Pindahkan ke papan</option>
+          </select>
           <template v-if="selected.size >= 2">
             <label :for="`${uid}-align`" class="sr-only">Rapikan kartu terpilih</label>
             <select
@@ -2589,7 +3587,16 @@ const toolBtn =
               <path d="M5 12h14" />
             </svg>
           </button>
-          <span class="min-w-11 text-center text-sm tabular-nums">{{ zoomPercent }}%</span>
+          <button
+            type="button"
+            class="inline-flex min-h-11 min-w-14 items-center justify-center rounded-card px-1 text-sm tabular-nums hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
+            :aria-label="`Zoom ${zoomPercent}%, kembali ke 100%`"
+            title="Kembali ke 100%"
+            data-testid="wb-zoom"
+            @click="resetZoom"
+          >
+            {{ zoomPercent }}%
+          </button>
           <button
             type="button"
             :class="iconBtn"
@@ -2695,6 +3702,14 @@ const toolBtn =
           {{ canWrite ? 'Tambah' : 'Menu papan' }}
         </button>
 
+        <p
+          v-if="uploadStatus"
+          role="status"
+          class="absolute top-2 right-2 z-30 max-w-[calc(100%-1rem)] rounded-card border border-line bg-surface px-3 py-2 text-sm shadow-menu"
+          data-testid="wb-upload"
+        >
+          {{ uploadStatus }}
+        </p>
         <div
           v-if="toast"
           class="absolute right-2 bottom-16 left-2 z-30 mx-auto flex max-w-md flex-wrap items-center justify-between gap-2 rounded-card border border-line bg-surface p-3 shadow-dialog"
@@ -2705,6 +3720,14 @@ const toolBtn =
             <button v-if="toast.batch && canWrite" type="button" :class="btn" @click="undoDelete">
               Urungkan
             </button>
+            <RouterLink
+              v-if="toast.board"
+              :to="{ name: 'whiteboard-board', params: { id: toast.board } }"
+              :class="btn"
+              @click="toast = null"
+            >
+              Buka papan
+            </RouterLink>
             <button type="button" :class="btn" @click="toast = null">Tutup</button>
           </div>
         </div>
@@ -2715,6 +3738,8 @@ const toolBtn =
       Panah: pindah antar kartu. Shift dan panah: geser kartu terpilih. Enter: ubah isi atau buka papan.
       Delete: hapus. Ctrl A: pilih semua. Ctrl Z dan Ctrl Shift Z: urungkan dan ulangi. Ctrl C, Ctrl V, Ctrl
       D: salin, tempel, duplikat. N: catatan baru. Ctrl 0: pas ke layar. Tahan Spasi untuk menggeser kanvas.
+      Di kolom, Shift dan panah atas atau bawah mengubah urutan kartu. Tempel gambar atau berkas dengan Ctrl
+      V. Garis, komentar, dan pindah papan ada di bar kartu terpilih.
     </p>
     <p class="sr-only" aria-live="polite">{{ announce }}</p>
 
@@ -2765,6 +3790,51 @@ const toolBtn =
     </BaseDialog>
 
     <WbTrashPanel :open="trashOpen" @close="trashOpen = false" @restored="onRestored" />
+
+    <input
+      ref="fileInput"
+      type="file"
+      multiple
+      :accept="acceptFiles"
+      class="sr-only"
+      tabindex="-1"
+      aria-hidden="true"
+      @change="onFilePicked"
+    />
+    <WbLinkDialog
+      :open="linkOpen"
+      :busy="linkBusy"
+      :error="linkError"
+      @close="linkOpen = false"
+      @submit="submitLink"
+    />
+    <WbConnectorDialog
+      :open="connectorIds !== null"
+      :connectors="dialogConnectors"
+      :name-of="cardName"
+      :can-write="canWrite"
+      @close="connectorIds = null"
+      @update="onConnectorUpdate"
+      @remove="onConnectorRemove"
+    />
+    <WbMoveDialog
+      :open="moveOpen"
+      :current="bid"
+      :moving="movingRefs"
+      :busy="moveBusy"
+      :error="moveError"
+      @close="moveOpen = false"
+      @move="moveFromDialog"
+    />
+    <WbCommentsPanel
+      :open="commentsFor !== null"
+      :board="bid"
+      :card="commentsCard"
+      :can-write="canWrite"
+      :reload="commentsReload"
+      @close="commentsFor = null"
+      @card="upsert([$event])"
+    />
 
     <BaseDialog
       :open="tabPrompt !== null"

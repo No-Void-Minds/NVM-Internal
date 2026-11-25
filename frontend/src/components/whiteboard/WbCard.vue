@@ -2,15 +2,22 @@
 import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue'
 import WbRichText from './WbRichText'
 import WbChecklist from './WbChecklist.vue'
-import type { ChecklistOp } from '../../api/whiteboard'
+import WbTable from './WbTable.vue'
+import { fileUrl, type ChecklistOp, type TableOp } from '../../api/whiteboard'
+import { formatBytes } from '../../utils/attachment'
+import { placeCaret, type CaretHint } from './caret'
 import {
   cardLabel,
   refSummary,
+  type CaptionContent,
   type Card,
   type ChecklistContent,
+  type ColumnContent,
   type HeadingContent,
+  type LinkContent,
   type NoteContent,
   type PMNode,
+  type TableContent,
 } from '../../utils/whiteboard'
 
 // TipTap hanya dimuat saat ada kartu catatan yang dibuka untuk diedit.
@@ -30,17 +37,23 @@ const props = defineProps<{
   dh: number
   // Orang lain yang sedang memilih, menyeret, atau mengedit kartu ini (W2): warna kolaborasi 1 sampai 8 dan label.
   remote?: { color: number; label: string; strong: boolean } | null
+  // Posisi kursor dari dobel klik (atau dobel ketuk), untuk editor yang baru dibuka.
+  caret?: CaretHint | null
+  // Kartu dikunci orang lain dan dibuka hanya baca: nama pemegangnya.
+  readonlyBy?: string | null
 }>()
 const emit = defineEmits<{
   grab: [e: PointerEvent]
   resize: [e: PointerEvent]
-  edit: []
   close: []
   note: [doc: PMNode]
   heading: [text: string]
   rename: [title: string]
   draft: [text: string]
   checklist: [op: ChecklistOp]
+  table: [op: TableOp]
+  content: [content: Card['content']]
+  comments: []
 }>()
 
 const root = ref<HTMLElement | null>(null)
@@ -90,8 +103,11 @@ watch(
     headingDraft.value = (props.card.content as HeadingContent).text
     lastSent = headingDraft.value
     await nextTick()
-    headingInput.value?.focus()
-    headingInput.value?.select()
+    if (props.caret?.offset !== undefined) placeCaret(headingInput.value, props.caret.offset)
+    else {
+      headingInput.value?.focus()
+      headingInput.value?.select()
+    }
   },
   { immediate: true },
 )
@@ -156,6 +172,65 @@ function onTitleKey(e: KeyboardEvent) {
   }
 }
 
+// Keterangan gambar dan berkas, serta judul kolom: satu isian teks, disimpan saat Enter, blur, atau editor ditutup.
+const textDraft = ref('')
+const textInput = ref<HTMLInputElement | null>(null)
+let textSent = ''
+const textKind = computed(() =>
+  props.card.kind === 'column'
+    ? 'title'
+    : props.card.kind === 'image' || props.card.kind === 'file'
+      ? 'caption'
+      : '',
+)
+watch(
+  () => props.editing,
+  async (on, was) => {
+    if (!textKind.value) return
+    if (was && !on) {
+      saveText()
+      return
+    }
+    if (!on) return
+    const c = props.card.content as CaptionContent & ColumnContent
+    textDraft.value = (textKind.value === 'title' ? c.title : c.caption) ?? ''
+    textSent = textDraft.value
+    await nextTick()
+    textInput.value?.focus()
+  },
+  { immediate: true },
+)
+
+function saveText() {
+  const t = textDraft.value.trim()
+  if (t === textSent) return
+  textSent = t
+  emit('content', textKind.value === 'title' ? { title: t } : { caption: t })
+}
+
+function onTextKey(e: KeyboardEvent) {
+  if (e.key === 'Enter' || e.key === 'Escape') {
+    e.preventDefault()
+    e.stopPropagation()
+    saveText()
+    emit('close')
+  }
+}
+
+const caption = computed(() => (props.card.content as CaptionContent).caption ?? '')
+const imageStyle = computed(() => ({
+  width: 'calc(100% + 1.5rem)',
+  height: `${Math.max(40, props.card.h + props.dh - (props.editing || caption.value ? 72 : 24))}px`,
+}))
+const linkHref = computed(() => (props.card.kind === 'link' ? (props.card.content as LinkContent).url : ''))
+const linkHost = computed(() => {
+  try {
+    return new URL(linkHref.value).host
+  } catch {
+    return linkHref.value
+  }
+})
+
 function onPointerDown(e: PointerEvent) {
   if (props.editing) return
   emit('grab', e)
@@ -178,12 +253,12 @@ function onPointerDown(e: PointerEvent) {
     ]"
     :style="style"
     @pointerdown="onPointerDown"
-    @dblclick="canWrite && !editing && emit('edit')"
   >
     <template v-if="card.kind === 'note'">
       <WbNoteEditor
         v-if="editing"
         :doc="(card.content as NoteContent).doc"
+        :caret="caret"
         label="Isi catatan"
         @input="emit('note', $event)"
         @close="emit('close')"
@@ -228,6 +303,136 @@ function onPointerDown(e: PointerEvent) {
       </div>
     </template>
 
+    <template v-else-if="card.kind === 'image' || card.kind === 'file'">
+      <img
+        v-if="card.kind === 'image' && card.file?.thumb"
+        :src="fileUrl(card.file.id, true)"
+        :alt="caption || card.file.name"
+        draggable="false"
+        loading="lazy"
+        class="-m-3 mb-0 block max-w-none rounded-t-card bg-canvas object-contain"
+        :style="imageStyle"
+      />
+      <div v-else class="flex min-w-0 items-start gap-3">
+        <span
+          aria-hidden="true"
+          class="inline-flex size-11 shrink-0 items-center justify-center rounded-card border border-line bg-canvas"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            class="size-6"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.75"
+            stroke-linejoin="round"
+          >
+            <path d="M6 3h8l4 4v14H6zM14 3v4h4M9 13h6M9 17h6" />
+          </svg>
+        </span>
+        <div class="min-w-0 flex-1">
+          <p class="font-semibold break-all">{{ card.file?.name }}</p>
+          <p class="text-sm text-ink-muted">{{ card.file ? formatBytes(card.file.size) : '' }}</p>
+        </div>
+      </div>
+      <template v-if="editing">
+        <label :for="`c-${card.id}`" class="sr-only">Keterangan</label>
+        <input
+          :id="`c-${card.id}`"
+          ref="textInput"
+          v-model="textDraft"
+          maxlength="300"
+          placeholder="Keterangan"
+          class="mt-2 min-h-11 w-full rounded-card border border-line bg-surface px-2 text-ink"
+          @pointerdown.stop
+          @keydown="onTextKey"
+          @blur="saveText"
+        />
+      </template>
+      <p v-else-if="caption" class="mt-2 text-sm break-words">{{ caption }}</p>
+      <a
+        v-if="card.file && card.kind === 'file'"
+        :href="fileUrl(card.file.id)"
+        class="mt-2 inline-flex min-h-11 items-center gap-1 self-start rounded-card px-2 font-medium underline underline-offset-2 hover:bg-canvas focus-visible:outline-2 focus-visible:outline-mark"
+        @pointerdown.stop
+      >
+        Unduh berkas<span class="sr-only"> {{ card.file.name }}</span>
+      </a>
+    </template>
+
+    <template v-else-if="card.kind === 'link'">
+      <img
+        v-if="card.preview?.status === 'ok' && card.preview.image"
+        :src="fileUrl(card.preview.image)"
+        alt=""
+        draggable="false"
+        loading="lazy"
+        class="-m-3 mb-2 block h-32 max-w-none rounded-t-card bg-canvas object-cover"
+        :style="{ width: 'calc(100% + 1.5rem)' }"
+      />
+      <p class="font-semibold break-words">
+        {{ card.preview?.status === 'ok' && card.preview.title ? card.preview.title : linkHost }}
+      </p>
+      <p
+        v-if="card.preview?.status === 'ok' && card.preview.description"
+        class="line-clamp-3 text-sm break-words"
+      >
+        {{ card.preview.description }}
+      </p>
+      <p v-else-if="card.preview && card.preview.status !== 'ok'" class="text-sm text-ink-muted">
+        Pratinjau tidak tersedia.
+      </p>
+      <p class="text-sm break-all text-ink-muted">{{ card.preview?.site || linkHost }}</p>
+      <a
+        :href="linkHref"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="mt-1 inline-flex min-h-11 items-center gap-1 self-start rounded-card px-2 font-medium underline underline-offset-2 hover:bg-canvas focus-visible:outline-2 focus-visible:outline-mark"
+        @pointerdown.stop
+      >
+        Buka tautan<span class="sr-only"> {{ linkHost }} di tab baru</span>
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          class="size-4"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.75"
+          stroke-linecap="round"
+        >
+          <path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6" />
+        </svg>
+      </a>
+    </template>
+
+    <template v-else-if="card.kind === 'column'">
+      <template v-if="editing">
+        <label :for="`k-${card.id}`" class="sr-only">Judul kolom</label>
+        <input
+          :id="`k-${card.id}`"
+          ref="textInput"
+          v-model="textDraft"
+          maxlength="200"
+          placeholder="Judul kolom"
+          class="min-h-11 w-full rounded-card border border-line bg-surface px-2 font-bold text-ink"
+          @pointerdown.stop
+          @keydown="onTextKey"
+          @blur="saveText"
+        />
+      </template>
+      <p v-else class="min-h-8 font-bold break-words">
+        {{ (card.content as ColumnContent).title || 'Kolom tanpa judul' }}
+      </p>
+    </template>
+
+    <WbTable
+      v-else-if="card.kind === 'table'"
+      :content="card.content as TableContent"
+      :editing="editing"
+      :caret="caret"
+      @op="emit('table', $event)"
+      @close="emit('close')"
+    />
+
     <template v-else-if="card.kind === 'heading'">
       <template v-if="editing">
         <label :for="`h-${card.id}`" class="sr-only">Teks judul</label>
@@ -243,9 +448,14 @@ function onPointerDown(e: PointerEvent) {
           @blur="saveHeading"
         />
       </template>
-      <p v-else class="text-lg leading-snug font-bold break-words">
-        {{ (card.content as HeadingContent).text || 'Judul kosong' }}
+      <p
+        v-else-if="(card.content as HeadingContent).text"
+        data-caret
+        class="text-lg leading-snug font-bold break-words"
+      >
+        {{ (card.content as HeadingContent).text }}
       </p>
+      <p v-else class="text-lg leading-snug font-bold break-words">Judul kosong</p>
     </template>
 
     <WbChecklist
@@ -253,10 +463,50 @@ function onPointerDown(e: PointerEvent) {
       :content="card.content as ChecklistContent"
       :editing="editing"
       :can-write="canWrite"
+      :caret="caret"
       @op="emit('checklist', $event)"
       @close="emit('close')"
     />
 
+    <!-- Lencana komentar menjadi tombol hanya di zoom 100% ke atas, supaya area sentuhnya tetap 44 px di layar. Di
+         bawah itu hanya penanda: jumlahnya ada di label kartu, dan panelnya dibuka lewat Aksi lain di bar pilihan. -->
+    <component
+      :is="zoom >= 1 ? 'button' : 'span'"
+      v-if="card.comments"
+      :type="zoom >= 1 ? 'button' : undefined"
+      class="absolute -top-4 -right-4 inline-flex size-11 items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-mark"
+      :class="zoom >= 1 ? '' : 'pointer-events-none'"
+      :aria-label="zoom >= 1 ? `${card.comments} komentar, buka komentar` : undefined"
+      :aria-hidden="zoom >= 1 ? undefined : 'true'"
+      data-testid="wb-comment-badge"
+      @pointerdown.stop
+      @click="zoom >= 1 && emit('comments')"
+    >
+      <span
+        class="inline-flex min-w-6 items-center justify-center gap-0.5 rounded-chip bg-accent px-1.5 py-0.5 text-xs font-semibold text-on-accent"
+      >
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          class="size-3"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linejoin="round"
+        >
+          <path d="M4 5h16v11H9l-5 4z" />
+        </svg>
+        {{ card.comments }}
+      </span>
+    </component>
+    <p
+      v-if="readonlyBy && !editing"
+      role="status"
+      class="mt-2 rounded-chip bg-canvas px-2 py-1 text-sm text-ink"
+      data-testid="wb-readonly"
+    >
+      Hanya baca: {{ readonlyBy }} sedang mengedit. Teksnya berubah langsung di sini.
+    </p>
     <!-- Label orang lain di atas kartu; warnanya warna orang itu, teksnya on-collab (kontras dihitung di style.css). -->
     <span
       v-if="remote"

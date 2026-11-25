@@ -159,3 +159,122 @@ func mustJSON(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
 }
+
+// Gambar bebas dan tabel disiarkan seperti kartu lain. Tabel dan gambar bebas yang dikunci orang lain ditolak 409
+// dengan nama pemegang kunci, baik lewat op tabel maupun patch isi, dan pindah papan juga ditolak.
+func TestWhiteboardWSTabelDanGambarBebas(t *testing.T) {
+	tm := newTaskTeam(t)
+	watch, _, err := tm.dialWb(t, tm.other, tm.srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wsSend(t, watch, map[string]any{"t": "join", "board": "root"})
+	wsWait(t, watch, "joined")
+	var table, drawing struct {
+		Card struct {
+			ID             string `json:"id"`
+			ContentVersion int32  `json:"content_version"`
+		} `json:"card"`
+	}
+	if code := tm.sendJSON(t, tm.pic, http.MethodPost, "/api/whiteboard/boards/root/cards", `{"kind":"table","x":0,"y":0,"w":320,"h":160}`, &table); code != http.StatusCreated {
+		t.Fatalf("buat tabel %d", code)
+	}
+	wsWait(t, watch, "changed")
+	// Gambar bebas (revisi A): objek dibuat dari goresan pertama berkoordinat dunia, kotak batasnya dihitung server.
+	if code, body := tm.rawSend(t, tm.pic, http.MethodPost, "/api/whiteboard/boards/root/drawings",
+		`{"stroke":{"color":"tinta","width":4,"points":[100,300,200,400]}}`); code != http.StatusCreated {
+		t.Fatalf("buat gambar %d %s", code, body)
+	} else {
+		_ = json.Unmarshal([]byte(body), &drawing)
+	}
+	if ch := wsWait(t, watch, "changed"); !strings.Contains(mustJSON(ch["cards"]), `"x":96`) {
+		t.Fatalf("siaran gambar %v", ch)
+	}
+	drawOp := "/api/whiteboard/boards/root/cards/" + drawing.Card.ID + "/drawing"
+	if code, body := tm.rawSend(t, tm.pic, http.MethodPost, drawOp, `{"op":"add","stroke":{"color":"tinta","width":5,"points":[0,0,1,1]}}`); code != http.StatusBadRequest || !strings.Contains(body, "Ketebalan") {
+		t.Fatalf("goresan tidak sah %d %s", code, body)
+	}
+	if code, body := tm.rawSend(t, tm.pic, http.MethodPost, "/api/whiteboard/boards/root/cards/patch",
+		`{"cards":[{"id":"`+drawing.Card.ID+`","content":{"strokes":[]},"base_content_version":1}]}`); code != http.StatusBadRequest {
+		t.Fatalf("patch isi gambar %d %s", code, body)
+	}
+	// Goresan yang sedang digambar disiarkan langsung ke orang lain.
+	pen, _, err := tm.dialWb(t, tm.pic, tm.srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wsSend(t, pen, map[string]any{"t": "join", "board": "root"})
+	wsWait(t, pen, "joined")
+	wsSend(t, pen, map[string]any{"t": "ink", "points": []int{10, 10, 20, 25}, "color": "biru", "width": 4})
+	if m := wsWait(t, watch, "ink"); mustJSON(m["points"]) != "[10,10,20,25]" {
+		t.Fatalf("siaran goresan langsung %v", m)
+	}
+
+	for _, id := range []string{table.Card.ID, drawing.Card.ID} {
+		wsSend(t, watch, map[string]any{"t": "lock", "card": id})
+		wsWait(t, watch, "lock_granted")
+	}
+	tableOp := "/api/whiteboard/boards/root/cards/" + table.Card.ID + "/table"
+	for _, req := range []struct{ path, body string }{
+		{tableOp, `{"op":"set","row":0,"col":0,"text":"Harga"}`},
+		{drawOp, `{"op":"color","color":"merah"}`},
+		{"/api/whiteboard/boards/root/move", `{"ids":["` + table.Card.ID + `"],"to":"root"}`},
+	} {
+		if code, body := tm.rawSend(t, tm.pic, http.MethodPost, req.path, req.body); code != http.StatusConflict || !strings.Contains(body, "staf.b sedang mengubah") {
+			t.Fatalf("%s saat dikunci orang lain: %d %s", req.path, code, body)
+		}
+	}
+	// Pemegang kunci tetap bisa mengubah, dan hasilnya disiarkan.
+	if code, body := tm.rawSend(t, tm.other, http.MethodPost, tableOp, `{"op":"set","row":0,"col":0,"text":"Harga"}`); code != http.StatusOK {
+		t.Fatalf("pemegang kunci %d %s", code, body)
+	}
+	if ch := wsWait(t, watch, "changed"); !strings.Contains(mustJSON(ch["cards"]), "Harga") {
+		t.Fatalf("siaran tabel %v", ch)
+	}
+}
+
+// Garis dan pindah papan disiarkan: papan asal menerima moved (kartu dan garis yang terputus dibuang), papan
+// tujuan diminta memuat ulang.
+func TestWhiteboardWSGarisDanPindah(t *testing.T) {
+	tm := newTaskTeam(t)
+	type created struct {
+		Card struct {
+			ID  string `json:"id"`
+			Ref struct {
+				ID string `json:"id"`
+			} `json:"ref"`
+		} `json:"card"`
+	}
+	var child, a, b created
+	tm.sendJSON(t, tm.pic, http.MethodPost, "/api/whiteboard/boards/root/cards", `{"kind":"board","title":"Anak","x":0,"y":0,"w":200,"h":120}`, &child)
+	tm.sendJSON(t, tm.pic, http.MethodPost, "/api/whiteboard/boards/root/cards", `{"kind":"note","x":300,"y":0,"w":240,"h":160}`, &a)
+	tm.sendJSON(t, tm.pic, http.MethodPost, "/api/whiteboard/boards/root/cards", `{"kind":"note","x":600,"y":0,"w":240,"h":160}`, &b)
+
+	src, _, err := tm.dialWb(t, tm.other, tm.srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wsSend(t, src, map[string]any{"t": "join", "board": "root"})
+	wsWait(t, src, "joined")
+	dst, _, err := tm.dialWb(t, tm.manager, tm.srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wsSend(t, dst, map[string]any{"t": "join", "board": child.Card.Ref.ID})
+	wsWait(t, dst, "joined")
+
+	if code, body := tm.rawSend(t, tm.pic, http.MethodPost, "/api/whiteboard/boards/root/connectors", `{"from":"`+a.Card.ID+`","to":"`+b.Card.ID+`","label":"lalu"}`); code != http.StatusCreated {
+		t.Fatalf("buat garis %d %s", code, body)
+	}
+	if m := wsWait(t, src, "connectors"); !strings.Contains(mustJSON(m["items"]), `"label":"lalu"`) {
+		t.Fatalf("siaran garis %v", m)
+	}
+	if code, body := tm.rawSend(t, tm.pic, http.MethodPost, "/api/whiteboard/boards/root/move", `{"ids":["`+a.Card.ID+`"],"to":"`+child.Card.Ref.ID+`"}`); code != http.StatusOK {
+		t.Fatalf("pindah %d %s", code, body)
+	}
+	m := wsWait(t, src, "moved")
+	if mustJSON(m["ids"]) != `["`+a.Card.ID+`"]` || len(m["connectors_gone"].([]any)) != 1 {
+		t.Fatalf("siaran pindah %v", m)
+	}
+	wsWait(t, dst, "resync")
+}

@@ -505,6 +505,19 @@ E2E: `wb-template`, `wb-ekspor` (berkas PNG dan PDF terunduh dan berukuran wajar
 
 Bisa dipakai tim: fitur lengkap sesuai kebutuhan Manajer.
 
+### W5: bentuk dan diagram (revisi C, setelah W4, sebelum rilis)
+
+Isi:
+
+- Alat Bentuk di sidebar membuka palet yang bisa dicari dan dinavigasi keyboard (listbox dengan panah, Enter menaruh bentuk, Escape menutup). Kelompok: Dasar (persegi, persegi sudut bulat, elips, segitiga, belah ketupat, segi enam, bintang), Flowchart (proses, keputusan, mulai/selesai, data, database, dokumen), UML (kelas tiga bagian, aktor, catatan UML, paket), dan Panah blok (kanan, kiri, atas, bawah, dua arah).
+- Model: kartu jenis `shape` (migrasi W5 hanya menambah jenis itu ke CHECK). Isi: `shape` dari daftar putih, `rotation` 0 sampai 359, `fill` dan `stroke` (nama token), `stroke_width` 1 sampai 8, `stroke_style` solid atau dashed, `text` (maksimal 2.000 karakter teks polos), `align` kiri, tengah, kanan, `font_size` dari daftar (12, 14, 16, 20, 24, 32). Kelas UML menyimpan tiga teks (`name`, `attributes`, `methods`). Ukuran memakai `w` dan `h` kartu yang sudah ada.
+- Ubah ukuran dengan pegangan di empat sudut dan empat sisi (Shift menjaga proporsi), putar dengan pegangan putar (Shift snap 15 derajat), dobel klik untuk mengetik di dalam bentuk dengan kunci lunak yang sama dengan catatan. Realtime, undo, salin tempel, Tempat sampah, dan pencarian isi memakai jalur kartu yang sudah ada.
+- Render SVG yang dibangun dari angka (path per jenis bentuk di klien), tanpa `v-html`; teks lewat interpolasi Vue.
+- Garis: port di tengah keempat sisi setiap kartu, ditambah empat sudut untuk bentuk; garis menempel ke port dan dihitung ulang saat bentuk dipindah, diubah ukuran, atau diputar. Ujung bebas boleh. Jalur lurus, siku (routing ortogonal yang keluar dari sisi port dan tidak menembus bentuk asal dan tujuan), dan melengkung (Bezier dari arah port). Titik belok bisa diseret dan disimpan di `geometry.points`. Tujuh jenis ujung per sisi, tiga gaya garis, tiga label. Semua kolom ini sudah ada sejak `000024`, jadi W5 tidak memigrasi data garis.
+- Dialog garis menjadi panel gaya lengkap; garis juga bisa dipilih di kanvas dan dihapus dengan Delete.
+
+Test: unit routing ortogonal (tidak menembus kotak asal dan tujuan), port setelah putar, validasi isi bentuk (jenis asing, sudut, ukuran huruf, panjang teks); DB pembuatan dan patch bentuk; E2E `wb5` (flowchart sederhana dan diagram kelas: tiga bentuk, garis siku dengan panah dan label, geser bentuk lalu garis ikut, ubah jenis ujung, realtime di dua klien); uji performa 500 kartu termasuk 100 bentuk dan 100 garis.
+
 ## 10. Risiko dan pertanyaan untuk Manajer
 
 ### Risiko
@@ -552,3 +565,13 @@ Masuk ke "Menunggu jawaban Manajer" di `docs/sprint.md` saat W1 dimulai. Pilihan
 - 2026-11-24, W2: kunci lunak juga dipakai saat mengedit checklist dan judul kartu papan (bukan hanya catatan dan judul), supaya label "sedang mengedit" konsisten; operasi checklist tetap per butir.
 - 2026-11-24, W2: ganti judul papan anak dan pulihkan dari Tempat sampah menyiarkan `resync` (muat ulang papan utuh) ke papan yang terdampak, bukan daftar perubahan, karena keduanya mengubah beberapa hal sekaligus dan jarang terjadi.
 - 2026-11-24, W2: uji wss di Chrome, Edge, dan Firefox memakai proxy HTTPS lokal dengan build produksi dan header keamanan nginx yang sama (`scripts/e2e/uji-wss.mjs`). Firefox dikendalikan lewat WebDriver BiDi bawaannya. Safari belum teruji (tidak ada di Windows). Uji ini menemukan font `data:` yang diblokir CSP di build produksi; diperbaiki dengan `build.assetsInlineLimit`.
+- 2026-11-24, W3: daftar DELETE di `10-grants.sql` menjadi tiga belas tabel (tambah `wb_connectors`, `wb_files`, `wb_link_previews`), bukan empat belas: `wb_comments` dihapus lewat `deleted_at` dan barisnya ikut hilang lewat ON DELETE CASCADE.
+- 2026-11-24, W3: batas gambar bebas 300 goresan, 2.000 titik per goresan, dan 6.000 titik per kartu (bukan 500 goresan), supaya isi kartu tetap di bawah 64 KB. Titik disimpan sebagai bilangan bulat 0 sampai 4.000 relatif ke kartu.
+- 2026-11-24, W3: pengambil pratinjau hanya tersambung lewat IPv4 karena VM produksi tanpa rute IPv6 (accept-ra dimatikan); host yang hanya punya IPv6 gagal seketika dengan pesan jelas. og:image disimpan ulang sebagai berkas JPEG milik aplikasi, jadi CSP `img-src 'self'` tidak berubah.
+- 2026-11-24, W3: kunci lunak tabel dan gambar bebas ditegakkan di server (409 untuk akun lain pemegang kunci), bukan hanya di klien.
+- 2026-11-24, W3: `wb_boards.resync_seq` ditambahkan di `000024`: pindah kartu ke papan lain tidak bisa disusulkan per kartu ke papan asal, jadi klien yang tersambung ulang memuat ulang papan utuh.
+- 2026-11-24, W3: kolom satu tingkat; isi kolom ditata klien dari urutan `col_order`, dan posisi tersimpan isi kolom diabaikan selama di kolom.
+- 2026-11-24, W3: keluar masuk kolom dan pindah papan tidak ikut undo; pindah papan menampilkan tombol Buka papan.
+- 2026-11-25, revisi A: gambar bebas bukan lagi kartu berbingkai. Mode pena mencoret langsung di kanvas di atas kartu; goresan dikelompokkan menjadi objek (kartu `drawing` tanpa bingkai) dengan kotak batas yang dihitung server dari titik koordinat dunia. Satu sesi pena satu objek, objek baru otomatis lewat 300 goresan, 6.000 titik, atau lebar 4.000 px. Goresan langsung lewat pesan WebSocket `ink`; penghapus pada objek yang dikunci orang lain ditolak dengan nama pemegang. `000024` tidak perlu berubah untuk ini (jenis `drawing` sudah ada).
+- 2026-11-25, revisi B: kartu tabel punya judul (maksimal 200 karakter), ikut kunci lunak dan teks pencarian.
+- 2026-11-25, revisi C: tahap W5 (bentuk dan diagram) ditambahkan setelah W4. Model `wb_connectors` di `000024` diubah langsung (belum di-commit) supaya memuat port, ujung bebas, gaya jalur, titik belok, tujuh jenis ujung, tiga gaya garis, dan tiga label, jadi W5 tidak memigrasi ulang data garis.

@@ -18,7 +18,10 @@ GRANT DELETE ON
   user_sessions,         -- job maintenance: sesi kedaluwarsa
   audit_logs,            -- job maintenance: audit log login lebih dari 1 tahun
   wb_boards,             -- job maintenance: Tempat sampah Whiteboard lebih dari 30 hari (migrasi 000023)
-  wb_cards               -- job maintenance: Tempat sampah Whiteboard lebih dari 30 hari (migrasi 000023)
+  wb_cards,              -- job maintenance: Tempat sampah Whiteboard lebih dari 30 hari (migrasi 000023)
+  wb_connectors,         -- job maintenance: garis penghubung di Tempat sampah lebih dari 30 hari (migrasi 000024)
+  wb_files,              -- job maintenance: berkas Whiteboard yang tidak dipakai kartu mana pun (migrasi 000024)
+  wb_link_previews       -- job maintenance: cache pratinjau tautan lebih dari 7 hari (migrasi 000024)
 TO nvm_internal_app;
 
 -- daily_activities (migrasi 000016, revisi 21) sengaja tidak ada di daftar DELETE: sel yang dikosongkan
@@ -41,6 +44,10 @@ TO nvm_internal_app;
 -- hari di Tempat sampah; aplikasi sendiri menghapus lewat deleted_at. wb_activity sengaja tidak diberi DELETE:
 -- barisnya ikut hilang lewat ON DELETE CASCADE saat papannya dihapus permanen, dan aksi FK berjalan dengan hak
 -- pemilik tabel. Daftar DELETE sekarang sepuluh tabel.
+
+-- wb_connectors, wb_files, dan wb_link_previews (migrasi 000024, Whiteboard W3) juga hanya dihapus oleh job
+-- maintenance. wb_comments sengaja tidak diberi DELETE: komentar dihapus lewat deleted_at, dan barisnya ikut hilang
+-- lewat ON DELETE CASCADE saat kartunya dihapus permanen. Daftar DELETE sekarang tiga belas tabel.
 
 -- Bukti untuk runbook: daftar tabel yang boleh dihapus app.
 SELECT table_name FROM information_schema.role_table_grants

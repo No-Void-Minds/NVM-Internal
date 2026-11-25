@@ -336,7 +336,10 @@ func CleanContent(kind string, raw json.RawMessage) ([]byte, string, error) {
 	case KindChecklist:
 		v, plain, err = CleanChecklist(raw)
 	default:
-		return nil, "", apperr.Invalid("Jenis kartu tidak dikenal.")
+		var ok bool
+		if v, plain, ok, err = cleanW3(kind, raw); !ok {
+			return nil, "", apperr.Invalid("Jenis kartu tidak dikenal.")
+		}
 	}
 	if err != nil {
 		return nil, "", err
@@ -370,6 +373,14 @@ func DefaultContent(kind string) json.RawMessage {
 		return json.RawMessage(`{"doc":{"type":"doc","content":[{"type":"paragraph"}]}}`)
 	case KindHeading:
 		return json.RawMessage(`{"text":"","level":1}`)
+	case KindImage, KindFile:
+		return json.RawMessage(`{"caption":""}`)
+	case KindColumn:
+		return json.RawMessage(`{"title":""}`)
+	case KindDrawing:
+		return json.RawMessage(`{"strokes":[]}`)
+	case KindTable:
+		return json.RawMessage(`{"header":true,"rows":[["",""],["",""]]}`)
 	default:
 		return json.RawMessage(`{"title":"","items":[]}`)
 	}

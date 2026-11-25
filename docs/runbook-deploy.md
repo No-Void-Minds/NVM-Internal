@@ -107,7 +107,7 @@ docker exec "$PG_CONTAINER" psql -U nvm_internal_migrator -d nvm_internal_prod -
 docker exec "$PG_CONTAINER" rm /tmp/10-grants.sql
 ```
 
-Hasil query terakhir di `10-grants.sql` harus tepat sepuluh tabel: `activity_attachments`, `audit_logs`, `subtask_assignees`, `task_assignees`, `task_labels`, `task_subtasks`, `user_sessions`, `user_todos`, `wb_boards`, `wb_cards` (dua terakhir sejak migrasi 000023, Whiteboard W1).
+Hasil query terakhir di `10-grants.sql` harus tepat tiga belas tabel: `activity_attachments`, `audit_logs`, `subtask_assignees`, `task_assignees`, `task_labels`, `task_subtasks`, `user_sessions`, `user_todos`, `wb_boards`, `wb_cards` (sejak migrasi 000023, Whiteboard W1), `wb_connectors`, `wb_files`, `wb_link_previews` (sejak migrasi 000024, Whiteboard W3).
 
 Cek bahwa role aplikasi tidak bisa mengubah skema (harus `permission denied`):
 
@@ -580,7 +580,7 @@ Urutan `rilis.sh` tanpa opsi:
 5. `./deploy/backup.sh`; baris terakhir `backup.log` harus `OK`.
 6. Tag `nvm-internal-backend` dan `nvm-internal-frontend` `:latest` menjadi `:sebelum`.
 7. `git merge --ff-only <commit target>`. Bukan `git pull`, supaya yang naik tepat commit yang CI-nya sudah dicek.
-8. Bila ada migrasi baru: `migrate up` (image `migrate/migrate:v4.18.3` di `PG_NETWORK` dengan `MIGRATOR_URL`), lalu versi harus sama dengan migrasi terbaru dan tidak dirty. Bila ada migrasi baru atau `deploy/sql` berubah: `10-grants.sql` dijalankan sebagai `nvm_internal_migrator`. Berkas itu aman diulang, dan migrasi yang menambah tabel selalu butuh grants ulang walaupun `deploy/sql` tidak berubah. Cek keluarannya sama dengan daftar DELETE di langkah 3 (sepuluh tabel sejak migrasi 000023).
+8. Bila ada migrasi baru: `migrate up` (image `migrate/migrate:v4.18.3` di `PG_NETWORK` dengan `MIGRATOR_URL`), lalu versi harus sama dengan migrasi terbaru dan tidak dirty. Bila ada migrasi baru atau `deploy/sql` berubah: `10-grants.sql` dijalankan sebagai `nvm_internal_migrator`. Berkas itu aman diulang, dan migrasi yang menambah tabel selalu butuh grants ulang walaupun `deploy/sql` tidak berubah. Cek keluarannya sama dengan daftar DELETE di langkah 3 (tiga belas tabel sejak migrasi 000024).
 9. `docker compose up -d --build`.
 10. Health check `http://127.0.0.1:8094/api/health` berulang sampai 60 detik.
 11. Bila build atau health gagal:
@@ -627,6 +627,9 @@ docker run --rm --network "$PG_NETWORK" -v "$PWD/backend/migrations:/migrations:
 # Migrasi 000023 (Whiteboard W1) menambah wb_boards, wb_cards, dan wb_activity: 10-grants.sql WAJIB dijalankan
 # ulang, dan daftar DELETE jadi sepuluh tabel (wb_boards dan wb_cards untuk hapus permanen Tempat sampah oleh
 # job maintenance; wb_activity tidak, karena ikut terhapus lewat ON DELETE CASCADE).
+# Migrasi 000024 (Whiteboard W3) menambah wb_files, wb_link_previews, wb_connectors, dan wb_comments: 10-grants.sql
+# WAJIB dijalankan ulang, dan daftar DELETE jadi tiga belas tabel (wb_comments tidak, karena hapus memakai
+# deleted_at dan barisnya ikut hilang lewat ON DELETE CASCADE).
 docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
 curl -s http://127.0.0.1:8094/api/health
 ```

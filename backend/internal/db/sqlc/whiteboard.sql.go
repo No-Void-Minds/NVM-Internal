@@ -68,6 +68,51 @@ func (q *Queries) DeleteWbExpiredCards(ctx context.Context, before pgtype.Timest
 	return result.RowsAffected(), nil
 }
 
+const deleteWbExpiredConnectors = `-- name: DeleteWbExpiredConnectors :execrows
+DELETE FROM wb_connectors WHERE deleted_at < $1
+`
+
+func (q *Queries) DeleteWbExpiredConnectors(ctx context.Context, before pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteWbExpiredConnectors, before)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteWbOldPreviews = `-- name: DeleteWbOldPreviews :execrows
+DELETE FROM wb_link_previews p
+WHERE p.fetched_at < $1
+  AND NOT EXISTS (SELECT 1 FROM wb_cards c WHERE c.kind = 'link' AND c.content->>'preview_id' = p.id::text)
+`
+
+// Cache pratinjau lebih dari 7 hari yang tidak dipakai kartu tautan mana pun (termasuk di Tempat sampah).
+func (q *Queries) DeleteWbOldPreviews(ctx context.Context, before pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteWbOldPreviews, before)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteWbUnusedFiles = `-- name: DeleteWbUnusedFiles :execrows
+DELETE FROM wb_files f
+WHERE f.created_at < $1
+  AND NOT EXISTS (SELECT 1 FROM wb_cards c WHERE c.file_id = f.id)
+  AND NOT EXISTS (SELECT 1 FROM wb_link_previews p WHERE p.image_file_id = f.id)
+`
+
+// Berkas yang tidak lagi dipakai kartu mana pun (termasuk kartu di Tempat sampah) atau pratinjau, dan sudah berumur
+// lebih dari satu hari (unggahan yang sedang dipakai kartu baru tidak tersentuh). Berkas di disk dibersihkan pembersih
+// berkas yatim pada run berikutnya.
+func (q *Queries) DeleteWbUnusedFiles(ctx context.Context, before pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteWbUnusedFiles, before)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getWbActivityToMerge = `-- name: GetWbActivityToMerge :one
 SELECT id, summary FROM wb_activity
 WHERE board_id = $1 AND user_id = $2 AND action = $3
@@ -165,36 +210,66 @@ func (q *Queries) GetWbBoardForUpdate(ctx context.Context, id pgtype.UUID) (GetW
 
 const getWbCard = `-- name: GetWbCard :one
 SELECT c.id, c.board_id, c.kind, c.ref_board_id, c.x, c.y, c.w, c.h, c.z, c.color, c.content, c.version,
-       c.content_version, c.seq, c.updated_by, c.updated_at,
+       c.content_version, c.seq, c.updated_by, c.updated_at, c.file_id, c.column_id, c.col_order,
        coalesce(rb.title, '')::text AS ref_title, coalesce(rb.version, 0)::int AS ref_version,
        (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind = 'board')::bigint AS ref_boards,
-       (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind <> 'board')::bigint AS ref_cards
+       (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind <> 'board')::bigint AS ref_cards,
+       coalesce(f.original_name, '')::text AS file_name, coalesce(f.mime_type, '')::text AS file_mime,
+       coalesce(f.size_bytes, 0)::bigint AS file_size, coalesce(f.has_thumb, false)::bool AS file_thumb,
+       coalesce(f.width, 0)::int AS file_width, coalesce(f.height, 0)::int AS file_height,
+       lp.id AS preview_id, coalesce(lp.title, '')::text AS preview_title,
+       coalesce(lp.description, '')::text AS preview_description, coalesce(lp.site_name, '')::text AS preview_site,
+       coalesce(lp.final_url, '')::text AS preview_final_url, coalesce(lp.status, '')::text AS preview_status,
+       lp.image_file_id AS preview_image,
+       (SELECT count(*) FROM wb_comments m WHERE m.card_id = c.id AND m.deleted_at IS NULL)::bigint AS comment_count,
+       coalesce(cu.name, '')::text AS created_by_name
 FROM wb_cards c
 LEFT JOIN wb_boards rb ON rb.id = c.ref_board_id
+LEFT JOIN wb_files f ON f.id = c.file_id
+LEFT JOIN wb_link_previews lp ON c.kind = 'link' AND lp.id = nullif(c.content->>'preview_id', '')::uuid
+LEFT JOIN users cu ON cu.id = c.created_by
 WHERE c.id = $1 AND c.deleted_at IS NULL
 `
 
 type GetWbCardRow struct {
-	ID             pgtype.UUID
-	BoardID        pgtype.UUID
-	Kind           string
-	RefBoardID     pgtype.UUID
-	X              float64
-	Y              float64
-	W              float64
-	H              float64
-	Z              float64
-	Color          pgtype.Text
-	Content        []byte
-	Version        int32
-	ContentVersion int32
-	Seq            int64
-	UpdatedBy      int64
-	UpdatedAt      pgtype.Timestamptz
-	RefTitle       string
-	RefVersion     int32
-	RefBoards      int64
-	RefCards       int64
+	ID                 pgtype.UUID
+	BoardID            pgtype.UUID
+	Kind               string
+	RefBoardID         pgtype.UUID
+	X                  float64
+	Y                  float64
+	W                  float64
+	H                  float64
+	Z                  float64
+	Color              pgtype.Text
+	Content            []byte
+	Version            int32
+	ContentVersion     int32
+	Seq                int64
+	UpdatedBy          int64
+	UpdatedAt          pgtype.Timestamptz
+	FileID             pgtype.UUID
+	ColumnID           pgtype.UUID
+	ColOrder           pgtype.Float8
+	RefTitle           string
+	RefVersion         int32
+	RefBoards          int64
+	RefCards           int64
+	FileName           string
+	FileMime           string
+	FileSize           int64
+	FileThumb          bool
+	FileWidth          int32
+	FileHeight         int32
+	PreviewID          pgtype.UUID
+	PreviewTitle       string
+	PreviewDescription string
+	PreviewSite        string
+	PreviewFinalUrl    string
+	PreviewStatus      string
+	PreviewImage       pgtype.UUID
+	CommentCount       int64
+	CreatedByName      string
 }
 
 func (q *Queries) GetWbCard(ctx context.Context, id pgtype.UUID) (GetWbCardRow, error) {
@@ -217,16 +292,34 @@ func (q *Queries) GetWbCard(ctx context.Context, id pgtype.UUID) (GetWbCardRow, 
 		&i.Seq,
 		&i.UpdatedBy,
 		&i.UpdatedAt,
+		&i.FileID,
+		&i.ColumnID,
+		&i.ColOrder,
 		&i.RefTitle,
 		&i.RefVersion,
 		&i.RefBoards,
 		&i.RefCards,
+		&i.FileName,
+		&i.FileMime,
+		&i.FileSize,
+		&i.FileThumb,
+		&i.FileWidth,
+		&i.FileHeight,
+		&i.PreviewID,
+		&i.PreviewTitle,
+		&i.PreviewDescription,
+		&i.PreviewSite,
+		&i.PreviewFinalUrl,
+		&i.PreviewStatus,
+		&i.PreviewImage,
+		&i.CommentCount,
+		&i.CreatedByName,
 	)
 	return i, err
 }
 
 const getWbCardForUpdate = `-- name: GetWbCardForUpdate :one
-SELECT id, board_id, kind, ref_board_id, content, content_version
+SELECT id, board_id, kind, ref_board_id, content, content_version, column_id
 FROM wb_cards
 WHERE id = $1 AND board_id = $2 AND deleted_at IS NULL
 FOR UPDATE
@@ -244,6 +337,7 @@ type GetWbCardForUpdateRow struct {
 	RefBoardID     pgtype.UUID
 	Content        []byte
 	ContentVersion int32
+	ColumnID       pgtype.UUID
 }
 
 func (q *Queries) GetWbCardForUpdate(ctx context.Context, arg GetWbCardForUpdateParams) (GetWbCardForUpdateRow, error) {
@@ -256,6 +350,7 @@ func (q *Queries) GetWbCardForUpdate(ctx context.Context, arg GetWbCardForUpdate
 		&i.RefBoardID,
 		&i.Content,
 		&i.ContentVersion,
+		&i.ColumnID,
 	)
 	return i, err
 }
@@ -274,6 +369,171 @@ func (q *Queries) GetWbCardKind(ctx context.Context, arg GetWbCardKindParams) (s
 	var kind string
 	err := row.Scan(&kind)
 	return kind, err
+}
+
+const getWbCommentForUpdate = `-- name: GetWbCommentForUpdate :one
+SELECT m.id, m.card_id, m.user_id, m.body, c.board_id
+FROM wb_comments m JOIN wb_cards c ON c.id = m.card_id
+WHERE m.id = $1 AND m.deleted_at IS NULL AND c.deleted_at IS NULL
+FOR UPDATE OF m
+`
+
+type GetWbCommentForUpdateRow struct {
+	ID      pgtype.UUID
+	CardID  pgtype.UUID
+	UserID  int64
+	Body    string
+	BoardID pgtype.UUID
+}
+
+func (q *Queries) GetWbCommentForUpdate(ctx context.Context, id pgtype.UUID) (GetWbCommentForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, getWbCommentForUpdate, id)
+	var i GetWbCommentForUpdateRow
+	err := row.Scan(
+		&i.ID,
+		&i.CardID,
+		&i.UserID,
+		&i.Body,
+		&i.BoardID,
+	)
+	return i, err
+}
+
+const getWbConnectorEnds = `-- name: GetWbConnectorEnds :one
+SELECT from_card_id, to_card_id FROM wb_connectors
+WHERE id = $1 AND board_id = $2 AND deleted_at IS NULL
+FOR UPDATE
+`
+
+type GetWbConnectorEndsParams struct {
+	ID      pgtype.UUID
+	BoardID pgtype.UUID
+}
+
+type GetWbConnectorEndsRow struct {
+	FromCardID pgtype.UUID
+	ToCardID   pgtype.UUID
+}
+
+func (q *Queries) GetWbConnectorEnds(ctx context.Context, arg GetWbConnectorEndsParams) (GetWbConnectorEndsRow, error) {
+	row := q.db.QueryRow(ctx, getWbConnectorEnds, arg.ID, arg.BoardID)
+	var i GetWbConnectorEndsRow
+	err := row.Scan(&i.FromCardID, &i.ToCardID)
+	return i, err
+}
+
+const getWbFile = `-- name: GetWbFile :one
+SELECT id, board_id, kind, original_name, mime_type, size_bytes, has_thumb, created_at FROM wb_files WHERE id = $1
+`
+
+type GetWbFileRow struct {
+	ID           pgtype.UUID
+	BoardID      pgtype.UUID
+	Kind         string
+	OriginalName string
+	MimeType     string
+	SizeBytes    int64
+	HasThumb     bool
+	CreatedAt    pgtype.Timestamptz
+}
+
+func (q *Queries) GetWbFile(ctx context.Context, id pgtype.UUID) (GetWbFileRow, error) {
+	row := q.db.QueryRow(ctx, getWbFile, id)
+	var i GetWbFileRow
+	err := row.Scan(
+		&i.ID,
+		&i.BoardID,
+		&i.Kind,
+		&i.OriginalName,
+		&i.MimeType,
+		&i.SizeBytes,
+		&i.HasThumb,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getWbPreview = `-- name: GetWbPreview :one
+SELECT id, url, final_url, title, description, site_name, image_file_id, status, message, fetched_at
+FROM wb_link_previews WHERE id = $1
+`
+
+type GetWbPreviewRow struct {
+	ID          pgtype.UUID
+	Url         string
+	FinalUrl    string
+	Title       string
+	Description string
+	SiteName    string
+	ImageFileID pgtype.UUID
+	Status      string
+	Message     string
+	FetchedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) GetWbPreview(ctx context.Context, id pgtype.UUID) (GetWbPreviewRow, error) {
+	row := q.db.QueryRow(ctx, getWbPreview, id)
+	var i GetWbPreviewRow
+	err := row.Scan(
+		&i.ID,
+		&i.Url,
+		&i.FinalUrl,
+		&i.Title,
+		&i.Description,
+		&i.SiteName,
+		&i.ImageFileID,
+		&i.Status,
+		&i.Message,
+		&i.FetchedAt,
+	)
+	return i, err
+}
+
+const getWbPreviewByHash = `-- name: GetWbPreviewByHash :one
+SELECT id, url, final_url, title, description, site_name, image_file_id, status, message, fetched_at
+FROM wb_link_previews WHERE url_hash = $1
+`
+
+type GetWbPreviewByHashRow struct {
+	ID          pgtype.UUID
+	Url         string
+	FinalUrl    string
+	Title       string
+	Description string
+	SiteName    string
+	ImageFileID pgtype.UUID
+	Status      string
+	Message     string
+	FetchedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) GetWbPreviewByHash(ctx context.Context, urlHash string) (GetWbPreviewByHashRow, error) {
+	row := q.db.QueryRow(ctx, getWbPreviewByHash, urlHash)
+	var i GetWbPreviewByHashRow
+	err := row.Scan(
+		&i.ID,
+		&i.Url,
+		&i.FinalUrl,
+		&i.Title,
+		&i.Description,
+		&i.SiteName,
+		&i.ImageFileID,
+		&i.Status,
+		&i.Message,
+		&i.FetchedAt,
+	)
+	return i, err
+}
+
+const getWbResyncSeq = `-- name: GetWbResyncSeq :one
+SELECT resync_seq FROM wb_boards WHERE id = $1
+`
+
+func (q *Queries) GetWbResyncSeq(ctx context.Context, id pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, getWbResyncSeq, id)
+	var resync_seq int64
+	err := row.Scan(&resync_seq)
+	return resync_seq, err
 }
 
 const getWbRoot = `-- name: GetWbRoot :one
@@ -335,9 +595,9 @@ func (q *Queries) InsertWbBoard(ctx context.Context, arg InsertWbBoardParams) (p
 }
 
 const insertWbCard = `-- name: InsertWbCard :exec
-INSERT INTO wb_cards (id, board_id, kind, ref_board_id, x, y, w, h, z, color, content, plain, seq, created_by, updated_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-        $14, $14)
+INSERT INTO wb_cards (id, board_id, kind, ref_board_id, file_id, x, y, w, h, z, color, content, plain, seq, created_by, updated_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+        $13, $14, $15, $15)
 `
 
 type InsertWbCardParams struct {
@@ -345,6 +605,7 @@ type InsertWbCardParams struct {
 	BoardID    pgtype.UUID
 	Kind       string
 	RefBoardID pgtype.UUID
+	FileID     pgtype.UUID
 	X          float64
 	Y          float64
 	W          float64
@@ -363,6 +624,7 @@ func (q *Queries) InsertWbCard(ctx context.Context, arg InsertWbCardParams) erro
 		arg.BoardID,
 		arg.Kind,
 		arg.RefBoardID,
+		arg.FileID,
 		arg.X,
 		arg.Y,
 		arg.W,
@@ -373,6 +635,134 @@ func (q *Queries) InsertWbCard(ctx context.Context, arg InsertWbCardParams) erro
 		arg.Plain,
 		arg.Seq,
 		arg.ActorID,
+	)
+	return err
+}
+
+const insertWbComment = `-- name: InsertWbComment :one
+INSERT INTO wb_comments (card_id, user_id, body) VALUES ($1, $2, $3)
+RETURNING id, created_at
+`
+
+type InsertWbCommentParams struct {
+	CardID pgtype.UUID
+	UserID int64
+	Body   string
+}
+
+type InsertWbCommentRow struct {
+	ID        pgtype.UUID
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) InsertWbComment(ctx context.Context, arg InsertWbCommentParams) (InsertWbCommentRow, error) {
+	row := q.db.QueryRow(ctx, insertWbComment, arg.CardID, arg.UserID, arg.Body)
+	var i InsertWbCommentRow
+	err := row.Scan(&i.ID, &i.CreatedAt)
+	return i, err
+}
+
+const insertWbConnector = `-- name: InsertWbConnector :one
+INSERT INTO wb_connectors (board_id, from_card_id, to_card_id, geometry, style, label, label_start, label_end, seq,
+                           created_by, updated_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+        $9, $10, $10)
+RETURNING id, board_id, from_card_id, to_card_id, geometry, style, label, label_start, label_end, version, seq
+`
+
+type InsertWbConnectorParams struct {
+	BoardID    pgtype.UUID
+	FromCardID pgtype.UUID
+	ToCardID   pgtype.UUID
+	Geometry   []byte
+	Style      []byte
+	Label      string
+	LabelStart string
+	LabelEnd   string
+	Seq        int64
+	ActorID    int64
+}
+
+type InsertWbConnectorRow struct {
+	ID         pgtype.UUID
+	BoardID    pgtype.UUID
+	FromCardID pgtype.UUID
+	ToCardID   pgtype.UUID
+	Geometry   []byte
+	Style      []byte
+	Label      string
+	LabelStart string
+	LabelEnd   string
+	Version    int32
+	Seq        int64
+}
+
+func (q *Queries) InsertWbConnector(ctx context.Context, arg InsertWbConnectorParams) (InsertWbConnectorRow, error) {
+	row := q.db.QueryRow(ctx, insertWbConnector,
+		arg.BoardID,
+		arg.FromCardID,
+		arg.ToCardID,
+		arg.Geometry,
+		arg.Style,
+		arg.Label,
+		arg.LabelStart,
+		arg.LabelEnd,
+		arg.Seq,
+		arg.ActorID,
+	)
+	var i InsertWbConnectorRow
+	err := row.Scan(
+		&i.ID,
+		&i.BoardID,
+		&i.FromCardID,
+		&i.ToCardID,
+		&i.Geometry,
+		&i.Style,
+		&i.Label,
+		&i.LabelStart,
+		&i.LabelEnd,
+		&i.Version,
+		&i.Seq,
+	)
+	return i, err
+}
+
+const insertWbFile = `-- name: InsertWbFile :exec
+
+INSERT INTO wb_files (id, board_id, kind, original_name, mime_type, size_bytes, checksum, width, height, has_thumb, uploaded_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+        $9, $10, $11)
+`
+
+type InsertWbFileParams struct {
+	ID           pgtype.UUID
+	BoardID      pgtype.UUID
+	Kind         string
+	OriginalName string
+	MimeType     string
+	SizeBytes    int64
+	Checksum     string
+	Width        pgtype.Int4
+	Height       pgtype.Int4
+	HasThumb     bool
+	UploadedBy   pgtype.Int8
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// W3: berkas, pratinjau tautan, kolom, penghubung, komentar, pindah antar papan
+func (q *Queries) InsertWbFile(ctx context.Context, arg InsertWbFileParams) error {
+	_, err := q.db.Exec(ctx, insertWbFile,
+		arg.ID,
+		arg.BoardID,
+		arg.Kind,
+		arg.OriginalName,
+		arg.MimeType,
+		arg.SizeBytes,
+		arg.Checksum,
+		arg.Width,
+		arg.Height,
+		arg.HasThumb,
+		arg.UploadedBy,
 	)
 	return err
 }
@@ -478,39 +868,126 @@ func (q *Queries) ListWbAncestors(ctx context.Context, id pgtype.UUID) ([]ListWb
 	return items, nil
 }
 
+const listWbBoards = `-- name: ListWbBoards :many
+SELECT id, title, parent_id, is_root FROM wb_boards WHERE deleted_at IS NULL ORDER BY lower(title), id
+`
+
+type ListWbBoardsRow struct {
+	ID       pgtype.UUID
+	Title    string
+	ParentID pgtype.UUID
+	IsRoot   bool
+}
+
+// Semua papan hidup untuk pilihan "Pindahkan ke papan"; jumlah papan tim kecil, jadi pohonnya disusun di klien.
+func (q *Queries) ListWbBoards(ctx context.Context) ([]ListWbBoardsRow, error) {
+	rows, err := q.db.Query(ctx, listWbBoards)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWbBoardsRow{}
+	for rows.Next() {
+		var i ListWbBoardsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.ParentID,
+			&i.IsRoot,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWbCardBounds = `-- name: ListWbCardBounds :one
+SELECT coalesce(max(x + w), 0)::double precision AS right_edge, coalesce(min(y), 0)::double precision AS top_edge,
+       count(*)::bigint AS n
+FROM wb_cards WHERE board_id = $1 AND deleted_at IS NULL AND column_id IS NULL
+`
+
+type ListWbCardBoundsRow struct {
+	RightEdge float64
+	TopEdge   float64
+	N         int64
+}
+
+// Batas kanan dan atas isi papan, untuk menaruh kartu pindahan di sebelah kanan isi yang sudah ada.
+func (q *Queries) ListWbCardBounds(ctx context.Context, boardID pgtype.UUID) (ListWbCardBoundsRow, error) {
+	row := q.db.QueryRow(ctx, listWbCardBounds, boardID)
+	var i ListWbCardBoundsRow
+	err := row.Scan(&i.RightEdge, &i.TopEdge, &i.N)
+	return i, err
+}
+
 const listWbCards = `-- name: ListWbCards :many
 SELECT c.id, c.board_id, c.kind, c.ref_board_id, c.x, c.y, c.w, c.h, c.z, c.color, c.content, c.version,
-       c.content_version, c.seq, c.updated_by, c.updated_at,
+       c.content_version, c.seq, c.updated_by, c.updated_at, c.file_id, c.column_id, c.col_order,
        coalesce(rb.title, '')::text AS ref_title, coalesce(rb.version, 0)::int AS ref_version,
        (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind = 'board')::bigint AS ref_boards,
-       (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind <> 'board')::bigint AS ref_cards
+       (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind <> 'board')::bigint AS ref_cards,
+       coalesce(f.original_name, '')::text AS file_name, coalesce(f.mime_type, '')::text AS file_mime,
+       coalesce(f.size_bytes, 0)::bigint AS file_size, coalesce(f.has_thumb, false)::bool AS file_thumb,
+       coalesce(f.width, 0)::int AS file_width, coalesce(f.height, 0)::int AS file_height,
+       lp.id AS preview_id, coalesce(lp.title, '')::text AS preview_title,
+       coalesce(lp.description, '')::text AS preview_description, coalesce(lp.site_name, '')::text AS preview_site,
+       coalesce(lp.final_url, '')::text AS preview_final_url, coalesce(lp.status, '')::text AS preview_status,
+       lp.image_file_id AS preview_image,
+       (SELECT count(*) FROM wb_comments m WHERE m.card_id = c.id AND m.deleted_at IS NULL)::bigint AS comment_count,
+       coalesce(cu.name, '')::text AS created_by_name
 FROM wb_cards c
 LEFT JOIN wb_boards rb ON rb.id = c.ref_board_id
+LEFT JOIN wb_files f ON f.id = c.file_id
+LEFT JOIN wb_link_previews lp ON c.kind = 'link' AND lp.id = nullif(c.content->>'preview_id', '')::uuid
+LEFT JOIN users cu ON cu.id = c.created_by
 WHERE c.board_id = $1 AND c.deleted_at IS NULL
 ORDER BY c.z, c.created_at, c.id
 `
 
 type ListWbCardsRow struct {
-	ID             pgtype.UUID
-	BoardID        pgtype.UUID
-	Kind           string
-	RefBoardID     pgtype.UUID
-	X              float64
-	Y              float64
-	W              float64
-	H              float64
-	Z              float64
-	Color          pgtype.Text
-	Content        []byte
-	Version        int32
-	ContentVersion int32
-	Seq            int64
-	UpdatedBy      int64
-	UpdatedAt      pgtype.Timestamptz
-	RefTitle       string
-	RefVersion     int32
-	RefBoards      int64
-	RefCards       int64
+	ID                 pgtype.UUID
+	BoardID            pgtype.UUID
+	Kind               string
+	RefBoardID         pgtype.UUID
+	X                  float64
+	Y                  float64
+	W                  float64
+	H                  float64
+	Z                  float64
+	Color              pgtype.Text
+	Content            []byte
+	Version            int32
+	ContentVersion     int32
+	Seq                int64
+	UpdatedBy          int64
+	UpdatedAt          pgtype.Timestamptz
+	FileID             pgtype.UUID
+	ColumnID           pgtype.UUID
+	ColOrder           pgtype.Float8
+	RefTitle           string
+	RefVersion         int32
+	RefBoards          int64
+	RefCards           int64
+	FileName           string
+	FileMime           string
+	FileSize           int64
+	FileThumb          bool
+	FileWidth          int32
+	FileHeight         int32
+	PreviewID          pgtype.UUID
+	PreviewTitle       string
+	PreviewDescription string
+	PreviewSite        string
+	PreviewFinalUrl    string
+	PreviewStatus      string
+	PreviewImage       pgtype.UUID
+	CommentCount       int64
+	CreatedByName      string
 }
 
 // Kartu papan membawa judul papan anak dan ringkasan isinya ("3 papan, 12 kartu").
@@ -540,10 +1017,28 @@ func (q *Queries) ListWbCards(ctx context.Context, boardID pgtype.UUID) ([]ListW
 			&i.Seq,
 			&i.UpdatedBy,
 			&i.UpdatedAt,
+			&i.FileID,
+			&i.ColumnID,
+			&i.ColOrder,
 			&i.RefTitle,
 			&i.RefVersion,
 			&i.RefBoards,
 			&i.RefCards,
+			&i.FileName,
+			&i.FileMime,
+			&i.FileSize,
+			&i.FileThumb,
+			&i.FileWidth,
+			&i.FileHeight,
+			&i.PreviewID,
+			&i.PreviewTitle,
+			&i.PreviewDescription,
+			&i.PreviewSite,
+			&i.PreviewFinalUrl,
+			&i.PreviewStatus,
+			&i.PreviewImage,
+			&i.CommentCount,
+			&i.CreatedByName,
 		); err != nil {
 			return nil, err
 		}
@@ -557,13 +1052,25 @@ func (q *Queries) ListWbCards(ctx context.Context, boardID pgtype.UUID) ([]ListW
 
 const listWbCardsSince = `-- name: ListWbCardsSince :many
 SELECT c.id, c.board_id, c.kind, c.ref_board_id, c.x, c.y, c.w, c.h, c.z, c.color, c.content, c.version,
-       c.content_version, c.seq, c.updated_by, c.updated_at,
+       c.content_version, c.seq, c.updated_by, c.updated_at, c.file_id, c.column_id, c.col_order,
        coalesce(rb.title, '')::text AS ref_title, coalesce(rb.version, 0)::int AS ref_version,
        (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind = 'board')::bigint AS ref_boards,
        (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind <> 'board')::bigint AS ref_cards,
+       coalesce(f.original_name, '')::text AS file_name, coalesce(f.mime_type, '')::text AS file_mime,
+       coalesce(f.size_bytes, 0)::bigint AS file_size, coalesce(f.has_thumb, false)::bool AS file_thumb,
+       coalesce(f.width, 0)::int AS file_width, coalesce(f.height, 0)::int AS file_height,
+       lp.id AS preview_id, coalesce(lp.title, '')::text AS preview_title,
+       coalesce(lp.description, '')::text AS preview_description, coalesce(lp.site_name, '')::text AS preview_site,
+       coalesce(lp.final_url, '')::text AS preview_final_url, coalesce(lp.status, '')::text AS preview_status,
+       lp.image_file_id AS preview_image,
+       (SELECT count(*) FROM wb_comments m WHERE m.card_id = c.id AND m.deleted_at IS NULL)::bigint AS comment_count,
+       coalesce(cu.name, '')::text AS created_by_name,
        (c.deleted_at IS NOT NULL)::bool AS deleted
 FROM wb_cards c
 LEFT JOIN wb_boards rb ON rb.id = c.ref_board_id
+LEFT JOIN wb_files f ON f.id = c.file_id
+LEFT JOIN wb_link_previews lp ON c.kind = 'link' AND lp.id = nullif(c.content->>'preview_id', '')::uuid
+LEFT JOIN users cu ON cu.id = c.created_by
 WHERE c.board_id = $1 AND c.seq > $2
 ORDER BY c.seq, c.id
 `
@@ -574,27 +1081,45 @@ type ListWbCardsSinceParams struct {
 }
 
 type ListWbCardsSinceRow struct {
-	ID             pgtype.UUID
-	BoardID        pgtype.UUID
-	Kind           string
-	RefBoardID     pgtype.UUID
-	X              float64
-	Y              float64
-	W              float64
-	H              float64
-	Z              float64
-	Color          pgtype.Text
-	Content        []byte
-	Version        int32
-	ContentVersion int32
-	Seq            int64
-	UpdatedBy      int64
-	UpdatedAt      pgtype.Timestamptz
-	RefTitle       string
-	RefVersion     int32
-	RefBoards      int64
-	RefCards       int64
-	Deleted        bool
+	ID                 pgtype.UUID
+	BoardID            pgtype.UUID
+	Kind               string
+	RefBoardID         pgtype.UUID
+	X                  float64
+	Y                  float64
+	W                  float64
+	H                  float64
+	Z                  float64
+	Color              pgtype.Text
+	Content            []byte
+	Version            int32
+	ContentVersion     int32
+	Seq                int64
+	UpdatedBy          int64
+	UpdatedAt          pgtype.Timestamptz
+	FileID             pgtype.UUID
+	ColumnID           pgtype.UUID
+	ColOrder           pgtype.Float8
+	RefTitle           string
+	RefVersion         int32
+	RefBoards          int64
+	RefCards           int64
+	FileName           string
+	FileMime           string
+	FileSize           int64
+	FileThumb          bool
+	FileWidth          int32
+	FileHeight         int32
+	PreviewID          pgtype.UUID
+	PreviewTitle       string
+	PreviewDescription string
+	PreviewSite        string
+	PreviewFinalUrl    string
+	PreviewStatus      string
+	PreviewImage       pgtype.UUID
+	CommentCount       int64
+	CreatedByName      string
+	Deleted            bool
 }
 
 // Sinkron ulang setelah koneksi putus: semua kartu yang berubah sesudah seq itu, termasuk yang masuk Tempat sampah
@@ -625,11 +1150,222 @@ func (q *Queries) ListWbCardsSince(ctx context.Context, arg ListWbCardsSincePara
 			&i.Seq,
 			&i.UpdatedBy,
 			&i.UpdatedAt,
+			&i.FileID,
+			&i.ColumnID,
+			&i.ColOrder,
 			&i.RefTitle,
 			&i.RefVersion,
 			&i.RefBoards,
 			&i.RefCards,
+			&i.FileName,
+			&i.FileMime,
+			&i.FileSize,
+			&i.FileThumb,
+			&i.FileWidth,
+			&i.FileHeight,
+			&i.PreviewID,
+			&i.PreviewTitle,
+			&i.PreviewDescription,
+			&i.PreviewSite,
+			&i.PreviewFinalUrl,
+			&i.PreviewStatus,
+			&i.PreviewImage,
+			&i.CommentCount,
+			&i.CreatedByName,
 			&i.Deleted,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWbColumnChildren = `-- name: ListWbColumnChildren :many
+SELECT id FROM wb_cards WHERE column_id = ANY($1::uuid[]) AND deleted_at IS NULL
+`
+
+func (q *Queries) ListWbColumnChildren(ctx context.Context, ids []pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listWbColumnChildren, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWbComments = `-- name: ListWbComments :many
+SELECT m.id, m.card_id, m.user_id, u.name AS user_name, u.avatar_id, m.body, m.created_at, m.edited_at
+FROM wb_comments m
+JOIN users u ON u.id = m.user_id
+WHERE m.card_id = $1 AND m.deleted_at IS NULL
+ORDER BY m.created_at, m.id
+`
+
+type ListWbCommentsRow struct {
+	ID        pgtype.UUID
+	CardID    pgtype.UUID
+	UserID    int64
+	UserName  string
+	AvatarID  pgtype.UUID
+	Body      string
+	CreatedAt pgtype.Timestamptz
+	EditedAt  pgtype.Timestamptz
+}
+
+func (q *Queries) ListWbComments(ctx context.Context, cardID pgtype.UUID) ([]ListWbCommentsRow, error) {
+	rows, err := q.db.Query(ctx, listWbComments, cardID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWbCommentsRow{}
+	for rows.Next() {
+		var i ListWbCommentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CardID,
+			&i.UserID,
+			&i.UserName,
+			&i.AvatarID,
+			&i.Body,
+			&i.CreatedAt,
+			&i.EditedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWbConnectors = `-- name: ListWbConnectors :many
+SELECT n.id, n.board_id, n.from_card_id, n.to_card_id, n.geometry, n.style, n.label, n.label_start, n.label_end,
+       n.version, n.seq
+FROM wb_connectors n
+LEFT JOIN wb_cards a ON a.id = n.from_card_id
+LEFT JOIN wb_cards b ON b.id = n.to_card_id
+WHERE n.board_id = $1 AND n.deleted_at IS NULL
+  AND (n.from_card_id IS NULL OR a.deleted_at IS NULL) AND (n.to_card_id IS NULL OR b.deleted_at IS NULL)
+ORDER BY n.created_at, n.id
+`
+
+type ListWbConnectorsRow struct {
+	ID         pgtype.UUID
+	BoardID    pgtype.UUID
+	FromCardID pgtype.UUID
+	ToCardID   pgtype.UUID
+	Geometry   []byte
+	Style      []byte
+	Label      string
+	LabelStart string
+	LabelEnd   string
+	Version    int32
+	Seq        int64
+}
+
+// Penghubung yang ujung menempelnya hidup (ujung bebas tidak punya kartu); ujung di Tempat sampah menyembunyikannya.
+func (q *Queries) ListWbConnectors(ctx context.Context, boardID pgtype.UUID) ([]ListWbConnectorsRow, error) {
+	rows, err := q.db.Query(ctx, listWbConnectors, boardID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWbConnectorsRow{}
+	for rows.Next() {
+		var i ListWbConnectorsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BoardID,
+			&i.FromCardID,
+			&i.ToCardID,
+			&i.Geometry,
+			&i.Style,
+			&i.Label,
+			&i.LabelStart,
+			&i.LabelEnd,
+			&i.Version,
+			&i.Seq,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWbConnectorsSince = `-- name: ListWbConnectorsSince :many
+SELECT n.id, n.board_id, n.from_card_id, n.to_card_id, n.geometry, n.style, n.label, n.label_start, n.label_end,
+       n.version, n.seq,
+       (n.deleted_at IS NOT NULL OR a.deleted_at IS NOT NULL OR b.deleted_at IS NOT NULL)::bool AS hidden
+FROM wb_connectors n
+LEFT JOIN wb_cards a ON a.id = n.from_card_id
+LEFT JOIN wb_cards b ON b.id = n.to_card_id
+WHERE n.board_id = $1 AND n.seq > $2
+`
+
+type ListWbConnectorsSinceParams struct {
+	BoardID pgtype.UUID
+	Seq     int64
+}
+
+type ListWbConnectorsSinceRow struct {
+	ID         pgtype.UUID
+	BoardID    pgtype.UUID
+	FromCardID pgtype.UUID
+	ToCardID   pgtype.UUID
+	Geometry   []byte
+	Style      []byte
+	Label      string
+	LabelStart string
+	LabelEnd   string
+	Version    int32
+	Seq        int64
+	Hidden     bool
+}
+
+func (q *Queries) ListWbConnectorsSince(ctx context.Context, arg ListWbConnectorsSinceParams) ([]ListWbConnectorsSinceRow, error) {
+	rows, err := q.db.Query(ctx, listWbConnectorsSince, arg.BoardID, arg.Seq)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWbConnectorsSinceRow{}
+	for rows.Next() {
+		var i ListWbConnectorsSinceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BoardID,
+			&i.FromCardID,
+			&i.ToCardID,
+			&i.Geometry,
+			&i.Style,
+			&i.Label,
+			&i.LabelStart,
+			&i.LabelEnd,
+			&i.Version,
+			&i.Seq,
+			&i.Hidden,
 		); err != nil {
 			return nil, err
 		}
@@ -647,6 +1383,8 @@ FROM (
   SELECT wb.deleted_batch AS batch, 1 AS nb, 0 AS nc FROM wb_boards wb WHERE wb.deleted_at < $1
   UNION ALL
   SELECT wc.deleted_batch, 0, 1 FROM wb_cards wc WHERE wc.deleted_at < $1
+  UNION ALL
+  SELECT wn.deleted_batch, 0, 0 FROM wb_connectors wn WHERE wn.deleted_at < $1
 ) t
 GROUP BY t.batch
 ORDER BY t.batch
@@ -784,6 +1522,60 @@ func (q *Queries) ListWbTrashCards(ctx context.Context) ([]ListWbTrashCardsRow, 
 	return items, nil
 }
 
+const listWbTrashConnectors = `-- name: ListWbTrashConnectors :many
+SELECT n.deleted_batch, n.deleted_at, n.board_id, u.name AS deleted_by_name, b.title AS board_title,
+       (b.deleted_at IS NOT NULL)::bool AS board_in_trash
+FROM wb_connectors n
+JOIN users u ON u.id = n.deleted_by
+JOIN wb_boards b ON b.id = n.board_id
+WHERE n.deleted_at IS NOT NULL
+`
+
+type ListWbTrashConnectorsRow struct {
+	DeletedBatch  pgtype.UUID
+	DeletedAt     pgtype.Timestamptz
+	BoardID       pgtype.UUID
+	DeletedByName string
+	BoardTitle    string
+	BoardInTrash  bool
+}
+
+func (q *Queries) ListWbTrashConnectors(ctx context.Context) ([]ListWbTrashConnectorsRow, error) {
+	rows, err := q.db.Query(ctx, listWbTrashConnectors)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWbTrashConnectorsRow{}
+	for rows.Next() {
+		var i ListWbTrashConnectorsRow
+		if err := rows.Scan(
+			&i.DeletedBatch,
+			&i.DeletedAt,
+			&i.BoardID,
+			&i.DeletedByName,
+			&i.BoardTitle,
+			&i.BoardInTrash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markWbResync = `-- name: MarkWbResync :exec
+UPDATE wb_boards SET resync_seq = seq WHERE id = $1
+`
+
+func (q *Queries) MarkWbResync(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, markWbResync, id)
+	return err
+}
+
 const maxWbCardZ = `-- name: MaxWbCardZ :one
 SELECT coalesce(max(z), 0)::double precision FROM wb_cards WHERE board_id = $1 AND deleted_at IS NULL
 `
@@ -795,6 +1587,114 @@ func (q *Queries) MaxWbCardZ(ctx context.Context, boardID pgtype.UUID) (float64,
 	return column_1, err
 }
 
+const maxWbColOrder = `-- name: MaxWbColOrder :one
+SELECT coalesce(max(col_order), 0)::double precision FROM wb_cards WHERE column_id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) MaxWbColOrder(ctx context.Context, columnID pgtype.UUID) (float64, error) {
+	row := q.db.QueryRow(ctx, maxWbColOrder, columnID)
+	var column_1 float64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const moveWbCards = `-- name: MoveWbCards :many
+UPDATE wb_cards
+SET board_id = $1, seq = $2, updated_by = $3, version = version + 1,
+    x = x + $4::double precision, y = y + $5::double precision,
+    column_id = CASE WHEN column_id = ANY($6::uuid[]) THEN column_id ELSE NULL END,
+    col_order = CASE WHEN column_id = ANY($6::uuid[]) THEN col_order ELSE NULL END
+WHERE board_id = $7 AND deleted_at IS NULL AND id = ANY($6::uuid[])
+RETURNING id, ref_board_id
+`
+
+type MoveWbCardsParams struct {
+	ToBoard   pgtype.UUID
+	Seq       int64
+	ActorID   int64
+	Dx        float64
+	Dy        float64
+	Ids       []pgtype.UUID
+	FromBoard pgtype.UUID
+}
+
+type MoveWbCardsRow struct {
+	ID         pgtype.UUID
+	RefBoardID pgtype.UUID
+}
+
+// Pindah kartu ke papan lain. Kartu yang tetap berada di kolomnya (kolomnya ikut pindah) mempertahankan column_id;
+// yang lain keluar dari kolom.
+func (q *Queries) MoveWbCards(ctx context.Context, arg MoveWbCardsParams) ([]MoveWbCardsRow, error) {
+	rows, err := q.db.Query(ctx, moveWbCards,
+		arg.ToBoard,
+		arg.Seq,
+		arg.ActorID,
+		arg.Dx,
+		arg.Dy,
+		arg.Ids,
+		arg.FromBoard,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MoveWbCardsRow{}
+	for rows.Next() {
+		var i MoveWbCardsRow
+		if err := rows.Scan(&i.ID, &i.RefBoardID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const moveWbConnectors = `-- name: MoveWbConnectors :many
+UPDATE wb_connectors SET board_id = $1, seq = $2, updated_by = $3
+WHERE board_id = $4 AND deleted_at IS NULL
+  AND from_card_id = ANY($5::uuid[]) AND to_card_id = ANY($5::uuid[])
+RETURNING id
+`
+
+type MoveWbConnectorsParams struct {
+	ToBoard   pgtype.UUID
+	Seq       int64
+	ActorID   int64
+	FromBoard pgtype.UUID
+	Ids       []pgtype.UUID
+}
+
+// Penghubung yang kedua ujungnya ikut pindah, pindah bersama kartunya.
+func (q *Queries) MoveWbConnectors(ctx context.Context, arg MoveWbConnectorsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, moveWbConnectors,
+		arg.ToBoard,
+		arg.Seq,
+		arg.ActorID,
+		arg.FromBoard,
+		arg.Ids,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const patchWbCard = `-- name: PatchWbCard :exec
 UPDATE wb_cards
 SET x = coalesce($1, x),
@@ -802,30 +1702,35 @@ SET x = coalesce($1, x),
     w = coalesce($3, w),
     h = coalesce($4, h),
     z = coalesce($5, z),
-    color = CASE WHEN $6::bool THEN NULL ELSE coalesce($7, color) END,
-    content = coalesce($8, content),
-    plain = coalesce($9, plain),
-    content_version = content_version + CASE WHEN $8::jsonb IS NULL THEN 0 ELSE 1 END,
+    column_id = CASE WHEN $6::bool THEN NULL ELSE coalesce($7, column_id) END,
+    col_order = CASE WHEN $6::bool THEN NULL ELSE coalesce($8, col_order) END,
+    color = CASE WHEN $9::bool THEN NULL ELSE coalesce($10, color) END,
+    content = coalesce($11, content),
+    plain = coalesce($12, plain),
+    content_version = content_version + CASE WHEN $11::jsonb IS NULL THEN 0 ELSE 1 END,
     version = version + 1,
-    seq = $10,
-    updated_by = $11
-WHERE id = $12 AND board_id = $13 AND deleted_at IS NULL
+    seq = $13,
+    updated_by = $14
+WHERE id = $15 AND board_id = $16 AND deleted_at IS NULL
 `
 
 type PatchWbCardParams struct {
-	X          pgtype.Float8
-	Y          pgtype.Float8
-	W          pgtype.Float8
-	H          pgtype.Float8
-	Z          pgtype.Float8
-	ClearColor bool
-	Color      pgtype.Text
-	Content    []byte
-	Plain      pgtype.Text
-	Seq        int64
-	ActorID    int64
-	ID         pgtype.UUID
-	BoardID    pgtype.UUID
+	X           pgtype.Float8
+	Y           pgtype.Float8
+	W           pgtype.Float8
+	H           pgtype.Float8
+	Z           pgtype.Float8
+	ClearColumn bool
+	ColumnID    pgtype.UUID
+	ColOrder    pgtype.Float8
+	ClearColor  bool
+	Color       pgtype.Text
+	Content     []byte
+	Plain       pgtype.Text
+	Seq         int64
+	ActorID     int64
+	ID          pgtype.UUID
+	BoardID     pgtype.UUID
 }
 
 // Hanya field yang dikirim yang berubah (last-write-wins per field). Warna dikosongkan lewat clear_color, karena
@@ -837,6 +1742,9 @@ func (q *Queries) PatchWbCard(ctx context.Context, arg PatchWbCardParams) error 
 		arg.W,
 		arg.H,
 		arg.Z,
+		arg.ClearColumn,
+		arg.ColumnID,
+		arg.ColOrder,
 		arg.ClearColor,
 		arg.Color,
 		arg.Content,
@@ -879,6 +1787,21 @@ func (q *Queries) RenameWbBoard(ctx context.Context, arg RenameWbBoardParams) (R
 	var i RenameWbBoardRow
 	err := row.Scan(&i.ID, &i.Title, &i.Version)
 	return i, err
+}
+
+const reparentWbBoards = `-- name: ReparentWbBoards :exec
+UPDATE wb_boards SET parent_id = $1, updated_by = $2 WHERE id = ANY($3::uuid[]) AND NOT is_root
+`
+
+type ReparentWbBoardsParams struct {
+	ParentID pgtype.UUID
+	ActorID  int64
+	Ids      []pgtype.UUID
+}
+
+func (q *Queries) ReparentWbBoards(ctx context.Context, arg ReparentWbBoardsParams) error {
+	_, err := q.db.Exec(ctx, reparentWbBoards, arg.ParentID, arg.ActorID, arg.Ids)
+	return err
 }
 
 const restoreWbBoards = `-- name: RestoreWbBoards :many
@@ -954,6 +1877,43 @@ func (q *Queries) RestoreWbCards(ctx context.Context, arg RestoreWbCardsParams) 
 	return items, nil
 }
 
+const restoreWbConnectors = `-- name: RestoreWbConnectors :many
+UPDATE wb_connectors SET deleted_at = NULL, deleted_by = NULL, deleted_batch = NULL, updated_by = $1,
+                         seq = (SELECT b.seq FROM wb_boards b WHERE b.id = wb_connectors.board_id)
+WHERE wb_connectors.deleted_batch = $2
+RETURNING id, board_id
+`
+
+type RestoreWbConnectorsParams struct {
+	ActorID int64
+	Batch   pgtype.UUID
+}
+
+type RestoreWbConnectorsRow struct {
+	ID      pgtype.UUID
+	BoardID pgtype.UUID
+}
+
+func (q *Queries) RestoreWbConnectors(ctx context.Context, arg RestoreWbConnectorsParams) ([]RestoreWbConnectorsRow, error) {
+	rows, err := q.db.Query(ctx, restoreWbConnectors, arg.ActorID, arg.Batch)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RestoreWbConnectorsRow{}
+	for rows.Next() {
+		var i RestoreWbConnectorsRow
+		if err := rows.Scan(&i.ID, &i.BoardID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const searchWbBoards = `-- name: SearchWbBoards :many
 SELECT b.id, b.title, b.parent_id
 FROM wb_boards b
@@ -986,6 +1946,37 @@ func (q *Queries) SearchWbBoards(ctx context.Context, q_ string) ([]SearchWbBoar
 		return nil, err
 	}
 	return items, nil
+}
+
+const softDeleteWbComment = `-- name: SoftDeleteWbComment :exec
+UPDATE wb_comments SET deleted_at = now(), deleted_by = $1::bigint WHERE id = $2
+`
+
+type SoftDeleteWbCommentParams struct {
+	ActorID int64
+	ID      pgtype.UUID
+}
+
+func (q *Queries) SoftDeleteWbComment(ctx context.Context, arg SoftDeleteWbCommentParams) error {
+	_, err := q.db.Exec(ctx, softDeleteWbComment, arg.ActorID, arg.ID)
+	return err
+}
+
+const touchWbCard = `-- name: TouchWbCard :one
+UPDATE wb_cards SET seq = $1 WHERE id = $2 AND deleted_at IS NULL RETURNING board_id
+`
+
+type TouchWbCardParams struct {
+	Seq int64
+	ID  pgtype.UUID
+}
+
+// Menaikkan seq kartu tanpa mengubah isinya (jumlah komentar berubah), supaya ikut sinkron ulang.
+func (q *Queries) TouchWbCard(ctx context.Context, arg TouchWbCardParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, touchWbCard, arg.Seq, arg.ID)
+	var board_id pgtype.UUID
+	err := row.Scan(&board_id)
+	return board_id, err
 }
 
 const trashWbCards = `-- name: TrashWbCards :many
@@ -1034,6 +2025,51 @@ func (q *Queries) TrashWbCards(ctx context.Context, arg TrashWbCardsParams) ([]T
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const trashWbConnectors = `-- name: TrashWbConnectors :many
+UPDATE wb_connectors
+SET deleted_at = now(), deleted_by = $1::bigint, deleted_batch = $2, seq = $3, updated_by = $1
+WHERE board_id = $4 AND deleted_at IS NULL
+  AND (id = ANY($5::uuid[]) OR from_card_id = ANY($6::uuid[]) OR to_card_id = ANY($6::uuid[]))
+RETURNING id
+`
+
+type TrashWbConnectorsParams struct {
+	ActorID int64
+	Batch   pgtype.UUID
+	Seq     int64
+	BoardID pgtype.UUID
+	Ids     []pgtype.UUID
+	Cards   []pgtype.UUID
+}
+
+// Penghubung yang dipilih atau yang menempel di kartu yang dihapus atau dipindah, ke batch yang sama.
+func (q *Queries) TrashWbConnectors(ctx context.Context, arg TrashWbConnectorsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, trashWbConnectors,
+		arg.ActorID,
+		arg.Batch,
+		arg.Seq,
+		arg.BoardID,
+		arg.Ids,
+		arg.Cards,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -1100,6 +2136,148 @@ func (q *Queries) UpdateWbActivitySummary(ctx context.Context, arg UpdateWbActiv
 	return err
 }
 
+const updateWbComment = `-- name: UpdateWbComment :exec
+UPDATE wb_comments SET body = $1, edited_at = now() WHERE id = $2
+`
+
+type UpdateWbCommentParams struct {
+	Body string
+	ID   pgtype.UUID
+}
+
+func (q *Queries) UpdateWbComment(ctx context.Context, arg UpdateWbCommentParams) error {
+	_, err := q.db.Exec(ctx, updateWbComment, arg.Body, arg.ID)
+	return err
+}
+
+const updateWbConnector = `-- name: UpdateWbConnector :one
+UPDATE wb_connectors
+SET style = coalesce($1, style), geometry = coalesce($2, geometry),
+    label = coalesce($3, label), label_start = coalesce($4, label_start),
+    label_end = coalesce($5, label_end), version = version + 1,
+    seq = $6, updated_by = $7
+WHERE id = $8 AND board_id = $9 AND deleted_at IS NULL
+RETURNING id, board_id, from_card_id, to_card_id, geometry, style, label, label_start, label_end, version, seq
+`
+
+type UpdateWbConnectorParams struct {
+	Style      []byte
+	Geometry   []byte
+	Label      pgtype.Text
+	LabelStart pgtype.Text
+	LabelEnd   pgtype.Text
+	Seq        int64
+	ActorID    int64
+	ID         pgtype.UUID
+	BoardID    pgtype.UUID
+}
+
+type UpdateWbConnectorRow struct {
+	ID         pgtype.UUID
+	BoardID    pgtype.UUID
+	FromCardID pgtype.UUID
+	ToCardID   pgtype.UUID
+	Geometry   []byte
+	Style      []byte
+	Label      string
+	LabelStart string
+	LabelEnd   string
+	Version    int32
+	Seq        int64
+}
+
+func (q *Queries) UpdateWbConnector(ctx context.Context, arg UpdateWbConnectorParams) (UpdateWbConnectorRow, error) {
+	row := q.db.QueryRow(ctx, updateWbConnector,
+		arg.Style,
+		arg.Geometry,
+		arg.Label,
+		arg.LabelStart,
+		arg.LabelEnd,
+		arg.Seq,
+		arg.ActorID,
+		arg.ID,
+		arg.BoardID,
+	)
+	var i UpdateWbConnectorRow
+	err := row.Scan(
+		&i.ID,
+		&i.BoardID,
+		&i.FromCardID,
+		&i.ToCardID,
+		&i.Geometry,
+		&i.Style,
+		&i.Label,
+		&i.LabelStart,
+		&i.LabelEnd,
+		&i.Version,
+		&i.Seq,
+	)
+	return i, err
+}
+
+const upsertWbPreview = `-- name: UpsertWbPreview :one
+INSERT INTO wb_link_previews (url_hash, url, final_url, title, description, site_name, image_file_id, status, message, fetched_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+ON CONFLICT (url_hash) DO UPDATE
+SET url = EXCLUDED.url, final_url = EXCLUDED.final_url, title = EXCLUDED.title, description = EXCLUDED.description,
+    site_name = EXCLUDED.site_name, image_file_id = EXCLUDED.image_file_id, status = EXCLUDED.status,
+    message = EXCLUDED.message, fetched_at = now()
+RETURNING id, url, final_url, title, description, site_name, image_file_id, status, message, fetched_at
+`
+
+type UpsertWbPreviewParams struct {
+	UrlHash     string
+	Url         string
+	FinalUrl    string
+	Title       string
+	Description string
+	SiteName    string
+	ImageFileID pgtype.UUID
+	Status      string
+	Message     string
+}
+
+type UpsertWbPreviewRow struct {
+	ID          pgtype.UUID
+	Url         string
+	FinalUrl    string
+	Title       string
+	Description string
+	SiteName    string
+	ImageFileID pgtype.UUID
+	Status      string
+	Message     string
+	FetchedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) UpsertWbPreview(ctx context.Context, arg UpsertWbPreviewParams) (UpsertWbPreviewRow, error) {
+	row := q.db.QueryRow(ctx, upsertWbPreview,
+		arg.UrlHash,
+		arg.Url,
+		arg.FinalUrl,
+		arg.Title,
+		arg.Description,
+		arg.SiteName,
+		arg.ImageFileID,
+		arg.Status,
+		arg.Message,
+	)
+	var i UpsertWbPreviewRow
+	err := row.Scan(
+		&i.ID,
+		&i.Url,
+		&i.FinalUrl,
+		&i.Title,
+		&i.Description,
+		&i.SiteName,
+		&i.ImageFileID,
+		&i.Status,
+		&i.Message,
+		&i.FetchedAt,
+	)
+	return i, err
+}
+
 const wbCardExists = `-- name: WbCardExists :one
 SELECT EXISTS (SELECT 1 FROM wb_cards WHERE id = $1)::bool
 `
@@ -1107,6 +2285,25 @@ SELECT EXISTS (SELECT 1 FROM wb_cards WHERE id = $1)::bool
 func (q *Queries) WbCardExists(ctx context.Context, id pgtype.UUID) (bool, error) {
 	row := q.db.QueryRow(ctx, wbCardExists, id)
 	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const wbSubtreeDepth = `-- name: WbSubtreeDepth :one
+WITH RECURSIVE down AS (
+  SELECT b.id, 0 AS depth FROM wb_boards b WHERE b.id = $1
+  UNION ALL
+  SELECT c.id, down.depth + 1
+  FROM wb_boards c JOIN down ON c.parent_id = down.id
+  WHERE c.deleted_at IS NULL AND down.depth < 64
+)
+SELECT max(depth)::int FROM down
+`
+
+// Kedalaman terdalam di bawah papan ini (0 bila tanpa papan anak), supaya pindah kartu papan tidak melewati batas.
+func (q *Queries) WbSubtreeDepth(ctx context.Context, id pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, wbSubtreeDepth, id)
+	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
 }

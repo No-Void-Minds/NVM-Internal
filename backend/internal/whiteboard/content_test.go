@@ -108,7 +108,7 @@ func TestCleanChecklistDanHeading(t *testing.T) {
 	if err != nil || string(h) != `{"text":"Kampanye","level":1}` {
 		t.Fatalf("heading %s %v", h, err)
 	}
-	if _, _, err := CleanContent("image", json.RawMessage(`{}`)); !invalid(err) {
+	if _, _, err := CleanContent("video", json.RawMessage(`{}`)); !invalid(err) {
 		t.Fatalf("jenis tidak dikenal diterima: %v", err)
 	}
 }

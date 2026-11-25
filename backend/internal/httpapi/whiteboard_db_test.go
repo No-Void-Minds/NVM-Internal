@@ -79,6 +79,16 @@ func TestWhiteboardAdminHanyaMembaca(t *testing.T) {
 		{http.MethodPost, "/api/whiteboard/boards/" + board + "/cards/delete", `{"ids":["` + card.Card.ID + `"]}`},
 		{http.MethodPost, "/api/whiteboard/boards/" + board + "/cards/" + card.Card.ID + "/checklist", `{"op":"title","text":"x"}`},
 		{http.MethodPost, "/api/whiteboard/trash/" + board + "/restore", ""},
+		{http.MethodPost, "/api/whiteboard/boards/" + board + "/files?x=0&y=0&w=240&h=160", ""},
+		{http.MethodPost, "/api/whiteboard/preview", `{"url":"https://contoh.test/"}`},
+		{http.MethodPost, "/api/whiteboard/boards/" + board + "/cards/" + card.Card.ID + "/table", `{"op":"header","on":true}`},
+		{http.MethodPost, "/api/whiteboard/boards/" + board + "/move", `{"ids":["` + card.Card.ID + `"],"to":"root"}`},
+		{http.MethodPost, "/api/whiteboard/boards/" + board + "/connectors", `{"from":"` + card.Card.ID + `","to":"` + card.Card.ID + `"}`},
+		{http.MethodPut, "/api/whiteboard/boards/" + board + "/connectors/" + card.Card.ID, `{"label":"x"}`},
+		{http.MethodDelete, "/api/whiteboard/boards/" + board + "/connectors/" + card.Card.ID, ""},
+		{http.MethodPost, "/api/whiteboard/boards/" + board + "/cards/" + card.Card.ID + "/comments", `{"body":"x"}`},
+		{http.MethodPut, "/api/whiteboard/comments/" + card.Card.ID, `{"body":"x"}`},
+		{http.MethodDelete, "/api/whiteboard/comments/" + card.Card.ID, ""},
 	}
 	for _, w := range writes {
 		code, body := tm.rawSend(t, tm.admin, w.method, w.path, w.body)

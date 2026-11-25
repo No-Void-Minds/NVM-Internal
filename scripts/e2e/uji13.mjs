@@ -48,7 +48,14 @@
 // Admin hanya baca; kartu papan uji dipindah ke Tempat sampah di akhir).
 // E2E_ONLY=wb2 untuk semua skenario Whiteboard W2 (atau satu per satu: wbhadir, wblangsung, wbseret, wbhapusedit,
 // wbputus, wbundo, wbduatab) ditambah navbar (semua halaman, tiga peran, 768, 1024, 1279, dan 1280 px).
+// E2E_ONLY=wb3 untuk semua skenario Whiteboard W3 (atau satu per satu: wbberkas, wbtautan, wbkolom, wbpenghubung,
+// wbkomentar, wbgambar, wbtabel, wbpindah, wbzoom, wbdobel).
 // Keluar dengan kode 1 bila ada yang gagal.
+import fs from "node:fs";
+import http from "node:http";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import zlib from "node:zlib";
 import { chromium } from "playwright-core";
 
 const BASE = process.env.E2E_BASE || "http://localhost:5173";
@@ -121,21 +128,63 @@ const fail = (where, what) => fails.push(`${where} :: ${what}`);
 
 const browser = await chromium.launch({ channel: "msedge", headless: true });
 
-// Login sekali per peran lewat API (limiter login 10 percobaan per IP), lalu sesinya dipakai ulang di setiap konteks.
+// Sesi per akun disimpan di scripts/e2e/.auth (gitignore) dan dipakai ulang antar run, supaya run beruntun tidak
+// menghabiskan limiter login (10 percobaan per IP, satu kembali tiap 30 detik). Login sungguhan hanya bila sesi
+// tersimpan tidak ada atau sudah tidak sah (dicek lewat /auth/me), sekali per akun. Skenario yang memang menguji
+// login (form login, kembali ke tujuan asal) tetap login lewat form.
+const AUTH_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), ".auth");
 const sessions = {};
-async function login(role) {
+let realLogins = 0;
+const authFile = (role) => path.join(AUTH_DIR, `${role}.json`);
+
+async function sessionValid(state) {
+  const ctx = await browser.newContext({ storageState: state });
+  try {
+    const res = await ctx.request.get(BASE + "/api/auth/me");
+    return res.status() === 200;
+  } finally {
+    await ctx.close();
+  }
+}
+
+async function freshLogin(role) {
   const ctx = await browser.newContext();
   const { user, pass } = ROLES[role];
   const res = await ctx.request.post(BASE + "/api/auth/login", {
     headers: { Origin: BASE },
     data: { username: user, password: pass },
   });
+  realLogins++;
   if (res.status() !== 200) {
     console.error(`Login ${role} gagal: HTTP ${res.status()}`);
     process.exit(2);
   }
   sessions[role] = await ctx.storageState();
   await ctx.close();
+  fs.mkdirSync(AUTH_DIR, { recursive: true });
+  fs.writeFileSync(authFile(role), JSON.stringify(sessions[role]), { mode: 0o600 });
+}
+
+async function login(role) {
+  try {
+    const saved = JSON.parse(fs.readFileSync(authFile(role), "utf8"));
+    if (await sessionValid(saved)) {
+      sessions[role] = saved;
+      return;
+    }
+  } catch {
+    // Belum ada sesi tersimpan, atau berkasnya rusak: login sungguhan.
+  }
+  await freshLogin(role);
+}
+
+// Sesi kedaluwarsa di tengah run (401): login ulang sekali per akun, lalu sesi barunya dipakai skenario berikutnya.
+const relogged = new Set();
+async function refreshSession(role) {
+  if (relogged.has(role)) return false;
+  relogged.add(role);
+  await freshLogin(role);
+  return true;
 }
 
 async function open(role, width, theme) {
@@ -1432,7 +1481,11 @@ if (ONLY === "activity") {
 // task Ready ke On Progress dengan memilih sub task miliknya. Datanya disiapkan lewat API: Manajer PIC task,
 // Staf memegang dua sub task, Manajer satu sub task; semuanya dicentang lalu task dipindah ke Ready.
 async function apiAs(role) {
-  const ctx = await browser.newContext({ storageState: sessions[role] });
+  let ctx = await browser.newContext({ storageState: sessions[role] });
+  if ((await ctx.request.get(BASE + "/api/auth/me")).status() === 401 && (await refreshSession(role))) {
+    await ctx.close();
+    ctx = await browser.newContext({ storageState: sessions[role] });
+  }
   const call = async (method, path, data) => {
     const res = await ctx.request.fetch(BASE + "/api" + path, {
       method,
@@ -3845,8 +3898,12 @@ async function checkWbDasar(width) {
     if (!boardCard) return;
     const boardId = boardCard.ref.id;
 
-    // Klik kartu papan membukanya di /whiteboard/:id.
-    await page.locator(`[data-card="${boardCard.id}"]`).click({ position: { x: 20, y: 20 } });
+    // Klik sekali hanya memilih kartu papan; dobel klik membukanya di /whiteboard/:id.
+    // Tengah kartu: papan akar dev berisi banyak papan uji, jadi Pas ke layar bisa memperkecil sampai 10%.
+    await page.locator(`[data-card="${boardCard.id}"]`).click();
+    await page.waitForTimeout(300);
+    expect(!page.url().endsWith(boardId) && (await page.locator(`[data-card="${boardCard.id}"]`).getAttribute("aria-label")).includes("terpilih"), "klik papan", "klik sekali membuka atau tidak memilih kartu papan");
+    await page.locator(`[data-card="${boardCard.id}"]`).dblclick();
     await page.waitForURL(new RegExp(`/whiteboard/${boardId}$`));
     await page.waitForLoadState("networkidle");
     expect((await page.getByRole("heading", { level: 1 }).textContent())?.trim() === kunci, "buka papan", "judul papan anak");
@@ -3917,7 +3974,7 @@ async function checkWbDasar(width) {
     }
 
     // Seret catatan 96 px ke kanan dengan mouse, dipegang di pojok kiri atas (checklist menumpuk di kanan bawahnya).
-    const zoom = parseInt((await page.locator("text=/^\\d+%$/").first().textContent())?.trim() ?? "100", 10) / 100;
+    const zoom = parseInt((await page.locator("[data-testid=wb-zoom]").textContent())?.trim() ?? "100", 10) / 100;
     const box = await page.locator(`[data-card="${note.id}"]`).boundingBox();
     await page.mouse.move(box.x + 6, box.y + 6);
     await page.mouse.down();
@@ -4085,8 +4142,11 @@ async function checkWbPonsel(width) {
     // kontrol tampilan (di bawah).
     const empty = { x: cb.x + cb.width - 12, y: cb.y + cb.height / 2 };
     const card = page.locator(`[data-card="${a.id}"]`);
-    await card.tap({ position: { x: 12, y: 12 } });
-    await card.tap({ position: { x: 12, y: 12 } });
+    // Titik ketuk di bawah kartu: bar pilihan yang muncul setelah ketukan pertama menutupi bagian atasnya di ponsel.
+    const cardBox = await card.boundingBox();
+    const tapAt = { x: 12, y: cardBox.height - 12 };
+    await card.tap({ position: tapAt });
+    await card.tap({ position: tapAt });
     await editor.waitFor({ timeout: 10000 }).catch(() => {});
     expect(await editor.isVisible().catch(() => false), "ketuk dua kali", "ketukan kedua tidak membuka editor");
     await page.touchscreen.tap(empty.x, empty.y);
@@ -4109,7 +4169,7 @@ async function checkWbPonsel(width) {
 
     // Geser satu jari dan pinch, lewat PointerEvent sentuh sintetis di kanvas kosong.
     const before = await card.boundingBox();
-    const zoomBefore = await page.locator("text=/^\\d+%$/").first().textContent();
+    const zoomBefore = await page.locator("[data-testid=wb-zoom]").textContent();
     await page.evaluate(
       ({ x, y }) => {
         const el = document.querySelector('[role="application"]');
@@ -4131,14 +4191,16 @@ async function checkWbPonsel(width) {
       empty,
     );
     const afterBox = await card.boundingBox();
-    const zoomAfter = await page.locator("text=/^\\d+%$/").first().textContent();
+    const zoomAfter = await page.locator("[data-testid=wb-zoom]").textContent();
     expect(afterBox && before && (afterBox.x !== before.x || afterBox.y !== before.y), "geser", "kanvas tidak bergeser");
     expect(parseInt(zoomAfter, 10) > parseInt(zoomBefore, 10), "pinch", `zoom ${zoomBefore} menjadi ${zoomAfter}`);
     await audit(page, errors, where("setelah pinch"));
 
-    // Ketuk kartu papan membukanya.
+    // Dobel ketuk kartu papan membukanya.
     await page.getByRole("button", { name: "Pas ke layar" }).tap();
-    await page.locator(`[data-card="${sub.id}"]`).tap({ position: { x: 20, y: 20 } });
+    const subBox = await page.locator(`[data-card="${sub.id}"]`).boundingBox();
+    await page.locator(`[data-card="${sub.id}"]`).tap({ position: { x: 20, y: subBox.height - 12 } });
+    await page.locator(`[data-card="${sub.id}"]`).tap({ position: { x: 20, y: subBox.height - 12 } });
     await page.waitForURL(new RegExp(`/whiteboard/${sub.ref.id}$`), { timeout: 10000 }).catch(() => {});
     expect(page.url().endsWith(`/whiteboard/${sub.ref.id}`), "ketuk papan", `ketuk kartu papan membuka ${page.url()}`);
   } finally {
@@ -4354,7 +4416,7 @@ async function checkWbSeret(width) {
     await wbSaved(ps);
     await wbSaved(pm);
     // Posisi akhir hanya hasil seret Staf (74 px layar ke kanan), bukan ditambah seret Manajer yang ditolak.
-    const z = parseInt((await ps.locator("text=/^\\d+%$/").first().textContent()) ?? "100", 10) / 100;
+    const z = parseInt((await ps.locator("[data-testid=wb-zoom]").textContent()) ?? "100", 10) / 100;
     const saved = (await wbCards(api, board)).find((c) => c.id === note.id);
     expect(Math.abs(saved.x - note.x - 74 / z) <= 16, "posisi", `posisi akhir ${saved.x}, ${saved.y}, mau sekitar ${Math.round(74 / z)} (zoom ${z})`);
   } finally {
@@ -4438,7 +4500,7 @@ async function checkWbPutus(width) {
     await ps.waitForFunction((id) => document.querySelector(`[data-card="${id}"]`)?.className.includes("bg-completed-bg"), b.id, { timeout: 10000 }).catch(() => {});
     expect((await ps.locator(`[data-card="${b.id}"]`).getAttribute("class")).includes("bg-completed-bg"), "sinkron", "Staf tidak melihat warna dari Manajer");
     const pa = await pm.locator(`[data-card="${a.id}"]`).boundingBox();
-    const pmZoom = parseInt((await pm.locator("text=/^\\d+%$/").first().textContent()) ?? "100", 10) / 100;
+    const pmZoom = parseInt((await pm.locator("[data-testid=wb-zoom]").textContent()) ?? "100", 10) / 100;
     expect(pa && Math.abs(pa.x - (await pm.locator(`[data-card="${b.id}"]`).boundingBox()).x - (sa.x - b.x) * pmZoom) < 4, "sinkron", "Manajer tidak melihat posisi baru kartu A");
   } finally {
     await wbCleanup(api, card);
@@ -4623,9 +4685,691 @@ if (ONLY === "wb2") {
   await checkNavbar();
 }
 
+// Whiteboard W3: berkas, tautan, kolom, garis penghubung, komentar, gambar bebas, tabel, dan pindah papan. Setiap
+// skenario memakai papan uji sendiri yang dipindah ke Tempat sampah di akhir.
+
+// PNG kecil yang sah (zlib bawaan Node), supaya backend bisa membuat thumbnail.
+function testPng(w = 40, h = 20) {
+  const crcTable = Array.from({ length: 256 }, (_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  const crc = (buf) => {
+    let c = 0xffffffff;
+    for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type), data]);
+    const c = Buffer.alloc(4);
+    c.writeUInt32BE(crc(td));
+    return Buffer.concat([len, td, c]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  const raw = Buffer.alloc((w * 3 + 1) * h, 0x80);
+  for (let y = 0; y < h; y++) raw[y * (w * 3 + 1)] = 0;
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", zlib.deflateSync(raw)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+async function wbBoardView(api, board) {
+  return (await api.call("GET", `/whiteboard/boards/${board}`)).body.board;
+}
+
+async function wbSelect(page, id, opts = {}) {
+  // Tengah kartu: pojok kiri atas bisa tertutup bar pilihan di 360 px.
+  await page.locator(`[data-card="${id}"]`).click(opts);
+}
+
+// Unggah lewat alat Berkas (pemilih berkas), tempel tangkapan layar, berkas SVG ditolak sebelum diunggah, gambar
+// tampil dari thumbnail, berkas bisa diunduh sebagai lampiran.
+async function checkWbBerkas(width) {
+  const expect = wbExpect("wbberkas", width);
+  const { api, card, board } = await wbSetup("staf", `E2E wbberkas ${width} ${Date.now()}`);
+  const errors = [];
+  const cs = await wbContext("staf", width);
+  try {
+    const ps = await wbPage(cs, board, errors);
+    const [chooser] = await Promise.all([ps.waitForEvent("filechooser"), wbTool(ps, width, "Berkas")]);
+    await chooser.setFiles([
+      { name: "poster.png", mimeType: "image/png", buffer: testPng(400, 100) },
+      { name: "catatan.txt", mimeType: "text/plain", buffer: Buffer.from("isi berkas uji") },
+    ]);
+    await ps.waitForFunction(() => document.querySelectorAll("[data-card]").length >= 2, null, { timeout: 15000 }).catch(() => {});
+    const cards = await wbCards(api, board);
+    const img = cards.find((c) => c.kind === "image");
+    const txt = cards.find((c) => c.kind === "file");
+    expect(img?.file?.thumb && txt?.file?.name === "catatan.txt", "unggah", `kartu: ${cards.map((c) => c.kind).join(", ")}`);
+    if (img) {
+      await ps.waitForFunction((id) => document.querySelector(`[data-card="${id}"] img`)?.naturalWidth > 0, img.id, { timeout: 10000 }).catch(() => {});
+      expect(await ps.locator(`[data-card="${img.id}"] img`).evaluate((el) => el.naturalWidth > 0 && el.alt === "poster.png"), "thumbnail", "thumbnail gambar tidak tampil atau alt salah");
+      expect(Math.abs(img.h - Math.round((img.w * 100) / 400)) <= 1, "rasio", `tinggi kartu gambar ${img.h} untuk lebar ${img.w}`);
+    }
+    if (txt) {
+      const href = await ps.locator(`[data-card="${txt.id}"] a`, { hasText: "Unduh berkas" }).getAttribute("href");
+      const res = await api.ctx.request.get(BASE + href);
+      expect(res.status() === 200 && (res.headers()["content-disposition"] ?? "").startsWith("attachment") && (await res.text()) === "isi berkas uji", "unduh", `unduh ${res.status()} ${res.headers()["content-disposition"]}`);
+    }
+
+    // Tempel tangkapan layar di kanvas.
+    await ps.locator(".wb-canvas").click({ position: { x: 20, y: 200 } });
+    await ps.evaluate((b64) => {
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const dt = new DataTransfer();
+      dt.items.add(new File([bytes], "image.png", { type: "image/png" }));
+      document.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true }));
+    }, testPng().toString("base64"));
+    await ps.waitForFunction(() => document.querySelectorAll("[data-card]").length >= 3, null, { timeout: 15000 }).catch(() => {});
+    const after = await wbCards(api, board);
+    expect(after.some((c) => c.kind === "image" && c.file?.name?.startsWith("tempel-")), "tempel", `tempel: ${after.map((c) => c.file?.name).join(", ")}`);
+
+    // SVG ditolak di peramban (dan di server, lihat test Go).
+    const [ch2] = await Promise.all([ps.waitForEvent("filechooser"), wbTool(ps, width, "Berkas")]);
+    await ch2.setFiles([{ name: "logo.svg", mimeType: "image/svg+xml", buffer: Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'/>") }]);
+    await ps.getByText(/logo\.svg tidak bisa diunggah/).first().waitFor({ timeout: 5000 }).catch(() => {});
+    expect((await ps.getByText(/logo\.svg tidak bisa diunggah/).count()) > 0, "svg", "SVG tidak ditolak dengan pesan");
+    const svg = await api.ctx.request.post(BASE + `/api/whiteboard/boards/${board}/files?x=0&y=0&w=240&h=160`, {
+      headers: { Origin: BASE },
+      multipart: { file: { name: "logo.png", mimeType: "image/png", buffer: Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>") } },
+    });
+    expect(svg.status() === 400, "svg server", `SVG berkedok PNG diterima server: ${svg.status()}`);
+    expect(await wbNoScroll(ps), "gulir", "halaman bisa digulir");
+    await audit(ps, errors, `wbberkas ${width} papan`);
+  } finally {
+    await wbCleanup(api, card);
+    await api.ctx.close();
+    await cs.close();
+  }
+}
+
+// Tautan ke server lokal: kartu tetap dibuat, pratinjau diblokir karena alamatnya jaringan internal, dan server
+// lokal tidak pernah dihubungi backend. Tautan dibuka di tab baru tanpa opener.
+async function checkWbTautan(width) {
+  const expect = wbExpect("wbtautan", width);
+  let hits = 0;
+  const srv = http.createServer((_, res) => {
+    hits++;
+    res.setHeader("Content-Type", "text/html");
+    res.end('<title>Rahasia internal</title><meta property="og:image" content="/x.png">');
+  });
+  await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  const url = `http://127.0.0.1:${srv.address().port}/halaman`;
+  const { api, card, board } = await wbSetup("staf", `E2E wbtautan ${width} ${Date.now()}`);
+  const errors = [];
+  const cs = await wbContext("staf", width);
+  try {
+    const ps = await wbPage(cs, board, errors);
+    await wbTool(ps, width, "Tautan");
+    const dlg = ps.locator("dialog[open]");
+    await dlg.getByLabel(/Alamat/).fill(url);
+    await dlg.getByRole("button", { name: "Tambah tautan" }).click();
+    await ps.getByText(/tanpa pratinjau/).first().waitFor({ timeout: 15000 }).catch(() => {});
+    const link = (await wbCards(api, board)).find((c) => c.kind === "link");
+    expect(link?.preview?.status === "blocked", "ssrf", `status pratinjau ${link?.preview?.status}`);
+    expect((await ps.getByText(/jaringan internal/).count()) > 0, "pesan", "alasan pratinjau tidak ditampilkan");
+    expect(hits === 0, "ssrf", `server lokal dihubungi ${hits} kali`);
+    if (link) {
+      const a = ps.locator(`[data-card="${link.id}"] a`, { hasText: "Buka tautan" });
+      expect((await a.getAttribute("href")) === url && (await a.getAttribute("rel"))?.includes("noopener") && (await a.getAttribute("target")) === "_blank", "buka", "atribut tautan salah");
+      expect((await ps.locator(`[data-card="${link.id}"]`).textContent()).includes("Pratinjau tidak tersedia"), "kartu", "kartu tidak menyebut pratinjau tidak tersedia");
+    }
+    // Skema selain http dan https ditolak dengan pesan di dialog.
+    await wbTool(ps, width, "Tautan");
+    await dlg.getByLabel(/Alamat/).fill("javascript:alert(1)");
+    await dlg.getByRole("button", { name: "Tambah tautan" }).click();
+    await dlg.getByRole("alert").waitFor({ timeout: 10000 }).catch(() => {});
+    expect((await dlg.getByRole("alert").count()) > 0, "skema", "alamat javascript: tidak ditolak di dialog");
+    await audit(ps, errors, `wbtautan ${width} dialog`);
+    await ps.keyboard.press("Escape");
+    await audit(ps, errors, `wbtautan ${width} papan`);
+  } finally {
+    srv.close();
+    await wbCleanup(api, card);
+    await api.ctx.close();
+    await cs.close();
+  }
+}
+
+async function dragTo(page, fromSel, to) {
+  const a = await page.locator(fromSel).boundingBox();
+  await page.mouse.move(a.x + 8, a.y + 8);
+  await page.mouse.down();
+  await page.mouse.move(a.x + 30, a.y + 30, { steps: 4 });
+  await page.mouse.move(to.x, to.y, { steps: 8 });
+  await page.mouse.up();
+}
+
+// Kolom: seret kartu masuk kolom (tersusun di bawah judul), seret keluar lagi, dan hapus kolom ikut menghapus isinya.
+async function checkWbKolom(width) {
+  const expect = wbExpect("wbkolom", width);
+  const { api, card, board } = await wbSetup("staf", `E2E wbkolom ${width} ${Date.now()}`);
+  const col = await wbCard(api, board, "column", 0, 0, { title: "Ide" });
+  const a = await wbCard(api, board, "note", 320, 0, wbNote("Masuk kolom"));
+  const errors = [];
+  const cs = await wbContext("staf", width);
+  try {
+    const ps = await wbPage(cs, board, errors);
+    const cb = await ps.locator(`[data-card="${col.id}"]`).boundingBox();
+    await dragTo(ps, `[data-card="${a.id}"]`, { x: cb.x + cb.width / 2, y: cb.y + cb.height - 10 });
+    await wbSaved(ps);
+    let saved = (await wbCards(api, board)).find((c) => c.id === a.id);
+    expect(saved?.column_id === col.id, "masuk", `column_id ${saved?.column_id}`);
+    const nb = await ps.locator(`[data-card="${a.id}"]`).boundingBox();
+    const cb2 = await ps.locator(`[data-card="${col.id}"]`).boundingBox();
+    expect(nb && nb.y > cb2.y + 20 && nb.x >= cb2.x && nb.x + nb.width <= cb2.x + cb2.width + 1, "tumpuk", "kartu tidak tersusun di dalam kolom");
+    expect((await cardLabelOf(ps, col.id)).startsWith("Kolom Ide"), "label", await cardLabelOf(ps, col.id));
+
+    await dragTo(ps, `[data-card="${a.id}"]`, { x: cb2.x + cb2.width + 120, y: cb2.y + 40 });
+    await wbSaved(ps);
+    saved = (await wbCards(api, board)).find((c) => c.id === a.id);
+    expect(!saved?.column_id, "keluar", `masih di kolom ${saved?.column_id}`);
+
+    // Masukkan lagi lewat API bersama kartu kedua; Shift+Panah atas menaikkan kartu kedua di kolom.
+    const b2 = await wbCard(api, board, "note", 320, 300, wbNote("Kedua"));
+    await api.call("POST", `/whiteboard/boards/${board}/cards/patch`, { cards: [{ id: a.id, column_id: col.id, col_order: 1 }, { id: b2.id, column_id: col.id, col_order: 2 }] });
+    await ps.reload();
+    await ps.waitForLoadState("networkidle");
+    await wbSelect(ps, b2.id);
+    await ps.keyboard.press("Shift+ArrowUp");
+    await wbSaved(ps);
+    const ord = await wbCards(api, board);
+    const oa = ord.find((c) => c.id === a.id)?.col_order;
+    const ob = ord.find((c) => c.id === b2.id)?.col_order;
+    expect(ob < oa, "keyboard", `urutan setelah Shift+ArrowUp: a ${oa}, kedua ${ob}`);
+    // Hapus kolom: isinya ikut ke Tempat sampah dan kembali saat Urungkan.
+    // Kolom dipilih lewat area judulnya; tengah kolom berisi kartu isinya.
+    const colBox = await ps.locator(`[data-card="${col.id}"]`).boundingBox();
+    await ps.locator(`[data-card="${col.id}"]`).click({ position: { x: colBox.width - 16, y: 16 } });
+    await ps.keyboard.press("Delete");
+    await ps.getByRole("button", { name: "Urungkan", exact: true }).waitFor({ timeout: 10000 }).catch(() => {});
+    expect((await wbCards(api, board)).length === 0, "hapus", "isi kolom tidak ikut terhapus");
+    await ps.getByRole("button", { name: "Urungkan", exact: true }).click();
+    await wbSaved(ps);
+    await ps.waitForTimeout(500);
+    const back = await wbCards(api, board);
+    expect(back.length === 3 && back.find((c) => c.id === a.id)?.column_id === col.id, "pulih", `setelah urungkan: ${back.length} kartu`);
+    expect(await wbNoScroll(ps), "gulir", "halaman bisa digulir");
+    await audit(ps, errors, `wbkolom ${width} papan`);
+  } finally {
+    await wbCleanup(api, card);
+    await api.ctx.close();
+    await cs.close();
+  }
+}
+
+// Garis penghubung lewat keyboard dan bar pilihan: pilih dua kartu, Hubungkan, ubah label dan ujung di dialog,
+// orang lain melihat garisnya langsung, lalu hapus.
+async function checkWbPenghubung(width) {
+  const expect = wbExpect("wbpenghubung", width);
+  const { api, card, board } = await wbSetup("staf", `E2E wbgaris ${width} ${Date.now()}`);
+  const a = await wbCard(api, board, "note", 0, 0, wbNote("Awal"));
+  const b = await wbCard(api, board, "note", 0, 260, wbNote("Akhir"));
+  const errors = [];
+  const cs = await wbContext("staf", width);
+  const cm = await wbContext("manajer", width);
+  try {
+    const ps = await wbPage(cs, board, errors);
+    const pm = await wbPage(cm, board, errors);
+    await wbSelect(ps, a.id);
+    await wbSelect(ps, b.id, { modifiers: ["Shift"] });
+    await ps.getByLabel("Aksi lain untuk kartu terpilih").selectOption("connect");
+    const dlg = ps.locator("dialog[open]");
+    await dlg.getByLabel("Label").waitFor({ timeout: 10000 });
+    await dlg.getByLabel("Label").fill("lalu");
+    await dlg.getByLabel("Label").press("Tab");
+    await dlg.getByLabel("Garis", { exact: true }).selectOption("dashed");
+    await wbSaved(ps);
+    await audit(ps, errors, `wbpenghubung ${width} dialog`);
+    await dlg.getByRole("button", { name: "Tutup" }).click();
+    const view = await wbBoardView(api, board);
+    const conn = view.connectors[0];
+    expect(view.connectors.length === 1 && conn.label === "lalu" && conn.style.line === "dashed" && conn.from === a.id && conn.to === b.id, "simpan", JSON.stringify(view.connectors));
+    await pm.waitForFunction(() => document.querySelectorAll("[data-testid=wb-connector]").length === 1, null, { timeout: 10000 }).catch(() => {});
+    expect((await pm.locator("[data-testid=wb-connector]").count()) === 1, "langsung", "garis tidak muncul di layar Manajer");
+    expect((await pm.locator("[data-testid=wb-connector] text").textContent())?.trim() === "lalu", "label", "label garis tidak tampil");
+
+    await ps.locator(".wb-canvas").focus();
+    await ps.keyboard.press("Escape");
+    await wbSelect(ps, a.id);
+    await ps.getByLabel("Aksi lain untuk kartu terpilih").selectOption("lines");
+    await dlg.getByRole("button", { name: "Hapus garis" }).click();
+    await wbSaved(ps);
+    await pm.waitForFunction(() => document.querySelectorAll("[data-testid=wb-connector]").length === 0, null, { timeout: 10000 }).catch(() => {});
+    expect((await pm.locator("[data-testid=wb-connector]").count()) === 0, "hapus", "garis masih tampil di layar Manajer");
+    expect((await wbBoardView(api, board)).connectors.length === 0, "hapus api", "garis masih ada");
+    await audit(ps, errors, `wbpenghubung ${width} papan`);
+  } finally {
+    await wbCleanup(api, card);
+    await api.ctx.close();
+    await cs.close();
+    await cm.close();
+  }
+}
+
+// Komentar: Staf menulis, lencana jumlah muncul di layar Manajer, Manajer menghapus komentar Staf, Admin hanya
+// membaca (tanpa form).
+async function checkWbKomentar(width) {
+  const expect = wbExpect("wbkomentar", width);
+  const { api, card, board } = await wbSetup("staf", `E2E wbkomen ${width} ${Date.now()}`);
+  const note = await wbCard(api, board, "note", 0, 0, wbNote("Bahas ini"));
+  const errors = [];
+  const cs = await wbContext("staf", width);
+  const cm = await wbContext("manajer", width);
+  const ca = await wbContext("admin", width);
+  try {
+    const ps = await wbPage(cs, board, errors);
+    const pm = await wbPage(cm, board, errors);
+    await wbSelect(ps, note.id);
+    await ps.getByLabel("Aksi lain untuk kartu terpilih").selectOption("comments");
+    const panel = ps.locator("dialog[open]");
+    await panel.getByLabel("Komentar baru").fill("Ukuran gambarnya cek lagi");
+    await panel.getByRole("button", { name: "Kirim komentar" }).click();
+    await panel.getByText("Ukuran gambarnya cek lagi").waitFor({ timeout: 10000 }).catch(() => {});
+    expect((await panel.getByText("Ukuran gambarnya cek lagi").count()) === 1, "kirim", "komentar tidak tampil di panel");
+    await audit(ps, errors, `wbkomentar ${width} panel`);
+    await pm.locator("[data-testid=wb-comment-badge]").waitFor({ timeout: 10000 }).catch(() => {});
+    expect((await pm.locator("[data-testid=wb-comment-badge]").textContent())?.trim() === "1", "lencana", "lencana komentar tidak muncul di layar Manajer");
+
+    const pa = await wbPage(ca, board, errors);
+    await pa.locator("[data-testid=wb-comment-badge]").click();
+    const pPanel = pa.locator("dialog[open]");
+    await pPanel.getByText("Ukuran gambarnya cek lagi").waitFor({ timeout: 10000 }).catch(() => {});
+    expect((await pPanel.getByText("Ukuran gambarnya cek lagi").count()) === 1 && (await pPanel.getByLabel("Komentar baru").count()) === 0, "admin", "Admin tidak bisa membaca atau masih melihat form");
+    await audit(pa, errors, `wbkomentar ${width} admin`);
+
+    await pm.locator("[data-testid=wb-comment-badge]").click();
+    const mPanel = pm.locator("dialog[open]");
+    expect((await mPanel.getByRole("button", { name: /^Ubah/ }).count()) === 0, "ubah", "Manajer bisa mengubah komentar orang lain");
+    await mPanel.getByRole("button", { name: /^Hapus/ }).click();
+    await mPanel.getByText("Belum ada komentar.").waitFor({ timeout: 10000 }).catch(() => {});
+    await ps.keyboard.press("Escape");
+    await ps.waitForFunction(() => !document.querySelector("[data-testid=wb-comment-badge]"), null, { timeout: 10000 }).catch(() => {});
+    expect((await ps.locator("[data-testid=wb-comment-badge]").count()) === 0, "hapus", "lencana masih tampil setelah Manajer menghapus");
+  } finally {
+    await wbCleanup(api, card);
+    await api.ctx.close();
+    await cs.close();
+    await cm.close();
+    await ca.close();
+  }
+}
+
+// Gambar bebas tanpa kartu (revisi A): alat Gambar menyalakan mode pena dan toolbar melayang; coretan di atas kartu
+// lain tersimpan sebagai objek tanpa bingkai, Manajer melihat goresan saat masih digambar, dua goresan satu sesi
+// menjadi satu objek, penghapus Manajer pada objek yang dikunci ditolak dengan nama pemegang, Escape keluar,
+// klik di luar garis tembus ke kartu di bawahnya, dan objek bisa difokus lalu dihapus dengan Delete.
+async function checkWbGambar(width) {
+  const expect = wbExpect("wbgambar", width);
+  const { api, card, board } = await wbSetup("staf", `E2E wbgambar ${width} ${Date.now()}`);
+  const note = await wbCard(api, board, "note", 0, 0, wbNote("Di bawah coretan"));
+  const errors = [];
+  const cs = await wbContext("staf", width);
+  const cm = await wbContext("manajer", width);
+  const mgr = await apiAs("manajer");
+  try {
+    const ps = await wbPage(cs, board, errors);
+    const pm = await wbPage(cm, board, errors);
+    await wbTool(ps, width, "Gambar");
+    const bar = ps.locator("[data-testid=wb-penbar]");
+    await bar.waitFor({ timeout: 10000 });
+    expect((await ps.locator('[aria-live="polite"]').textContent()).includes("Mode pena aktif"), "umumkan", "mode pena tidak diumumkan");
+    await bar.getByRole("button", { name: "Pena biru" }).click();
+    await audit(ps, errors, `wbgambar ${width} pena`);
+    const nb = await ps.locator(`[data-card="${note.id}"]`).boundingBox();
+    // Goresan mendatar melintasi kartu catatan.
+    const y0 = nb.y + nb.height / 2;
+    await ps.mouse.move(nb.x + 10, y0);
+    await ps.mouse.down();
+    for (let i = 1; i <= 12; i++) await ps.mouse.move(nb.x + 10 + i * 12, y0 + (i % 2) * 4);
+    await pm.waitForFunction(() => document.querySelectorAll("[data-testid=wb-ink-live] path").length > 0, null, { timeout: 5000 }).catch(() => {});
+    expect((await pm.locator("[data-testid=wb-ink-live] path").count()) > 0, "langsung", "goresan tidak terlihat Manajer saat masih digambar");
+    await ps.mouse.up();
+    await wbSaved(ps);
+    await ps.mouse.move(nb.x + 10, y0 + 30);
+    await ps.mouse.down();
+    await ps.mouse.move(nb.x + 60, y0 + 40, { steps: 5 });
+    await ps.mouse.up();
+    await wbSaved(ps);
+    await ps.waitForTimeout(400);
+    let ink = (await wbCards(api, board)).filter((c) => c.kind === "drawing");
+    const d = ink[0];
+    expect(ink.length === 1 && d.content.strokes.length === 2 && d.content.strokes[0].color === "biru", "objek", `objek ${ink.length}, goresan ${d?.content?.strokes?.length}`);
+    expect(d && d.content.strokes.every((s) => s.points.every((p) => Number.isInteger(p) && p >= 0 && p <= 4000)), "titik", "titik relatif tidak sah");
+    const look = await ps.locator(`[data-card="${d.id}"]`).evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { bg: s.backgroundColor, border: s.borderTopWidth, z: Number(s.zIndex) };
+    });
+    expect(look.bg === "rgba(0, 0, 0, 0)" && look.border === "0px", "tanpa bingkai", JSON.stringify(look));
+    const cardZ = await ps.locator(`[data-card="${note.id}"]`).evaluate((el) => Number(getComputedStyle(el).zIndex));
+    expect(look.z > cardZ, "lapisan", `coretan z ${look.z}, kartu z ${cardZ}`);
+    expect((await cardLabelOf(pm, d.id)).includes("sedang mengedit"), "kunci", "objek sesi pena tidak tampil terkunci");
+    const er = await mgr.call("POST", `/whiteboard/boards/${board}/cards/${d.id}/drawing`, { op: "remove", index: 0 });
+    expect(er.status === 409 && /sedang mengubah/.test(er.body?.error?.message ?? ""), "penghapus", `penghapus Manajer ${er.status}`);
+
+    await ps.keyboard.press("Escape");
+    await bar.waitFor({ state: "detached", timeout: 5000 }).catch(() => {});
+    expect((await bar.count()) === 0, "keluar", "toolbar pena masih tampil setelah Escape");
+    // Klik di kartu jauh dari garis memilih kartu itu, bukan coretannya.
+    await ps.locator(`[data-card="${note.id}"]`).click({ position: { x: nb.width - 12, y: 12 } });
+    expect((await cardLabelOf(ps, note.id)).includes("terpilih"), "tembus", "klik di luar garis tidak sampai ke kartu");
+    await ps.mouse.click(nb.x + 70, y0 + 2);
+    expect((await cardLabelOf(ps, d.id)).startsWith("Gambar bebas oleh"), "label", await cardLabelOf(ps, d.id));
+    expect((await cardLabelOf(ps, d.id)).includes("terpilih"), "pilih", "klik di garis tidak memilih coretan");
+    await audit(ps, errors, `wbgambar ${width} terpilih`);
+    await ps.locator(`[data-card="${d.id}"]`).focus();
+    await ps.keyboard.press("Delete");
+    await wbSaved(ps);
+    ink = (await wbCards(api, board)).filter((c) => c.kind === "drawing");
+    expect(ink.length === 0, "hapus", "objek gambar tidak terhapus dengan Delete");
+    const bad = await api.call("POST", `/whiteboard/boards/${board}/drawings`, { stroke: { color: "tinta", width: 3, points: [0, 0] } });
+    expect(bad.status === 400, "validasi", `goresan tebal 3 diterima: ${bad.status}`);
+  } finally {
+    await wbCleanup(api, card);
+    await api.ctx.close();
+    await mgr.ctx.close();
+    await cs.close();
+    await cm.close();
+  }
+}
+
+// Tabel: alat Tabel membuka editor sel; Enter pindah ke baris berikut; tambah baris; Manajer melihat isinya dan
+// ditolak 409 saat mengubah tabel yang dikunci Staf.
+async function checkWbTabel(width) {
+  const expect = wbExpect("wbtabel", width);
+  const { api, card, board } = await wbSetup("staf", `E2E wbtabel ${width} ${Date.now()}`);
+  const errors = [];
+  const cs = await wbContext("staf", width);
+  const cm = await wbContext("manajer", width);
+  const mgr = await apiAs("manajer");
+  try {
+    const ps = await wbPage(cs, board, errors);
+    const pm = await wbPage(cm, board, errors);
+    await wbTool(ps, width, "Tabel");
+    const title = ps.getByLabel("Judul tabel");
+    await title.waitFor({ timeout: 10000 });
+    await title.fill("Harga paket");
+    await title.press("Enter");
+    const cell = ps.getByLabel("Baris 1, kolom 1");
+    await cell.waitFor({ timeout: 10000 });
+    await cell.fill("Harga");
+    await cell.press("Enter");
+    expect(await ps.getByLabel("Baris 2, kolom 1").evaluate((el) => el === document.activeElement), "enter", "Enter tidak pindah ke baris berikut");
+    await ps.getByRole("button", { name: "Tambah baris" }).click();
+    await ps.getByLabel("Baris 3, kolom 1").waitFor({ timeout: 10000 }).catch(() => {});
+    await wbSaved(ps);
+    let t = (await wbCards(api, board)).find((c) => c.kind === "table");
+    expect(t?.content?.rows?.length === 3 && t.content.rows[0][0] === "Harga" && t.content.title === "Harga paket", "simpan", JSON.stringify(t?.content));
+    await pm.waitForFunction((id) => document.querySelector(`[data-card="${id}"]`)?.textContent?.includes("Harga"), t?.id, { timeout: 10000 }).catch(() => {});
+    expect((await pm.locator(`[data-card="${t.id}"]`).textContent()).includes("Harga"), "langsung", "isi tabel tidak tampil di layar Manajer");
+    const op = await mgr.call("POST", `/whiteboard/boards/${board}/cards/${t.id}/table`, { op: "set", row: 0, col: 1, text: "x" });
+    expect(op.status === 409 && /sedang mengubah/.test(op.body?.error?.message ?? ""), "kunci", `op Manajer saat dikunci ${op.status}`);
+    await audit(ps, errors, `wbtabel ${width} edit`);
+    await ps.keyboard.press("Escape");
+    await wbSaved(ps);
+    const big = await mgr.call("POST", `/whiteboard/boards/${board}/cards/patch`, {
+      cards: [{ id: t.id, content: { header: true, rows: [Array(21).fill("")] }, base_content_version: t.content_version + 5 }],
+    });
+    expect(big.status === 400 || big.status === 409, "validasi", `tabel 21 kolom ${big.status}`);
+    await audit(ps, errors, `wbtabel ${width} papan`);
+  } finally {
+    await wbCleanup(api, card);
+    await api.ctx.close();
+    await mgr.ctx.close();
+    await cs.close();
+    await cm.close();
+  }
+}
+
+// Pindah papan: lewat dialog Pindahkan ke papan, dan dengan melepas kartu di atas kartu papan.
+async function checkWbPindah(width) {
+  const expect = wbExpect("wbpindah", width);
+  const { api, card, board } = await wbSetup("staf", `E2E wbpindah ${width} ${Date.now()}`);
+  const child = (await api.call("POST", `/whiteboard/boards/${board}/cards`, { kind: "board", title: "Tujuan", x: 0, y: 0, w: 200, h: 120 })).body.card;
+  const a = await wbCard(api, board, "note", 320, 0, wbNote("Pindah lewat menu"));
+  const b = await wbCard(api, board, "note", 320, 200, wbNote("Pindah lewat seret"));
+  const errors = [];
+  const cs = await wbContext("staf", width);
+  try {
+    const ps = await wbPage(cs, board, errors);
+    await wbSelect(ps, a.id);
+    await ps.getByLabel("Aksi lain untuk kartu terpilih").selectOption("move");
+    const dlg = ps.locator("dialog[open]");
+    await dlg.getByRole("radio", { name: "Tujuan", exact: true }).check();
+    await audit(ps, errors, `wbpindah ${width} dialog`);
+    await dlg.getByRole("button", { name: "Pindahkan", exact: true }).click();
+    await ps.getByRole("button", { name: "Buka papan" }).waitFor({ timeout: 10000 }).catch(() => {});
+    const cb = await ps.locator(`[data-card="${child.id}"]`).boundingBox();
+    await dragTo(ps, `[data-card="${b.id}"]`, { x: cb.x + cb.width / 2, y: cb.y + cb.height / 2 });
+    await ps.waitForTimeout(800);
+    const inChild = await wbCards(api, child.ref.id);
+    expect(inChild.length === 2, "pindah", `isi papan Tujuan ${inChild.length}`);
+    expect((await wbCards(api, board)).length === 1, "asal", "kartu masih di papan asal");
+    await audit(ps, errors, `wbpindah ${width} papan`);
+  } finally {
+    await wbCleanup(api, card);
+    await api.ctx.close();
+    await cs.close();
+  }
+}
+
+// Zoom roda: Ctrl+wheel memperbesar dan memperkecil di sekitar kursor (titik di bawah kursor tetap), wheel biasa
+// dan Shift+wheel menggeser kanvas, halaman tidak tergulir, zoom browser tidak berubah, klik persentase ke 100%.
+async function checkWbZoom(width) {
+  const expect = wbExpect("wbzoom", width);
+  const { api, card, board } = await wbSetup("staf", `E2E wbzoom ${width} ${Date.now()}`);
+  const note = await wbCard(api, board, "note", 0, 0, wbNote("Titik acuan"));
+  const errors = [];
+  const cs = await wbContext("staf", width);
+  try {
+    const ps = await wbPage(cs, board, errors);
+    const el = ps.locator(`[data-card="${note.id}"]`);
+    const zoomText = async () => Number((await ps.locator("[data-testid=wb-zoom]").textContent()).replace(/\D/g, ""));
+    const env = () => ps.evaluate(() => ({ sy: window.scrollY, sx: window.scrollX, scale: window.visualViewport?.scale ?? 1, dpr: window.devicePixelRatio }));
+    const before = await env();
+    const b0 = await el.boundingBox();
+    // Kursor di dalam kartu, sedikit dari pojok: setelah zoom, titik dunia di bawah kursor tetap di tempatnya.
+    const cx = b0.x + 30;
+    const cy = b0.y + 20;
+    const z0 = await zoomText();
+    await ps.mouse.move(cx, cy);
+    await ps.keyboard.down("Control");
+    await ps.mouse.wheel(0, -100);
+    await ps.keyboard.up("Control");
+    await ps.waitForTimeout(150);
+    const z1 = await zoomText();
+    const b1 = await el.boundingBox();
+    expect(z1 > z0 && z1 <= z0 * 1.35, "ctrl wheel", `zoom ${z0} -> ${z1}`);
+    const fx = (cx - b0.x) / b0.width;
+    const fy = (cy - b0.y) / b0.height;
+    const drift = Math.hypot(b1.x + fx * b1.width - cx, b1.y + fy * b1.height - cy);
+    expect(drift < 2, "kursor tetap", `titik bergeser ${drift.toFixed(1)} px`);
+    await ps.keyboard.down("Control");
+    for (let i = 0; i < 40; i++) await ps.mouse.wheel(0, 120);
+    await ps.keyboard.up("Control");
+    await ps.waitForTimeout(150);
+    expect((await zoomText()) === 10, "batas", `zoom minimum ${await zoomText()}`);
+    await ps.locator("[data-testid=wb-zoom]").click();
+    expect((await zoomText()) === 100, "100%", `klik persentase ${await zoomText()}`);
+    await ps.getByRole("button", { name: "Pas ke layar" }).click();
+    await ps.waitForTimeout(150);
+
+    const p0 = await el.boundingBox();
+    await ps.mouse.move(cx, cy);
+    await ps.mouse.wheel(0, 120);
+    await ps.waitForTimeout(150);
+    const p1 = await el.boundingBox();
+    expect(Math.abs(p1.y - (p0.y - 120)) < 2 && Math.abs(p1.x - p0.x) < 1, "geser", `wheel biasa ${p0.y} -> ${p1.y}`);
+    await ps.keyboard.down("Shift");
+    await ps.mouse.wheel(0, 80);
+    await ps.keyboard.up("Shift");
+    await ps.waitForTimeout(150);
+    const p2 = await el.boundingBox();
+    expect(Math.abs(p2.x - (p1.x - 80)) < 2 && Math.abs(p2.y - p1.y) < 1, "shift", `Shift+wheel ${p1.x} -> ${p2.x}`);
+    const after = await env();
+    expect(after.sy === 0 && after.sx === 0 && after.scale === before.scale && after.dpr === before.dpr, "halaman", JSON.stringify({ before, after }));
+    expect(await wbNoScroll(ps), "gulir", "halaman bisa digulir");
+    await audit(ps, errors, `wbzoom ${width} papan`);
+  } finally {
+    await wbCleanup(api, card);
+    await api.ctx.close();
+    await cs.close();
+  }
+}
+
+// Dobel klik untuk mengedit: kursor di posisi klik untuk catatan, judul, butir checklist, dan sel tabel; klik
+// sekali hanya memilih; centang tetap sekali klik; dobel klik area kosong tidak membuat kartu; kartu yang dikunci
+// orang lain terbuka hanya baca dengan nama pemegang.
+async function checkWbDobel(width) {
+  const expect = wbExpect("wbdobel", width);
+  const { api, card, board } = await wbSetup("staf", `E2E wbdobel ${width} ${Date.now()}`);
+  const note = await wbCard(api, board, "note", 0, 0, wbNote("Halo dunia"));
+  const head = await wbCard(api, board, "heading", 0, 160, { text: "Rencana besar", level: 1 }, { w: 320, h: 64 });
+  const list = await wbCard(api, board, "checklist", 0, 260, { title: "Tugas", items: [{ id: crypto.randomUUID(), text: "Beli kertas", done: false }] });
+  const tb = await wbCard(api, board, "table", 0, 420, { title: "", header: false, rows: [["Harga", "Isi"]] }, { w: 360, h: 120 });
+  const errors = [];
+  const cs = await wbContext("staf", width);
+  const cm = await wbContext("manajer", width);
+  try {
+    const ps = await wbPage(cs, board, errors);
+    const pm = await wbPage(cm, board, errors);
+    // Titik tengah sebuah kata di teks tampilan.
+    const wordAt = (sel, word) =>
+      ps.evaluate(
+        ([sel, word]) => {
+          const el = document.querySelector(sel);
+          const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+          for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+            const i = n.textContent.indexOf(word);
+            if (i < 0) continue;
+            const r = document.createRange();
+            r.setStart(n, i);
+            r.setEnd(n, i + 1);
+            const b = r.getBoundingClientRect();
+            return { x: b.left + 1, y: b.top + b.height / 2 };
+          }
+          return null;
+        },
+        [sel, word],
+      );
+    const nCount = async () => (await wbCards(api, board)).length;
+    const before = await nCount();
+
+    // Klik sekali hanya memilih, tanpa editor.
+    await ps.locator(`[data-card="${note.id}"]`).click();
+    expect((await ps.getByRole("textbox", { name: "Isi catatan" }).count()) === 0, "klik sekali", "klik sekali membuka editor");
+
+    // Catatan: dobel klik di depan "dunia", ketik, teks masuk di posisi itu.
+    let pt = await wordAt(`[data-card="${note.id}"]`, "dunia");
+    await ps.mouse.dblclick(pt.x, pt.y);
+    await ps.getByRole("textbox", { name: "Isi catatan" }).waitFor({ timeout: 10000 });
+    // Fokus TipTap diterapkan di frame berikutnya.
+    await ps.waitForFunction(() => document.activeElement?.classList.contains("ProseMirror-focused"), null, { timeout: 5000 }).catch(() => {});
+    await ps.keyboard.type("X");
+    await ps.keyboard.press("Escape");
+    await wbSaved(ps);
+    let saved = await wbCards(api, board);
+    expect(JSON.stringify(saved.find((c) => c.id === note.id).content).includes("Halo Xdunia"), "catatan", JSON.stringify(saved.find((c) => c.id === note.id).content).slice(0, 160));
+
+    // Judul: dobel klik di depan "besar".
+    pt = await wordAt(`[data-card="${head.id}"]`, "besar");
+    await ps.mouse.dblclick(pt.x, pt.y);
+    await ps.getByLabel("Teks judul").waitFor({ timeout: 10000 });
+    await ps.keyboard.type("Y");
+    await ps.keyboard.press("Enter");
+    await wbSaved(ps);
+    saved = await wbCards(api, board);
+    expect(saved.find((c) => c.id === head.id).content.text === "Rencana Ybesar", "judul", saved.find((c) => c.id === head.id).content.text);
+
+    // Butir checklist: dobel klik di depan "kertas"; centang tetap sekali klik tanpa membuka editor.
+    pt = await wordAt(`[data-card="${list.id}"] [data-item-text]`, "kertas");
+    await ps.mouse.dblclick(pt.x, pt.y);
+    await ps.getByLabel("Teks butir 1").waitFor({ timeout: 10000 });
+    expect(await ps.getByLabel("Teks butir 1").evaluate((el) => el === document.activeElement && el.selectionStart === 5), "butir", "kursor butir tidak di posisi klik");
+    await ps.keyboard.type("Z");
+    await ps.keyboard.press("Escape");
+    await wbSaved(ps);
+    await ps.getByRole("checkbox", { name: /Selesai: Beli/ }).click();
+    await wbSaved(ps);
+    saved = await wbCards(api, board);
+    const item = saved.find((c) => c.id === list.id).content.items[0];
+    expect(item.text === "Beli Zkertas" && item.done, "checklist", JSON.stringify(item));
+    expect((await ps.getByLabel("Teks butir 1").count()) === 0, "centang", "centang membuka editor");
+
+    // Sel tabel: dobel klik di depan "Isi".
+    pt = await wordAt(`[data-card="${tb.id}"] [data-cell-text="0,1"]`, "Isi");
+    await ps.mouse.dblclick(pt.x, pt.y);
+    await ps.getByLabel("Baris 1, kolom 2").waitFor({ timeout: 10000 });
+    expect(await ps.getByLabel("Baris 1, kolom 2").evaluate((el) => el === document.activeElement && el.selectionStart === 0), "sel", "kursor sel tidak di posisi klik");
+    await ps.keyboard.type("W");
+    await ps.keyboard.press("Escape");
+    await wbSaved(ps);
+    saved = await wbCards(api, board);
+    expect(saved.find((c) => c.id === tb.id).content.rows[0][1] === "WIsi", "tabel", JSON.stringify(saved.find((c) => c.id === tb.id).content.rows));
+
+    // Dobel klik area kosong kanvas tidak membuat kartu.
+    const cb = await ps.locator(".wb-canvas").boundingBox();
+    await ps.mouse.dblclick(cb.x + cb.width - 20, cb.y + cb.height / 2);
+    await ps.waitForTimeout(400);
+    expect((await nCount()) === before, "kosong", "dobel klik area kosong membuat kartu");
+
+    // Manajer mengedit catatan; dobel klik Staf membuka tampilan hanya baca dengan nama pemegang.
+    await pm.locator(`[data-card="${note.id}"]`).click();
+    await pm.keyboard.press("Enter");
+    await pm.getByRole("textbox", { name: "Isi catatan" }).waitFor({ timeout: 10000 });
+    await ps.waitForFunction((id) => document.querySelector(`[data-card="${id}"]`)?.getAttribute("aria-label")?.includes("sedang mengedit"), note.id, { timeout: 10000 }).catch(() => {});
+    pt = await wordAt(`[data-card="${note.id}"]`, "Halo");
+    await ps.mouse.dblclick(pt.x, pt.y);
+    await ps.locator("[data-testid=wb-readonly]").waitFor({ timeout: 5000 }).catch(() => {});
+    expect(/Hanya baca: \S.* sedang mengedit/.test((await ps.locator("[data-testid=wb-readonly]").textContent()) ?? ""), "hanya baca", "tampilan hanya baca tanpa nama pemegang");
+    expect((await ps.getByRole("textbox", { name: "Isi catatan" }).count()) === 0, "kunci", "editor terbuka di kartu yang dikunci");
+    await audit(ps, errors, `wbdobel ${width} papan`);
+    await pm.keyboard.press("Escape");
+  } finally {
+    await wbCleanup(api, card);
+    await api.ctx.close();
+    await cs.close();
+    await cm.close();
+  }
+}
+
+if (ONLY === "wbdobel") for (const w of [360, 1280]) await checkWbDobel(w);
+if (ONLY === "wbzoom") for (const w of [360, 1280]) await checkWbZoom(w);
+if (ONLY === "wbberkas") for (const w of [360, 1280]) await checkWbBerkas(w);
+if (ONLY === "wbtautan") for (const w of [360, 1280]) await checkWbTautan(w);
+if (ONLY === "wbkolom") for (const w of [360, 1280]) await checkWbKolom(w);
+if (ONLY === "wbpenghubung") for (const w of [360, 1280]) await checkWbPenghubung(w);
+if (ONLY === "wbkomentar") for (const w of [360, 1280]) await checkWbKomentar(w);
+if (ONLY === "wbgambar") for (const w of [360, 1280]) await checkWbGambar(w);
+if (ONLY === "wbtabel") for (const w of [360, 1280]) await checkWbTabel(w);
+if (ONLY === "wbpindah") for (const w of [360, 1280]) await checkWbPindah(w);
+if (ONLY === "wb3")
+  for (const w of [360, 1280]) {
+    await checkWbBerkas(w);
+    await checkWbTautan(w);
+    await checkWbKolom(w);
+    await checkWbPenghubung(w);
+    await checkWbKomentar(w);
+    await checkWbGambar(w);
+    await checkWbTabel(w);
+    await checkWbPindah(w);
+    await checkWbZoom(w);
+    await checkWbDobel(w);
+  }
+
 await browser.close();
 console.log(
-  `pemeriksaan: ${checks}, gagal: ${fails.length}, panel tanpa bar aksi (hanya baca): ${info.length}`,
+  `pemeriksaan: ${checks}, gagal: ${fails.length}, panel tanpa bar aksi (hanya baca): ${info.length}, login sungguhan: ${realLogins}`,
 );
 if (info.length)
   console.log(

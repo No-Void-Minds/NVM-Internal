@@ -7,7 +7,7 @@ import type { PMNode } from '../../utils/whiteboard'
 // Editor kartu catatan, dimuat hanya saat kartu dibuka untuk diedit (dynamic import), jadi halaman lain dan kartu
 // yang tidak diedit tidak membawa TipTap. injectCSS false wajib: TipTap bawaannya menyisipkan tag <style>, yang
 // diblokir CSP style-src 'self'. Gaya editor ada di style.css (.wb-editor).
-const props = defineProps<{ doc: PMNode; label: string }>()
+const props = defineProps<{ doc: PMNode; label: string; caret?: { textIndex?: number } | null }>()
 const emit = defineEmits<{ input: [doc: PMNode]; close: [] }>()
 
 const host = ref<HTMLElement | null>(null)
@@ -41,7 +41,26 @@ onMounted(() => {
     element: host.value!,
     injectCSS: false,
     content: props.doc,
-    autofocus: 'end',
+    // Dobel klik menaruh kursor di titik klik (onCreate); tanpa itu (Enter) di akhir teks.
+    autofocus: props.caret?.textIndex !== undefined ? false : 'end',
+    onCreate: ({ editor: e }) => {
+      const want = props.caret?.textIndex
+      if (want === undefined) return
+      // Indeks karakter teks tampilan dipetakan ke posisi dokumen: jumlah karakter text node sebelumnya.
+      let seen = 0
+      let at: number | null = null
+      e.state.doc.descendants((node, pos) => {
+        if (at !== null) return false
+        if (!node.isText) return true
+        const len = node.text?.length ?? 0
+        if (want <= seen + len) at = pos + (want - seen)
+        seen += len
+        return false
+      })
+      e.chain()
+        .focus(at ?? 'end')
+        .run()
+    },
     extensions: [
       StarterKit.configure({
         codeBlock: false,
