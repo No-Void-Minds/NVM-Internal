@@ -18,6 +18,8 @@ export type BoardTask = TaskSummary & {
   move_to: TaskStatus[]
   revision_subtasks: RevisionSubtask[]
   revision_note_required: boolean
+  // Revisi 45: pengguna peminta task ini tetapi bukan PIC task atau PIC sub task. Hanya penanda, bukan hak.
+  requester_only?: boolean
 }
 export type BoardColumn = { status: TaskStatus; count: number; tasks: BoardTask[] }
 export type Board = { columns: BoardColumn[]; completed_days: number }

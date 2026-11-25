@@ -113,7 +113,7 @@ func (s *Server) userAvatar(c *gin.Context) {
 // myTaskCounts memakai aturan papan scope=mine tanpa filter lain, jadi angkanya tidak ikut berubah saat filter
 // papan diganti. Completed hanya menghitung task CompletedDays hari terakhir, sama seperti kolom papan.
 func (s *Server) myTaskCounts(c *gin.Context) {
-	cols, err := s.tasks.Board(c.Request.Context(), task.BoardFilter{PICIDs: []int64{currentUser(c).ID}}, time.Now())
+	cols, err := s.tasks.Board(c.Request.Context(), mineFilter(task.BoardFilter{}, currentUser(c).ID), time.Now())
 	if err != nil {
 		s.writeTaskError(c, err)
 		return

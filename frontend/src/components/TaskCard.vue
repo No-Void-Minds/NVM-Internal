@@ -27,8 +27,18 @@ const percent = computed(() =>
   <article
     class="relative rounded-card border border-line bg-surface p-4 transition-colors duration-150 hover:border-ink has-[h3_button:focus-visible]:outline-2 has-[h3_button:focus-visible]:outline-offset-2 has-[h3_button:focus-visible]:outline-mark"
   >
-    <div class="flex items-center justify-between gap-2 text-sm">
-      <span class="specimen-tag">{{ task.id }}</span>
+    <div class="flex flex-wrap items-center justify-between gap-2 text-sm">
+      <span class="flex flex-wrap items-center gap-2">
+        <span class="specimen-tag">{{ task.id }}</span>
+        <!-- Revisi 45: task ini ada di Task saya karena kamu yang meminta, bukan karena kamu PIC-nya. -->
+        <span
+          v-if="task.requester_only"
+          class="rounded-chip border border-line bg-canvas px-2 py-0.5 text-ink"
+          data-testid="requester-badge"
+        >
+          Kamu peminta
+        </span>
+      </span>
       <span class="flex items-center gap-3">
         <RecurrenceBadge v-if="task.series_freq" :freq="task.series_freq" />
         <UrgencyLabel :urgency="task.urgency" />

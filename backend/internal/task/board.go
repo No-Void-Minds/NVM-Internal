@@ -44,11 +44,14 @@ func mustLoadLocation(name string) *time.Location {
 type BoardFilter struct {
 	PICIDs       []int64
 	PICUsernames []string
-	DivisionID   *int64
-	LabelID      *int64
-	Urgency      string
-	Due          string
-	Keyword      string
+	// RequesterID: "Task saya" (revisi 45) juga memuat task yang diminta orang ini, selain yang dia pegang sebagai
+	// PIC task atau PIC sub task. Hanya diisi bersama PICIDs; filter Orang tidak memakainya.
+	RequesterID *int64
+	DivisionID  *int64
+	LabelID     *int64
+	Urgency     string
+	Due         string
+	Keyword     string
 }
 
 type BoardColumn struct {
@@ -169,6 +172,9 @@ func (f BoardFilter) params(now time.Time) (sqlc.ListBoardTasksParams, error) {
 	}
 	if f.LabelID != nil {
 		p.LabelID = pgtype.Int8{Int64: *f.LabelID, Valid: true}
+	}
+	if f.RequesterID != nil {
+		p.RequesterID = pgtype.Int8{Int64: *f.RequesterID, Valid: true}
 	}
 	pattern, err := keywordPattern(f.Keyword)
 	if err != nil {

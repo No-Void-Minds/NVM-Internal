@@ -76,9 +76,18 @@ func withMoveTo(actor task.Actor, r task.Summary, mine []sqlc.ListMySubtasksRow)
 	// isCreator false: kartu papan dan Arsip hanya memakai move_to, sedangkan tombol Ubah dan Hapus ada di
 	// detail task, yang membaca pembuatnya sendiri (revisi 27).
 	can, choices := task.MoveOptions(actor.Role, isPIC, false, mine, task.Status(r.Task.Status))
+	// mine hanya terisi untuk Staf, jadi PIC sub task dicek dari daftar PIC sub task kartu ini.
+	subPIC := false
+	for _, p := range r.SubtaskPICs {
+		if p.ID == actor.ID {
+			subPIC = true
+			break
+		}
+	}
 	return boardTask{
 		taskSummary: summaryOf(r), MoveTo: can.MoveTo, RevisionSubtasks: choices,
 		RevisionNoteRequired: task.RevisionNoteRequired(actor.Role, isPIC, len(mine) > 0),
+		RequesterOnly:        r.Task.RequestedBy == actor.ID && !isPIC && !subPIC,
 	}
 }
 

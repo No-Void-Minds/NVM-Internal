@@ -24,6 +24,17 @@ type boardTask struct {
 	// Sama dengan detail task. Di papan dan Arsip pilihan untuk PIC task dan Manajer tidak dikirim (butuh semua
 	// sub task setiap kartu), jadi mereka memilih sub task dari panel detail.
 	RevisionNoteRequired bool `json:"revision_note_required"`
+	// RequesterOnly: pelaku peminta task ini tetapi bukan PIC task atau PIC sub task (penanda "Kamu peminta",
+	// revisi 45). Tidak mengubah hak apa pun.
+	RequesterOnly bool `json:"requester_only"`
+}
+
+// mineFilter: "Task saya" adalah task yang orang ini pegang sebagai PIC task atau PIC sub task, atau yang dia
+// minta (revisi 45). Dipakai papan dan hitungan di kartu profil, supaya angkanya sama.
+func mineFilter(f task.BoardFilter, userID int64) task.BoardFilter {
+	f.PICIDs = []int64{userID}
+	f.RequesterID = &userID
+	return f
 }
 
 type boardColumn struct {
@@ -43,10 +54,11 @@ type person struct {
 
 // board menerima scope (mine/all), pic (username, dipisah koma), division, label, urgency, dan due.
 // scope=mine selalu memakai akun yang login dan mengabaikan pic, supaya URL yang membawa keduanya tidak ambigu.
+// Sejak revisi 45 scope=mine juga memuat task yang diminta akun itu.
 func (s *Server) board(c *gin.Context) {
 	f := task.BoardFilter{Urgency: c.Query("urgency"), Due: c.Query("due"), Keyword: c.Query("q")}
 	if c.Query("scope") == "mine" {
-		f.PICIDs = []int64{currentUser(c).ID}
+		f = mineFilter(f, currentUser(c).ID)
 	} else if p := c.Query("pic"); p != "" {
 		f.PICUsernames = strings.Split(p, ",")
 	}

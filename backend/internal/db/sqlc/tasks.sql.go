@@ -316,7 +316,7 @@ func (q *Queries) ListArchiveTasks(ctx context.Context, arg ListArchiveTasksPara
 const listBoardTasks = `-- name: ListBoardTasks :many
 SELECT t.id, t.title, t.status, t.urgency, t.division_id, d.name AS division_name,
        t.start_date, t.due_date, t.solved_date, t.version,
-       t.series_id, t.occurrence_date, s.freq AS series_freq
+       t.series_id, t.occurrence_date, s.freq AS series_freq, t.requested_by
 FROM tasks t
 JOIN divisions d ON d.id = t.division_id
 LEFT JOIN task_series s ON s.id = t.series_id
@@ -333,32 +333,34 @@ WHERE NOT t.is_deleted
                   JOIN subtask_assignees sa ON sa.subtask_id = st.id
                   JOIN users u ON u.id = sa.user_id
                   WHERE st.task_id = t.id
-                    AND (sa.user_id = ANY($2::bigint[]) OR lower(u.username) = ANY($3::text[]))))
-  AND ($4::bigint IS NULL OR t.division_id = $4::bigint)
-  AND ($5::bigint IS NULL
-       OR EXISTS (SELECT 1 FROM task_labels tl WHERE tl.task_id = t.id AND tl.label_id = $5::bigint))
-  AND ($6::task_urgency IS NULL OR t.urgency = $6::task_urgency)
-  AND ($7::text IS NULL
-       OR ($7::text = 'overdue' AND t.due_date < $8::date AND t.status <> 'completed')
-       OR ($7::text = 'today' AND t.due_date = $8::date)
-       OR ($7::text = 'week' AND t.due_date BETWEEN $8::date AND ($8::date) + 6)
-       OR ($7::text = 'none' AND t.due_date IS NULL))
+                    AND (sa.user_id = ANY($2::bigint[]) OR lower(u.username) = ANY($3::text[])))
+       -- Revisi 45: "Task saya" juga memuat task yang diminta orang ini (requested_by). Tetap satu baris per task.
+       OR t.requested_by = $4::bigint)
+  AND ($5::bigint IS NULL OR t.division_id = $5::bigint)
+  AND ($6::bigint IS NULL
+       OR EXISTS (SELECT 1 FROM task_labels tl WHERE tl.task_id = t.id AND tl.label_id = $6::bigint))
+  AND ($7::task_urgency IS NULL OR t.urgency = $7::task_urgency)
+  AND ($8::text IS NULL
+       OR ($8::text = 'overdue' AND t.due_date < $9::date AND t.status <> 'completed')
+       OR ($8::text = 'today' AND t.due_date = $9::date)
+       OR ($8::text = 'week' AND t.due_date BETWEEN $9::date AND ($9::date) + 6)
+       OR ($8::text = 'none' AND t.due_date IS NULL))
          -- Blok kata kunci ini harus sama dengan ListArchiveTasks. Diubah di satu tempat, ubah di tempat lain.
-  AND ($9::text IS NULL OR (
-        t.id ILIKE $9::text
-        OR t.title ILIKE $9::text
-        OR t.description ILIKE $9::text
-        OR t.deliverable_url ILIKE $9::text
-        OR EXISTS (SELECT 1 FROM users r WHERE r.id = t.requested_by AND r.name ILIKE $9::text)
+  AND ($10::text IS NULL OR (
+        t.id ILIKE $10::text
+        OR t.title ILIKE $10::text
+        OR t.description ILIKE $10::text
+        OR t.deliverable_url ILIKE $10::text
+        OR EXISTS (SELECT 1 FROM users r WHERE r.id = t.requested_by AND r.name ILIKE $10::text)
         OR EXISTS (SELECT 1 FROM task_subtasks st
-                   WHERE st.task_id = t.id AND st.title ILIKE $9::text)
+                   WHERE st.task_id = t.id AND st.title ILIKE $10::text)
         OR EXISTS (SELECT 1 FROM task_assignees tas
                    JOIN users u ON u.id = tas.user_id
-                   WHERE tas.task_id = t.id AND u.name ILIKE $9::text)
+                   WHERE tas.task_id = t.id AND u.name ILIKE $10::text)
         OR EXISTS (SELECT 1 FROM task_labels tl JOIN labels l ON l.id = tl.label_id
-                   WHERE tl.task_id = t.id AND l.name ILIKE $9::text)
+                   WHERE tl.task_id = t.id AND l.name ILIKE $10::text)
         OR EXISTS (SELECT 1 FROM task_attachments ta
-                   WHERE ta.task_id = t.id AND NOT ta.is_deleted AND ta.original_name ILIKE $9::text)))
+                   WHERE ta.task_id = t.id AND NOT ta.is_deleted AND ta.original_name ILIKE $10::text)))
 ORDER BY CASE t.urgency WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
          t.due_date NULLS LAST, t.created_at
 `
@@ -367,6 +369,7 @@ type ListBoardTasksParams struct {
 	CompletedSince pgtype.Timestamptz
 	PicIds         []int64
 	PicUsernames   []string
+	RequesterID    pgtype.Int8
 	DivisionID     pgtype.Int8
 	LabelID        pgtype.Int8
 	Urgency        NullTaskUrgency
@@ -389,6 +392,7 @@ type ListBoardTasksRow struct {
 	SeriesID       pgtype.Int8
 	OccurrenceDate pgtype.Date
 	SeriesFreq     NullRecurrenceFreq
+	RequestedBy    int64
 }
 
 // Kolomnya sama persis dengan ListTasks supaya hasilnya bisa dikonversi dan dilengkapi PIC serta label
@@ -399,6 +403,7 @@ func (q *Queries) ListBoardTasks(ctx context.Context, arg ListBoardTasksParams) 
 		arg.CompletedSince,
 		arg.PicIds,
 		arg.PicUsernames,
+		arg.RequesterID,
 		arg.DivisionID,
 		arg.LabelID,
 		arg.Urgency,
@@ -427,6 +432,7 @@ func (q *Queries) ListBoardTasks(ctx context.Context, arg ListBoardTasksParams) 
 			&i.SeriesID,
 			&i.OccurrenceDate,
 			&i.SeriesFreq,
+			&i.RequestedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -665,7 +671,7 @@ func (q *Queries) ListTaskLabels(ctx context.Context, taskIds []string) ([]ListT
 const listTasks = `-- name: ListTasks :many
 SELECT t.id, t.title, t.status, t.urgency, t.division_id, d.name AS division_name,
        t.start_date, t.due_date, t.solved_date, t.version,
-       t.series_id, t.occurrence_date, s.freq AS series_freq
+       t.series_id, t.occurrence_date, s.freq AS series_freq, t.requested_by
 FROM tasks t
 JOIN divisions d ON d.id = t.division_id
 LEFT JOIN task_series s ON s.id = t.series_id
@@ -694,6 +700,7 @@ type ListTasksRow struct {
 	SeriesID       pgtype.Int8
 	OccurrenceDate pgtype.Date
 	SeriesFreq     NullRecurrenceFreq
+	RequestedBy    int64
 }
 
 // Daftar sederhana untuk Sprint 3; papan dengan filter lengkap dibuat di Sprint 4.
@@ -720,6 +727,7 @@ func (q *Queries) ListTasks(ctx context.Context, assigneeID pgtype.Int8) ([]List
 			&i.SeriesID,
 			&i.OccurrenceDate,
 			&i.SeriesFreq,
+			&i.RequestedBy,
 		); err != nil {
 			return nil, err
 		}

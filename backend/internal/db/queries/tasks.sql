@@ -29,7 +29,7 @@ WHERE t.id = @id AND NOT t.is_deleted;
 -- Daftar sederhana untuk Sprint 3; papan dengan filter lengkap dibuat di Sprint 4.
 SELECT t.id, t.title, t.status, t.urgency, t.division_id, d.name AS division_name,
        t.start_date, t.due_date, t.solved_date, t.version,
-       t.series_id, t.occurrence_date, s.freq AS series_freq
+       t.series_id, t.occurrence_date, s.freq AS series_freq, t.requested_by
 FROM tasks t
 JOIN divisions d ON d.id = t.division_id
 LEFT JOIN task_series s ON s.id = t.series_id
@@ -70,7 +70,7 @@ ORDER BY a.occurred_at DESC, a.id DESC;
 -- dengan kode yang sama. Completed hanya yang selesai sejak @completed_since; sisanya hanya ada di Arsip.
 SELECT t.id, t.title, t.status, t.urgency, t.division_id, d.name AS division_name,
        t.start_date, t.due_date, t.solved_date, t.version,
-       t.series_id, t.occurrence_date, s.freq AS series_freq
+       t.series_id, t.occurrence_date, s.freq AS series_freq, t.requested_by
 FROM tasks t
 JOIN divisions d ON d.id = t.division_id
 LEFT JOIN task_series s ON s.id = t.series_id
@@ -87,7 +87,9 @@ WHERE NOT t.is_deleted
                   JOIN subtask_assignees sa ON sa.subtask_id = st.id
                   JOIN users u ON u.id = sa.user_id
                   WHERE st.task_id = t.id
-                    AND (sa.user_id = ANY(@pic_ids::bigint[]) OR lower(u.username) = ANY(@pic_usernames::text[]))))
+                    AND (sa.user_id = ANY(@pic_ids::bigint[]) OR lower(u.username) = ANY(@pic_usernames::text[])))
+       -- Revisi 45: "Task saya" juga memuat task yang diminta orang ini (requested_by). Tetap satu baris per task.
+       OR t.requested_by = sqlc.narg(requester_id)::bigint)
   AND (sqlc.narg(division_id)::bigint IS NULL OR t.division_id = sqlc.narg(division_id)::bigint)
   AND (sqlc.narg(label_id)::bigint IS NULL
        OR EXISTS (SELECT 1 FROM task_labels tl WHERE tl.task_id = t.id AND tl.label_id = sqlc.narg(label_id)::bigint))
