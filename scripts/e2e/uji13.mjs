@@ -2306,22 +2306,21 @@ async function checkTodo(width) {
     );
     await vis(judulSatu).focus();
     await page.keyboard.press("Enter");
-    // Isian ubah membuka dengan seluruh teks terseleksi, supaya judul bisa diganti tanpa menghapus dulu.
+    // Revisi 46: isian ubah dari keyboard membuka dengan kursor di akhir teks, tanpa seleksi, supaya kata
+    // yang mau diganti tetap terlihat.
     const seleksi = await page.evaluate(() => {
       const el = document.activeElement;
-      if (!(el instanceof HTMLInputElement))
+      if (!(el instanceof HTMLTextAreaElement))
         return `fokus bukan isian: ${el?.tagName}`;
-      return el.selectionStart === 0 && el.selectionEnd === el.value.length
+      return el.selectionStart === el.value.length && el.selectionEnd === el.value.length
         ? ""
         : `seleksi ${el.selectionStart} sampai ${el.selectionEnd} dari ${el.value.length}`;
     });
     expect(
       seleksi === "",
       "ubah",
-      `teks isian ubah tidak terseleksi: ${seleksi}`,
+      `kursor isian ubah tidak di akhir teks: ${seleksi}`,
     );
-    // End dulu: tanpa itu, mengetik akan mengganti seluruh judul yang terseleksi, bukan menambah di akhir.
-    await page.keyboard.press("End");
     await page.keyboard.type(" diubah");
     await page.keyboard.press("Enter");
     const tersimpan = await ada(

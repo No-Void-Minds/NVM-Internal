@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, ref, useId } from 'vue'
 import { useTodos } from '../composables/useTodos'
 import type { TodoItem } from '../api/todos'
+import { caretHint } from './whiteboard/caret'
 
 // Kartu To Do (revisi 28). Satu lembar catatan: permukaan krem dengan teks tinta, token yang sama dengan
 // label ID task, dan baris-baris dipisah garis tipis seperti buku bergaris. Dipakai kartu di kolom kiri
@@ -38,10 +39,18 @@ const editingId = ref<number | null>(null)
 const editDraft = ref('')
 // Function ref, bukan ref bernama: isian ini ada di dalam v-for, dan ref bernama di dalam v-for
 // dikumpulkan Vue menjadi array, jadi editInput.value.focus bukan fungsi.
-const editInput = ref<HTMLInputElement | null>(null)
+const editInput = ref<HTMLTextAreaElement | null>(null)
 
 function setEditInput(el: unknown) {
-  editInput.value = el instanceof HTMLInputElement ? el : null
+  editInput.value = el instanceof HTMLTextAreaElement ? el : null
+}
+
+// Isian ubah setinggi isinya, supaya judul panjang terbaca utuh dan terbungkus saat diubah (revisi 46).
+function grow() {
+  const el = editInput.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = `${el.scrollHeight}px`
 }
 const dragId = ref<number | null>(null)
 // Mode Atur: kontrol urut dan hapus tampil di semua baris. Satu-satunya cara memunculkannya di layar sentuh,
@@ -65,19 +74,68 @@ async function submit() {
   await add(title)
 }
 
-async function startEdit(item: TodoItem) {
+// Revisi 46: teks tidak diseleksi semua, supaya kata yang mau diganti tetap terlihat. Kursor di posisi dobel
+// klik, atau di akhir teks bila dibuka dengan keyboard.
+async function startEdit(item: TodoItem, offset?: number) {
+  if (editingId.value === item.id) return
   editingId.value = item.id
   editDraft.value = item.title
   await nextTick()
-  editInput.value?.focus()
-  // Seluruh teks terseleksi, supaya mengganti judul tidak perlu menghapus dulu.
-  editInput.value?.select()
+  const el = editInput.value
+  if (!el) return
+  grow()
+  const at = offset === undefined ? el.value.length : Math.max(0, Math.min(el.value.length, offset))
+  el.focus()
+  el.setSelectionRange(at, at)
+}
+
+function editAt(item: TodoItem, e: MouseEvent) {
+  void startEdit(item, caretHint(e.clientX, e.clientY, e.target).offset)
+}
+
+// Klik mouse sekali tidak membuka isian: klik kedua dari dobel klik akan jatuh di isian dan menyeleksi satu
+// kata. Klik dari Enter atau Spasi (detail 0) tetap membuka isian.
+function onTitleClick(item: TodoItem, e: MouseEvent) {
+  if (e.detail === 0) void startEdit(item)
+}
+
+// Dobel ketuk di layar sentuh: dua ketukan di judul yang sama dalam 350 ms. dblclick tidak selalu dikirim
+// peramban sentuh; bila tetap dikirim, startEdit mengabaikan panggilan kedua.
+let lastTap = { id: 0, at: 0 }
+function onTitleTap(item: TodoItem, e: PointerEvent) {
+  if (e.pointerType !== 'touch') return
+  if (lastTap.id === item.id && e.timeStamp - lastTap.at < 350) {
+    lastTap = { id: 0, at: 0 }
+    void startEdit(item, caretHint(e.clientX, e.clientY, e.target).offset).then(keepCaret)
+  } else lastTap = { id: item.id, at: e.timeStamp }
+}
+
+// Gestur dobel ketuk bawaan peramban ikut sampai ke isian yang baru muncul di bawah jari dan menyeleksi satu
+// kata. Selama 600 ms, seleksi dari gestur itu dikembalikan ke posisi kursor yang dipilih.
+function keepCaret() {
+  const el = editInput.value
+  if (!el) return
+  const at = el.selectionStart
+  const restore = () => el.setSelectionRange(at, at)
+  for (const t of ['dblclick', 'select']) el.addEventListener(t, restore)
+  setTimeout(() => {
+    for (const t of ['dblclick', 'select']) el.removeEventListener(t, restore)
+  }, 600)
+}
+
+// Enter menyimpan (judul to do satu baris), bukan membuat baris baru.
+function onEditKey(e: KeyboardEvent, item: TodoItem) {
+  if (e.key === 'Enter' && !e.isComposing) {
+    e.preventDefault()
+    void commitEdit(item)
+  }
 }
 
 async function commitEdit(item: TodoItem) {
   // Dipanggil juga dari blur. Setelah Escape mode ubah sudah tertutup, jadi di situ tidak ada yang disimpan.
   if (editingId.value !== item.id) return
-  const title = editDraft.value
+  // Baris baru dari teks yang ditempel menjadi spasi.
+  const title = editDraft.value.replace(/\s*\n\s*/g, ' ')
   editingId.value = null
   await rename(item.id, title)
 }
@@ -217,14 +275,17 @@ function titleUrl(title: string): string | null {
 
             <form v-if="editingId === item.id" class="min-w-0 flex-1 py-1" @submit.prevent="commitEdit(item)">
               <label :for="`${uid}-edit-${item.id}`" class="sr-only">Ubah to do</label>
-              <input
+              <!-- Selebar baris dan tumbuh mengikuti isinya; kontrol baris disembunyikan selama mengetik. Garis
+                   bawah tag-ink 2 px menjadi penanda fokus yang selalu terlihat. -->
+              <textarea
                 :id="`${uid}-edit-${item.id}`"
                 :ref="setEditInput"
                 v-model="editDraft"
-                type="text"
+                rows="1"
                 maxlength="200"
-                class="min-h-11 w-full min-w-0 border-b bg-transparent px-1 outline-none"
-                :class="rule"
+                class="block min-h-11 w-full min-w-0 resize-none overflow-hidden border-b-2 border-tag-ink bg-transparent px-1 py-2.5 leading-6 outline-none [overflow-wrap:anywhere]"
+                @input="grow"
+                @keydown="onEditKey($event, item)"
                 @keydown.esc.stop.prevent="cancelEdit(item)"
                 @blur="commitEdit(item)"
               />
@@ -235,16 +296,20 @@ function titleUrl(title: string): string | null {
               v-else
               :id="`${uid}-title-${item.id}`"
               type="button"
-              class="min-w-0 flex-1 py-3 text-left [overflow-wrap:anywhere]"
+              data-caret
+              class="min-w-0 flex-1 touch-manipulation py-3 text-left [overflow-wrap:anywhere]"
               :class="focusRing"
               :aria-label="`Ubah ${item.title}`"
-              @click="startEdit(item)"
+              title="Dobel klik atau Enter untuk mengubah"
+              @click="onTitleClick(item, $event)"
+              @dblclick="editAt(item, $event)"
+              @pointerup="onTitleTap(item, $event)"
             >
               {{ item.title }}
             </button>
           </div>
 
-          <div :class="rowControls">
+          <div v-if="editingId !== item.id" :class="rowControls">
             <!-- Judul yang memuat URL tetap teks biasa, supaya mengkliknya membuka mode ubah. Tautannya
                  dibuka lewat ikon terpisah ini, yang ikut kelompok kontrol baris: di mode biasa kontrolnya
                  lapisan di sisi kanan baris, jadi ikon di luar kelompok itu akan tertutup lapisannya. -->
