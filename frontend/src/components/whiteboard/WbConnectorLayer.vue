@@ -1,55 +1,19 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { edgePoint, type Connector, type Rect } from '../../utils/whiteboard'
-import { inkColor } from './wbColors'
+import type { Routed } from '../../utils/wbShapes'
 
-// Garis penghubung di bawah kartu, dalam koordinat dunia. Ujung garis di tepi kartu; panah digambar sebagai
-// segitiga sendiri (bukan marker) supaya warnanya selalu sama dengan garisnya di semua peramban. Garis bisa diklik
-// untuk membuka dialog garis; jalur keyboard ke dialog yang sama ada di bar pilihan kartu.
-const props = defineProps<{ connectors: Connector[]; geom: Map<string, Rect>; canWrite: boolean }>()
-const emit = defineEmits<{ open: [id: string] }>()
-
-function head(tip: { x: number; y: number }, from: { x: number; y: number }) {
-  const len = Math.hypot(tip.x - from.x, tip.y - from.y) || 1
-  const ux = (tip.x - from.x) / len
-  const uy = (tip.y - from.y) / len
-  const bx = tip.x - ux * 12
-  const by = tip.y - uy * 12
-  return `M${tip.x} ${tip.y}L${bx - uy * 6} ${by + ux * 6}L${bx + uy * 6} ${by - ux * 6}Z`
+// Garis penghubung di bawah kartu, dalam koordinat dunia. Jalurnya (lurus, siku, melengkung), ujung, dan posisi label
+// dihitung routeConnector (utils/wbShapes.ts), sama dengan pegangan diagram dan ekspor. Ujung digambar sebagai path
+// sendiri (bukan marker) supaya warnanya selalu sama dengan garisnya di semua peramban. Klik memilih garis (Delete
+// menghapus), dobel klik membuka panel gaya; jalur keyboard ke panel yang sama ada di bar pilihan kartu.
+export type DrawnLine = Routed & {
+  color: string
+  dash?: string
+  label: string
+  label_start: string
+  label_end: string
 }
-
-const lines = computed(() =>
-  props.connectors.flatMap((c) => {
-    // Ujung bebas (model W5) digambar sebagai titik di koordinat dunia.
-    const end = (card: string | null, e: { x?: number; y?: number }) =>
-      card
-        ? props.geom.get(card)
-        : e.x !== undefined && e.y !== undefined
-          ? { x: e.x, y: e.y, w: 0, h: 0 }
-          : undefined
-    const a = end(c.from, c.geometry.from)
-    const b = end(c.to, c.geometry.to)
-    if (!a || !b) return []
-    const ca = { x: a.x + a.w / 2, y: a.y + a.h / 2 }
-    const cb = { x: b.x + b.w / 2, y: b.y + b.h / 2 }
-    const p = edgePoint(a, cb)
-    const q = edgePoint(b, ca)
-    return [
-      {
-        id: c.id,
-        d: `M${p.x} ${p.y}L${q.x} ${q.y}`,
-        heads: [
-          c.style.end === 'arrow' ? head(q, p) : '',
-          c.style.start === 'arrow' ? head(p, q) : '',
-        ].filter(Boolean),
-        dash: c.style.line === 'dashed' ? '8 6' : c.style.line === 'dotted' ? '2 5' : undefined,
-        color: inkColor(c.style.color || 'tinta'),
-        label: c.label,
-        mid: { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 },
-      },
-    ]
-  }),
-)
+defineProps<{ lines: DrawnLine[]; selected: string | null; zoom: number }>()
+const emit = defineEmits<{ select: [id: string]; open: [id: string] }>()
 </script>
 
 <template>
@@ -59,9 +23,31 @@ const lines = computed(() =>
     width="1"
     height="1"
   >
-    <g v-for="l in lines" :key="l.id" :style="{ color: l.color }" data-testid="wb-connector">
-      <path :d="l.d" fill="none" stroke="currentColor" stroke-width="2" :stroke-dasharray="l.dash" />
-      <path v-for="(h, i) in l.heads" :key="i" :d="h" fill="currentColor" />
+    <g
+      v-for="l in lines"
+      :key="l.id"
+      :style="{ color: l.color }"
+      data-testid="wb-connector"
+      :data-connector="l.id"
+      :data-selected="selected === l.id ? 'true' : undefined"
+    >
+      <path
+        :d="l.d"
+        fill="none"
+        stroke="currentColor"
+        :stroke-width="selected === l.id ? 3 : 2"
+        :stroke-dasharray="l.dash"
+        stroke-linejoin="round"
+      />
+      <path
+        v-for="(h, i) in l.heads"
+        :key="i"
+        :d="h.d"
+        :fill="h.fill === 'line' ? 'currentColor' : h.fill === 'surface' ? 'var(--color-surface)' : 'none'"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linejoin="round"
+      />
       <text
         v-if="l.label"
         :x="l.mid.x"
@@ -72,17 +58,38 @@ const lines = computed(() =>
       >
         {{ l.label }}
       </text>
-      <!-- Area klik selebar 16 px di sepanjang garis. -->
+      <text
+        v-if="l.label_start"
+        :x="l.near.start.x"
+        :y="l.near.start.y - 12"
+        text-anchor="middle"
+        dominant-baseline="middle"
+        class="wb-connector-label text-xs"
+        data-label="start"
+      >
+        {{ l.label_start }}
+      </text>
+      <text
+        v-if="l.label_end"
+        :x="l.near.end.x"
+        :y="l.near.end.y - 12"
+        text-anchor="middle"
+        dominant-baseline="middle"
+        class="wb-connector-label text-xs"
+        data-label="end"
+      >
+        {{ l.label_end }}
+      </text>
+      <!-- Area klik 16 px di layar di sepanjang garis. -->
       <path
-        v-if="canWrite"
         :d="l.d"
         fill="none"
         stroke="transparent"
-        stroke-width="16"
+        :stroke-width="16 / zoom"
         pointer-events="stroke"
         class="cursor-pointer"
-        @pointerdown.stop
-        @click="emit('open', l.id)"
+        @pointerdown.stop="emit('select', l.id)"
+        @dblclick.stop="emit('open', l.id)"
       />
     </g>
   </svg>

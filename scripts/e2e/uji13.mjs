@@ -52,6 +52,7 @@
 // wbkomentar, wbgambar, wbtabel, wbpindah, wbzoom, wbdobel, wbketik).
 // E2E_ONLY=wb4 untuk semua skenario Whiteboard W4 (atau satu per satu: wbtemplate, wbekspor, wbcari, wbdaftar,
 // wbperforma; wbperforma mengisi satu papan uji dengan 500 kartu lewat API dan hanya di 1280 px).
+// E2E_ONLY=wb5 untuk Whiteboard W5 (bentuk dan diagram: flowchart dan diagram kelas, dua konteks).
 // Keluar dengan kode 1 bila ada yang gagal.
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -4931,9 +4932,9 @@ async function checkWbPenghubung(width) {
     await wbSelect(ps, b.id, { modifiers: ["Shift"] });
     await ps.getByLabel("Aksi lain untuk kartu terpilih").selectOption("connect");
     const dlg = ps.locator("dialog[open]");
-    await dlg.getByLabel("Label").waitFor({ timeout: 10000 });
-    await dlg.getByLabel("Label").fill("lalu");
-    await dlg.getByLabel("Label").press("Tab");
+    await dlg.getByLabel("Label tengah").waitFor({ timeout: 10000 });
+    await dlg.getByLabel("Label tengah").fill("lalu");
+    await dlg.getByLabel("Label tengah").press("Tab");
     await dlg.getByLabel("Garis", { exact: true }).selectOption("dashed");
     await wbSaved(ps);
     await audit(ps, errors, `wbpenghubung ${width} dialog`);
@@ -5406,7 +5407,7 @@ async function checkWbKetik(width) {
     await ps.waitForLoadState("networkidle");
     await ps.locator(`[data-card="${list.id}"]`).click();
     await ps.getByLabel("Aksi lain untuk kartu terpilih").selectOption("lines");
-    const label = ps.locator("dialog[open]").getByLabel("Label");
+    const label = ps.locator("dialog[open]").getByLabel("Label tengah");
     await label.waitFor({ timeout: 10000 });
     await label.fill("lalu diketik");
     await mgr.call("PUT", `/whiteboard/boards/${board}/connectors/${conn.id}`, { style: { start: "none", end: "arrow", line: "dashed", color: "" } });
@@ -5666,8 +5667,8 @@ async function checkWbDaftar(width) {
   }
 }
 
-// Performa (rancangan bagian 7): papan 500 kartu (catatan, checklist, judul, 50 gambar, 20 gambar bebas) dengan 100
-// garis, diisi lewat API. Ukur waktu muat sampai kartu tampil dan durasi frame selama geser kanvas 3 detik, lalu
+// Performa (rancangan bagian 7): papan 500 kartu (catatan, checklist, judul, 50 gambar, 100 bentuk, 20 gambar bebas)
+// dengan 100 garis (sebagian siku antar bentuk), diisi lewat API. Ukur waktu muat sampai kartu tampil dan durasi frame selama geser kanvas 3 detik, lalu
 // level of detail saat zoom di bawah 40%. Hanya 1280 px. Batas frame berlaku untuk build produksi: lewat Vite dev
 // (Vue mode pengembangan) p95 sekitar 27 ms, jadi di sana angkanya hanya dicatat. Build produksi untuk uji ini:
 //   cd frontend && npx vite build --outDir <tmp>/dist && VITE_API_TARGET=... npx vite preview --outDir <tmp>/dist
@@ -5689,8 +5690,10 @@ async function checkWbPerforma() {
     for (let i = 1; i < 480; i++) {
       const x = (i % 25) * 280;
       const y = Math.floor(i / 25) * 180;
-      const kind = i <= 49 ? "image" : ["note", "checklist", "heading"][i % 3];
+      // W5: 100 bentuk (sebagian diputar) di antara 500 kartu.
+      const kind = i <= 49 ? "image" : i <= 149 ? "shape" : ["note", "checklist", "heading"][i % 3];
       const content =
+        kind === "shape" ? { shape: ["process", "decision", "ellipse", "uml_class", "arrow_right"][i % 5], rotation: i % 4 === 0 ? 30 : 0, fill: "putih", stroke: "tinta", stroke_width: 2, stroke_style: "solid", text: `Langkah ${i}`, align: "center", font_size: 16, name: "Kelas", attributes: "+ id", methods: "+ simpan()" } :
         kind === "note" ? wbNote(`Catatan uji performa nomor ${i} dengan sedikit teks`) :
         kind === "checklist" ? { title: `Checklist ${i}`, items: [{ id: crypto.randomUUID(), text: "Butir", done: i % 2 === 0 }] } :
         kind === "heading" ? { text: `Judul ${i}`, level: 2 } : { caption: `Gambar ${i}` };
@@ -5706,10 +5709,21 @@ async function checkWbPerforma() {
     // Delapan permintaan sekaligus: cukup cepat tanpa membanjiri backend dev.
     for (let i = 0; i < jobs.length; i += 8) await Promise.all(jobs.slice(i, i + 8).map((j) => j()));
     const plain = made.filter((c) => c.kind !== "drawing");
-    for (let i = 0; i + 1 < plain.length && i < 200; i += 2)
-      await api.call("POST", `/whiteboard/boards/${board}/connectors`, { from: plain[i].id, to: plain[i + 1].id });
-    const total = (await wbCards(api, board)).length;
+    // 100 garis; antar bentuk memakai jalur siku dengan ujung segitiga (W5).
+    for (let i = 0; i + 1 < plain.length && i < 200; i += 2) {
+      const shapeLine = plain[i].kind === "shape" && plain[i + 1].kind === "shape";
+      await api.call("POST", `/whiteboard/boards/${board}/connectors`, {
+        from: plain[i].id,
+        to: plain[i + 1].id,
+        ...(shapeLine ? { geometry: { from: { port: "auto" }, to: { port: "auto" }, route: "orthogonal", points: [] }, style: { start: "none", end: "triangle", line: "solid", color: "" } } : {}),
+      });
+    }
+    const full = await wbBoardView(api, board);
+    const total = full.cards.length;
+    const shapeCount = full.cards.filter((c) => c.kind === "shape").length;
+    const ortho = full.connectors.filter((c) => c.geometry.route === "orthogonal").length;
     expect(total >= 500, "isi", `kartu di papan uji: ${total}`);
+    expect(shapeCount === 100 && full.connectors.length >= 100 && ortho > 0, "isi W5", `bentuk ${shapeCount}, garis ${full.connectors.length}, siku ${ortho}`);
 
     const ps = await cs.newPage();
     ps.on("console", (m) => m.type() === "error" && errors.push(m.text()));
@@ -5757,7 +5771,7 @@ async function checkWbPerforma() {
     const dev = await ps.evaluate(() => !!document.querySelector('script[src*="/@vite/client"]'));
     if (dev) console.log("catatan: wbperforma lewat Vite dev, batas frame 20 ms tidak dinilai (jalankan terhadap build produksi)");
     else expect(p95 < 20, "frame", `p95 frame ${p95.toFixed(1)} ms dari ${frames.length} frame`);
-    console.log(`catatan: wbperforma${dev ? " (Vite dev)" : " (build produksi)"} muat ${loadMs} ms, p95 frame ${p95.toFixed(1)} ms (${frames.length} frame), ${total} kartu`);
+    console.log(`catatan: wbperforma${dev ? " (Vite dev)" : " (build produksi)"} ${shapeCount} bentuk, ${full.connectors.length} garis, muat ${loadMs} ms, p95 frame ${p95.toFixed(1)} ms (${frames.length} frame), ${total} kartu`);
 
     // Level of detail: pas ke layar membuat zoom di bawah 40% untuk papan selebar ini.
     await ps.getByRole("button", { name: "Pas ke layar" }).click();
@@ -5790,6 +5804,230 @@ if (ONLY === "wb4") {
   }
   await checkWbPerforma();
 }
+
+// Whiteboard W5: bentuk dan diagram. Flowchart (palet dengan cari dan keyboard, teks di dalam bentuk, garis dari
+// port yang siku dan berpanah, label dan ujung lewat panel, geser bentuk lalu garis ikut, realtime di layar Manajer,
+// pilih garis lalu Delete) dan diagram kelas (kelas UML tiga bagian, putar lewat panel dan pegangan, ubah ukuran
+// dari pegangan kiri). Papan uji dipindah ke Tempat sampah di akhir.
+
+async function wbPalette(page, width, query, how) {
+  await wbTool(page, width, "Bentuk");
+  const dlg = page.getByRole("dialog", { name: "Pilih bentuk" });
+  await dlg.waitFor({ timeout: 5000 });
+  const box = dlg.getByRole("combobox", { name: "Cari bentuk" });
+  await box.fill(query);
+  if (how === "enter") await box.press("Enter");
+  else await dlg.getByRole("option", { name: how, exact: true }).click();
+  await dlg.waitFor({ state: "hidden", timeout: 5000 }).catch(() => {});
+}
+
+// Titik terakhir path garis (koordinat dunia) dan apakah semua segmennya sejajar sumbu.
+async function connectorPath(page, id) {
+  const d = await page.locator(`[data-connector="${id}"] path`).first().getAttribute("d");
+  const nums = (d.match(/-?\d+(\.\d+)?/g) ?? []).map(Number);
+  const pts = [];
+  for (let i = 0; i + 1 < nums.length; i += 2) pts.push({ x: nums[i], y: nums[i + 1] });
+  const axis = pts.every((p, i) => i === 0 || Math.abs(p.x - pts[i - 1].x) < 0.6 || Math.abs(p.y - pts[i - 1].y) < 0.6);
+  return { d, end: pts.at(-1), axis };
+}
+
+async function checkWb5(width) {
+  const expect = wbExpect("wb5", width);
+  const { api, card, board } = await wbSetup("staf", `E2E wb5 ${width} ${Date.now()}`);
+  const errors = [];
+  const cs = await wbContext("staf", width);
+  const cm = await wbContext("manajer", width);
+  try {
+    const ps = await wbPage(cs, board, errors);
+    const pm = await wbPage(cm, board, errors);
+    const shapes = async () => (await wbCards(api, board)).filter((c) => c.kind === "shape");
+
+    // Palet: cari lalu Enter, dan klik opsi.
+    await wbPalette(ps, width, "keputusan", "enter");
+    await wbSaved(ps);
+    let list = await shapes();
+    const decision = list.find((c) => c.content.shape === "decision");
+    expect(!!decision, "palet enter", `bentuk: ${list.map((c) => c.content.shape).join(", ")}`);
+    await wbPalette(ps, width, "proses", "Proses");
+    await wbSaved(ps);
+    list = await shapes();
+    const proc = list.find((c) => c.content.shape === "process");
+    expect(!!proc && list.length === 2, "palet klik", `bentuk: ${list.map((c) => c.content.shape).join(", ")}`);
+    if (!decision || !proc) return;
+    // Bentuk baru bertumpuk di tengah; proses digeser lewat API supaya keduanya terpisah dan terlihat.
+    await api.call("POST", `/whiteboard/boards/${board}/cards/patch`, { cards: [{ id: proc.id, x: decision.x, y: decision.y - 260 }] });
+    await ps.getByRole("button", { name: "Pas ke layar" }).click();
+    await ps.waitForTimeout(300);
+
+    // Dobel klik bentuk: ketik teks, Escape menyimpan.
+    await ps.locator(`[data-card="${decision.id}"]`).dblclick();
+    const text = ps.getByRole("textbox", { name: "Teks bentuk" });
+    expect(await text.waitFor({ timeout: 5000 }).then(() => true, () => false), "edit", "isian teks bentuk tidak terbuka");
+    await text.fill("Stok ada?");
+    await ps.keyboard.press("Escape");
+    await wbSaved(ps);
+    expect((await shapes()).find((c) => c.id === decision.id)?.content.text === "Stok ada?", "teks", "teks bentuk tidak tersimpan");
+    expect((await ps.locator(`[data-card="${decision.id}"]`).textContent()).includes("Stok ada?"), "tampil", "teks bentuk tidak tampil");
+
+    // Garis dari port bawah proses ke bentuk keputusan: siku, berpanah.
+    await wbSelect(ps, proc.id);
+    const port = ps.locator(`[data-testid=wb-diagram-handles] [data-port="bottom"] circle`).last();
+    const pb = await port.boundingBox();
+    const db = await ps.locator(`[data-card="${decision.id}"]`).boundingBox();
+    await ps.mouse.move(pb.x + pb.width / 2, pb.y + pb.height / 2);
+    await ps.mouse.down();
+    await ps.mouse.move(db.x + db.width / 2, db.y + db.height / 2, { steps: 8 });
+    await ps.mouse.up();
+    await wbSaved(ps);
+    let view = await wbBoardView(api, board);
+    const conn = view.connectors[0];
+    expect(view.connectors.length === 1 && conn.from === proc.id && conn.to === decision.id, "garis", JSON.stringify(view.connectors));
+    if (!conn) return;
+    expect(conn.geometry.route === "orthogonal" && conn.geometry.from.port === "bottom" && conn.style.end === "arrow", "siku", JSON.stringify(conn));
+    await ps.locator(`[data-connector="${conn.id}"]`).waitFor({ timeout: 5000 });
+    const before = await connectorPath(ps, conn.id);
+    expect(before.axis, "sejajar sumbu", before.d);
+    expect(
+      await pm.locator(`[data-connector="${conn.id}"]`).waitFor({ timeout: 10000 }).then(() => true, () => false),
+      "realtime garis",
+      "garis tidak muncul di layar Manajer",
+    );
+
+    // Panel gaya garis lewat dobel klik garis: label tengah dan ujung akhir segitiga kosong.
+    await ps.locator(`[data-connector="${conn.id}"] path`).last().dispatchEvent("dblclick");
+    const panel = ps.getByRole("dialog", { name: "Garis penghubung" });
+    await panel.waitFor({ timeout: 5000 });
+    await panel.getByLabel("Label tengah").fill("ya");
+    await panel.getByLabel("Label tengah").press("Tab");
+    await panel.getByLabel("Ujung akhir").selectOption("triangle");
+    await wbSaved(ps);
+    await ps.keyboard.press("Escape");
+    view = await wbBoardView(api, board);
+    expect(view.connectors[0]?.label === "ya" && view.connectors[0]?.style.end === "triangle", "panel garis", JSON.stringify(view.connectors[0]));
+    await pm.waitForFunction((id) => document.querySelector(`[data-connector="${id}"] text`)?.textContent?.trim() === "ya", conn.id, { timeout: 10000 }).catch(() => {});
+    expect((await pm.locator(`[data-connector="${conn.id}"] text`).first().textContent())?.trim() === "ya", "realtime label", "label garis tidak tampil di layar Manajer");
+
+    // Geser bentuk keputusan: ujung garis ikut, juga di layar Manajer.
+    const pmBefore = await connectorPath(pm, conn.id);
+    await wbSelect(ps, decision.id);
+    const cb = await ps.locator(`[data-card="${decision.id}"]`).boundingBox();
+    await ps.mouse.move(cb.x + cb.width / 2, cb.y + cb.height / 2);
+    await ps.mouse.down();
+    await ps.mouse.move(cb.x + cb.width / 2 + 90, cb.y + cb.height / 2, { steps: 10 });
+    await ps.mouse.up();
+    await wbSaved(ps);
+    const after = await connectorPath(ps, conn.id);
+    expect(after.end.x > before.end.x + 40, "ikut", `ujung garis ${before.end.x} lalu ${after.end.x}`);
+    expect(after.axis, "sejajar sumbu setelah geser", after.d);
+    await pm.waitForFunction(
+      ([id, d]) => document.querySelector(`[data-connector="${id}"] path`)?.getAttribute("d") !== d,
+      [conn.id, pmBefore.d],
+      { timeout: 10000 },
+    ).catch(() => {});
+    const pmAfter = await connectorPath(pm, conn.id);
+    expect(pmAfter.end.x > pmBefore.end.x + 40, "realtime ikut", `ujung garis Manajer ${pmBefore.end.x} lalu ${pmAfter.end.x}`);
+
+    // Diagram kelas: kelas UML tiga bagian.
+    await wbPalette(ps, width, "kelas", "enter");
+    await wbSaved(ps);
+    const cls = (await shapes()).find((c) => c.content.shape === "uml_class");
+    expect(!!cls, "kelas", "kelas UML tidak dibuat");
+    if (cls) {
+      await api.call("POST", `/whiteboard/boards/${board}/cards/patch`, { cards: [{ id: cls.id, x: decision.x + 400, y: decision.y }] });
+      await ps.getByRole("button", { name: "Pas ke layar" }).click();
+      await ps.waitForTimeout(300);
+      await ps.locator(`[data-card="${cls.id}"]`).dblclick();
+      const name = ps.getByRole("textbox", { name: "Nama kelas" });
+      expect(await name.waitFor({ timeout: 5000 }).then(() => true, () => false), "kelas edit", "isian kelas tidak terbuka");
+      await name.fill("Pesanan");
+      await ps.getByRole("textbox", { name: "Atribut kelas, satu per baris" }).fill("+ id: int\n+ total: int");
+      await ps.getByRole("textbox", { name: "Metode kelas, satu per baris" }).fill("+ bayar()");
+      await ps.keyboard.press("Escape");
+      await wbSaved(ps);
+      const saved = (await shapes()).find((c) => c.id === cls.id);
+      expect(saved?.content.name === "Pesanan" && saved?.content.attributes === "+ id: int\n+ total: int" && saved?.content.methods === "+ bayar()", "kelas simpan", JSON.stringify(saved?.content));
+
+      // Putar lewat panel gaya (jalur keyboard).
+      await wbSelect(ps, cls.id);
+      await ps.getByLabel("Aksi lain untuk kartu terpilih").selectOption("shapestyle");
+      const style = ps.getByRole("dialog", { name: "Gaya bentuk" });
+      await style.waitFor({ timeout: 5000 });
+      await style.getByLabel("Putar (derajat)").fill("45");
+      await style.getByLabel("Putar (derajat)").press("Tab");
+      await wbSaved(ps);
+      await ps.keyboard.press("Escape");
+      expect((await shapes()).find((c) => c.id === cls.id)?.content.rotation === 45, "putar panel", "sudut 45 tidak tersimpan");
+      const tf = await ps.locator(`[data-card="${cls.id}"]`).evaluate((el) => el.style.transform);
+      expect(tf.includes("rotate(45deg)"), "putar tampil", tf);
+    }
+
+    // Pegangan (mouse, 1280): putar dengan Shift kelipatan 15 derajat, ubah ukuran dari kiri dengan tepi kanan tetap.
+    if (width >= 768) {
+      await wbSelect(ps, proc.id);
+      const rot = ps.locator(`[data-card="${proc.id}"] [data-handle="rotate"]`);
+      const rb = await rot.boundingBox();
+      const pc = await ps.locator(`[data-card="${proc.id}"]`).boundingBox();
+      await ps.mouse.move(rb.x + rb.width / 2, rb.y + rb.height / 2);
+      await ps.mouse.down();
+      await ps.keyboard.down("Shift");
+      await ps.mouse.move(pc.x + pc.width + 200, pc.y + pc.height / 2 - 4, { steps: 8 });
+      await ps.mouse.up();
+      await ps.keyboard.up("Shift");
+      await wbSaved(ps);
+      const turned = (await shapes()).find((c) => c.id === proc.id)?.content.rotation;
+      expect(turned === 90, "putar pegangan", `sudut ${turned}, mau 90`);
+      // Kembali tegak lewat API supaya pegangan kiri tetap di kiri.
+      const cur = (await shapes()).find((c) => c.id === proc.id);
+      await api.call("POST", `/whiteboard/boards/${board}/cards/patch`, { cards: [{ id: proc.id, content: { ...cur.content, rotation: 0 }, base_content_version: cur.content_version }] });
+      await ps.waitForTimeout(500);
+      await wbSelect(ps, proc.id);
+      const startCard = (await shapes()).find((c) => c.id === proc.id);
+      const wh = await ps.locator(`[data-card="${proc.id}"] [data-handle="w"]`).boundingBox();
+      await ps.mouse.move(wh.x + wh.width / 2, wh.y + wh.height / 2);
+      await ps.mouse.down();
+      await ps.mouse.move(wh.x + wh.width / 2 - 60, wh.y + wh.height / 2, { steps: 6 });
+      await ps.mouse.up();
+      await wbSaved(ps);
+      const resized = (await shapes()).find((c) => c.id === proc.id);
+      expect(resized.w > startCard.w + 20 && Math.abs(resized.x + resized.w - (startCard.x + startCard.w)) <= 8, "ubah ukuran kiri", `${JSON.stringify(startCard && { x: startCard.x, w: startCard.w })} lalu ${JSON.stringify({ x: resized.x, w: resized.w })}`);
+    }
+
+    // Garis kedua antar kelas dan keputusan dengan ujung UML, lalu ubah jenis ujung lewat API dan lihat di layar.
+    if (cls) {
+      const g2 = await api.call("POST", `/whiteboard/boards/${board}/connectors`, {
+        from: cls.id, to: decision.id,
+        geometry: { from: { port: "left" }, to: { port: "right" }, route: "orthogonal", points: [] },
+        style: { start: "diamond", end: "triangle", line: "solid", color: "" },
+      });
+      expect(g2.status === 201, "garis kelas", `${g2.status} ${JSON.stringify(g2.body)}`);
+      if (g2.status === 201) {
+        await ps.locator(`[data-connector="${g2.body.connector.id}"]`).waitFor({ timeout: 10000 });
+        const heads = await ps.locator(`[data-connector="${g2.body.connector.id}"] path`).count();
+        expect(heads >= 4, "ujung kelas", `path garis kelas ${heads}`);
+        await api.call("PUT", `/whiteboard/boards/${board}/connectors/${g2.body.connector.id}`, { style: { start: "none", end: "open_arrow", line: "solid", color: "" } });
+        await pm.waitForFunction((id) => document.querySelectorAll(`[data-connector="${id}"] path`).length === 3, g2.body.connector.id, { timeout: 10000 }).catch(() => {});
+        expect((await pm.locator(`[data-connector="${g2.body.connector.id}"] path`).count()) === 3, "ubah ujung realtime", "jenis ujung baru tidak tampil di layar Manajer");
+      }
+    }
+
+    // Pilih garis pertama di kanvas, lalu Delete.
+    await ps.locator(`[data-connector="${conn.id}"] path`).last().dispatchEvent("pointerdown");
+    await ps.keyboard.press("Delete");
+    await wbSaved(ps);
+    view = await wbBoardView(api, board);
+    expect(!view.connectors.some((c) => c.id === conn.id), "hapus garis", "garis tidak terhapus dengan Delete");
+
+    expect(await wbNoScroll(ps), "gulir", "halaman bisa digulir");
+    await audit(ps, errors, `wb5 ${width}`);
+  } finally {
+    await wbCleanup(api, card);
+    await api.ctx.close();
+    await cs.close();
+    await cm.close();
+  }
+}
+
+if (ONLY === "wb5") for (const w of [360, 1280]) await checkWb5(w);
 
 await browser.close();
 console.log(

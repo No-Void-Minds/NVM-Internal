@@ -3,9 +3,11 @@ import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue'
 import WbRichText from './WbRichText'
 import WbChecklist from './WbChecklist.vue'
 import WbTable from './WbTable.vue'
+import WbShape from './WbShape.vue'
 import { fileUrl, type ChecklistOp, type TableOp } from '../../api/whiteboard'
 import { formatBytes } from '../../utils/attachment'
 import { placeCaret, type CaretHint } from './caret'
+import { HANDLES, handleSign, type Handle, type ShapeContent } from '../../utils/wbShapes'
 import {
   LOD_ZOOM,
   cardLabel,
@@ -43,10 +45,14 @@ const props = defineProps<{
   caret?: CaretHint | null
   // Kartu dikunci orang lain dan dibuka hanya baca: nama pemegangnya.
   readonlyBy?: string | null
+  // Sudut sementara selama pegangan putar diseret (W5); null memakai sudut tersimpan.
+  rotation?: number | null
 }>()
 const emit = defineEmits<{
   grab: [e: PointerEvent]
-  resize: [e: PointerEvent]
+  resize: [e: PointerEvent, handle?: Handle]
+  rotate: [e: PointerEvent]
+  live: [content: Card['content']]
   close: []
   note: [doc: PMNode]
   heading: [text: string]
@@ -74,15 +80,22 @@ const colorClass: Record<string, string> = {
 // Level of detail (W4, rancangan bagian 7): di bawah zoom 40% isi tidak terbaca, jadi kartu hanya menampilkan
 // judul ringkas dan warnanya. Ukuran huruf dibagi zoom supaya di layar tetap sekitar 14 px, dan baris dipotong di
 // tinggi kartu. Gambar tetap menampilkan pratinjaunya; kartu yang sedang diedit selalu utuh.
-const lod = computed(() => props.zoom < LOD_ZOOM && !props.editing && props.card.kind !== 'image')
+const lod = computed(
+  () => props.zoom < LOD_ZOOM && !props.editing && props.card.kind !== 'image' && props.card.kind !== 'shape',
+)
 const lodStyle = computed(() => ({
   fontSize: `${14 / props.zoom}px`,
   maxHeight: `${Math.max(20, props.card.h + props.dh - 24)}px`,
 }))
 
 // Posisi lewat CSSOM (:style), yang tidak diatur CSP style-src. Garis pilihan dibagi zoom supaya tetap 2 px di layar.
+// Bentuk (W5) diputar utuh terhadap pusatnya, termasuk garis pilihan dan pegangannya.
+const isShape = computed(() => props.card.kind === 'shape')
+const shape = computed(() => props.card.content as ShapeContent)
+const deg = computed(() => (isShape.value ? (props.rotation ?? shape.value.rotation ?? 0) : 0))
 const style = computed(() => ({
-  transform: `translate(${props.card.x + props.dx}px, ${props.card.y + props.dy}px)`,
+  transform: `translate(${props.card.x + props.dx}px, ${props.card.y + props.dy}px)${deg.value ? ` rotate(${deg.value}deg)` : ''}`,
+  height: isShape.value ? `${props.card.h + props.dh}px` : undefined,
   width: `${props.card.w + props.dw}px`,
   minHeight: `${props.card.h + props.dh}px`,
   zIndex: props.editing ? 100000 : Math.round(props.card.z),
@@ -90,9 +103,46 @@ const style = computed(() => ({
   '--wb-remote': props.remote ? `var(--color-collab-${props.remote.color})` : undefined,
 }))
 
+// Pegangan bentuk: gambar 10 px dan area sentuh 44 px di layar pada zoom berapa pun.
+const handleBox = computed(() => 44 / props.zoom)
+function handleStyle(h: Handle) {
+  const [sx, sy] = handleSign(h)
+  const s = handleBox.value
+  return {
+    width: `${s}px`,
+    height: `${s}px`,
+    left: `calc(${((sx + 1) / 2) * 100}% - ${s / 2}px)`,
+    top: `calc(${((sy + 1) / 2) * 100}% - ${s / 2}px)`,
+    cursor:
+      h === 'n' || h === 's'
+        ? 'ns-resize'
+        : h === 'e' || h === 'w'
+          ? 'ew-resize'
+          : h === 'ne' || h === 'sw'
+            ? 'nesw-resize'
+            : 'nwse-resize',
+  }
+}
+const dot = computed(() => ({
+  width: `${10 / props.zoom}px`,
+  height: `${10 / props.zoom}px`,
+  borderWidth: `${2 / props.zoom}px`,
+}))
+const rotateStyle = computed(() => {
+  const s = handleBox.value
+  return {
+    width: `${s}px`,
+    height: `${s}px`,
+    left: `calc(50% - ${s / 2}px)`,
+    // Di atas pegangan port atas (48 px di luar tepi), supaya area sentuh keduanya tidak bertumpuk.
+    top: `${-100 / props.zoom - s / 2}px`,
+  }
+})
+
 const label = computed(
   () =>
     cardLabel(props.card) +
+    (isShape.value && deg.value ? `, diputar ${deg.value} derajat` : '') +
     (props.selected ? ', terpilih' : '') +
     (props.remote ? `, ${props.remote.label}` : ''),
 )
@@ -255,9 +305,10 @@ function onPointerDown(e: PointerEvent) {
     :tabindex="focusable ? 0 : -1"
     :aria-label="label"
     aria-roledescription="kartu"
-    class="wb-card absolute top-0 left-0 flex flex-col rounded-card border border-line p-3 text-ink shadow-sm select-none"
+    class="wb-card absolute top-0 left-0 flex flex-col text-ink select-none"
     :class="[
-      card.color ? colorClass[card.color] : 'bg-surface',
+      isShape ? 'origin-center' : 'rounded-card border border-line p-3 shadow-sm',
+      isShape ? '' : card.color ? colorClass[card.color] : 'bg-surface',
       selected ? 'wb-card-selected' : '',
       !selected && remote ? (remote.strong ? 'wb-card-remote-strong' : 'wb-card-remote') : '',
       editing ? 'cursor-auto select-text' : canWrite ? 'cursor-grab' : 'cursor-default',
@@ -273,6 +324,16 @@ function onPointerDown(e: PointerEvent) {
     >
       {{ cardTitle(card) }}
     </p>
+    <WbShape
+      v-else-if="isShape"
+      :content="shape"
+      :w="card.w + dw"
+      :h="card.h + dh"
+      :editing="editing"
+      @save="emit('content', $event)"
+      @live="emit('live', $event)"
+      @close="emit('close')"
+    />
     <template v-else-if="card.kind === 'note'">
       <WbNoteEditor
         v-if="editing"
@@ -534,9 +595,33 @@ function onPointerDown(e: PointerEvent) {
     >
       {{ remote.label }}
     </span>
+    <!-- Bentuk: delapan pegangan ubah ukuran (Shift menjaga proporsi) dan pegangan putar (Shift kelipatan 15 derajat).
+         Jalur keyboard untuk keduanya ada di panel gaya bentuk. -->
+    <template v-if="isShape && selected && canWrite && !editing">
+      <div
+        v-for="h in HANDLES"
+        :key="h"
+        aria-hidden="true"
+        class="absolute flex items-center justify-center touch-none"
+        :style="handleStyle(h)"
+        :data-handle="h"
+        @pointerdown.stop="emit('resize', $event, h)"
+      >
+        <span class="rounded-chip border-mark bg-surface" :style="dot" />
+      </div>
+      <div
+        aria-hidden="true"
+        class="absolute flex cursor-grab items-center justify-center touch-none"
+        :style="rotateStyle"
+        data-handle="rotate"
+        @pointerdown.stop="emit('rotate', $event)"
+      >
+        <span class="rounded-full border-mark bg-surface" :style="dot" />
+      </div>
+    </template>
     <!-- Pegangan ubah ukuran: gambarnya kecil, area sentuhnya 44x44 px. -->
     <div
-      v-if="selected && canWrite && !editing"
+      v-else-if="selected && canWrite && !editing"
       aria-hidden="true"
       class="absolute -right-5 -bottom-5 flex size-11 cursor-nwse-resize items-center justify-center touch-none"
       @pointerdown.stop="emit('resize', $event)"

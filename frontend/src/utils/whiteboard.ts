@@ -1,8 +1,21 @@
 // Logika murni Whiteboard (docs/whiteboard.md): tipe data, geometri kanvas, navigasi keyboard antar kartu, dan teks
 // riwayat. Tanpa Vue dan tanpa klien API, supaya bisa diuji dengan node --test.
 
+// Ekstensi .ts: modul ini juga diimpor test Node (tsconfig.node.json, resolusi node16).
+import type { ShapeContent } from './wbShapes.ts'
+
 export type CardKind =
-  'note' | 'heading' | 'checklist' | 'board' | 'image' | 'file' | 'link' | 'column' | 'drawing' | 'table'
+  | 'note'
+  | 'heading'
+  | 'checklist'
+  | 'board'
+  | 'image'
+  | 'file'
+  | 'link'
+  | 'column'
+  | 'drawing'
+  | 'table'
+  | 'shape'
 export type CardColor = 'abu' | 'hijau' | 'kuning' | 'biru' | 'krem' | 'merah'
 
 export type PMMark = { type: string; attrs?: Record<string, unknown> }
@@ -97,6 +110,7 @@ export type Card = {
     | ColumnContent
     | DrawingContent
     | TableContent
+    | ShapeContent
   ref?: BoardRef
   file?: FileInfo
   preview?: PreviewInfo
@@ -133,6 +147,7 @@ export const defaultSize: Record<CardKind, { w: number; h: number }> = {
   column: { w: 280, h: 200 },
   drawing: { w: 320, h: 320 },
   table: { w: 360, h: 120 },
+  shape: { w: 160, h: 100 },
 }
 
 export const kindLabel: Record<CardKind, string> = {
@@ -146,6 +161,7 @@ export const kindLabel: Record<CardKind, string> = {
   column: 'Kolom',
   drawing: 'Gambar bebas',
   table: 'Tabel',
+  shape: 'Bentuk',
 }
 
 // Batas gambar bebas dan tabel, sama dengan content_w3.go. Klien menyederhanakan goresan sebelum mengirim.
@@ -344,6 +360,10 @@ function kindText(card: Card): string {
       const t = card.content as TableContent
       return `Tabel ${t.title ? `${t.title}, ` : ''}${t.rows.length} baris, ${t.rows[0]?.length ?? 0} kolom`
     }
+    case 'shape': {
+      const t = shapeText(card.content as ShapeContent)
+      return t ? `Bentuk: ${excerpt(t)}` : 'Bentuk tanpa teks'
+    }
   }
   const c = card.content as ChecklistContent
   const done = c.items.filter((i) => i.done).length
@@ -363,6 +383,18 @@ export function emptyContent(kind: CardKind): Card['content'] {
   if (kind === 'link') return { url: '', preview_id: '' }
   if (kind === 'column') return { title: '' }
   if (kind === 'drawing') return { strokes: [] }
+  if (kind === 'shape')
+    return {
+      shape: 'rect',
+      rotation: 0,
+      fill: 'putih',
+      stroke: 'tinta',
+      stroke_width: 2,
+      stroke_style: 'solid',
+      text: '',
+      align: 'center',
+      font_size: 16,
+    }
   if (kind === 'table')
     return {
       header: true,
@@ -626,7 +658,15 @@ export function cardTitle(card: Card): string {
       return 'Gambar bebas'
     case 'table':
       return (card.content as TableContent).title || 'Tabel'
+    case 'shape':
+      return excerpt(shapeText(card.content as ShapeContent).split('\n')[0] ?? '', 80) || 'Bentuk tanpa teks'
   }
+}
+
+// Teks bentuk; kelas UML memakai nama, atribut, dan metodenya.
+export function shapeText(c: ShapeContent): string {
+  if (c.shape === 'uml_class') return [c.name, c.attributes, c.methods].filter(Boolean).join('\n')
+  return c.text
 }
 
 export type TextLine = { text: string; size: number; bold?: boolean; muted?: boolean }
@@ -713,6 +753,9 @@ export function cardLines(card: Card): TextLine[] {
       return t ? [{ text: t, size: 15, bold: true }] : []
     }
     case 'drawing':
+      return []
+    case 'shape':
+      // Bentuk digambar penggambar ekspor sendiri (path dan teks di dalamnya).
       return []
   }
 }

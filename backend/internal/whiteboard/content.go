@@ -381,6 +381,8 @@ func DefaultContent(kind string) json.RawMessage {
 		return json.RawMessage(`{"strokes":[]}`)
 	case KindTable:
 		return json.RawMessage(`{"header":true,"rows":[["",""],["",""]]}`)
+	case KindShape:
+		return json.RawMessage(defaultShape)
 	default:
 		return json.RawMessage(`{"title":"","items":[]}`)
 	}

@@ -581,3 +581,7 @@ Masuk ke "Menunggu jawaban Manajer" di `docs/sprint.md` saat W1 dimulai. Pilihan
 - 2026-11-25, W4: uji performa 500 kartu di build produksi: muat sekitar 200 ms, p95 frame 13,4 ms. Batas frame hanya dinilai di build produksi; Vite dev memakai Vue mode pengembangan.
 - 2026-11-25, W4: ekspor Drive hanya mengambil lampiran task dan Aktivitas, jadi berkas Whiteboard memang tidak ikut (pertanyaan 2) tanpa perubahan kode.
 - 2026-11-25, W4: bar atas dua baris di bawah 1280 px dan Pas ke layar di ponsel mengosongkan area bar pilihan dan kontrol bawah, ditemukan saat regresi W1 sampai W3 setelah tombol W4 ditambahkan.
+- 2026-11-25, W5: bentuk adalah satu jenis kartu `shape` (migrasi `000025` hanya mengubah CHECK), sehingga realtime, undo, salin tempel, Tempat sampah, pencarian, dan template tidak butuh jalur baru. Seluruh kartu bentuk diputar lewat CSS; posisi dan seleksi memakai kotak tegak.
+- 2026-11-25, W5: jalur siku, port setelah putar, ubah ukuran pada bentuk diputar, dan satu garis lengkap (`routeConnector`) adalah fungsi murni di `frontend/src/utils/wbShapes.ts` dengan unit test, dipakai bersama lapisan garis, pegangan diagram, dan ekspor.
+- 2026-11-25, W5: pegangan port 48 px layar di luar tepi kartu, bukan tepat di port, karena di sana ada pegangan ubah ukuran; pegangan putar 100 px di atas bentuk supaya tidak bertumpuk dengan port atas.
+- 2026-11-25, gerbang akhir: `uji-wss.mjs` juga menguji WebSocket papan task (revisi 47); audit luapan 768 dan 1024 px menjadi skrip tetap `scripts/e2e/uji-lebar.mjs`.

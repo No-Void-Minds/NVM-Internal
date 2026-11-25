@@ -5,6 +5,7 @@ import type {
   CardColor,
   CardKind,
   Connector,
+  ConnectorGeometry,
   ConnectorStyle,
   PreviewInfo,
 } from '../utils/whiteboard'
@@ -240,9 +241,16 @@ export function moveCards(board: string, ids: string[], to: string) {
   return apiPost<{ moved: MoveResult }>(`/whiteboard/boards/${board}/move`, { ids, to })
 }
 
+// from atau to kosong berarti ujung bebas; titiknya di geometry (W5).
 export function createConnector(
   board: string,
-  input: { from: string; to: string; style?: Partial<ConnectorStyle>; label?: string },
+  input: {
+    from: string
+    to: string
+    style?: Partial<ConnectorStyle>
+    label?: string
+    geometry?: ConnectorGeometry
+  },
 ) {
   return apiPost<{ connector: Connector }>(`/whiteboard/boards/${board}/connectors`, input)
 }
@@ -250,7 +258,13 @@ export function createConnector(
 export function updateConnector(
   board: string,
   id: string,
-  patch: { style?: ConnectorStyle; label?: string },
+  patch: {
+    style?: ConnectorStyle
+    label?: string
+    label_start?: string
+    label_end?: string
+    geometry?: ConnectorGeometry
+  },
 ) {
   return apiPut<{ connector: Connector }>(`/whiteboard/boards/${board}/connectors/${id}`, patch)
 }

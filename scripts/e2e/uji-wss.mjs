@@ -6,7 +6,9 @@
 //     frontend/nginx-security-headers.conf, termasuk CSP connect-src 'self';
 //   - meneruskan /api dan WebSocket /api/whiteboard/ws ke backend dev di 127.0.0.1:8080 dengan Host asli.
 // Lolos berarti: halaman Whiteboard tersambung lewat wss:// (penanda "Tersimpan"), WebSocket buatan sendiri di
-// halaman itu menerima "joined", dan tidak ada galat console (termasuk pelanggaran CSP).
+// halaman itu menerima "joined", dan tidak ada galat console (termasuk pelanggaran CSP). Revisi 47: halaman papan
+// task juga membuka wss:// ke /api/tasks/ws, dan WebSocket papan task buatan sendiri menerima event saat Manajer
+// membuat task (lewat backend langsung; task itu dihapus lagi). Butuh DEV_MANAGER_USERNAME dan DEV_MANAGER_PASSWORD.
 //
 // Cara menjalankan (backend dev di :8080 sudah jalan, openssl ada di PATH, frontend sudah di-build):
 //   cd frontend && npm run build && cd ../scripts/e2e
@@ -30,8 +32,10 @@ const BACKEND_PORT = Number(process.env.WSS_BACKEND_PORT || 8080);
 const ORIGIN = `https://localhost:${PORT}`;
 const USER = process.env.DEV_STAFF_USERNAME;
 const PASS = process.env.DEV_STAFF_PASSWORD;
-if (!USER || !PASS) {
-  console.error("DEV_STAFF_USERNAME dan DEV_STAFF_PASSWORD wajib diisi.");
+const MGR_USER = process.env.DEV_MANAGER_USERNAME;
+const MGR_PASS = process.env.DEV_MANAGER_PASSWORD;
+if (!USER || !PASS || !MGR_USER || !MGR_PASS) {
+  console.error("DEV_STAFF_USERNAME, DEV_STAFF_PASSWORD, DEV_MANAGER_USERNAME, dan DEV_MANAGER_PASSWORD wajib diisi.");
   process.exit(2);
 }
 if (!fs.existsSync(path.join(DIST, "index.html"))) {
@@ -112,6 +116,66 @@ const saved = `new Promise((res) => {
 const login = `fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ username: ${JSON.stringify(USER)}, password: ${JSON.stringify(PASS)} }) }).then((r) => r.status)`;
 
+// Revisi 47: WebSocket papan task buatan sendiri; event yang datang dikumpulkan di window.__te.
+const taskListen = `new Promise((res) => {
+  window.__te = [];
+  const ws = new WebSocket("wss://" + location.host + "/api/tasks/ws");
+  window.__tws = ws;
+  const t = setTimeout(() => res("timeout"), 8000);
+  ws.onmessage = (e) => window.__te.push(JSON.parse(e.data));
+  ws.onopen = () => { clearTimeout(t); res("open"); };
+  ws.onerror = () => { clearTimeout(t); res("error"); };
+})`;
+const taskWait = (id) => `new Promise((res) => {
+  const end = Date.now() + 8000;
+  const tick = () => {
+    if ((window.__te || []).some((m) => m.t === "task" && m.task_id === ${JSON.stringify(id)})) { window.__tws.close(); return res("event"); }
+    if (Date.now() > end) return res("tidak ada event");
+    setTimeout(tick, 100);
+  };
+  tick();
+})`;
+
+// Manajer membuat dan menghapus task langsung di backend (Origin sama dengan Host, seperti peramban).
+const BACK = `http://127.0.0.1:${BACKEND_PORT}`;
+let mgrCookie = "";
+async function managerLogin() {
+  const r = await fetch(BACK + "/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: BACK },
+    body: JSON.stringify({ username: MGR_USER, password: MGR_PASS }),
+  });
+  if (r.status !== 200) throw new Error(`login Manajer ${r.status}`);
+  mgrCookie = r.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
+}
+async function managerTask() {
+  const me = await (await fetch(BACK + "/api/auth/me", { headers: { cookie: mgrCookie } })).json();
+  const r = await fetch(BACK + "/api/tasks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: BACK, cookie: mgrCookie },
+    body: JSON.stringify({ title: "E2E uji-wss papan task", urgency: "low", pic_ids: [me.user.id] }),
+  });
+  if (r.status !== 201) throw new Error(`buat task ${r.status}`);
+  const { id } = await r.json();
+  return {
+    id,
+    del: async () => {
+      const d = await (await fetch(`${BACK}/api/tasks/${id}`, { headers: { cookie: mgrCookie } })).json();
+      await fetch(`${BACK}/api/tasks/${id}?version=${d.task.version}`, { method: "DELETE", headers: { Origin: BACK, cookie: mgrCookie } });
+    },
+  };
+}
+async function taskEvent(evaluate) {
+  const open = await evaluate(taskListen);
+  if (open !== "open") return `koneksi ${open}`;
+  const t = await managerTask();
+  try {
+    return await evaluate(taskWait(t.id));
+  } finally {
+    await t.del();
+  }
+}
+
 const results = [];
 
 async function viaPlaywright(name, channel) {
@@ -132,8 +196,14 @@ async function viaPlaywright(name, channel) {
     const s = await page.evaluate(saved);
     const p = await page.evaluate(probe);
     const wss = sockets.some((u) => u.startsWith(`wss://localhost:${PORT}/api/whiteboard/ws`));
-    results.push({ name, ok: status === 200 && s === "Tersimpan" && p === "joined" && wss && errors.length === 0,
-      detail: `login ${status}, penanda "${s}", probe ${p}, wss ${wss}, galat ${errors.length}${errors.length ? ": " + errors.join(" | ").slice(0, 200) : ""}` });
+    // Revisi 47: papan task tersambung lewat wss dan event task sampai.
+    await page.goto(ORIGIN + "/task");
+    await page.waitForLoadState("networkidle");
+    const taskWss = sockets.some((u) => u.startsWith(`wss://localhost:${PORT}/api/tasks/ws`));
+    const offline = await page.locator("[data-testid=live-offline]").count();
+    const ev = await taskEvent((x) => page.evaluate(x));
+    results.push({ name, ok: status === 200 && s === "Tersimpan" && p === "joined" && wss && taskWss && offline === 0 && ev === "event" && errors.length === 0,
+      detail: `login ${status}, penanda "${s}", probe ${p}, wss ${wss}, papan task wss ${taskWss}, event task ${ev}, galat ${errors.length}${errors.length ? ": " + errors.join(" | ").slice(0, 200) : ""}` });
   } finally {
     await browser.close();
   }
@@ -186,8 +256,10 @@ async function viaFirefoxBidi() {
     await cmd("browsingContext.navigate", { context, url: ORIGIN + "/whiteboard", wait: "complete" });
     const s = await evaluate(saved);
     const p = await evaluate(probe);
-    results.push({ name: "Firefox", ok: status === 200 && s === "Tersimpan" && p === "joined" && errors.length === 0,
-      detail: `login ${status}, penanda "${s}", probe ${p}, galat ${errors.length}${errors.length ? ": " + errors.join(" | ").slice(0, 200) : ""}` });
+    await cmd("browsingContext.navigate", { context, url: ORIGIN + "/task", wait: "complete" });
+    const ev = await taskEvent(evaluate);
+    results.push({ name: "Firefox", ok: status === 200 && s === "Tersimpan" && p === "joined" && ev === "event" && errors.length === 0,
+      detail: `login ${status}, penanda "${s}", probe ${p}, event task ${ev}, galat ${errors.length}${errors.length ? ": " + errors.join(" | ").slice(0, 200) : ""}` });
     ws.close();
   } catch (e) {
     results.push({ name: "Firefox", ok: false, detail: String(e.message ?? e) });
@@ -197,6 +269,7 @@ async function viaFirefoxBidi() {
 }
 
 try {
+  await managerLogin();
   await viaPlaywright("Chrome", "chrome");
   await viaPlaywright("Edge", "msedge");
   await viaFirefoxBidi();

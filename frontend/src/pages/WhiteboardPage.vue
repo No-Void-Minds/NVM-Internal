@@ -15,6 +15,26 @@ import WbPenBar from '../components/whiteboard/WbPenBar.vue'
 import WbTemplateDialog from '../components/whiteboard/WbTemplateDialog.vue'
 import WbExportDialog from '../components/whiteboard/WbExportDialog.vue'
 import WbListView from '../components/whiteboard/WbListView.vue'
+import WbShapePalette from '../components/whiteboard/WbShapePalette.vue'
+import WbShapeStyle from '../components/whiteboard/WbShapeStyle.vue'
+import WbDiagramHandles from '../components/whiteboard/WbDiagramHandles.vue'
+import type { DrawnLine } from '../components/whiteboard/WbConnectorLayer.vue'
+import type { ConnectorUpdate } from '../components/whiteboard/WbConnectorDialog.vue'
+import {
+  SHAPES,
+  angleFrom,
+  center as boxCenter,
+  newShapeContent,
+  portPoint,
+  portsFor,
+  resizeBox,
+  routeConnector,
+  type Handle,
+  type Port,
+  type Pt,
+  type ShapeContent,
+  type ShapeType,
+} from '../utils/wbShapes'
 import { inkColor, penColors } from '../components/whiteboard/wbColors'
 import { caretHint, type CaretHint } from '../components/whiteboard/caret'
 import { ApiError, notifyUnauthorized } from '../api/client'
@@ -95,7 +115,6 @@ import {
   type CardKind,
   type ChecklistContent,
   type Connector,
-  type ConnectorStyle,
   type Direction,
   type DrawingContent,
   type Rect,
@@ -432,8 +451,13 @@ const geomMap = computed(() => {
   const out = new Map<string, Rect>()
   for (const c of shownCards.value) {
     const d = dragged(c)
-    const r = gestureResizeId.value === c.id ? resizeDelta.value : { dw: 0, dh: 0 }
-    out.set(c.id, { x: c.x + (d ? dx : 0), y: c.y + (d ? dy : 0), w: c.w + r.dw, h: c.h + r.dh })
+    const r = gestureResizeId.value === c.id ? resizeDelta.value : { dx: 0, dy: 0, dw: 0, dh: 0 }
+    out.set(c.id, {
+      x: c.x + (d ? dx : 0) + r.dx,
+      y: c.y + (d ? dy : 0) + r.dy,
+      w: c.w + r.dw,
+      h: c.h + r.dh,
+    })
   }
   return out
 })
@@ -1070,9 +1094,13 @@ const canRedo = computed(() => historyVersion.value >= 0 && history.redo.length 
 let placed = 0
 // Kartu baru di titik dunia at (dari seret alat), atau di tengah layar dengan sedikit geser supaya kartu yang
 // dibuat beruntun tidak menumpuk persis.
-async function addCard(kind: CardKind, at?: { x: number; y: number }, extra?: Card['content']) {
+async function addCard(
+  kind: CardKind,
+  at?: { x: number; y: number },
+  extra?: Card['content'],
+  dim = defaultSize[kind],
+) {
   if (!canWrite.value) return
-  const dim = defaultSize[kind]
   const c = at ?? centerWorld()
   const offset = at ? 0 : (placed++ % 5) * 24
   const input: NewCard = {
@@ -1092,7 +1120,8 @@ async function addCard(kind: CardKind, at?: { x: number; y: number }, extra?: Ca
     upsert([res.card])
     record({ kind: 'create', ids: [res.card.id] })
     select([res.card.id])
-    if (kind !== 'link') startEdit(res.card.id)
+    // Bentuk baru hanya dipilih: teksnya diketik dengan dobel klik, seperti di aplikasi diagram.
+    if (kind !== 'link' && kind !== 'shape') startEdit(res.card.id)
     else focusCard(res.card.id)
     announce.value = `${kindLabel[kind]} baru ditambahkan.`
     return res.card
@@ -1417,6 +1446,7 @@ function onMoreAction(e: Event) {
   el.value = ''
   if (action === 'comments' && first) commentsFor.value = first
   else if (action === 'lines' && first) connectorIds.value = connectorsOf(first).map((c) => c.id)
+  else if (action === 'shapestyle' && first) shapeStyleId.value = first
   else if (action === 'connect') connectSelected()
   else if (action === 'move') {
     moveError.value = ''
@@ -1756,6 +1786,11 @@ const tools: { kind: ToolKind; label: string; path: string }[] = [
   { kind: 'drawing', label: 'Gambar', path: 'M4 20l4-1 11-11-3-3L5 16zM14 7l3 3' },
   { kind: 'table', label: 'Tabel', path: 'M4 5h16v14H4zM4 10h16M4 15h16M10 5v14' },
   { kind: 'template', label: 'Template', path: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM16.5 13v7M13 16.5h7' },
+  {
+    kind: 'shape',
+    label: 'Bentuk',
+    path: 'M3 14h7v7H3zM17.5 3a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7M14 21l3.5-7 3.5 7z',
+  },
 ]
 
 // Alat yang membuka pilihan dulu (berkas, tautan) mengingat titik lepasnya.
@@ -1773,7 +1808,8 @@ function useTool(kind: ToolKind, at?: { x: number; y: number }) {
   else if (kind === 'template') {
     templateError.value = ''
     templateOpen.value = true
-  } else if (kind === 'link') {
+  } else if (kind === 'shape') shapePaletteOpen.value = true
+  else if (kind === 'link') {
     linkError.value = ''
     linkOpen.value = true
   } else addCard(kind, at)
@@ -2244,6 +2280,229 @@ function placeAt(kind: CardKind, at?: { x: number; y: number }) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// Bentuk dan diagram (W5)
+
+const shapePaletteOpen = ref(false)
+async function addShape(t: ShapeType) {
+  shapePaletteOpen.value = false
+  const s = SHAPES.find((x) => x.id === t)!
+  await addCard('shape', toolAt, newShapeContent(t), { w: s.w, h: s.h })
+}
+
+// Panel gaya bentuk: juga jalur keyboard untuk putar dan ukuran.
+const shapeStyleId = ref<string | null>(null)
+const shapeStyleCard = computed(() =>
+  shapeStyleId.value ? (byId.value.get(shapeStyleId.value) ?? null) : null,
+)
+function onShapeStyle(c: ShapeContent) {
+  if (shapeStyleId.value) onContent(shapeStyleId.value, c)
+}
+function onShapeSize(sz: { w: number; h: number }) {
+  const id = shapeStyleId.value
+  if (id) applyLayout([{ id, after: sz }])
+}
+
+// Sudut sementara selama pegangan putar diseret.
+const rotateDraft = ref<{ id: string; deg: number } | null>(null)
+const rotations = computed(() => {
+  const m = new Map<string, number>()
+  for (const c of shownCards.value)
+    if (c.kind === 'shape') m.set(c.id, (c.content as ShapeContent).rotation || 0)
+  if (rotateDraft.value) m.set(rotateDraft.value.id, rotateDraft.value.deg)
+  return m
+})
+
+// Garis terpilih di kanvas (klik garisnya): Delete menghapus, Enter membuka panel gaya, Escape melepas.
+const selectedConnector = ref<string | null>(null)
+watch(selected, (s) => {
+  if (s.size) selectedConnector.value = null
+})
+// Titik belok sementara selama diseret, sebelum disimpan.
+const bendDraft = ref<{ id: string; points: [number, number][] } | null>(null)
+const lines = computed<DrawnLine[]>(() =>
+  visibleConnectors.value.flatMap((c) => {
+    const pts = bendDraft.value?.id === c.id ? bendDraft.value.points : undefined
+    const r = routeConnector(c, geomMap.value, rotations.value, pts)
+    if (!r) return []
+    return [
+      {
+        ...r,
+        color: inkColor(c.style.color || 'tinta'),
+        dash: c.style.line === 'dashed' ? '8 6' : c.style.line === 'dotted' ? '2 5' : undefined,
+        label: c.label,
+        label_start: c.label_start,
+        label_end: c.label_end,
+      },
+    ]
+  }),
+)
+const selectedStops = computed(() =>
+  canWrite.value && selectedConnector.value
+    ? (lines.value.find((l) => l.id === selectedConnector.value)?.stops ?? null)
+    : null,
+)
+
+// Port kartu terpilih untuk menarik garis baru: hanya satu kartu, bisa ditulis, tidak sedang diedit atau mode pena.
+const connectDraft = ref<{ card: string; port: Port; at: Pt } | null>(null)
+const PORT_OFFSET = 48
+const portHandles = computed(() => {
+  if (!canWrite.value || penOn.value || editingId.value || selected.value.size !== 1) return []
+  const id = [...selected.value][0]!
+  const card = shownById.value.get(id)
+  const b = geomMap.value.get(id)
+  if (!card || !b || card.kind === 'drawing' || card.kind === 'column' || card.column_id) return []
+  const rot = rotations.value.get(id) ?? 0
+  // Pegangan port 48 px layar di luar tepi, searah port: di tepi kartu ada pegangan ubah ukuran 44 px yang sama
+  // letaknya, dan klik di sana harus mengubah ukuran, bukan menarik garis. Garis tetap menempel di port aslinya.
+  const out = PORT_OFFSET / view.value.zoom
+  return portsFor(card.kind === 'shape').map((port) => {
+    const { p, dir } = portPoint(b, port as Exclude<Port, 'auto'>, rot)
+    return { card: id, port, p, h: { x: p.x + dir.x * out, y: p.y + dir.y * out } }
+  })
+})
+const tempLine = computed(() => {
+  const d = connectDraft.value
+  if (!d) return null
+  const b = geomMap.value.get(d.card)
+  if (!b) return null
+  return { a: portPoint(b, d.port as Exclude<Port, 'auto'>, rotations.value.get(d.card) ?? 0).p, b: d.at }
+})
+
+function worldOf(e: PointerEvent): Pt {
+  const p = local(e)
+  return toWorld(view.value, p.x, p.y)
+}
+
+function onPortDown(card: string, port: Port, e: PointerEvent) {
+  if (!canWrite.value) return
+  gesture = { kind: 'connect', card, port }
+  connectDraft.value = { card, port, at: worldOf(e) }
+  begin(e)
+}
+
+// Kartu paling atas di titik dunia (selain yang dikecualikan), beserta port terdekatnya bila cukup dekat.
+function cardAt(at: Pt, except: string): { id: string; port: Port } | null {
+  const hit = [...rendered.value]
+    .reverse()
+    .find(
+      (c) =>
+        c.id !== except &&
+        c.kind !== 'drawing' &&
+        at.x >= c.x &&
+        at.x <= c.x + c.w &&
+        at.y >= c.y &&
+        at.y <= c.y + c.h,
+    )
+  if (!hit) return null
+  const b = geomMap.value.get(hit.id) ?? hit
+  const rot = rotations.value.get(hit.id) ?? 0
+  let port: Port = 'auto'
+  let best = 28 / view.value.zoom
+  for (const pt of portsFor(hit.kind === 'shape')) {
+    const p = portPoint(b, pt as Exclude<Port, 'auto'>, rot).p
+    const dist = Math.hypot(p.x - at.x, p.y - at.y)
+    if (dist < best) {
+      best = dist
+      port = pt
+    }
+  }
+  return { id: hit.id, port }
+}
+
+async function finishConnect(at: Pt) {
+  const d = connectDraft.value
+  connectDraft.value = null
+  if (!d) return
+  const from = byId.value.get(d.card)
+  if (!from) return
+  const near = portHandles.value.find((h) => Math.hypot(h.h.x - at.x, h.h.y - at.y) < 8 / view.value.zoom)
+  if (near && near.card === d.card) return
+  const target = cardAt(at, d.card)
+  const toShape = target ? byId.value.get(target.id)?.kind === 'shape' : false
+  const route = from.kind === 'shape' || toShape ? 'orthogonal' : 'straight'
+  try {
+    const res = await saving(() =>
+      createConnector(bid.value, {
+        from: d.card,
+        to: target?.id ?? '',
+        style: { start: 'none', end: 'arrow', line: 'solid', color: '' },
+        geometry: {
+          from: { port: d.port },
+          to: target ? { port: target.port } : { port: '', x: Math.round(at.x), y: Math.round(at.y) },
+          route,
+          points: [],
+        },
+      }),
+    )
+    if (!res) return
+    upsertConnectors([res.connector])
+    select([])
+    selectedConnector.value = res.connector.id
+    announce.value = target ? 'Garis ditambahkan.' : 'Garis ditambahkan dengan ujung bebas.'
+  } catch {
+    // Pesan galat sudah tampil di penanda simpan.
+  }
+}
+
+function onBendDown(index: number, insert: boolean, e: PointerEvent) {
+  const id = selectedConnector.value
+  const c = id ? connectors.value.find((x) => x.id === id) : null
+  if (!c || !canWrite.value) return
+  const pts = [...(c.geometry.points ?? [])] as [number, number][]
+  const at = worldOf(e)
+  if (insert) pts.splice(index, 0, [Math.round(at.x), Math.round(at.y)])
+  gesture = { kind: 'bend', id: c.id, index }
+  bendDraft.value = { id: c.id, points: pts }
+  begin(e)
+}
+
+async function saveBends(id: string, points: [number, number][]) {
+  const c = connectors.value.find((x) => x.id === id)
+  if (!c) return
+  await onConnectorUpdate(id, { geometry: { ...c.geometry, points } })
+}
+
+function onUnbend(index: number) {
+  const id = selectedConnector.value
+  const c = id ? connectors.value.find((x) => x.id === id) : null
+  if (!c) return
+  const pts = [...(c.geometry.points ?? [])] as [number, number][]
+  pts.splice(index, 1)
+  void saveBends(c.id, pts)
+  announce.value = 'Titik belok dihapus.'
+}
+
+function onRotateStart(card: Card, e: PointerEvent) {
+  if (!canWrite.value) return
+  const b = geomMap.value.get(card.id) ?? card
+  gesture = { kind: 'rotate', id: card.id, c: boxCenter(b) }
+  rotateDraft.value = { id: card.id, deg: (card.content as ShapeContent).rotation || 0 }
+  send({ t: 'grab', ids: [card.id] })
+  begin(e)
+}
+
+// Klik garis memilihnya; fokus pindah ke kanvas supaya Delete, Enter, dan Escape langsung berlaku.
+function onConnectorSelect(id: string) {
+  select([])
+  selectedConnector.value = id
+  canvas.value?.focus()
+  announce.value = 'Garis terpilih. Enter membuka gaya garis, Delete menghapus.'
+}
+
+function onConnectorKey(e: KeyboardEvent): boolean {
+  const id = selectedConnector.value
+  if (!id) return false
+  if (e.key === 'Escape') selectedConnector.value = null
+  else if (e.key === 'Enter') connectorIds.value = [id]
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && canWrite.value) {
+    void onConnectorRemove(id)
+    selectedConnector.value = null
+  } else return false
+  e.preventDefault()
+  return true
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // Garis penghubung (W3)
 
 const connectorIds = ref<string[] | null>(null)
@@ -2265,7 +2524,19 @@ async function connectSelected() {
   const [from, to] = [...selected.value]
   if (!from || !to) return
   try {
-    const res = await saving(() => createConnector(bid.value, { from, to }))
+    const shape = byId.value.get(from)?.kind === 'shape' || byId.value.get(to)?.kind === 'shape'
+    const res = await saving(() =>
+      createConnector(bid.value, {
+        from,
+        to,
+        ...(shape
+          ? {
+              style: { start: 'none', end: 'arrow', line: 'solid', color: '' },
+              geometry: { from: { port: 'auto' }, to: { port: 'auto' }, route: 'orthogonal', points: [] },
+            }
+          : {}),
+      }),
+    )
     if (!res) return
     upsertConnectors([res.connector])
     announce.value = 'Garis ditambahkan.'
@@ -2275,7 +2546,7 @@ async function connectSelected() {
   }
 }
 
-async function onConnectorUpdate(id: string, patch: { style?: ConnectorStyle; label?: string }) {
+async function onConnectorUpdate(id: string, patch: ConnectorUpdate) {
   try {
     const res = await saving(() => updateConnector(bid.value, id, patch))
     if (res) upsertConnectors([res.connector])
@@ -2413,7 +2684,19 @@ type Gesture =
       touchTap: boolean
       cancelled: boolean
     }
-  | { kind: 'resize'; startX: number; startY: number; id: string; cancelled: boolean }
+  | {
+      kind: 'resize'
+      startX: number
+      startY: number
+      id: string
+      cancelled: boolean
+      handle: Handle
+      rot: number
+      start: Rect
+    }
+  | { kind: 'rotate'; id: string; c: Pt }
+  | { kind: 'connect'; card: string; port: Port }
+  | { kind: 'bend'; id: string; index: number }
   | { kind: 'pan'; startX: number; startY: number; view: Viewport; tapCard: string | null }
   | { kind: 'box'; startX: number; startY: number; additive: boolean; base: Set<string> }
   | { kind: 'pinch' }
@@ -2422,7 +2705,8 @@ let gesture: Gesture | null = null
 const touches = new Map<number, { x: number; y: number }>()
 let pinchStart: { dist: number; mid: { x: number; y: number }; view: Viewport } | null = null
 const dragOffset = ref({ dx: 0, dy: 0 })
-const resizeDelta = ref({ dw: 0, dh: 0 })
+// dx dan dy dipakai pegangan kiri dan atas (W5), yang menggeser kartu sambil mengubah ukurannya.
+const resizeDelta = ref({ dx: 0, dy: 0, dw: 0, dh: 0 })
 const box = ref<{ x: number; y: number; w: number; h: number } | null>(null)
 const gestureResizeId = ref<string | null>(null)
 const spaceHeld = ref(false)
@@ -2466,6 +2750,7 @@ function begin(e: PointerEvent) {
 
 function onCanvasDown(e: PointerEvent) {
   if (e.target !== canvas.value && !(e.target as HTMLElement).classList.contains('wb-world')) return
+  selectedConnector.value = null
   if (editingId.value) stopEdit()
   // Fokus ke kanvas supaya pintasan keyboard langsung berlaku setelah klik di area kosong.
   canvas.value?.focus({ preventScroll: true })
@@ -2523,10 +2808,20 @@ function onCardGrab(card: Card, e: PointerEvent) {
   begin(e)
 }
 
-function onResizeStart(card: Card, e: PointerEvent) {
+function onResizeStart(card: Card, e: PointerEvent, handle: Handle = 'se') {
   if (!canWrite.value) return
   const p = local(e)
-  gesture = { kind: 'resize', startX: p.x, startY: p.y, id: card.id, cancelled: false }
+  const start = shownById.value.get(card.id) ?? card
+  gesture = {
+    kind: 'resize',
+    startX: p.x,
+    startY: p.y,
+    id: card.id,
+    cancelled: false,
+    handle,
+    rot: card.kind === 'shape' ? (card.content as ShapeContent).rotation || 0 : 0,
+    start: { x: start.x, y: start.y, w: start.w, h: start.h },
+  }
   gestureResizeId.value = card.id
   send({ t: 'grab', ids: [card.id] })
   begin(e)
@@ -2547,7 +2842,10 @@ function onGrabResult(granted: string[], denied: { id: string; user: Who }[]) {
     } else g.ids = g.ids.filter((id) => !deniedIds.has(id))
   } else if (g?.kind === 'resize' && deniedIds.has(g.id)) {
     g.cancelled = true
-    resizeDelta.value = { dw: 0, dh: 0 }
+    resizeDelta.value = { dx: 0, dy: 0, dw: 0, dh: 0 }
+  } else if (g?.kind === 'rotate' && deniedIds.has(g.id)) {
+    gesture = null
+    rotateDraft.value = null
   }
   // Seret yang dibatalkan melepas kartu lain yang sempat diberikan.
   if (g?.kind === 'move' && g.cancelled && granted.length) send({ t: 'release', ids: granted })
@@ -2571,7 +2869,15 @@ function sendMoves(force = false) {
     if (c)
       send({
         t: 'move',
-        moves: [{ id: c.id, x: c.x, y: c.y, w: c.w + resizeDelta.value.dw, h: c.h + resizeDelta.value.dh }],
+        moves: [
+          {
+            id: c.id,
+            x: c.x + resizeDelta.value.dx,
+            y: c.y + resizeDelta.value.dy,
+            w: c.w + resizeDelta.value.dw,
+            h: c.h + resizeDelta.value.dh,
+          },
+        ],
       })
   }
 }
@@ -2633,10 +2939,57 @@ function onMove(e: PointerEvent) {
       if (gesture.cancelled) return
       const card = byId.value.get(gesture.id)
       if (!card) return
-      const w = clamp(snap(card.w + (p.x - gesture.startX) / z, gridOn.value), MIN_SIZE, MAX_SIZE)
-      const h = clamp(snap(card.h + (p.y - gesture.startY) / z, gridOn.value), MIN_SIZE, MAX_SIZE)
-      resizeDelta.value = { dw: w - card.w, dh: h - card.h }
+      if (gesture.handle === 'se' && card.kind !== 'shape') {
+        const w = clamp(snap(card.w + (p.x - gesture.startX) / z, gridOn.value), MIN_SIZE, MAX_SIZE)
+        const h = clamp(snap(card.h + (p.y - gesture.startY) / z, gridOn.value), MIN_SIZE, MAX_SIZE)
+        resizeDelta.value = { dx: 0, dy: 0, dw: w - card.w, dh: h - card.h }
+      } else {
+        const s0 = gesture.start
+        const d = { x: (p.x - gesture.startX) / z, y: (p.y - gesture.startY) / z }
+        let r = resizeBox(s0, gesture.rot, gesture.handle, d, e.shiftKey, MIN_SIZE, MAX_SIZE)
+        // Snap grid hanya untuk bentuk tegak: tepi yang bergerak ditarik ke grid, tepi seberangnya diam.
+        if (gridOn.value && !gesture.rot && !e.shiftKey) {
+          const right = s0.x + s0.w
+          const bottom = s0.y + s0.h
+          const x = gesture.handle.includes('w') ? snap(r.x, true) : r.x
+          const y = gesture.handle.includes('n') ? snap(r.y, true) : r.y
+          const w = gesture.handle.includes('w')
+            ? right - x
+            : gesture.handle.includes('e')
+              ? snap(r.x + r.w, true) - x
+              : r.w
+          const h = gesture.handle.includes('n')
+            ? bottom - y
+            : gesture.handle.includes('s')
+              ? snap(r.y + r.h, true) - y
+              : r.h
+          if (w >= MIN_SIZE && h >= MIN_SIZE) r = { x, y, w, h }
+        }
+        resizeDelta.value = { dx: r.x - s0.x, dy: r.y - s0.y, dw: r.w - s0.w, dh: r.h - s0.h }
+      }
       sendMoves()
+      return
+    }
+    case 'rotate': {
+      rotateDraft.value = {
+        id: gesture.id,
+        deg: angleFrom(gesture.c, toWorld(view.value, p.x, p.y), e.shiftKey),
+      }
+      return
+    }
+    case 'connect': {
+      if (connectDraft.value)
+        connectDraft.value = { ...connectDraft.value, at: toWorld(view.value, p.x, p.y) }
+      return
+    }
+    case 'bend': {
+      const b = bendDraft.value
+      if (!b) return
+      const w = toWorld(view.value, p.x, p.y)
+      const pts = [...b.points]
+      pts[gesture.index] = [Math.round(snap(w.x, gridOn.value)), Math.round(snap(w.y, gridOn.value))]
+      bendDraft.value = { id: b.id, points: pts }
+      return
     }
   }
 }
@@ -2695,13 +3048,47 @@ function onUp(e: PointerEvent) {
     applyLayout(changes)
   }
   if (g.kind === 'resize') {
-    const { dw, dh } = resizeDelta.value
-    resizeDelta.value = { dw: 0, dh: 0 }
+    const { dx, dy, dw, dh } = resizeDelta.value
+    resizeDelta.value = { dx: 0, dy: 0, dw: 0, dh: 0 }
     gestureResizeId.value = null
     send({ t: 'release', ids: [g.id] })
     const c = byId.value.get(g.id)
-    if (g.cancelled || !c || (dw === 0 && dh === 0)) return
-    applyLayout([{ id: g.id, after: { w: c.w + dw, h: c.h + dh } }])
+    if (g.cancelled || !c || (dx === 0 && dy === 0 && dw === 0 && dh === 0)) return
+    applyLayout([
+      {
+        id: g.id,
+        after:
+          dx || dy
+            ? {
+                x: Math.round(c.x + dx),
+                y: Math.round(c.y + dy),
+                w: Math.round(c.w + dw),
+                h: Math.round(c.h + dh),
+              }
+            : { w: c.w + dw, h: c.h + dh },
+      },
+    ])
+  }
+  if (g.kind === 'rotate') {
+    send({ t: 'release', ids: [g.id] })
+    const r = rotateDraft.value
+    const c = byId.value.get(g.id)
+    if (r && c && c.kind === 'shape' && r.deg !== (c.content as ShapeContent).rotation) {
+      onContent(c.id, { ...(c.content as ShapeContent), rotation: r.deg })
+      announce.value = `Bentuk diputar ${r.deg} derajat.`
+    }
+    // Sudut sementara dilepas setelah isi lokal berubah, supaya bentuk tidak sempat kembali ke sudut lama.
+    rotateDraft.value = null
+  }
+  if (g.kind === 'connect') void finishConnect(worldOf(e))
+  if (g.kind === 'bend') {
+    const b = bendDraft.value
+    if (b) {
+      void saveBends(b.id, b.points).finally(() => {
+        if (bendDraft.value?.id === b.id) bendDraft.value = null
+      })
+      announce.value = 'Titik belok garis disimpan.'
+    }
   }
 }
 
@@ -2907,6 +3294,7 @@ function onKeydown(e: KeyboardEvent) {
     return
   }
   if (target.closest('input, textarea, select, [contenteditable="true"]')) return
+  if (onConnectorKey(e)) return
   const mod = e.ctrlKey || e.metaKey
   if (e.key === ' ' && !mod) {
     spaceHeld.value = true
@@ -3491,9 +3879,10 @@ const toolBtn =
         >
           <div class="wb-world absolute top-0 left-0 origin-top-left" :style="worldStyle">
             <WbConnectorLayer
-              :connectors="visibleConnectors"
-              :geom="geomMap"
-              :can-write="canWrite"
+              :lines="lines"
+              :selected="selectedConnector"
+              :zoom="view.zoom"
+              @select="onConnectorSelect"
               @open="connectorIds = [$event]"
             />
             <template v-for="c in rendered" :key="c.id">
@@ -3520,16 +3909,19 @@ const toolBtn =
                 :can-write="canWrite"
                 :focusable="rovingId === c.id"
                 :zoom="view.zoom"
-                :dx="dragged(c) ? dragOffset.dx : 0"
-                :dy="dragged(c) ? dragOffset.dy : 0"
+                :dx="(dragged(c) ? dragOffset.dx : 0) + (gestureResizeId === c.id ? resizeDelta.dx : 0)"
+                :dy="(dragged(c) ? dragOffset.dy : 0) + (gestureResizeId === c.id ? resizeDelta.dy : 0)"
                 :dw="gestureResizeId === c.id ? resizeDelta.dw : 0"
                 :dh="gestureResizeId === c.id ? resizeDelta.dh : 0"
+                :rotation="rotateDraft?.id === c.id ? rotateDraft.deg : null"
                 :remote="remoteFor(c.id)"
                 :caret="editHint?.id === c.id ? editHint : null"
                 :readonly-by="readonlyFor?.id === c.id ? readonlyFor.name : null"
                 @focus="focusedId = c.id"
                 @grab="onCardGrab(c, $event)"
-                @resize="onResizeStart(c, $event)"
+                @resize="(e: PointerEvent, h?: Handle) => onResizeStart(c, e, h)"
+                @rotate="onRotateStart(c, $event)"
+                @live="sendDraft(c.id, $event)"
                 @close="stopEdit"
                 @note="onNoteInput(c.id, $event)"
                 @heading="onHeading(c.id, $event)"
@@ -3541,6 +3933,17 @@ const toolBtn =
                 @comments="commentsFor = c.id"
               />
             </template>
+            <WbDiagramHandles
+              v-if="portHandles.length || selectedStops || tempLine"
+              :zoom="view.zoom"
+              :ports="portHandles"
+              :stops="selectedStops"
+              :temp="tempLine"
+              @port="onPortDown"
+              @bend="(i: number, e: PointerEvent) => onBendDown(i, false, e)"
+              @insert="(i: number, e: PointerEvent) => onBendDown(i, true, e)"
+              @unbend="onUnbend"
+            />
             <!-- Goresan yang sedang digambar (sendiri dan orang lain) dan yang belum dijawab server. -->
             <svg
               v-if="inkLayer.length"
@@ -3677,6 +4080,12 @@ const toolBtn =
           >
             <option value="" disabled>Aksi lain...</option>
             <option v-if="selected.size === 1" value="comments">Komentar</option>
+            <option
+              v-if="selected.size === 1 && byId.get([...selected][0]!)?.kind === 'shape'"
+              value="shapestyle"
+            >
+              Gaya bentuk
+            </option>
             <option v-if="selected.size === 1 && connectorsOf([...selected][0]!).length" value="lines">
               Garis ({{ connectorsOf([...selected][0]!).length }})
             </option>
@@ -4042,6 +4451,17 @@ const toolBtn =
     </BaseDialog>
 
     <WbTrashPanel :open="trashOpen" @close="trashOpen = false" @restored="onRestored" />
+    <WbShapePalette :open="shapePaletteOpen" @close="shapePaletteOpen = false" @pick="addShape" />
+    <WbShapeStyle
+      :open="shapeStyleCard !== null"
+      :content="shapeStyleCard?.kind === 'shape' ? (shapeStyleCard.content as ShapeContent) : null"
+      :w="shapeStyleCard?.w ?? 0"
+      :h="shapeStyleCard?.h ?? 0"
+      :can-write="canWrite"
+      @close="shapeStyleId = null"
+      @content="onShapeStyle"
+      @size="onShapeSize"
+    />
     <WbTemplateDialog
       :open="templateOpen"
       :current="bid"
@@ -4080,6 +4500,7 @@ const toolBtn =
       :open="connectorIds !== null"
       :connectors="dialogConnectors"
       :name-of="cardName"
+      :is-shape="(id: string) => byId.get(id)?.kind === 'shape'"
       :can-write="canWrite"
       @close="connectorIds = null"
       @update="onConnectorUpdate"

@@ -492,7 +492,7 @@ func (s *Service) CreateCard(ctx context.Context, actor Actor, boardText string,
 			return Card{}, err
 		}
 		content = []byte(`{}`)
-	case KindNote, KindHeading, KindChecklist, KindLink, KindColumn, KindDrawing, KindTable, KindImage, KindFile:
+	case KindNote, KindHeading, KindChecklist, KindLink, KindColumn, KindDrawing, KindTable, KindImage, KindFile, KindShape:
 		raw := in.Content
 		if len(raw) == 0 || string(raw) == "null" {
 			raw = DefaultContent(in.Kind)

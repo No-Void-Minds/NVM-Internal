@@ -4,10 +4,10 @@
 // Warna selalu dari token mode terang, supaya PNG dan PDF tetap layak dicetak walau aplikasi sedang di mode gelap.
 import { fileUrl } from '../../api/whiteboard'
 import { EXPORT_PAD, EXPORT_SCALE, exportScale, wrapText } from '../../utils/wbExport'
+import { openShape, rotatedBounds, routeConnector, shapePath, type ShapeContent } from '../../utils/wbShapes'
 import {
   bounds,
   cardLines,
-  edgePoint,
   type CaptionContent,
   type Card,
   type Connector,
@@ -92,14 +92,20 @@ export async function renderBoard(cards: Card[], connectors: Connector[]): Promi
     }
     let need = PAD * 2 + text.reduce((n, l) => n + l.size * 1.4, 0)
     if (card.kind === 'table') need += ((card.content as TableContent).rows.length || 1) * 28
-    if (card.kind === 'image') need = card.h
+    if (card.kind === 'image' || card.kind === 'shape') need = card.h
     return {
       card,
       text,
       rect: { x: card.x, y: card.y, w: card.w, h: Math.max(card.h, card.kind === 'drawing' ? 0 : need) },
     }
   })
-  const box = bounds(laid.map((l) => l.rect))
+  const rot = new Map(
+    laid.flatMap((l) =>
+      l.card.kind === 'shape' ? [[l.card.id, (l.card.content as ShapeContent).rotation || 0]] : [],
+    ) as [string, number][],
+  )
+  // Bentuk yang diputar bisa keluar dari kotak tegaknya; batas gambar memakai kotak setelah diputar.
+  const box = bounds(laid.map((l) => rotatedBounds(l.rect, rot.get(l.card.id) ?? 0)))
   if (!box) return null
   const w = box.w + EXPORT_PAD * 2
   const h = box.h + EXPORT_PAD * 2
@@ -115,50 +121,38 @@ export async function renderBoard(cards: Card[], connectors: Connector[]): Promi
   ctx.fillRect(box.x - EXPORT_PAD, box.y - EXPORT_PAD, w, h)
 
   const geom = new Map(laid.map((l) => [l.card.id, l.rect]))
-  ctx.lineWidth = 2
+  // Jalur, ujung, dan posisi label sama dengan lapisan garis di layar (routeConnector).
   for (const c of connectors) {
-    const a = c.from ? geom.get(c.from) : undefined
-    const b = c.to ? geom.get(c.to) : undefined
-    if (!a || !b) continue
-    const p = edgePoint(a, { x: b.x + b.w / 2, y: b.y + b.h / 2 })
-    const q = edgePoint(b, { x: a.x + a.w / 2, y: a.y + a.h / 2 })
+    const r = routeConnector(c, geom, rot)
+    if (!r) continue
     const color = ink(tok, c.style.color || 'tinta')
     ctx.strokeStyle = color
-    ctx.fillStyle = color
+    ctx.lineWidth = 2
+    ctx.lineJoin = 'round'
     ctx.setLineDash(c.style.line === 'dashed' ? [8, 6] : c.style.line === 'dotted' ? [2, 5] : [])
-    ctx.beginPath()
-    ctx.moveTo(p.x, p.y)
-    ctx.lineTo(q.x, q.y)
-    ctx.stroke()
+    ctx.stroke(new Path2D(r.d))
     ctx.setLineDash([])
-    // Ujung selain "tidak ada" digambar sebagai panah, sama dengan lapisan garis di layar.
-    for (const [tip, from, kind] of [
-      [q, p, c.style.end],
-      [p, q, c.style.start],
-    ] as const) {
-      if (kind === 'none') continue
-      const len = Math.hypot(tip.x - from.x, tip.y - from.y) || 1
-      const ux = (tip.x - from.x) / len
-      const uy = (tip.y - from.y) / len
-      const bx = tip.x - ux * 12
-      const by = tip.y - uy * 12
-      ctx.beginPath()
-      ctx.moveTo(tip.x, tip.y)
-      ctx.lineTo(bx - uy * 6, by + ux * 6)
-      ctx.lineTo(bx + uy * 6, by - ux * 6)
-      ctx.closePath()
-      ctx.fill()
+    for (const h of r.heads) {
+      const path = new Path2D(h.d)
+      if (h.fill !== 'none') {
+        ctx.fillStyle = h.fill === 'line' ? color : tok('--color-surface')
+        ctx.fill(path)
+      }
+      ctx.stroke(path)
     }
-    if (c.label) {
-      ctx.font = fontOf(tok, 13)
-      const mx = (p.x + q.x) / 2
-      const my = (p.y + q.y) / 2
-      const tw = ctx.measureText(c.label).width
-      ctx.fillStyle = tok('--color-surface')
-      ctx.fillRect(mx - tw / 2 - 4, my - 10, tw + 8, 20)
+    for (const [text, at, size] of [
+      [c.label, r.mid, 13],
+      [c.label_start, { x: r.near.start.x, y: r.near.start.y - 12 }, 12],
+      [c.label_end, { x: r.near.end.x, y: r.near.end.y - 12 }, 12],
+    ] as const) {
+      if (!text) continue
+      ctx.font = fontOf(tok, size)
+      const tw = ctx.measureText(text).width
+      ctx.fillStyle = tok('--color-canvas')
+      ctx.fillRect(at.x - tw / 2 - 4, at.y - size * 0.75, tw + 8, size * 1.5)
       ctx.fillStyle = tok('--color-ink')
       ctx.textBaseline = 'middle'
-      ctx.fillText(c.label, mx - tw / 2, my)
+      ctx.fillText(text, at.x - tw / 2, at.y)
     }
   }
 
@@ -189,6 +183,10 @@ export async function renderBoard(cards: Card[], connectors: Connector[]): Promi
         if (s.points.length === 2) ctx.lineTo(card.x + s.points[0]! + 0.1, card.y + s.points[1]!)
         ctx.stroke()
       }
+      continue
+    }
+    if (card.kind === 'shape') {
+      drawShape(ctx, tok, card.content as ShapeContent, rect)
       continue
     }
     ctx.beginPath()
@@ -253,6 +251,75 @@ export async function renderBoard(cards: Card[], connectors: Connector[]): Promi
   }
   return { canvas, scale, reduced: scale < EXPORT_SCALE }
 }
+
+const shapeFill: Record<string, string> = { putih: '--color-surface', ...cardBg }
+
+// Bentuk diputar terhadap pusatnya, digambar dari path yang sama dengan layar, lalu teksnya dipecah per baris di
+// tengah bentuk. Kelas UML: nama tebal, garis pemisah, atribut, garis pemisah, metode.
+function drawShape(ctx: CanvasRenderingContext2D, tok: (n: string) => string, c: ShapeContent, r: Box) {
+  const sw = c.stroke_width
+  ctx.save()
+  ctx.translate(r.x + r.w / 2, r.y + r.h / 2)
+  ctx.rotate(((c.rotation || 0) * Math.PI) / 180)
+  ctx.translate(-r.w / 2, -r.h / 2)
+  const path = new Path2D(shapePath(c.shape, Math.max(1, r.w - sw), Math.max(1, r.h - sw)))
+  ctx.save()
+  ctx.translate(sw / 2, sw / 2)
+  if (!openShape(c.shape) && c.fill) {
+    ctx.fillStyle = tok(shapeFill[c.fill] ?? '--color-surface')
+    ctx.fill(path)
+  }
+  ctx.strokeStyle = ink(tok, c.stroke)
+  ctx.lineWidth = sw
+  ctx.lineJoin = 'round'
+  ctx.lineCap = 'round'
+  ctx.setLineDash(c.stroke_style === 'dashed' ? [sw * 4, sw * 3] : [])
+  ctx.stroke(path)
+  ctx.setLineDash([])
+  ctx.restore()
+  ctx.fillStyle = tok('--color-ink')
+  ctx.textBaseline = 'top'
+  const fs = c.font_size
+  const lh = fs * 1.3
+  const fit = (t: string, maxW: number) => wrapText(t, maxW, (x) => ctx.measureText(x).width)
+  if (c.shape === 'uml_class') {
+    let y = 6
+    ctx.font = fontOf(tok, fs, true)
+    for (const l of fit(c.name || 'Kelas', r.w - 16)) {
+      ctx.fillText(l, (r.w - ctx.measureText(l).width) / 2, y)
+      y += lh
+    }
+    ctx.font = fontOf(tok, fs)
+    for (const part of [c.attributes ?? '', c.methods ?? '']) {
+      y += 4
+      ctx.strokeStyle = ink(tok, c.stroke)
+      ctx.lineWidth = sw
+      ctx.beginPath()
+      ctx.moveTo(0, y)
+      ctx.lineTo(r.w, y)
+      ctx.stroke()
+      y += 6
+      for (const l of fit(part, r.w - 16)) {
+        if (y + lh > r.h) break
+        ctx.fillText(l, 8, y)
+        y += lh
+      }
+    }
+  } else if (c.text) {
+    ctx.font = fontOf(tok, fs)
+    const lines = fit(c.text, r.w * 0.7)
+    let y = (r.h - lines.length * lh) / 2
+    for (const l of lines) {
+      const tw = ctx.measureText(l).width
+      const x = c.align === 'left' ? r.w * 0.15 : c.align === 'right' ? r.w * 0.85 - tw : (r.w - tw) / 2
+      ctx.fillText(l, x, y)
+      y += lh
+    }
+  }
+  ctx.restore()
+}
+
+type Box = { x: number; y: number; w: number; h: number }
 
 export function canvasBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob | null> {
   return new Promise((resolve) => canvas.toBlob(resolve, type, quality))

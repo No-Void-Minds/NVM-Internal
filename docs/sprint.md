@@ -1673,6 +1673,27 @@ Keputusan teknis:
 
 **Selesai kalau:** `scripts/pra-deploy.sh` LOLOS, `./scripts/check.sh` lolos, unit test frontend lolos, E2E `wb1` sampai `wb4` lolos di 360 dan 1280 px, dan `wbperforma` lolos di build produksi.
 
+**W5 (bentuk dan diagram, revisi C):**
+
+- [x] S12f-20 Migrasi `000025_whiteboard_shapes`: CHECK jenis kartu menerima `shape`. Down menghapus kartu bentuk dulu (garisnya ikut lewat ON DELETE CASCADE) lalu memasang CHECK W3. Tanpa tabel baru, jadi `deploy/sql/10-grants.sql` tidak berubah (tetap tiga belas tabel DELETE).
+- [x] S12f-21 Backend: `internal/whiteboard/content_w5.go` (validasi isi bentuk). Bentuk memakai jalur kartu yang sudah ada: buat, patch isi dengan `content_version` dan 409, kunci lunak dan draf hub (`CleanContent`), siaran, undo, salin tempel, Tempat sampah, pencarian (`plain`), dan template. Garis tidak berubah di backend: port, jalur, titik belok, tujuh ujung, dan tiga label sudah divalidasi sejak `000024`.
+- [x] S12f-22 Frontend: alat Bentuk dan palet (`WbShapePalette.vue`), kartu bentuk (`WbShape.vue`) dengan delapan pegangan ubah ukuran dan pegangan putar di `WbCard.vue`, panel gaya bentuk (`WbShapeStyle.vue`), lapisan garis baru (`WbConnectorLayer.vue`), pegangan diagram (`WbDiagramHandles.vue`: port, titik belok, titik sisip, garis sementara), panel gaya garis lengkap (`WbConnectorDialog.vue`), garis terpilih dengan Delete dan Enter, ekspor bentuk dan jalur garis. Logika murni di `utils/wbShapes.ts`.
+- [x] S12f-23 Test: unit Go `TestCleanShape`; DB `TestWbBentuk`; unit frontend `tests/wbShapes.test.ts` (path semua bentuk, port setelah putar, jalur siku tidak menembus kotak asal dan tujuan termasuk bentuk diputar dan port saling membelakangi, titik belok, melengkung, label, ujung, ubah ukuran tegak dan diputar, sudut dengan snap, `routeConnector`); E2E `E2E_ONLY=wb5` (flowchart dan diagram kelas, dua konteks); `wbperforma` kini 500 kartu dengan 100 bentuk dan 100 garis.
+- [x] S12f-24 Gerbang akhir: `uji-wss.mjs` diperluas dengan WebSocket papan task (revisi 47) di Chrome, Edge, dan Firefox; `uji-restart.mjs` dengan papan task terbuka; audit luapan baru `scripts/e2e/uji-lebar.mjs` (768 dan 1024 px, Staf dan Manajer, halaman utama dan semua panel Whiteboard); regresi `wb1` sampai `wb5`.
+
+**Keputusan W5:**
+- Satu jenis kartu `shape` dengan 22 bentuk dari daftar putih: Dasar (persegi, persegi sudut bulat, elips, segitiga, belah ketupat, segi enam, bintang), Flowchart (proses, keputusan, mulai atau selesai, data, database, dokumen), UML (kelas, aktor, catatan UML, paket), dan Panah blok (kanan, kiri, atas, bawah, dua arah). Isi: `rotation` 0 sampai 359 (bilangan bulat), `fill` nama warna kartu atau "putih" atau kosong, `stroke` warna pena, `stroke_width` 1 sampai 8, `stroke_style` utuh atau putus-putus, `align`, `font_size` 12, 14, 16, 20, 24, atau 32, `text` maksimal 2.000 karakter dengan baris baru tetap. Kelas UML memakai `name` (maksimal 200), `attributes`, dan `methods` (masing-masing maksimal 2.000, satu per baris) dan `text` kosong. Nilai di luar daftar ditolak 400, tidak dibetulkan diam-diam.
+- Bentuk digambar SVG dari angka (`shapePath`), teks lewat interpolasi Vue, tanpa `v-html`. Isian krem memakai token mode terang seperti kartu krem. Bentuk baru dari palet hanya dipilih (tidak langsung diedit); teks diketik dengan dobel klik, Escape atau keluar dari isian menyimpan.
+- Putar: seluruh kartu bentuk diputar terhadap pusatnya, termasuk garis pilihan dan pegangannya; posisi, culling, dan seleksi kotak tetap memakai kotak tegak. Pegangan putar 100 px layar di atas bentuk; Shift kelipatan 15 derajat. Ubah ukuran: delapan pegangan; geser diproyeksikan ke sumbu bentuk yang diputar dan titik seberang pegangan tetap; Shift menjaga proporsi; snap grid hanya untuk bentuk tegak. Jalur keyboard untuk putar dan ukuran: panel Gaya bentuk (Aksi lain di bar pilihan).
+- Port: tengah keempat sisi untuk semua kartu, ditambah empat sudut untuk bentuk; dihitung ulang dari posisi, ukuran, dan sudut. Port "otomatis" memilih sisi yang paling menghadap ujung lain. Pegangan port tampil 48 px layar di luar tepi kartu terpilih, dengan garis tipis ke titik sambungnya, karena di tepi ada pegangan ubah ukuran yang sama letaknya (ditemukan E2E: klik pegangan kiri menarik garis, bukan mengubah ukuran). Tarik dari port ke kartu lain membuat garis; ke area kosong membuat ujung bebas. Garis dari atau ke bentuk memakai jalur siku dan ujung panah.
+- Jalur siku keluar lurus dari port sampai lewat kotak batas (untuk bentuk diputar, kotak batas setelah diputar), lalu memilih rute terpendek dengan belokan paling sedikit yang tidak menembus kotak asal dan tujuan; bila rute langsung menembus, rute keliling dicoba. Titik belok dilewati berurutan; seret titik belok untuk memindah, titik sisip di tengah tiap bagian untuk menambah, dobel klik untuk membuang (juga tombol Hapus titik belok di panel). Jalur melengkung memakai Bezier dari arah port, atau kurva halus melewati titik belok.
+- Garis bisa dipilih dengan klik (area 16 px layar); Delete menghapus ke Tempat sampah, Enter atau dobel klik membuka panel gaya, Escape melepas. Panel gaya: tiga label (tengah, dekat awal, dekat akhir), tujuh jenis ujung per sisi, utuh, putus-putus, atau titik-titik, warna, jalur, dan port per ujung.
+- Ekspor PNG dan PDF menggambar bentuk dengan path yang sama dan garis dengan `routeConnector` yang sama dengan layar.
+- Level of detail tidak berlaku untuk bentuk: bentuknya sendiri sudah ringkas.
+- Performa (build produksi, 1280 px, 500 kartu termasuk 100 bentuk sebagian diputar dan 100 garis sebagian siku): muat 155 sampai 190 ms, p95 frame 13,4 ms.
+
+**Selesai kalau:** `scripts/pra-deploy.sh` LOLOS dengan migrasi 000025 di test DB, DB dev di versi 25, `./scripts/check.sh` lolos, E2E `wb1` sampai `wb5` lolos di 360 dan 1280 px, `wbperforma` lolos di build produksi, `uji-wss.mjs` lolos di Chrome, Edge, dan Firefox, `uji-restart.mjs` lolos, dan `uji-lebar.mjs` lolos di 768 dan 1024 px.
+
 ## Sprint 12g: Task saya untuk peminta, edit To Do, dan papan task realtime (revisi 45 sampai 47)
 
 **Tujuan:** tiga revisi papan task yang menyela Whiteboard W4. Kodenya sudah di-commit dan dirilis per revisi; bagian ini mencatat aturan yang diuji Sprint 13.
@@ -1931,6 +1952,10 @@ SRS v1.0 belum memuat keempat puluh tujuh revisi (revisi 5 di S14-17). SRS diper
   1. Ekspor PNG dan PDF selalu memakai warna mode terang, dan teks catatan diekspor tanpa format huruf (tebal, miring, tautan).
   2. Salinan template memakai berkas gambar yang sama dengan templatenya, bukan salinan berkas; menghapus template tidak merusak salinannya.
   3. Di bawah zoom 40% kartu hanya menampilkan judul ringkas (level of detail).
+- Whiteboard W5, bawaan dipakai, menunggu konfirmasi:
+  1. Warna isian bentuk memakai warna kartu yang sudah ada (tanpa palet warna bebas), garisnya memakai warna pena.
+  2. Bentuk dan garis memakai jalur siku otomatis yang tidak menembus bentuk asal dan tujuan, tetapi bisa melewati bentuk lain di tengah jalan; titik belok dipakai untuk memutarinya.
+  3. Ujung garis bebas (tidak menempel kartu) diatur dari titik yang ditarik; belum ada pegangan untuk menyeretnya setelah dibuat.
 - Revisi 47: event papan task (id task dan nama pelaku, tanpa isi) disiarkan ke semua yang login, karena semua peran boleh membaca semua task. Setuju, atau perlu dibatasi per divisi kalau aturan baca berubah?
 
 ## Setelah go-live (belum dijadwalkan)

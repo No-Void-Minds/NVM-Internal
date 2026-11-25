@@ -287,6 +287,9 @@ func cleanW3(kind string, raw json.RawMessage) (any, string, bool, error) {
 	case KindTable:
 		v, p, err := CleanTable(raw)
 		return v, p, true, err
+	case KindShape:
+		v, p, err := CleanShape(raw)
+		return v, p, true, err
 	}
 	return nil, "", false, nil
 }
