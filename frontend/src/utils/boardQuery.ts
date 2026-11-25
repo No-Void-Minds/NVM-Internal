@@ -27,13 +27,17 @@ export function cleanKeyword(value: string | undefined): string | undefined {
   return text && [...text].length >= minKeyword ? text : undefined
 }
 
-// staffUsername diisi hanya untuk akun Staf; Manajer dan Admin tidak punya saklar lingkup.
+// staffUsername diisi hanya untuk akun Staf. managerScope: Manajer juga punya saklar Task saya (revisi 47), tetapi
+// bawaannya Semua task, jadi scope=mine miliknya ditulis ke URL. Admin tidak punya saklar lingkup.
 // Aturan S4-06 dikumpulkan di sini supaya tombol, select, dan URL yang diketik tangan berujung pada keadaan yang sama.
 export function normalizeBoardQuery<T extends Pick<BoardQuery, 'scope' | 'pic'>>(
   b: T,
   staffUsername: string | null,
+  managerScope = false,
 ): T {
-  if (!staffUsername) return { ...b, scope: undefined }
+  // Filter Orang tidak diubah (revisi 45): pic nama sendiri di akun Manajer tetap filter Orang, bukan Task saya.
+  if (!staffUsername)
+    return managerScope && b.scope === 'mine' && !b.pic ? { ...b, scope: 'mine' } : { ...b, scope: undefined }
   const pic = b.pic?.toLowerCase()
   if (pic === staffUsername.toLowerCase()) return { ...b, scope: 'mine', pic: undefined }
   if (pic) return { ...b, scope: 'all' }
@@ -41,26 +45,35 @@ export function normalizeBoardQuery<T extends Pick<BoardQuery, 'scope' | 'pic'>>
 }
 
 // Nilai yang tidak dikenal dibuang, supaya URL lama atau salah ketik tidak membuat papan galat.
-export function parseBoardQuery(q: LocationQuery, staffUsername: string | null): BoardQuery {
+export function parseBoardQuery(
+  q: LocationQuery,
+  staffUsername: string | null,
+  managerScope = false,
+): BoardQuery {
   const urgency = one(q.urgency)
   const due = one(q.due)
   const raw: BoardQuery = {
     q: cleanKeyword(one(q.q)),
-    scope: one(q.scope) === 'all' ? 'all' : undefined,
+    scope: parseScope(one(q.scope)),
     pic: one(q.pic)?.trim() || undefined,
     division: positiveInt(one(q.division)),
     label: positiveInt(one(q.label)),
     urgency: urgencies.includes(urgency as Urgency) ? (urgency as Urgency) : undefined,
     due: dueOptions.some((d) => d.value === due) ? (due as DueFilter) : undefined,
   }
-  return normalizeBoardQuery(raw, staffUsername)
+  return normalizeBoardQuery(raw, staffUsername, managerScope)
 }
 
-// Nilai bawaan tidak ditulis ke URL, supaya alamat papan tanpa filter tetap /task.
-export function toRouteQuery(b: BoardQuery): Record<string, string> {
+export function parseScope(v: string | undefined): 'mine' | 'all' | undefined {
+  return v === 'all' || v === 'mine' ? v : undefined
+}
+
+// Nilai bawaan tidak ditulis ke URL, supaya alamat papan tanpa filter tetap /task. scope=mine hanya ditulis untuk
+// Manajer (managerScope), karena bagi Staf itu bawaan.
+export function toRouteQuery(b: BoardQuery, managerScope = false): Record<string, string> {
   const out: Record<string, string> = {}
   if (b.q) out.q = b.q
-  if (b.scope === 'all') out.scope = 'all'
+  if (b.scope === 'all' || (managerScope && b.scope === 'mine')) out.scope = b.scope
   if (b.pic) out.pic = b.pic
   if (b.division) out.division = String(b.division)
   if (b.label) out.label = String(b.label)

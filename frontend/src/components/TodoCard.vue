@@ -53,8 +53,7 @@ function grow() {
   el.style.height = `${el.scrollHeight}px`
 }
 const dragId = ref<number | null>(null)
-// Mode Atur: kontrol urut dan hapus tampil di semua baris. Satu-satunya cara memunculkannya di layar sentuh,
-// yang tidak punya hover.
+// Mode Atur: satu-satunya tempat kontrol urut dan hapus, di semua perangkat (revisi 47).
 const manage = ref(false)
 // Kelompok Selesai: tertutup sendiri kalau isinya lebih dari tiga, sampai pemakai memutuskan sendiri.
 const doneChoice = ref<boolean | null>(null)
@@ -167,17 +166,9 @@ const focusRing = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-
 const iconButton = `inline-flex size-11 shrink-0 items-center justify-center rounded-card hover:bg-tag-ink/10 ${focusRing} disabled:opacity-40`
 // min-w-11: "Atur" dengan px-2 hanya 41 px lebarnya, di bawah tap target 44 px.
 const headButton = `inline-flex min-h-11 min-w-11 items-center justify-center rounded-card px-2 text-sm font-medium hover:bg-tag-ink/10 ${focusRing}`
-// Kontrol baris: tersembunyi, lalu muncul saat baris disorot atau difokus (hanya pointer presisi), atau saat
-// mode Atur aktif. Di layar sentuh hover tidak pernah terjadi, jadi mode Atur yang menjadi jalannya.
-// Kontrol baris punya dua tempat. Mode Atur: baris sendiri di bawah judul, sama untuk semua item, jadi
-// tidak ada yang melompat saat disentuh. Di luar mode Atur: lapisan di sisi kanan baris, di atas judul,
-// jadi munculnya tidak mengubah lebar atau tinggi baris sama sekali. Gradasi ke kiri menjaga teks di
-// bawahnya tetap terbaca ujungnya. Hanya pointer presisi, karena layar sentuh tidak punya hover.
-const rowControls = computed(() =>
-  manage.value
-    ? 'flex items-center justify-end gap-1 pb-1'
-    : 'absolute top-0 right-0 hidden h-11 items-center gap-1 bg-linear-to-l from-tag from-60% to-transparent pl-8 pointer-fine:group-hover/row:flex pointer-fine:group-focus-within/row:flex',
-)
+// Revisi 47: kontrol urut dan hapus hanya tampil di mode Atur, di barisnya sendiri di bawah teks. Lapisan hover
+// lama menutupi ujung teks panjang; ruang tetap di kanan tidak muat di kartu 17rem (lima tombol 44 px).
+const rowControls = 'flex items-center justify-end gap-1 pb-1'
 
 // Judul yang memuat URL http atau https mendapat ikon buka tautan. Judulnya sendiri tetap teks biasa.
 function titleUrl(title: string): string | null {
@@ -238,7 +229,7 @@ function titleUrl(title: string): string | null {
           v-for="(item, i) in open"
           :key="item.id"
           draggable="true"
-          class="group/row relative px-1"
+          class="relative px-1"
           :class="dragId === item.id ? 'bg-tag-ink/10' : ''"
           @dragstart="dragId = item.id"
           @dragend="dragId = null"
@@ -307,14 +298,10 @@ function titleUrl(title: string): string | null {
             >
               {{ item.title }}
             </button>
-          </div>
-
-          <div v-if="editingId !== item.id" :class="rowControls">
-            <!-- Judul yang memuat URL tetap teks biasa, supaya mengkliknya membuka mode ubah. Tautannya
-                 dibuka lewat ikon terpisah ini, yang ikut kelompok kontrol baris: di mode biasa kontrolnya
-                 lapisan di sisi kanan baris, jadi ikon di luar kelompok itu akan tertutup lapisannya. -->
+            <!-- Judul yang memuat URL tetap teks biasa, supaya mengkliknya membuka mode ubah. Tautannya dibuka
+                 lewat ikon ini, di slot 44 px tetap di samping teks: selalu tampil, jadi baris tidak bergeser. -->
             <a
-              v-if="titleUrl(item.title)"
+              v-if="editingId !== item.id && titleUrl(item.title)"
               :href="titleUrl(item.title) ?? undefined"
               target="_blank"
               rel="noopener noreferrer"
@@ -336,6 +323,9 @@ function titleUrl(title: string): string | null {
                 />
               </svg>
             </a>
+          </div>
+
+          <div v-if="manage && editingId !== item.id" :class="rowControls">
             <span class="hidden size-11 cursor-grab items-center justify-center sm:flex" aria-hidden="true">
               <svg
                 viewBox="0 0 24 24"
@@ -498,7 +488,7 @@ function titleUrl(title: string): string | null {
           class="divide-y border-t"
           :class="[rule, 'divide-tag-ink/60']"
         >
-          <li v-for="item in done" :key="item.id" class="group/row relative px-1">
+          <li v-for="item in done" :key="item.id" class="relative px-1">
             <div class="flex min-h-11 items-start gap-1">
               <label class="relative flex size-11 shrink-0 cursor-pointer items-center justify-center">
                 <span class="sr-only">Batalkan centang {{ item.title }}</span>
@@ -527,7 +517,7 @@ function titleUrl(title: string): string | null {
                 {{ item.title }}
               </p>
             </div>
-            <div :class="rowControls">
+            <div v-if="manage" :class="rowControls">
               <button
                 type="button"
                 :class="iconButton"

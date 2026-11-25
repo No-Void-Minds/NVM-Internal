@@ -63,8 +63,11 @@ export function formatMoment(value: string): string {
 // supaya keduanya menampilkan pesan yang sama lalu memuat ulang papan (AC-10).
 export function staleMoveMessage(err: unknown, id: string): string | null {
   if (!(err instanceof ApiError)) return null
+  // Revisi 47: server menyebut siapa yang lebih dulu mengubah (by); "kamu" berarti dari tab lain milik sendiri.
+  if (err.status === 409 && err.code === 'conflict' && err.by === 'kamu')
+    return `${id} sudah kamu ubah di tab lain. Papan dimuat ulang, cek statusnya sebelum memindahkan lagi.`
   if (err.status === 409)
-    return `${id} sudah diubah orang lain. Papan dimuat ulang, cek statusnya sebelum memindahkan lagi.`
+    return `${id} sudah diubah ${err.by ?? 'orang lain'} lebih dulu. Papan dimuat ulang, cek statusnya sebelum memindahkan lagi.`
   if (err.status === 403) return `Kamu tidak lagi punya hak memindahkan ${id}. Papan dimuat ulang.`
   if (err.status === 404) return `${id} sudah dihapus. Papan dimuat ulang.`
   return null

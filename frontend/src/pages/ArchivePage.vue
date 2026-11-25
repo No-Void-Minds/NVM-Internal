@@ -3,7 +3,7 @@ import RecurrenceBadge from '../components/RecurrenceBadge.vue'
 import SubtaskPicLine from '../components/SubtaskPicLine.vue'
 import PersonChip from '../components/PersonChip.vue'
 import LoadingSkeleton from '../components/LoadingSkeleton.vue'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import KeywordSearch from '../components/KeywordSearch.vue'
 import MoveDialog from '../components/MoveDialog.vue'
@@ -25,6 +25,8 @@ import PageHeader from '../components/PageHeader.vue'
 import FilterToolbar from '../components/FilterToolbar.vue'
 import { filterControl, inlineControl, inlineLabel } from '../utils/ui'
 import type { ArchiveSort } from '../api/archive'
+import { debounce, useTaskLive } from '../utils/taskLive'
+import LiveIndicator from '../components/LiveIndicator.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -34,7 +36,9 @@ const isStaff = computed(() => session.user?.role === 'staff')
 const staffUsername = computed(() => (isStaff.value ? (session.user?.username ?? null) : null))
 
 // URL adalah sumber filter, sama seperti papan: bisa di-refresh, dibagikan, dan tombol Back tetap bekerja.
-const query = computed(() => parseArchiveQuery(route.query, staffUsername.value))
+// Revisi 47: Manajer juga punya saklar Task saya; bawaannya Semua task.
+const managerScope = computed(() => isManager.value)
+const query = computed(() => parseArchiveQuery(route.query, staffUsername.value, managerScope.value))
 const filtered = computed(() => hasArchiveFilters(query.value))
 // Kata kunci dan urutan tidak dihitung: jumlah ini untuk tombol Filter yang dilipat di ponsel.
 const activeFilterCount = computed(
@@ -48,14 +52,22 @@ const activeFilterCount = computed(
       query.value.to,
     ].filter(Boolean).length,
 )
-const showPicFilter = computed(() => !isStaff.value || query.value.scope === 'all')
-const queryKey = computed(() => new URLSearchParams(toArchiveRouteQuery(query.value)).toString())
+// Di Task saya isinya sudah pasti milik sendiri, jadi filter PIC hanya di Semua task.
+const showPicFilter = computed(() => query.value.scope !== 'mine')
+const queryKey = computed(() =>
+  new URLSearchParams(toArchiveRouteQuery(query.value, managerScope.value)).toString(),
+)
 
 // Filter apa pun yang berubah kembali ke halaman 1; hanya tombol halaman yang mengirim nomor halaman.
 function setQuery(patch: Partial<ArchiveQuery>) {
   void router.push({
     query: toArchiveRouteQuery(
-      normalizeBoardQuery({ ...query.value, page: undefined, ...patch }, staffUsername.value),
+      normalizeBoardQuery(
+        { ...query.value, page: undefined, ...patch },
+        staffUsername.value,
+        managerScope.value,
+      ),
+      managerScope.value,
     ),
   })
 }
@@ -63,7 +75,7 @@ function setQuery(patch: Partial<ArchiveQuery>) {
 watch(
   () => route.query,
   (q) => {
-    const canonical = toArchiveRouteQuery(query.value)
+    const canonical = toArchiveRouteQuery(query.value, managerScope.value)
     if (!sameRouteQuery(canonical, q)) void router.replace({ query: canonical })
   },
   { immediate: true },
@@ -110,7 +122,10 @@ async function load(quiet = false) {
     // Halaman yang diminta sudah lewat akhir daftar dan server mengembalikan halaman 1, jadi URL diluruskan.
     if ((query.value.page ?? 1) !== res.page) {
       void router.replace({
-        query: toArchiveRouteQuery({ ...query.value, page: res.page > 1 ? res.page : undefined }),
+        query: toArchiveRouteQuery(
+          { ...query.value, page: res.page > 1 ? res.page : undefined },
+          managerScope.value,
+        ),
       })
     }
   } catch (err) {
@@ -124,6 +139,15 @@ async function load(quiet = false) {
   }
 }
 watch(queryKey, () => load())
+
+// Revisi 47: task yang berubah di tab atau perangkat lain membuat daftar dimuat ulang (digabung 300 ms). Server
+// tetap yang menentukan isi halaman ini.
+const refetch = debounce(() => void load(true))
+useTaskLive(
+  () => refetch.run(),
+  () => void load(true),
+)
+onBeforeUnmount(refetch.cancel)
 
 const labels = ref<LabelItem[]>([])
 const divisions = ref<DivisionItem[]>([])
@@ -159,7 +183,9 @@ const rangeText = computed(() => {
 
 const resultsHeading = ref<HTMLElement | null>(null)
 function goPage(p: number) {
-  void router.push({ query: toArchiveRouteQuery({ ...query.value, page: p > 1 ? p : undefined }) })
+  void router.push({
+    query: toArchiveRouteQuery({ ...query.value, page: p > 1 ? p : undefined }, managerScope.value),
+  })
   // Fokus ke judul daftar supaya pengguna keyboard dan pembaca layar mulai dari awal halaman baru.
   resultsHeading.value?.focus()
 }
@@ -182,6 +208,17 @@ async function onStale(message: string) {
   moving.value = null
   notice.value = { kind: 'error', text: message }
   await load(true)
+}
+
+// Muat ulang dari dialog Pindahkan (revisi 47): kartu di dialog diganti versi terbaru, isian dialog tetap.
+async function onMoveRefresh(id: string) {
+  await load(true)
+  const fresh = result.value?.tasks.find((t) => t.id === id)
+  if (fresh) moving.value = fresh
+  else {
+    moving.value = null
+    notice.value = { kind: 'error', text: `${id} sudah tidak ada di Arsip dengan filter ini.` }
+  }
 }
 
 const detailId = ref<string | null>(null)
@@ -220,7 +257,7 @@ const buttonSecondary =
     />
 
     <div
-      v-if="isStaff"
+      v-if="isStaff || isManager"
       class="mt-4 inline-flex rounded-card border border-line bg-surface"
       role="group"
       aria-label="Lingkup task"
@@ -236,7 +273,7 @@ const buttonSecondary =
       <button
         type="button"
         :class="scopeButton"
-        :aria-pressed="query.scope === 'all'"
+        :aria-pressed="query.scope !== 'mine'"
         @click="setQuery({ scope: 'all' })"
       >
         Semua task
@@ -408,7 +445,7 @@ const buttonSecondary =
           </button>
         </template>
         <template v-else-if="query.scope === 'mine'">
-          <p>Belum ada task selesai yang PIC-nya kamu.</p>
+          <p>Belum ada task selesai yang kamu pegang atau kamu minta.</p>
           <button type="button" :class="buttonSecondary" class="mt-3" @click="setQuery({ scope: 'all' })">
             Lihat semua task
           </button>
@@ -555,7 +592,14 @@ const buttonSecondary =
       </div>
     </template>
 
-    <MoveDialog :task="moving" @close="moving = null" @moved="onMoved" @stale="onStale" />
+    <LiveIndicator what="Daftar" />
+    <MoveDialog
+      :task="moving"
+      @close="moving = null"
+      @moved="onMoved"
+      @stale="onStale"
+      @refresh="onMoveRefresh"
+    />
     <TaskDetailPanel
       :task-id="detailId"
       :labels="labels"

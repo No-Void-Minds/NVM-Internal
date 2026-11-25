@@ -31,6 +31,8 @@ type apiError struct {
 	Message string `json:"message"`
 	// Field diisi bila galat milik satu kolom form.
 	Field string `json:"field,omitempty"`
+	// By: nama orang yang lebih dulu mengubah task, pada 409 versi basi (revisi 47).
+	By string `json:"by,omitempty"`
 }
 
 type errorBody struct {

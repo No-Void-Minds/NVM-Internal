@@ -29,8 +29,10 @@ const (
 type ArchiveFilter struct {
 	PICIDs       []int64
 	PICUsernames []string
-	DivisionID   *int64
-	LabelID      *int64
+	// RequesterID: Arsip "Task saya" juga memuat task yang diminta orang ini (revisi 47, sama dengan papan).
+	RequesterID *int64
+	DivisionID  *int64
+	LabelID     *int64
 	// SeriesID: hanya kemunculan seri ini ("Lihat kemunculan lain", revisi 19).
 	SeriesID *int64
 	Urgency  string
@@ -80,6 +82,7 @@ func (s *Service) Archive(ctx context.Context, f ArchiveFilter) (ArchivePage, er
 			DivisionID: r.DivisionID, DivisionName: r.DivisionName,
 			StartDate: r.StartDate, DueDate: r.DueDate, SolvedDate: r.SolvedDate, Version: r.Version,
 			SeriesID: r.SeriesID, OccurrenceDate: r.OccurrenceDate, SeriesFreq: r.SeriesFreq,
+			RequestedBy: r.RequestedBy,
 		}
 	}
 	if len(rows) > 0 {
@@ -132,6 +135,9 @@ func (f ArchiveFilter) params() (sqlc.ListArchiveTasksParams, error) {
 	}
 	if f.LabelID != nil {
 		p.LabelID = pgtype.Int8{Int64: *f.LabelID, Valid: true}
+	}
+	if f.RequesterID != nil {
+		p.RequesterID = pgtype.Int8{Int64: *f.RequesterID, Valid: true}
 	}
 
 	pattern, err := keywordPattern(f.Keyword)

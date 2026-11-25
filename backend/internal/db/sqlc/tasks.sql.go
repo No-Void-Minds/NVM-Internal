@@ -180,7 +180,7 @@ func (q *Queries) GetTaskDetail(ctx context.Context, id string) (GetTaskDetailRo
 const listArchiveTasks = `-- name: ListArchiveTasks :many
 SELECT t.id, t.title, t.status, t.urgency, t.division_id, d.name AS division_name,
        t.start_date, t.due_date, t.solved_date, t.version,
-       t.series_id, t.occurrence_date, s.freq AS series_freq,
+       t.series_id, t.occurrence_date, s.freq AS series_freq, t.requested_by,
        count(*) OVER () AS total_count
 FROM tasks t
 JOIN divisions d ON d.id = t.division_id
@@ -199,41 +199,44 @@ WHERE NOT t.is_deleted AND t.status = 'completed'
                   JOIN subtask_assignees sa ON sa.subtask_id = st.id
                   JOIN users u ON u.id = sa.user_id
                   WHERE st.task_id = t.id
-                    AND (sa.user_id = ANY($2::bigint[]) OR lower(u.username) = ANY($3::text[]))))
-  AND ($4::bigint IS NULL OR t.division_id = $4::bigint)
-  AND ($5::bigint IS NULL
-       OR EXISTS (SELECT 1 FROM task_labels tl WHERE tl.task_id = t.id AND tl.label_id = $5::bigint))
-  AND ($6::task_urgency IS NULL OR t.urgency = $6::task_urgency)
-  AND ($7::timestamptz IS NULL OR t.solved_date >= $7::timestamptz)
-  AND ($8::timestamptz IS NULL OR t.solved_date < $8::timestamptz)
-  AND ($9::text IS NULL OR (
-        t.id ILIKE $9::text
-        OR t.title ILIKE $9::text
-        OR t.description ILIKE $9::text
-        OR t.deliverable_url ILIKE $9::text
-        OR EXISTS (SELECT 1 FROM users r WHERE r.id = t.requested_by AND r.name ILIKE $9::text)
+                    AND (sa.user_id = ANY($2::bigint[]) OR lower(u.username) = ANY($3::text[])))
+       -- Revisi 47: Arsip "Task saya" mengikuti papan (revisi 45), termasuk task yang diminta orang ini.
+       OR t.requested_by = $4::bigint)
+  AND ($5::bigint IS NULL OR t.division_id = $5::bigint)
+  AND ($6::bigint IS NULL
+       OR EXISTS (SELECT 1 FROM task_labels tl WHERE tl.task_id = t.id AND tl.label_id = $6::bigint))
+  AND ($7::task_urgency IS NULL OR t.urgency = $7::task_urgency)
+  AND ($8::timestamptz IS NULL OR t.solved_date >= $8::timestamptz)
+  AND ($9::timestamptz IS NULL OR t.solved_date < $9::timestamptz)
+  AND ($10::text IS NULL OR (
+        t.id ILIKE $10::text
+        OR t.title ILIKE $10::text
+        OR t.description ILIKE $10::text
+        OR t.deliverable_url ILIKE $10::text
+        OR EXISTS (SELECT 1 FROM users r WHERE r.id = t.requested_by AND r.name ILIKE $10::text)
         OR EXISTS (SELECT 1 FROM task_subtasks st
-                   WHERE st.task_id = t.id AND st.title ILIKE $9::text)
+                   WHERE st.task_id = t.id AND st.title ILIKE $10::text)
         OR EXISTS (SELECT 1 FROM task_assignees tas
                    JOIN users u ON u.id = tas.user_id
-                   WHERE tas.task_id = t.id AND u.name ILIKE $9::text)
+                   WHERE tas.task_id = t.id AND u.name ILIKE $10::text)
         OR EXISTS (SELECT 1 FROM task_labels tl JOIN labels l ON l.id = tl.label_id
-                   WHERE tl.task_id = t.id AND l.name ILIKE $9::text)
+                   WHERE tl.task_id = t.id AND l.name ILIKE $10::text)
         OR EXISTS (SELECT 1 FROM task_attachments ta
-                   WHERE ta.task_id = t.id AND NOT ta.is_deleted AND ta.original_name ILIKE $9::text)))
+                   WHERE ta.task_id = t.id AND NOT ta.is_deleted AND ta.original_name ILIKE $10::text)))
 ORDER BY
-  CASE WHEN $10::text = 'urgency'
+  CASE WHEN $11::text = 'urgency'
        THEN CASE t.urgency WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END END,
-  CASE WHEN $10::text = 'oldest' THEN t.solved_date END ASC,
-  CASE WHEN $10::text <> 'oldest' THEN t.solved_date END DESC,
+  CASE WHEN $11::text = 'oldest' THEN t.solved_date END ASC,
+  CASE WHEN $11::text <> 'oldest' THEN t.solved_date END DESC,
   t.id DESC
-LIMIT $12::int OFFSET $11::int
+LIMIT $13::int OFFSET $12::int
 `
 
 type ListArchiveTasksParams struct {
 	SeriesID     pgtype.Int8
 	PicIds       []int64
 	PicUsernames []string
+	RequesterID  pgtype.Int8
 	DivisionID   pgtype.Int8
 	LabelID      pgtype.Int8
 	Urgency      NullTaskUrgency
@@ -259,6 +262,7 @@ type ListArchiveTasksRow struct {
 	SeriesID       pgtype.Int8
 	OccurrenceDate pgtype.Date
 	SeriesFreq     NullRecurrenceFreq
+	RequestedBy    int64
 	TotalCount     int64
 }
 
@@ -270,6 +274,7 @@ func (q *Queries) ListArchiveTasks(ctx context.Context, arg ListArchiveTasksPara
 		arg.SeriesID,
 		arg.PicIds,
 		arg.PicUsernames,
+		arg.RequesterID,
 		arg.DivisionID,
 		arg.LabelID,
 		arg.Urgency,
@@ -301,6 +306,7 @@ func (q *Queries) ListArchiveTasks(ctx context.Context, arg ListArchiveTasksPara
 			&i.SeriesID,
 			&i.OccurrenceDate,
 			&i.SeriesFreq,
+			&i.RequestedBy,
 			&i.TotalCount,
 		); err != nil {
 			return nil, err
@@ -682,7 +688,9 @@ WHERE NOT t.is_deleted
        -- Revisi 15: "Task saya" juga memuat task yang sub task-nya dipegang orang ini.
        OR EXISTS (SELECT 1 FROM task_subtasks st
                   JOIN subtask_assignees sa ON sa.subtask_id = st.id
-                  WHERE st.task_id = t.id AND sa.user_id = $1::bigint))
+                  WHERE st.task_id = t.id AND sa.user_id = $1::bigint)
+       -- Revisi 47: sama dengan papan sejak revisi 45, task yang diminta orang ini juga termasuk.
+       OR t.requested_by = $1::bigint)
 ORDER BY t.created_at DESC
 `
 
@@ -768,4 +776,28 @@ func (q *Queries) ListUserNames(ctx context.Context, ids []int64) ([]ListUserNam
 		return nil, err
 	}
 	return items, nil
+}
+
+const taskLiveState = `-- name: TaskLiveState :one
+SELECT t.version, COALESCE(last.user_id, 0)::bigint AS last_actor_id, COALESCE(last.name, '')::text AS last_actor
+FROM tasks t
+LEFT JOIN LATERAL (SELECT a.user_id, u.name FROM audit_logs a JOIN users u ON u.id = a.user_id
+                   WHERE a.entity = 'task' AND a.entity_id = t.id
+                   ORDER BY a.occurred_at DESC, a.id DESC LIMIT 1) last ON true
+WHERE t.id = $1
+`
+
+type TaskLiveStateRow struct {
+	Version     int32
+	LastActorID int64
+	LastActor   string
+}
+
+// Revisi 47: versi terbaru dan nama orang terakhir yang mengubah task (baris audit terakhir), untuk event papan
+// realtime dan pesan 409. Task yang sudah dihapus tetap terbaca supaya event hapus membawa versinya.
+func (q *Queries) TaskLiveState(ctx context.Context, id string) (TaskLiveStateRow, error) {
+	row := q.db.QueryRow(ctx, taskLiveState, id)
+	var i TaskLiveStateRow
+	err := row.Scan(&i.Version, &i.LastActorID, &i.LastActor)
+	return i, err
 }

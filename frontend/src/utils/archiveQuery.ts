@@ -1,6 +1,6 @@
 import type { LocationQuery } from 'vue-router'
 import type { ArchiveQuery, ArchiveSort } from '../api/archive'
-import { cleanKeyword, normalizeBoardQuery, one, positiveInt } from './boardQuery'
+import { cleanKeyword, normalizeBoardQuery, one, parseScope, positiveInt } from './boardQuery'
 import { urgencies, type Urgency } from './task'
 
 export const sortOptions: { value: ArchiveSort; label: string }[] = [
@@ -12,7 +12,11 @@ export const sortOptions: { value: ArchiveSort; label: string }[] = [
 const dayPattern = /^\d{4}-\d{2}-\d{2}$/
 
 // Nilai yang tidak dikenal dibuang, supaya URL lama atau salah ketik tidak membuat Arsip galat.
-export function parseArchiveQuery(q: LocationQuery, staffUsername: string | null): ArchiveQuery {
+export function parseArchiveQuery(
+  q: LocationQuery,
+  staffUsername: string | null,
+  managerScope = false,
+): ArchiveQuery {
   const urgency = one(q.urgency)
   const sort = one(q.sort)
   const from = one(q.from)
@@ -20,7 +24,7 @@ export function parseArchiveQuery(q: LocationQuery, staffUsername: string | null
   const page = positiveInt(one(q.page))
   const raw: ArchiveQuery = {
     q: cleanKeyword(one(q.q)),
-    scope: one(q.scope) === 'all' ? 'all' : undefined,
+    scope: parseScope(one(q.scope)),
     pic: one(q.pic)?.trim() || undefined,
     division: positiveInt(one(q.division)),
     label: positiveInt(one(q.label)),
@@ -31,14 +35,14 @@ export function parseArchiveQuery(q: LocationQuery, staffUsername: string | null
     page: page && page > 1 ? page : undefined,
     series: positiveInt(one(q.series)),
   }
-  return normalizeBoardQuery(raw, staffUsername)
+  return normalizeBoardQuery(raw, staffUsername, managerScope)
 }
 
 // Nilai bawaan (urutan terbaru, halaman 1, lingkup bawaan) tidak ditulis, supaya alamat tanpa filter tetap /arsip.
-export function toArchiveRouteQuery(a: ArchiveQuery): Record<string, string> {
+export function toArchiveRouteQuery(a: ArchiveQuery, managerScope = false): Record<string, string> {
   const out: Record<string, string> = {}
   if (a.q) out.q = a.q
-  if (a.scope === 'all') out.scope = 'all'
+  if (a.scope === 'all' || (managerScope && a.scope === 'mine')) out.scope = a.scope
   if (a.pic) out.pic = a.pic
   if (a.division) out.division = String(a.division)
   if (a.label) out.label = String(a.label)

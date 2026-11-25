@@ -36,6 +36,8 @@ type Server struct {
 	timeline     *timeline.Service
 	whiteboard   *whiteboard.Service
 	hub          *whiteboard.Hub
+	// live menyiarkan perubahan task ke papan yang terbuka (revisi 47).
+	live *taskLive
 	// wsRecheck: jeda pemeriksaan ulang sesi koneksi WebSocket; dipendekkan di test.
 	wsRecheck   time.Duration
 	tasks       *task.Service
@@ -51,17 +53,24 @@ type Server struct {
 var wsRecheckEvery = 60 * time.Second
 
 func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.Engine, error) {
+	r, _, err := New(log, pool, cfg)
+	return r, err
+}
+
+// New sama dengan NewRouter, ditambah Server supaya main bisa menjalankan ticker kemunculan yang menyiarkan task
+// baru lewat hub papan yang sama (revisi 47).
+func New(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.Engine, *Server, error) {
 	if cfg.AppEnv == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
 	tokens, err := auth.NewTokenIssuer(cfg.JWTSecret)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	files, err := storage.Open(cfg.StorageDir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	log.Info("penyimpanan berkas siap", "dir", files.Root())
 
@@ -85,6 +94,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 		files:        files,
 		attachments:  task.NewAttachments(pool, files),
 		avatars:      account.NewAvatars(pool, files, log),
+		live:         newTaskLive(),
 	}
 
 	s.whiteboard.UseStorage(files)
@@ -97,7 +107,7 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	// dipercaya dari TRUSTED_PROXIES (subnet jaringan Nginx di produksi, yang mengisinya dari CF-Connecting-IP).
 	// Kosong di dev: tidak ada header yang dipercaya, jadi IP selalu alamat koneksi langsung.
 	if err := r.SetTrustedProxies(cfg.TrustedProxies); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	r.Use(withRequestID(), s.accessLog(), s.recoverer())
 
@@ -145,6 +155,8 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	manage.POST("/labels/:id/deactivate", s.setLabelActive(false))
 	manage.POST("/labels/:id/activate", s.setLabelActive(true))
 	app.GET("/tasks", s.listTasks)
+	// Revisi 47: koneksi realtime papan task. Event disiarkan middleware taskEvent di rute yang mengubah task.
+	app.GET("/tasks/ws", s.taskSocket)
 	app.GET("/board", s.board)
 	app.GET("/archive", s.archive)
 	app.GET("/people", s.listPeople)
@@ -153,23 +165,24 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	// Tanpa middleware peran: Staf dan Manajer boleh membuat task (revisi 27), dan pembuat task boleh
 	// mengubah serta menghapus task buatannya selama masih Requested. Keduanya dicek di service, yang
 	// memegang status dan pembuat task.
-	app.POST("/tasks", s.createTask)
+	ubah, pindah := s.taskEvent(aksiUbah), s.taskEvent(aksiPindah)
+	app.POST("/tasks", s.taskEvent(aksiBaru), s.createTask)
 	managerOnly := requireRole(sqlc.UserRoleManager)
-	app.PUT("/tasks/:id", s.updateTask)
-	app.DELETE("/tasks/:id", s.deleteTask)
-	app.POST("/tasks/:id/stop-series", managerOnly, s.stopSeries)
-	app.PUT("/tasks/:id/labels", s.setTaskLabels)
-	app.PUT("/tasks/:id/deliverable", s.setTaskDeliverable)
-	app.POST("/tasks/:id/move", s.moveTask)
-	app.POST("/tasks/:id/attachments", s.uploadAttachment)
+	app.PUT("/tasks/:id", ubah, s.updateTask)
+	app.DELETE("/tasks/:id", s.taskEvent(aksiHapus), s.deleteTask)
+	app.POST("/tasks/:id/stop-series", managerOnly, ubah, s.stopSeries)
+	app.PUT("/tasks/:id/labels", ubah, s.setTaskLabels)
+	app.PUT("/tasks/:id/deliverable", ubah, s.setTaskDeliverable)
+	app.POST("/tasks/:id/move", pindah, s.moveTask)
+	app.POST("/tasks/:id/attachments", ubah, s.uploadAttachment)
 	app.GET("/tasks/:id/attachments/:attachmentId", s.downloadAttachment)
-	app.DELETE("/tasks/:id/attachments/:attachmentId", s.deleteAttachment)
-	app.PUT("/tasks/:id/subtasks/:subtaskId/done", s.setSubtaskDone)
+	app.DELETE("/tasks/:id/attachments/:attachmentId", ubah, s.deleteAttachment)
+	app.PUT("/tasks/:id/subtasks/:subtaskId/done", s.taskEvent(aksiCentang), s.setSubtaskDone)
 	// Tanpa managerOnly: PIC task menyusun sub task dan membaginya ke PIC lain (revisi 7). Haknya dicek di service.
-	app.POST("/tasks/:id/subtasks", s.addSubtask)
-	app.PUT("/tasks/:id/subtasks/:subtaskId", s.updateSubtask)
-	app.DELETE("/tasks/:id/subtasks/:subtaskId", s.deleteSubtask)
-	app.POST("/tasks/:id/subtasks/:subtaskId/attachments", s.uploadSubtaskAttachment)
+	app.POST("/tasks/:id/subtasks", ubah, s.addSubtask)
+	app.PUT("/tasks/:id/subtasks/:subtaskId", ubah, s.updateSubtask)
+	app.DELETE("/tasks/:id/subtasks/:subtaskId", ubah, s.deleteSubtask)
+	app.POST("/tasks/:id/subtasks/:subtaskId/attachments", ubah, s.uploadSubtaskAttachment)
 	// Aktivitas Harian (revisi 21). Tabel harian bisa dibaca semua peran; hak mengubah dicek di service.
 	app.GET("/activities", s.listActivities)
 	app.GET("/activities/me", s.myActivities)
@@ -231,5 +244,5 @@ func NewRouter(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.En
 	wbWrite.PUT("/comments/:commentId", s.wbEditComment)
 	wbWrite.DELETE("/comments/:commentId", s.wbDeleteComment)
 
-	return r, nil
+	return r, s, nil
 }

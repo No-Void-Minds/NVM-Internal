@@ -1,4 +1,12 @@
-type ApiErrorBody = { error?: { code?: string; message?: string; field?: string } }
+type ApiErrorBody = { error?: { code?: string; message?: string; field?: string; by?: string } }
+
+// Revisi 47: id acak per tab, dikirim di setiap permintaan. Event papan realtime membawanya kembali, jadi tab yang
+// mengubah task tidak memberi tahu dirinya sendiri bahwa task itu baru diubah. Bukan penanda keamanan.
+export const tabId: string =
+  typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+export const TAB_HEADER = 'X-Tab-Id'
 
 export class ApiError extends Error {
   readonly status: number
@@ -6,6 +14,8 @@ export class ApiError extends Error {
   readonly retryAfterSeconds: number | null
   // Diisi backend bila galat milik satu kolom form, mis. "name" atau "job_title".
   readonly field: string | null
+  // Nama orang yang lebih dulu mengubah task, pada 409 versi basi (revisi 47); "kamu" bila dari tab lain sendiri.
+  readonly by: string | null
 
   constructor(
     status: number,
@@ -13,6 +23,7 @@ export class ApiError extends Error {
     message: string,
     retryAfterSeconds: number | null = null,
     field: string | null = null,
+    by: string | null = null,
   ) {
     super(message)
     this.name = 'ApiError'
@@ -20,6 +31,7 @@ export class ApiError extends Error {
     this.code = code
     this.retryAfterSeconds = retryAfterSeconds
     this.field = field
+    this.by = by
   }
 }
 
@@ -36,7 +48,7 @@ export async function request<T>(
   body?: unknown,
   signal?: AbortSignal,
 ): Promise<T> {
-  const headers: Record<string, string> = { Accept: 'application/json' }
+  const headers: Record<string, string> = { Accept: 'application/json', [TAB_HEADER]: tabId }
   if (body !== undefined) headers['Content-Type'] = 'application/json'
 
   let res: Response
@@ -70,6 +82,7 @@ export async function request<T>(
       detail.message ?? 'Terjadi kesalahan. Coba lagi.',
       Number.isFinite(retry) && retry > 0 ? retry : null,
       detail.field ?? null,
+      detail.by ?? null,
     )
   }
   return data as T

@@ -7,10 +7,17 @@ import { moveTask } from '../api/tasks'
 import type { BoardTask } from '../api/board'
 import { staleMoveMessage, statusLabel, type TaskStatus } from '../utils/task'
 import { readyBlock } from '../utils/subtaskGate'
+import { changedText, useTaskLive } from '../utils/taskLive'
 // initialTarget diisi saat kartu dilepas di kolom revisi, supaya tujuan sudah terpilih.
 const props = defineProps<{ task: BoardTask | null; initialTarget?: TaskStatus | null }>()
 
-const emit = defineEmits<{ close: []; moved: [message: string]; stale: [message: string] }>()
+// refresh: pengguna menekan Muat ulang setelah task ini diubah orang lain (revisi 47); papan mengirim kartu baru.
+const emit = defineEmits<{
+  close: []
+  moved: [message: string]
+  stale: [message: string]
+  refresh: [id: string]
+}>()
 
 // Setiap tujuan diberi penjelasan, supaya pilihannya tidak hanya berupa nama status.
 function describe(t: BoardTask, to: TaskStatus): string {
@@ -40,10 +47,25 @@ const subtaskRevision = computed(
     (props.task?.revision_subtasks.length ?? 0) > 0,
 )
 const selected = ref<number[]>([])
+const liveChange = ref<string | null>(null)
+
+useTaskLive((e) => {
+  const t = props.task
+  if (t && e.task_id === t.id && (e.aksi === 'hapus' || e.version > t.version))
+    liveChange.value = changedText(e)
+})
 
 watch(
   () => props.task,
-  (t) => {
+  (t, old) => {
+    liveChange.value = null
+    // Muat ulang kartu yang sama: catatan, pilihan sub task, dan tujuan yang masih sah tetap dipakai.
+    if (t && old && t.id === old.id) {
+      if (target.value && !t.move_to.includes(target.value)) target.value = null
+      const ids = new Set(t.revision_subtasks.map((s) => s.id))
+      selected.value = selected.value.filter((id) => ids.has(id))
+      return
+    }
     // Kalau tujuannya hanya satu, langsung terpilih supaya cukup satu ketukan lagi.
     target.value = props.initialTarget ?? (t && t.move_to.length === 1 ? t.move_to[0] : null)
     note.value = ''
@@ -104,6 +126,17 @@ const buttonSecondary =
     <form v-if="task" id="move-form" class="space-y-4" novalidate @submit.prevent="submit">
       <p class="text-sm text-ink-muted">Status saat ini: {{ statusLabel[task.status] }}</p>
       <p v-if="error" role="alert" class="rounded-card bg-danger-bg p-3 text-sm text-danger">{{ error }}</p>
+      <div
+        v-if="liveChange"
+        role="status"
+        class="flex flex-wrap items-center gap-3 rounded-card border border-line bg-canvas p-3 text-sm text-ink"
+        data-testid="live-notice"
+      >
+        <p class="min-w-0 flex-1">{{ liveChange }} Muat ulang dulu supaya tujuan dan versinya terbaru.</p>
+        <button type="button" :class="buttonSecondary" class="bg-surface" @click="emit('refresh', task.id)">
+          Muat ulang
+        </button>
+      </div>
 
       <fieldset>
         <legend class="text-sm font-medium">Pilih status tujuan</legend>

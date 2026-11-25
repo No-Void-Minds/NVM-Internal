@@ -13,7 +13,6 @@ import (
 	"nvm-internal/internal/config"
 	"nvm-internal/internal/db"
 	"nvm-internal/internal/httpapi"
-	"nvm-internal/internal/task"
 )
 
 func main() {
@@ -76,7 +75,7 @@ func run(cfg config.Config, log *slog.Logger) error {
 	}
 	defer pool.Close()
 
-	router, err := httpapi.NewRouter(log, pool, cfg)
+	router, server, err := httpapi.New(log, pool, cfg)
 	if err != nil {
 		return err
 	}
@@ -92,7 +91,8 @@ func run(cfg config.Config, log *slog.Logger) error {
 
 	// Revisi 19: kemunculan task berulang dibuat di dalam proses ini setiap 5 menit, bukan cron host, supaya
 	// tidak ada langkah deploy tambahan. Aman bila ada dua instance: pembuatnya idempoten.
-	go task.NewService(pool).RunOccurrenceTicker(ctx, log, 5*time.Minute)
+	// Revisi 47: ticker berjalan lewat Server supaya kemunculan baru ikut disiarkan ke papan yang terbuka.
+	go server.RunOccurrences(ctx, log, 5*time.Minute)
 
 	serveErr := make(chan error, 1)
 	go func() {

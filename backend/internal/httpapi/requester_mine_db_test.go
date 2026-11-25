@@ -105,4 +105,40 @@ func TestTaskSayaMemuatPeminta(t *testing.T) {
 	if _, ok := tm.board(t, tm.manager, "?pic=staf.b")[asked]; ok {
 		t.Fatal("filter Orang staf.b memuat task yang hanya dia minta")
 	}
+
+	// Revisi 47: GET /tasks?scope=mine dan Arsip scope=mine memakai aturan yang sama.
+	var list struct {
+		Tasks []card `json:"tasks"`
+	}
+	if code := tm.sendJSON(t, tm.other, http.MethodGet, "/api/tasks?scope=mine", "", &list); code != http.StatusOK {
+		t.Fatalf("tasks?scope=mine: %d", code)
+	}
+	ids := map[string]int{}
+	for _, k := range list.Tasks {
+		ids[k.ID]++
+	}
+	if ids[asked] != 1 || ids[both] != 1 || ids[unrelated] != 0 || len(ids) != 2 {
+		t.Fatalf("tasks?scope=mine staf.b: %v", ids)
+	}
+	// Arsip hanya berisi task Completed; statusnya diubah langsung karena alur pindahnya diuji di tempat lain.
+	if _, err := tm.pool.Exec(t.Context(), `UPDATE tasks SET status = 'completed', solved_date = now() WHERE id = ANY($1)`,
+		[]string{asked, unrelated, both}); err != nil {
+		t.Fatal(err)
+	}
+	var arch struct {
+		Tasks []card `json:"tasks"`
+	}
+	if code := tm.sendJSON(t, tm.other, http.MethodGet, "/api/archive?scope=mine", "", &arch); code != http.StatusOK {
+		t.Fatalf("archive?scope=mine: %d", code)
+	}
+	ac := map[string]card{}
+	for _, k := range arch.Tasks {
+		ac[k.ID] = k
+	}
+	if len(ac) != 2 || !ac[asked].RequesterOnly || ac[both].RequesterOnly {
+		t.Fatalf("Arsip scope=mine staf.b: %+v", arch.Tasks)
+	}
+	if _, ok := ac[unrelated]; ok {
+		t.Fatal("Arsip scope=mine memuat task yang tidak melibatkan staf.b")
+	}
 }

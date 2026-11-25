@@ -69,7 +69,11 @@ try {
     }
   }
 } finally {
-  for (const id of made) await mApi.call("DELETE", `/tasks/${id}`);
+  // DELETE wajib membawa versi; tanpa itu backend menjawab 400 dan task uji tertinggal di database dev.
+  for (const id of made) {
+    const t = (await mApi.call("GET", `/tasks/${id}`)).body?.task;
+    if (t) await mApi.call("DELETE", `/tasks/${id}?version=${t.version}`);
+  }
   await sApi.ctx.close();
   await mApi.ctx.close();
   await browser.close();

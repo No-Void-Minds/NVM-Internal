@@ -522,12 +522,16 @@ func createOccurrence(ctx context.Context, q *sqlc.Queries, series sqlc.TaskSeri
 }
 
 // RunOccurrenceTicker menjalankan CreateDueOccurrences sekali saat mulai lalu setiap interval, sampai ctx
-// selesai. Galat dicatat dan tidak menghentikan ticker.
-func (s *Service) RunOccurrenceTicker(ctx context.Context, log *slog.Logger, every time.Duration) {
+// selesai. Galat dicatat dan tidak menghentikan ticker. onCreated (boleh nil) menerima id kemunculan baru setelah
+// transaksinya commit, untuk papan realtime (revisi 47).
+func (s *Service) RunOccurrenceTicker(ctx context.Context, log *slog.Logger, every time.Duration, onCreated func([]string)) {
 	run := func() {
 		created, abandoned, err := s.createDueOccurrences(ctx, s.clock())
 		if len(created) > 0 {
 			log.Info("kemunculan task berulang dibuat", "tasks", created)
+			if onCreated != nil {
+				onCreated(created)
+			}
 		}
 		if len(abandoned) > 0 {
 			log.Warn("seri aktif tanpa kemunculan tersisa dilewati, minta Manajer menghentikannya", "series", abandoned)

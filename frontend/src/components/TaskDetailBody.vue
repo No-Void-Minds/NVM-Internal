@@ -11,6 +11,7 @@ import { emptyForm, subtaskDueProblem, type SubtaskForm } from '../utils/subtask
 import { computed, nextTick, ref, watch } from 'vue'
 import BaseDialog from './BaseDialog.vue'
 import { ApiError } from '../api/client'
+import { changedText, useTaskLive } from '../utils/taskLive'
 import {
   deleteTask,
   getTask,
@@ -108,6 +109,15 @@ const openSub = ref<number | null>(null)
 const editingLabels = ref(false)
 const chosenLabels = ref<number[]>([])
 
+// Revisi 47: orang lain mengubah task yang sedang dibuka. Detail tidak dimuat ulang sendiri supaya isian yang
+// sedang diketik tidak hilang; penanda dengan tombol Muat ulang yang memberi tahu.
+const liveChange = ref<string | null>(null)
+useTaskLive((e) => {
+  const t = task.value
+  if (!t || e.task_id !== props.taskId) return
+  if (e.aksi === 'hapus' || e.version > t.version) liveChange.value = changedText(e)
+})
+
 // quiet dipakai setelah unggah atau hapus berkas, supaya panel tidak berkedip ke tampilan memuat.
 async function load(quiet = false) {
   if (!props.taskId) return
@@ -115,6 +125,7 @@ async function load(quiet = false) {
   try {
     task.value = await getTask(props.taskId)
     loadState.value = 'ready'
+    liveChange.value = null
     // Sub task paling sering dibuat untuk diri sendiri, jadi itu pilihan awalnya kalau pelaku PIC task.
     if (!newPicPrimed) {
       newPicPrimed = true
@@ -136,6 +147,7 @@ watch(
   () => props.taskId,
   (id) => {
     actionError.value = null
+    liveChange.value = null
     editingLabels.value = false
     historyAll.value = false
     editingSub.value = null
@@ -666,6 +678,22 @@ const buttonSecondary =
     </div>
 
     <div aria-live="polite">
+      <div
+        v-if="liveChange"
+        class="mb-3 flex flex-wrap items-center gap-3 rounded-card border border-line bg-canvas p-3 text-sm text-ink"
+        data-testid="live-notice"
+      >
+        <p class="min-w-0 flex-1">
+          {{ liveChange }} Isianmu yang belum disimpan tetap ada sampai kamu memuat ulang.
+        </p>
+        <button
+          type="button"
+          class="inline-flex min-h-11 items-center rounded-card border border-line bg-surface px-4 font-medium hover:bg-canvas"
+          @click="load(true)"
+        >
+          Muat ulang
+        </button>
+      </div>
       <p v-if="actionError" role="alert" class="rounded-card bg-danger-bg p-3 text-sm text-danger">
         {{ actionError }}
       </p>

@@ -136,7 +136,7 @@ tolak "Daftar sub task kosong ditolak" "$code" 400 "Pilih minimal satu sub task 
 code=$(call "$STAF" POST "/tasks/$ID/move" "{\"version\":$V,\"to\":\"on_progress\",\"note\":\"\",\"subtask_ids\":[$S1,$S3]}")
 tolak "Memilih sub task milik orang lain ditolak" "$code" 400 "Sub task $S3 tidak bisa dibuka lagi"
 code=$(call "$STAF" POST "/tasks/$ID/move" "{\"version\":$((V - 1)),\"to\":\"on_progress\",\"note\":\"\",\"subtask_ids\":[$S1]}")
-tolak "Version basi ditolak" "$code" 409 "sudah diubah orang lain"
+tolak "Version basi ditolak" "$code" 409 "sudah diubah"
 code=$(call "$MGR" POST "/tasks/$ID/move" "{\"version\":$V,\"to\":\"on_progress\",\"note\":\"Revisi\",\"subtask_ids\":[$S1]}")
 tolak "PIC task mengirim pilihan sub task ditolak" "$code" 400 "Pilihan sub task hanya dipakai PIC sub task"
 

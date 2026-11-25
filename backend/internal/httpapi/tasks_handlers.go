@@ -147,6 +147,7 @@ func (s *Server) createTask(c *gin.Context) {
 		s.writeTaskError(c, err)
 		return
 	}
+	c.Set(liveTaskKey, id)
 	// ID sub task dikirim urut sesuai form, supaya lampiran acuan tiap baris bisa diunggah ke sub task-nya.
 	d, err := s.tasks.Get(c.Request.Context(), id)
 	if err != nil {
@@ -329,7 +330,16 @@ func (s *Server) writeTaskError(c *gin.Context, err error) {
 		// Cadangan bila ada penolakan tanpa pesan aksi; tidak menyebut aksi tertentu supaya tidak menyesatkan.
 		writeError(c, http.StatusForbidden, CodeForbidden, "Kamu tidak punya hak melakukan ini pada task ini.")
 	case errors.Is(err, task.ErrVersionConflict):
-		writeError(c, http.StatusConflict, CodeConflict, "Task ini sudah diubah orang lain. Muat ulang untuk melihat versi terbaru.")
+		// Revisi 47: pesan menyebut siapa yang lebih dulu mengubah, dari baris audit terakhir task ini.
+		by, msg := "", "Task ini sudah diubah orang lain. Muat ulang untuk melihat versi terbaru."
+		if st, e := sqlc.New(s.pool).TaskLiveState(c.Request.Context(), c.Param("id")); e == nil && st.LastActor != "" {
+			by = st.LastActor
+			msg = "Task ini sudah diubah " + by + " lebih dulu. Muat ulang untuk melihat versi terbaru."
+			if st.LastActorID == currentUser(c).ID {
+				by, msg = "kamu", "Task ini sudah kamu ubah di tab lain. Muat ulang untuk melihat versi terbaru."
+			}
+		}
+		c.AbortWithStatusJSON(http.StatusConflict, errorBody{Error: apiError{Code: CodeConflict, Message: msg, By: by}})
 	default:
 		s.internalError(c, err)
 	}

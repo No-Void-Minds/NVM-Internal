@@ -1,4 +1,4 @@
-import { ApiError, notifyUnauthorized, request } from './client'
+import { ApiError, notifyUnauthorized, request, TAB_HEADER, tabId } from './client'
 
 export type AttachmentKind = 'brief' | 'deliverable'
 
@@ -35,6 +35,7 @@ export function uploadAttachment(
     xhr.open('POST', url)
     xhr.responseType = 'json'
     xhr.setRequestHeader('Accept', 'application/json')
+    xhr.setRequestHeader(TAB_HEADER, tabId)
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(e.loaded / e.total)
     }

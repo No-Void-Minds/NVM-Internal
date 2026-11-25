@@ -12,14 +12,16 @@ import (
 )
 
 // archive menerima q (kata kunci), scope (mine/all), pic, division, label, urgency, from, to (tanggal selesai,
-// YYYY-MM-DD), sort (newest/oldest/urgency), dan page. Seperti papan, scope=mine mengabaikan pic.
+// YYYY-MM-DD), sort (newest/oldest/urgency), dan page. Seperti papan, scope=mine mengabaikan pic dan memuat task
+// yang diminta akun itu (revisi 47).
 func (s *Server) archive(c *gin.Context) {
 	f := task.ArchiveFilter{
 		Keyword: c.Query("q"), Urgency: c.Query("urgency"), Sort: c.Query("sort"),
 		SolvedFrom: c.Query("from"), SolvedTo: c.Query("to"), Page: 1,
 	}
 	if c.Query("scope") == "mine" {
-		f.PICIDs = []int64{currentUser(c).ID}
+		id := currentUser(c).ID
+		f.PICIDs, f.RequesterID = []int64{id}, &id
 	} else if p := c.Query("pic"); p != "" {
 		f.PICUsernames = strings.Split(p, ",")
 	}

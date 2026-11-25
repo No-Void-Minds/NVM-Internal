@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import LoadingSkeleton from '../components/LoadingSkeleton.vue'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { toArchiveRouteQuery } from '../utils/archiveQuery'
 import KeywordSearch from '../components/KeywordSearch.vue'
@@ -9,7 +9,7 @@ import TaskDetailPanel from '../components/TaskDetailPanel.vue'
 import TaskFormPanel from '../components/TaskFormPanel.vue'
 import { ApiError } from '../api/client'
 import { getBoard, listPeople, type Board, type BoardQuery, type BoardTask, type Person } from '../api/board'
-import { moveTask, type TaskDetail } from '../api/tasks'
+import { getTask, moveTask, type TaskDetail } from '../api/tasks'
 import { listUsers, type UserItem } from '../api/users'
 import { listLabels, type LabelItem } from '../api/labels'
 import { listDivisions, type DivisionItem } from '../api/divisions'
@@ -44,6 +44,8 @@ import PageHeader from '../components/PageHeader.vue'
 import DailyActivityCard from '../components/DailyActivityCard.vue'
 import FilterToolbar from '../components/FilterToolbar.vue'
 import { filterControl } from '../utils/ui'
+import { debounce, useTaskLive, type TaskEvent } from '../utils/taskLive'
+import LiveIndicator from '../components/LiveIndicator.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -55,21 +57,26 @@ const isStaff = computed(() => session.user?.role === 'staff')
 const staffUsername = computed(() => (isStaff.value ? (session.user?.username ?? null) : null))
 
 // URL adalah sumber filter: bisa di-refresh, dibagikan, dan tombol Back browser tetap bekerja.
-const query = computed(() => parseBoardQuery(route.query, staffUsername.value))
+// Revisi 47: Manajer juga punya saklar Task saya; bawaannya Semua task, jadi scope=mine miliknya tertulis di URL.
+const managerScope = computed(() => isManager.value)
+const query = computed(() => parseBoardQuery(route.query, staffUsername.value, managerScope.value))
 // Revisi 40: kolom Completed paling banyak 10 task dari server. Tautan ke Arsip (yang isinya memang hanya task
 // Completed) membawa filter papan yang juga dikenal Arsip; filter deadline tidak ada di Arsip.
 const archiveLink = computed(() => {
   const b = query.value
   return {
     name: 'archive',
-    query: toArchiveRouteQuery({
-      q: b.q,
-      scope: b.scope,
-      pic: b.pic,
-      division: b.division,
-      label: b.label,
-      urgency: b.urgency,
-    }),
+    query: toArchiveRouteQuery(
+      {
+        q: b.q,
+        scope: b.scope,
+        pic: b.pic,
+        division: b.division,
+        label: b.label,
+        urgency: b.urgency,
+      },
+      managerScope.value,
+    ),
   }
 })
 const filtered = computed(() => hasFilters(query.value))
@@ -81,22 +88,27 @@ const activeFilterCount = computed(
     ).length,
 )
 // Di "Task saya" isinya sudah pasti milik sendiri, jadi filter PIC baru berguna di "Semua task".
-const showPicFilter = computed(() => !isStaff.value || query.value.scope === 'all')
+const showPicFilter = computed(() => query.value.scope !== 'mine')
 // Kunci berupa teks supaya papan hanya dimuat ulang saat filternya benar-benar berubah,
 // bukan setiap kali objek query dibuat ulang.
-const queryKey = computed(() => new URLSearchParams(toRouteQuery(query.value)).toString())
+const queryKey = computed(() => new URLSearchParams(toRouteQuery(query.value, managerScope.value)).toString())
+
+function routeFor(patch: Partial<BoardQuery>) {
+  return toRouteQuery(
+    normalizeBoardQuery({ ...query.value, ...patch }, staffUsername.value, managerScope.value),
+    managerScope.value,
+  )
+}
 
 function setQuery(patch: Partial<BoardQuery>) {
-  void router.push({
-    query: toRouteQuery(normalizeBoardQuery({ ...query.value, ...patch }, staffUsername.value)),
-  })
+  void router.push({ query: routeFor(patch) })
 }
 
 // URL yang tidak sesuai aturan dirapikan dengan replace, supaya tidak menambah langkah di tombol Back.
 watch(
   () => route.query,
   (q) => {
-    const canonical = toRouteQuery(query.value)
+    const canonical = toRouteQuery(query.value, managerScope.value)
     if (!sameRouteQuery(canonical, q)) void router.replace({ query: canonical })
   },
   { immediate: true },
@@ -177,12 +189,14 @@ async function loadCounts() {
   }
 }
 
-// Klik angka menampilkan task saya di papan: filter lain dikosongkan supaya jumlahnya sama dengan angka di kartu.
+// Klik angka menampilkan Task saya di papan untuk Staf dan Manajer (revisi 47): filter lain dikosongkan supaya
+// jumlahnya sama dengan angka di kartu, yang dihitung dengan aturan Task saya yang sama.
 function pickCount(status: TaskStatus) {
-  const self = session.user?.username
-  const mine: Partial<BoardQuery> = isStaff.value ? { scope: 'mine' } : { pic: self }
   void router.push({
-    query: toRouteQuery(normalizeBoardQuery({ ...mine }, staffUsername.value)),
+    query: toRouteQuery(
+      normalizeBoardQuery({ scope: 'mine' }, staffUsername.value, managerScope.value),
+      managerScope.value,
+    ),
   })
   chooseColumn(status)
 }
@@ -248,6 +262,67 @@ async function onStale(message: string) {
 
 // Drag-and-drop hanya untuk mouse di desktop. Layar sentuh dan keyboard memakai tombol Pindahkan (S4-03).
 const dragging = ref<BoardTask | null>(null)
+
+// Revisi 47: papan realtime. Event dari tab atau perangkat lain memuat ulang papan (digabung 300 ms). Selama drag
+// papan tidak dimuat ulang, karena kartu yang sedang diseret akan diganti elemen baru dan drag-nya putus; event
+// ditahan sampai kartu dilepas.
+const refetch = debounce(() => void load(true))
+let held: TaskEvent[] = []
+let heldReconnect = false
+useTaskLive(
+  (e) => {
+    if (dragging.value) held.push(e)
+    else refetch.run()
+  },
+  () => {
+    if (dragging.value) heldReconnect = true
+    else void load(true)
+  },
+)
+onBeforeUnmount(refetch.cancel)
+
+// Melepas event yang ditahan selama drag. Kalau kartu yang diseret ikut berubah, toast menyebut siapa dan ke mana.
+async function releaseHeld(t: BoardTask): Promise<boolean> {
+  const mine = held.filter((e) => e.task_id === t.id).at(-1)
+  const any = held.length > 0 || heldReconnect
+  held = []
+  heldReconnect = false
+  if (!any) return false
+  refetch.cancel()
+  await load(true)
+  if (!mine) return false
+  const who = mine.pelaku || 'orang lain'
+  if (mine.aksi === 'hapus') {
+    notice.value = { kind: 'error', text: `${t.id} sudah dihapus ${who}.` }
+    return true
+  }
+  let status = board.value?.columns.find((c) => c.tasks.some((x) => x.id === t.id))?.status
+  if (!status)
+    status = await getTask(t.id).then(
+      (d) => d.status,
+      () => undefined,
+    )
+  const where = status ? ` ke ${statusLabel[status]}` : ''
+  notice.value = {
+    kind: 'error',
+    text:
+      mine.aksi === 'pindah'
+        ? `${t.id} sudah dipindah ${who}${where}.`
+        : `${t.id} baru saja diubah ${who}. Papan dimuat ulang, cek lagi sebelum memindahkan.`,
+  }
+  return true
+}
+
+// Muat ulang dari dialog Pindahkan: kartu di dialog diganti versi terbaru, catatan yang sudah diketik tetap.
+async function onMoveRefresh(id: string) {
+  await load(true)
+  const fresh = board.value?.columns.flatMap((c) => c.tasks).find((t) => t.id === id)
+  if (fresh) moving.value = fresh
+  else {
+    closeMove()
+    notice.value = { kind: 'error', text: `${id} sudah tidak ada di papan dengan filter ini.` }
+  }
+}
 const dropTarget = ref<TaskStatus | null>(null)
 
 function canDrop(status: TaskStatus): boolean {
@@ -267,9 +342,12 @@ function onDragStart(e: DragEvent, t: BoardTask) {
   if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
 }
 
+// Juga terpicu setelah drop (dragend menyusul drop), saat itu dragging sudah kosong dan tidak ada yang dilepas.
 function onDragEnd() {
+  const t = dragging.value
   dragging.value = null
   dropTarget.value = null
+  if (t) void releaseHeld(t)
 }
 
 // Selama drag: kolom tujuan yang sah bergaris putus-putus olive, kolom yang tidak boleh meredup, dan kolom yang
@@ -301,8 +379,12 @@ function onDragLeave(e: DragEvent, status: TaskStatus) {
 async function onDrop(e: DragEvent, status: TaskStatus) {
   e.preventDefault()
   const t = dragging.value
-  onDragEnd()
-  if (!t || t.status === status) return
+  dragging.value = null
+  dropTarget.value = null
+  if (!t) return
+  // Kartu yang berubah selama diseret sudah basi: tidak dipindahkan, papan dimuat ulang dan toast menjelaskan.
+  if (await releaseHeld(t)) return
+  if (t.status === status) return
   if (!t.move_to.includes(status)) {
     const allowed = t.move_to.map((s) => statusLabel[s]).join(' atau ')
     notice.value = {
@@ -425,7 +507,7 @@ const buttonSecondary =
         </div>
 
         <div
-          v-if="isStaff"
+          v-if="isStaff || isManager"
           class="mt-4 inline-flex rounded-card border border-line bg-surface"
           role="group"
           aria-label="Lingkup task"
@@ -441,7 +523,7 @@ const buttonSecondary =
           <button
             type="button"
             :class="scopeButton"
-            :aria-pressed="query.scope === 'all'"
+            :aria-pressed="query.scope !== 'mine'"
             @click="setQuery({ scope: 'all' })"
           >
             Semua task
@@ -681,7 +763,9 @@ const buttonSecondary =
       @close="closeMove"
       @moved="onMoved"
       @stale="onStale"
+      @refresh="onMoveRefresh"
     />
+    <LiveIndicator what="Papan" />
     <TaskDetailPanel
       :task-id="detailId"
       :labels="labels"

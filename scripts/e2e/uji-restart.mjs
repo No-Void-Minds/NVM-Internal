@@ -7,6 +7,9 @@
 //   3. setelah 6 detik backend dinyalakan lagi;
 //   4. lolos bila ketiganya kembali "Tersimpan", seret Staf tersimpan di server dan terlihat di layar Manajer, dan
 //      waktu sambung ulang ketiganya tidak serentak (jeda acak).
+// Revisi 47: Manajer juga membuka papan task di tab lain. Saat backend mati penanda terputus tampil; setelah
+// menyala penanda hilang, papan dimuat ulang tepat sekali, dan task yang dipindah Staf sesudahnya ikut berpindah di
+// papan Manajer tanpa muat ulang halaman.
 //
 // Cara menjalankan (dari scripts/e2e; variabel sama dengan uji13.mjs):
 //   DEV_ADMIN_PASSWORD=... DEV_STAFF_USERNAME=... DEV_STAFF_PASSWORD=... DEV_MANAGER_USERNAME=... DEV_MANAGER_PASSWORD=... \
@@ -90,6 +93,24 @@ try {
   const note = (await api("POST", `/whiteboard/boards/${board}/cards`, { kind: "note", x: 0, y: 0, w: 240, h: 120, content: { doc: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Restart" }] }] } } })).card;
   await api("POST", `/whiteboard/boards/${board}/cards`, { kind: "note", x: 500, y: 300, w: 240, h: 120 });
 
+  // Revisi 47: task milik Staf (dia PIC-nya, jadi boleh memindahkannya) di papan task Manajer.
+  const stafMe = (await api("GET", "/auth/me")).user;
+  const tq = `E2E restart ${Date.now()}`;
+  const tid = (await api("POST", "/tasks", { title: tq, urgency: "low", pic_ids: [stafMe.id] })).id;
+  const tb = await ctxs.manajer.newPage();
+  const boardGets = [];
+  tb.on("request", (rq) => new URL(rq.url()).pathname === "/api/board" && boardGets.push(Date.now()));
+  await tb.goto(BASE + `/task?q=${encodeURIComponent(tq)}`);
+  await tb.waitForLoadState("networkidle");
+  await tb.evaluate(() => (window.__restart = 1));
+  const columnOf = () =>
+    tb.evaluate((id) => {
+      const tag = [...document.querySelectorAll(".specimen-tag")].find((e) => e.textContent.trim() === id);
+      return tag?.closest("section[aria-labelledby]")?.getAttribute("aria-labelledby") ?? null;
+    }, tid);
+  expect((await columnOf()) === "kolom-requested", "task uji tidak tampil di papan task Manajer");
+  expect((await tb.getByTestId("live-offline").count()) === 0, "penanda terputus papan task tampil saat tersambung");
+
   const pages = {};
   const opens = {};
   for (const r of Object.keys(roles)) {
@@ -117,6 +138,10 @@ try {
     const label = (await page.locator("[data-testid=wb-save]").textContent()).trim();
     expect(label.includes("Terputus"), `${r}: penanda saat backend mati "${label}"`);
   }
+  expect(
+    await tb.getByTestId("live-offline").waitFor({ timeout: 10000 }).then(() => true, () => false),
+    "papan task: penanda terputus tidak tampil saat backend mati",
+  );
 
   await new Promise((r) => setTimeout(r, 6000));
   startBackend();
@@ -126,12 +151,30 @@ try {
       .then(() => true, () => false);
     expect(ok, `${r}: tidak kembali Tersimpan setelah backend menyala`);
   }
+  // Papan task: tersambung lagi, dimuat ulang sekali, lalu perubahan berikutnya datang tanpa muat ulang halaman.
+  const back = await tb.getByTestId("live-offline").waitFor({ state: "detached", timeout: 60000 }).then(() => true, () => false);
+  expect(back, "papan task: penanda terputus tidak hilang setelah backend menyala");
+  await tb.waitForTimeout(1500);
+  const reloads = boardGets.filter((t) => t > killedAt).length;
+  expect(reloads === 1, `papan task dimuat ulang ${reloads} kali setelah tersambung, mau 1`);
+  const ver = (await api("GET", `/tasks/${tid}`)).task.version;
+  await ctxs.staf.request.fetch(BASE + `/api/tasks/${tid}/move`, { method: "POST", headers: { Origin: BASE }, data: { version: ver, to: "on_progress" } });
+  let moved = false;
+  for (let i = 0; i < 50 && !moved; i++) {
+    moved = (await columnOf()) === "kolom-on_progress";
+    if (!moved) await tb.waitForTimeout(100);
+  }
+  expect(moved, "papan task: perpindahan Staf setelah sambung ulang tidak sampai ke Manajer");
+  expect((await tb.evaluate(() => window.__restart)) === 1, "papan task dimuat ulang halaman penuh");
+  const tv = (await api("GET", `/tasks/${tid}`)).task.version;
+  await ctxs.manajer.request.fetch(BASE + `/api/tasks/${tid}?version=${tv}`, { method: "DELETE", headers: { Origin: BASE } });
+
   const after = (await api("GET", `/whiteboard/boards/${board}`)).board.cards.find((c) => c.id === note.id);
   expect(after.x !== note.x, `seret selama backend mati hilang (x ${after.x})`);
   // Manajer melihat posisi baru tanpa muat ulang.
   const pm = pages.manajer;
   await pm.waitForTimeout(500);
-  const z = parseInt((await pm.locator("text=/^\\d+%$/").first().textContent()) ?? "100", 10) / 100;
+  const z = parseInt((await pm.getByTestId("wb-zoom").textContent()).trim(), 10) / 100;
   const mb = await pm.locator(`[data-card="${note.id}"]`).boundingBox();
   const sb = (await pm.evaluate(() => document.querySelector(".wb-world")?.getBoundingClientRect().x)) ?? 0;
   // Kartu di layar ada di (posisi elemen dunia) + x * zoom.
