@@ -1,18 +1,25 @@
 <script setup lang="ts">
 import { useId } from 'vue'
+import { useDrafts } from './drafts'
 import BaseDialog from '../BaseDialog.vue'
 import type { Connector, ConnectorStyle } from '../../utils/whiteboard'
 import { penColors } from './wbColors'
 
 // Dialog garis penghubung: label, ujung, jenis garis, warna, dan hapus. Dibuka dari garis di kanvas atau dari bar
 // pilihan kartu (jalur keyboard), jadi semua garis bisa diubah tanpa penunjuk.
-defineProps<{ open: boolean; connectors: Connector[]; nameOf: (id: string) => string; canWrite: boolean }>()
+const props = defineProps<{
+  open: boolean
+  connectors: Connector[]
+  nameOf: (id: string) => string
+  canWrite: boolean
+}>()
 const emit = defineEmits<{
   close: []
   update: [id: string, patch: { style?: ConnectorStyle; label?: string }]
   remove: [id: string]
 }>()
 const uid = useId()
+const labels = useDrafts(() => Object.fromEntries(props.connectors.map((c) => [c.id, c.label])))
 
 function setStyle(c: Connector, key: keyof ConnectorStyle, e: Event) {
   emit('update', c.id, { style: { ...c.style, [key]: (e.target as HTMLSelectElement).value } })
@@ -45,8 +52,8 @@ const btn =
           <label :for="`${uid}-${i}-label`" class="text-sm">Label</label>
           <input
             :id="`${uid}-${i}-label`"
+            v-model="labels[c.id]"
             :class="field"
-            :value="c.label"
             maxlength="200"
             @change="setLabel(c, $event)"
           />

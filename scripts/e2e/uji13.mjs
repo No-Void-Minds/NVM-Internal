@@ -49,7 +49,7 @@
 // E2E_ONLY=wb2 untuk semua skenario Whiteboard W2 (atau satu per satu: wbhadir, wblangsung, wbseret, wbhapusedit,
 // wbputus, wbundo, wbduatab) ditambah navbar (semua halaman, tiga peran, 768, 1024, 1279, dan 1280 px).
 // E2E_ONLY=wb3 untuk semua skenario Whiteboard W3 (atau satu per satu: wbberkas, wbtautan, wbkolom, wbpenghubung,
-// wbkomentar, wbgambar, wbtabel, wbpindah, wbzoom, wbdobel).
+// wbkomentar, wbgambar, wbtabel, wbpindah, wbzoom, wbdobel, wbketik).
 // Keluar dengan kode 1 bila ada yang gagal.
 import fs from "node:fs";
 import http from "node:http";
@@ -5344,6 +5344,79 @@ async function checkWbDobel(width) {
 }
 
 if (ONLY === "wbdobel") for (const w of [360, 1280]) await checkWbDobel(w);
+// Ketikan yang belum dikirim tidak hilang saat siaran perubahan lain datang: Staf mengetik di judul dan butir
+// checklist, sel tabel, dan label garis, lalu Manajer mengubah bagian lain kartu yang sama (centang, sel lain, gaya
+// garis) dan siarannya sampai sebelum Staf menyimpan.
+async function checkWbKetik(width) {
+  const expect = wbExpect("wbketik", width);
+  const { api, card, board } = await wbSetup("staf", `E2E wbketik ${width} ${Date.now()}`);
+  const i1 = crypto.randomUUID();
+  const i2 = crypto.randomUUID();
+  const list = await wbCard(api, board, "checklist", 0, 0, { title: "Tugas", items: [{ id: i1, text: "Satu", done: false }, { id: i2, text: "Dua", done: false }] });
+  const tb = await wbCard(api, board, "table", 0, 260, { title: "", header: false, rows: [["a", "b"]] }, { w: 360, h: 120 });
+  const errors = [];
+  const cs = await wbContext("staf", width);
+  const mgr = await apiAs("manajer");
+  try {
+    const ps = await wbPage(cs, board, errors);
+    const changed = (sel) =>
+      ps.waitForFunction((s) => !!document.querySelector(s), sel, { timeout: 10000 }).catch(() => {});
+
+    // Checklist: judul dan butir 1 diketik tanpa disimpan; Manajer mencentang butir 2.
+    await ps.locator(`[data-card="${list.id}"]`).click();
+    await ps.keyboard.press("Enter");
+    const title = ps.getByLabel("Judul checklist");
+    await title.waitFor({ timeout: 10000 });
+    await title.fill("Tugas minggu ini");
+    const item = ps.getByLabel("Teks butir 1");
+    await item.fill("Satu diketik");
+    await mgr.call("POST", `/whiteboard/boards/${board}/cards/${list.id}/checklist`, { op: "set", item_id: i2, done: true });
+    await changed(`[data-card="${list.id}"] input[type=checkbox]:checked`);
+    await ps.waitForTimeout(200);
+    expect((await title.inputValue()) === "Tugas minggu ini", "judul checklist", `judul jadi "${await title.inputValue()}"`);
+    expect((await item.inputValue()) === "Satu diketik", "butir checklist", `butir jadi "${await item.inputValue()}"`);
+    await ps.keyboard.press("Escape");
+    await wbSaved(ps);
+    const c = (await wbCards(api, board)).find((x) => x.id === list.id).content;
+    expect(c.title === "Tugas minggu ini" && c.items[0].text === "Satu diketik" && c.items[1].done, "simpan checklist", JSON.stringify(c));
+
+    // Tabel: sel 1 diketik; Manajer (tanpa kunci, lewat patch isi setelah Staf melepas) tidak bisa ikut, jadi
+    // jawaban server untuk operasi Staf sendiri (Tambah baris) yang datang saat sel lain sedang diketik.
+    await ps.locator(`[data-card="${tb.id}"]`).click();
+    await ps.keyboard.press("Enter");
+    const cell = ps.getByLabel("Baris 1, kolom 1");
+    await cell.waitFor({ timeout: 10000 });
+    await cell.fill("a diketik");
+    await ps.getByRole("button", { name: "Tambah baris" }).click();
+    await changed(`[data-card="${tb.id}"] [data-cell="1,0"]`);
+    await ps.waitForTimeout(200);
+    expect((await cell.inputValue()) === "a diketik", "sel tabel", `sel jadi "${await cell.inputValue()}"`);
+    await ps.keyboard.press("Escape");
+    await wbSaved(ps);
+
+    // Label garis: diketik di dialog, Manajer mengganti gaya garis yang sama.
+    const conn = (await api.call("POST", `/whiteboard/boards/${board}/connectors`, { from: list.id, to: tb.id })).body.connector;
+    await ps.reload();
+    await ps.waitForLoadState("networkidle");
+    await ps.locator(`[data-card="${list.id}"]`).click();
+    await ps.getByLabel("Aksi lain untuk kartu terpilih").selectOption("lines");
+    const label = ps.locator("dialog[open]").getByLabel("Label");
+    await label.waitFor({ timeout: 10000 });
+    await label.fill("lalu diketik");
+    await mgr.call("PUT", `/whiteboard/boards/${board}/connectors/${conn.id}`, { style: { start: "none", end: "arrow", line: "dashed", color: "" } });
+    await ps.waitForFunction(() => document.querySelector("[data-testid=wb-connector] path")?.getAttribute("stroke-dasharray"), null, { timeout: 10000 }).catch(() => {});
+    await ps.waitForTimeout(200);
+    expect((await label.inputValue()) === "lalu diketik", "label garis", `label jadi "${await label.inputValue()}"`);
+    await audit(ps, errors, `wbketik ${width} papan`);
+  } finally {
+    await wbCleanup(api, card);
+    await api.ctx.close();
+    await mgr.ctx.close();
+    await cs.close();
+  }
+}
+
+if (ONLY === "wbketik") for (const w of [360, 1280]) await checkWbKetik(w);
 if (ONLY === "wbzoom") for (const w of [360, 1280]) await checkWbZoom(w);
 if (ONLY === "wbberkas") for (const w of [360, 1280]) await checkWbBerkas(w);
 if (ONLY === "wbtautan") for (const w of [360, 1280]) await checkWbTautan(w);
@@ -5365,6 +5438,7 @@ if (ONLY === "wb3")
     await checkWbPindah(w);
     await checkWbZoom(w);
     await checkWbDobel(w);
+    await checkWbKetik(w);
   }
 
 await browser.close();

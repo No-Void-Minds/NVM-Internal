@@ -3,6 +3,7 @@ import { nextTick, ref, useId, watch } from 'vue'
 import type { ChecklistOp } from '../../api/whiteboard'
 import { newId, type ChecklistContent } from '../../utils/whiteboard'
 import { placeCaret, type CaretHint } from './caret'
+import { useDrafts } from './drafts'
 
 // Checklist di kartu. Setiap perubahan dikirim sebagai operasi per butir (centang, teks, tambah, hapus), bukan isi
 // utuh, jadi dua orang yang mengubah butir berbeda tidak saling menimpa. Centang boleh tanpa membuka editor.
@@ -16,6 +17,10 @@ const emit = defineEmits<{ op: [op: ChecklistOp]; close: [] }>()
 
 const uid = useId()
 const root = ref<HTMLElement | null>(null)
+// Kunci "title" untuk judul, id butir untuk teks butir.
+const drafts = useDrafts(() =>
+  Object.fromEntries([['title', props.content.title], ...props.content.items.map((i) => [i.id, i.text])]),
+)
 
 // Editor ditutup tanpa blur (klik di kanvas melepas input dari DOM, jadi change tidak terpanggil): isian yang
 // berubah dikirim sebelum DOM diperbarui. Watch bawaan berjalan sebelum render, saat input masih ada.
@@ -95,7 +100,7 @@ function onKeydown(e: KeyboardEvent) {
       <label :for="`${uid}-title`" class="sr-only">Judul checklist</label>
       <input
         :id="`${uid}-title`"
-        :value="content.title"
+        v-model="drafts.title"
         maxlength="200"
         placeholder="Judul checklist"
         class="min-h-11 rounded-card border border-line bg-surface px-2 font-semibold text-ink"
@@ -127,8 +132,8 @@ function onKeydown(e: KeyboardEvent) {
           <label :for="`${uid}-${item.id}`" class="sr-only">Teks butir {{ i + 1 }}</label>
           <input
             :id="`${uid}-${item.id}`"
+            v-model="drafts[item.id]"
             :data-item="item.id"
-            :value="item.text"
             maxlength="500"
             class="min-h-11 min-w-0 flex-1 rounded-card border border-line bg-surface px-2 text-ink"
             @pointerdown.stop
