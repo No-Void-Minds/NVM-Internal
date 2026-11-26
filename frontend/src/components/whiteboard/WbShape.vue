@@ -31,6 +31,13 @@ const fill = computed(() =>
   openShape(props.content.shape) ? 'none' : (fillVar[props.content.fill] ?? 'none'),
 )
 const stroke = computed(() => inkColor(props.content.stroke))
+// Balik mendatar dan tegak (revisi 50) hanya membalik gambar bentuk di kotaknya; teks tetap terbaca.
+const pathTransform = computed(() => {
+  const fx = props.content.flip_x ? Math.max(1, props.w - sw.value) : 0
+  const fy = props.content.flip_y ? Math.max(1, props.h - sw.value) : 0
+  const flip = fx || fy ? ` translate(${fx} ${fy}) scale(${fx ? -1 : 1} ${fy ? -1 : 1})` : ''
+  return `translate(${inset.value} ${inset.value})${flip}`
+})
 const isClass = computed(() => props.content.shape === 'uml_class')
 
 // Area teks di dalam bentuk: bentuk runcing (belah ketupat, segitiga, bintang) memberi ruang lebih sempit.
@@ -108,7 +115,7 @@ const field = 'block w-full'
     <svg :width="w" :height="h" class="absolute inset-0 overflow-visible" aria-hidden="true">
       <path
         :d="d"
-        :transform="`translate(${inset} ${inset})`"
+        :transform="pathTransform"
         :fill="fill"
         :stroke-width="sw"
         :stroke-dasharray="content.stroke_style === 'dashed' ? `${sw * 4} ${sw * 3}` : undefined"

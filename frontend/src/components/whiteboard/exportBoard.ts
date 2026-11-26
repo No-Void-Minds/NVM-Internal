@@ -1,7 +1,8 @@
 // Penggambar ekspor papan ke kanvas (W4). Digambar ulang dari data kartu, bukan tangkapan DOM, karena kartu di luar
 // layar tidak di-mount (culling) dan tangkapan DOM butuh pustaka tambahan. Hasilnya teks dengan format huruf (tebal,
 // miring, garis bawah, coret, warna, stabilo, ukuran, dan perataan; revisi 49), gambar dari thumbnail, tabel sebagai
-// kisi, goresan, dan garis penghubung.
+// kisi, goresan, dan garis penghubung. Sejak revisi 50 juga gaya kartu (latar, garis tepi, sudut, bayangan tegas,
+// transparansi, jarak dalam), potongan gambar, dan bentuk yang dibalik.
 // Warna selalu dari token mode terang, supaya PNG dan PDF tetap layak dicetak walau aplikasi sedang di mode gelap.
 import { fileUrl } from '../../api/whiteboard'
 import { EXPORT_PAD, EXPORT_SCALE, exportScale } from '../../utils/wbExport'
@@ -63,6 +64,22 @@ function ink(tok: (n: string) => string, value: string) {
 }
 
 type Tok = (n: string) => string
+
+// Tampilan kartu dari gaya revisi 50 (utils/wbStyle.ts), dengan nilai yang sama dengan kelas wb-st-* di style.css.
+function lookOf(card: Card) {
+  const st = card.style ?? {}
+  const pen = penColors.find((c) => c.value === st.border_color)
+  return {
+    alpha: st.opacity && st.opacity < 100 && card.kind !== 'board' ? st.opacity / 100 : 1,
+    clear: st.bg === 'transparan' && card.kind !== 'image' && card.kind !== 'shape',
+    border: st.border === 'tanpa' ? 0 : st.border === 'sedang' ? 2 : st.border === 'tebal' ? 4 : 1,
+    borderColor: pen ? pen.css.slice(4, -1) : '--color-line',
+    dash: st.border_style === 'putus' ? [8, 5] : st.border_style === 'titik' ? [2, 4] : [],
+    radius: st.radius === 'siku' ? 0 : st.radius === 'sedang' ? 12 : st.radius === 'bulat' ? 24 : RADIUS,
+    shadow: st.shadow === 'tegas',
+    pad: card.kind === 'image' ? PAD : st.padding === 'rapat' ? 6 : st.padding === 'lega' ? 20 : PAD,
+  }
+}
 // Satu baris hasil pecah: run berformat dan apakah baris terakhir paragrafnya (rata kiri-kanan tidak meregangkannya).
 type Drawn = TextLine & { runs: Run[]; last: boolean }
 type Laid = { card: Card; rect: Rect; text: Drawn[] }
@@ -159,8 +176,9 @@ export async function renderBoard(cards: Card[], connectors: Connector[]): Promi
 
   // Tinggi kartu teks mengikuti isinya, seperti di layar (min-height), supaya teks panjang tidak terpotong.
   const laid: Laid[] = cards.map((card) => {
-    const text = cardLines(card).flatMap((l) => wrapLine(measure, tok, l, Math.max(20, card.w - PAD * 2)))
-    let need = PAD * 2 + text.reduce((n, l) => n + lineHeight(l), 0)
+    const pad = lookOf(card).pad
+    const text = cardLines(card).flatMap((l) => wrapLine(measure, tok, l, Math.max(20, card.w - pad * 2)))
+    let need = pad * 2 + text.reduce((n, l) => n + lineHeight(l), 0)
     if (card.kind === 'table') need += ((card.content as TableContent).rows.length || 1) * 28
     if (card.kind === 'image' || card.kind === 'shape') need = card.h
     return {
@@ -237,6 +255,16 @@ export async function renderBoard(cards: Card[], connectors: Connector[]): Promi
   const order = laid.map((_, i) => i).sort((i, j) => laid[i]!.card.z - laid[j]!.card.z)
   for (const i of order) {
     const { card, rect, text } = laid[i]!
+    const look = lookOf(card)
+    ctx.save()
+    ctx.globalAlpha = look.alpha
+    drawCard(i, card, rect, text, look)
+    ctx.restore()
+  }
+  return { canvas, scale, reduced: scale < EXPORT_SCALE }
+
+  function drawCard(i: number, card: Card, rect: Rect, text: Drawn[], look: ReturnType<typeof lookOf>) {
+    if (!ctx) return
     if (card.kind === 'drawing') {
       ctx.lineCap = 'round'
       ctx.lineJoin = 'round'
@@ -253,20 +281,30 @@ export async function renderBoard(cards: Card[], connectors: Connector[]): Promi
         if (s.points.length === 2) ctx.lineTo(card.x + s.points[0]! + 0.1, card.y + s.points[1]!)
         ctx.stroke()
       }
-      continue
+      return
     }
     if (card.kind === 'shape') {
+      if (look.shadow) setShadow(ctx)
       drawShape(ctx, tok, card.content as ShapeContent, rect)
-      continue
+      return
     }
     ctx.beginPath()
-    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, RADIUS)
-    ctx.fillStyle = tok(card.color ? cardBg[card.color]! : '--color-surface')
-    ctx.fill()
-    ctx.strokeStyle = tok('--color-line')
-    ctx.lineWidth = 1
-    ctx.stroke()
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, look.radius)
+    if (!look.clear) {
+      if (look.shadow) setShadow(ctx)
+      ctx.fillStyle = tok(card.color ? cardBg[card.color]! : '--color-surface')
+      ctx.fill()
+      ctx.shadowColor = 'transparent'
+    }
+    if (look.border) {
+      ctx.strokeStyle = tok(look.borderColor)
+      ctx.lineWidth = look.border
+      ctx.setLineDash(look.dash)
+      ctx.stroke()
+      ctx.setLineDash([])
+    }
 
+    const PAD = look.pad
     let y = rect.y + PAD
     const img = images[i]
     if (img) {
@@ -275,15 +313,30 @@ export async function renderBoard(cards: Card[], connectors: Connector[]): Promi
       const k = Math.min(rect.w / img.width, ih / img.height)
       ctx.save()
       ctx.beginPath()
-      ctx.roundRect(rect.x, rect.y, rect.w, rect.h, RADIUS)
+      ctx.roundRect(rect.x, rect.y, rect.w, rect.h, look.radius)
       ctx.clip()
-      ctx.drawImage(
-        img,
-        rect.x + (rect.w - img.width * k) / 2,
-        rect.y + (ih - img.height * k) / 2,
-        img.width * k,
-        img.height * k,
-      )
+      // Potongan (revisi 50): bagian potongan saja yang mengisi area gambar kartu, sama dengan tampilan di layar.
+      const crop = (card.content as CaptionContent).crop
+      if (crop) {
+        ctx.drawImage(
+          img,
+          crop.x * img.width,
+          crop.y * img.height,
+          crop.w * img.width,
+          crop.h * img.height,
+          rect.x,
+          rect.y,
+          rect.w,
+          ih,
+        )
+      } else
+        ctx.drawImage(
+          img,
+          rect.x + (rect.w - img.width * k) / 2,
+          rect.y + (ih - img.height * k) / 2,
+          img.width * k,
+          img.height * k,
+        )
       ctx.restore()
       y = rect.y + ih + 8
     }
@@ -326,7 +379,13 @@ export async function renderBoard(cards: Card[], connectors: Connector[]): Promi
     }
     ctx.restore()
   }
-  return { canvas, scale, reduced: scale < EXPORT_SCALE }
+}
+
+// Bayangan tegas: hanya untuk kartu yang perlu menonjol (hierarki), sama dengan .wb-st-sh2.
+function setShadow(ctx: CanvasRenderingContext2D) {
+  ctx.shadowColor = 'rgba(26, 28, 32, 0.22)'
+  ctx.shadowBlur = 20
+  ctx.shadowOffsetY = 8
 }
 
 const shapeFill: Record<string, string> = { putih: '--color-surface', ...cardBg }
@@ -339,9 +398,16 @@ function drawShape(ctx: CanvasRenderingContext2D, tok: Tok, c: ShapeContent, r: 
   ctx.translate(r.x + r.w / 2, r.y + r.h / 2)
   ctx.rotate(((c.rotation || 0) * Math.PI) / 180)
   ctx.translate(-r.w / 2, -r.h / 2)
-  const path = new Path2D(shapePath(c.shape, Math.max(1, r.w - sw), Math.max(1, r.h - sw)))
+  const pw = Math.max(1, r.w - sw)
+  const ph = Math.max(1, r.h - sw)
+  const path = new Path2D(shapePath(c.shape, pw, ph))
   ctx.save()
   ctx.translate(sw / 2, sw / 2)
+  // Balik mendatar dan tegak (revisi 50): hanya path bentuknya, teks digambar sesudahnya tanpa dibalik.
+  if (c.flip_x || c.flip_y) {
+    ctx.translate(c.flip_x ? pw : 0, c.flip_y ? ph : 0)
+    ctx.scale(c.flip_x ? -1 : 1, c.flip_y ? -1 : 1)
+  }
   if (!openShape(c.shape) && c.fill) {
     ctx.fillStyle = tok(shapeFill[c.fill] ?? '--color-surface')
     ctx.fill(path)

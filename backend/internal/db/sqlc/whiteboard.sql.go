@@ -212,7 +212,7 @@ func (q *Queries) GetWbBoardForUpdate(ctx context.Context, id pgtype.UUID) (GetW
 
 const getWbCard = `-- name: GetWbCard :one
 SELECT c.id, c.board_id, c.kind, c.ref_board_id, c.x, c.y, c.w, c.h, c.z, c.color, c.content, c.version,
-       c.content_version, c.seq, c.updated_by, c.updated_at, c.file_id, c.column_id, c.col_order,
+       c.content_version, c.seq, c.updated_by, c.updated_at, c.file_id, c.column_id, c.col_order, c.style, c.locked, c.group_ids,
        coalesce(rb.title, '')::text AS ref_title, coalesce(rb.version, 0)::int AS ref_version,
        (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind = 'board')::bigint AS ref_boards,
        (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind <> 'board')::bigint AS ref_cards,
@@ -253,6 +253,9 @@ type GetWbCardRow struct {
 	FileID             pgtype.UUID
 	ColumnID           pgtype.UUID
 	ColOrder           pgtype.Float8
+	Style              []byte
+	Locked             bool
+	GroupIds           []pgtype.UUID
 	RefTitle           string
 	RefVersion         int32
 	RefBoards          int64
@@ -297,6 +300,9 @@ func (q *Queries) GetWbCard(ctx context.Context, id pgtype.UUID) (GetWbCardRow, 
 		&i.FileID,
 		&i.ColumnID,
 		&i.ColOrder,
+		&i.Style,
+		&i.Locked,
+		&i.GroupIds,
 		&i.RefTitle,
 		&i.RefVersion,
 		&i.RefBoards,
@@ -321,7 +327,7 @@ func (q *Queries) GetWbCard(ctx context.Context, id pgtype.UUID) (GetWbCardRow, 
 }
 
 const getWbCardForUpdate = `-- name: GetWbCardForUpdate :one
-SELECT id, board_id, kind, ref_board_id, content, content_version, column_id
+SELECT id, board_id, kind, ref_board_id, content, content_version, column_id, locked, file_id
 FROM wb_cards
 WHERE id = $1 AND board_id = $2 AND deleted_at IS NULL
 FOR UPDATE
@@ -340,6 +346,8 @@ type GetWbCardForUpdateRow struct {
 	Content        []byte
 	ContentVersion int32
 	ColumnID       pgtype.UUID
+	Locked         bool
+	FileID         pgtype.UUID
 }
 
 func (q *Queries) GetWbCardForUpdate(ctx context.Context, arg GetWbCardForUpdateParams) (GetWbCardForUpdateRow, error) {
@@ -353,6 +361,8 @@ func (q *Queries) GetWbCardForUpdate(ctx context.Context, arg GetWbCardForUpdate
 		&i.Content,
 		&i.ContentVersion,
 		&i.ColumnID,
+		&i.Locked,
+		&i.FileID,
 	)
 	return i, err
 }
@@ -597,9 +607,10 @@ func (q *Queries) InsertWbBoard(ctx context.Context, arg InsertWbBoardParams) (p
 }
 
 const insertWbCard = `-- name: InsertWbCard :exec
-INSERT INTO wb_cards (id, board_id, kind, ref_board_id, file_id, x, y, w, h, z, color, content, plain, seq, created_by, updated_by)
+INSERT INTO wb_cards (id, board_id, kind, ref_board_id, file_id, x, y, w, h, z, color, content, plain, seq, created_by, updated_by,
+                      style, locked, group_ids)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-        $13, $14, $15, $15)
+        $13, $14, $15, $15, $16, $17, $18::uuid[])
 `
 
 type InsertWbCardParams struct {
@@ -618,6 +629,9 @@ type InsertWbCardParams struct {
 	Plain      string
 	Seq        int64
 	ActorID    int64
+	Style      []byte
+	Locked     bool
+	GroupIds   []pgtype.UUID
 }
 
 func (q *Queries) InsertWbCard(ctx context.Context, arg InsertWbCardParams) error {
@@ -637,15 +651,18 @@ func (q *Queries) InsertWbCard(ctx context.Context, arg InsertWbCardParams) erro
 		arg.Plain,
 		arg.Seq,
 		arg.ActorID,
+		arg.Style,
+		arg.Locked,
+		arg.GroupIds,
 	)
 	return err
 }
 
 const insertWbCardCopy = `-- name: InsertWbCardCopy :exec
 INSERT INTO wb_cards (id, board_id, kind, ref_board_id, file_id, column_id, col_order, x, y, w, h, z, color, content,
-                      plain, created_by, updated_by)
+                      plain, created_by, updated_by, style, locked, group_ids)
 VALUES ($1, $2, $3, $4, $5, $6, $7,
-        $8, $9, $10, $11, $12, $13, $14, $15, $16, $16)
+        $8, $9, $10, $11, $12, $13, $14, $15, $16, $16, $17, $18, $19::uuid[])
 `
 
 type InsertWbCardCopyParams struct {
@@ -665,6 +682,9 @@ type InsertWbCardCopyParams struct {
 	Content    []byte
 	Plain      string
 	ActorID    int64
+	Style      []byte
+	Locked     bool
+	GroupIds   []pgtype.UUID
 }
 
 func (q *Queries) InsertWbCardCopy(ctx context.Context, arg InsertWbCardCopyParams) error {
@@ -685,6 +705,9 @@ func (q *Queries) InsertWbCardCopy(ctx context.Context, arg InsertWbCardCopyPara
 		arg.Content,
 		arg.Plain,
 		arg.ActorID,
+		arg.Style,
+		arg.Locked,
+		arg.GroupIds,
 	)
 	return err
 }
@@ -977,7 +1000,7 @@ func (q *Queries) ListWbCardBounds(ctx context.Context, boardID pgtype.UUID) (Li
 
 const listWbCards = `-- name: ListWbCards :many
 SELECT c.id, c.board_id, c.kind, c.ref_board_id, c.x, c.y, c.w, c.h, c.z, c.color, c.content, c.version,
-       c.content_version, c.seq, c.updated_by, c.updated_at, c.file_id, c.column_id, c.col_order,
+       c.content_version, c.seq, c.updated_by, c.updated_at, c.file_id, c.column_id, c.col_order, c.style, c.locked, c.group_ids,
        coalesce(rb.title, '')::text AS ref_title, coalesce(rb.version, 0)::int AS ref_version,
        (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind = 'board')::bigint AS ref_boards,
        (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind <> 'board')::bigint AS ref_cards,
@@ -1019,6 +1042,9 @@ type ListWbCardsRow struct {
 	FileID             pgtype.UUID
 	ColumnID           pgtype.UUID
 	ColOrder           pgtype.Float8
+	Style              []byte
+	Locked             bool
+	GroupIds           []pgtype.UUID
 	RefTitle           string
 	RefVersion         int32
 	RefBoards          int64
@@ -1070,6 +1096,9 @@ func (q *Queries) ListWbCards(ctx context.Context, boardID pgtype.UUID) ([]ListW
 			&i.FileID,
 			&i.ColumnID,
 			&i.ColOrder,
+			&i.Style,
+			&i.Locked,
+			&i.GroupIds,
 			&i.RefTitle,
 			&i.RefVersion,
 			&i.RefBoards,
@@ -1101,7 +1130,8 @@ func (q *Queries) ListWbCards(ctx context.Context, boardID pgtype.UUID) ([]ListW
 }
 
 const listWbCardsForCopy = `-- name: ListWbCardsForCopy :many
-SELECT id, board_id, kind, ref_board_id, file_id, column_id, col_order, x, y, w, h, z, color, content, plain
+SELECT id, board_id, kind, ref_board_id, file_id, column_id, col_order, x, y, w, h, z, color, content, plain,
+       style, locked, group_ids
 FROM wb_cards
 WHERE board_id = ANY($1::uuid[]) AND deleted_at IS NULL
 ORDER BY (column_id IS NOT NULL), board_id, z, id
@@ -1123,6 +1153,9 @@ type ListWbCardsForCopyRow struct {
 	Color      pgtype.Text
 	Content    []byte
 	Plain      string
+	Style      []byte
+	Locked     bool
+	GroupIds   []pgtype.UUID
 }
 
 // Kolom lebih dulu, supaya column_id isi kolom salinan menunjuk kolom yang sudah ada.
@@ -1151,6 +1184,9 @@ func (q *Queries) ListWbCardsForCopy(ctx context.Context, boardIds []pgtype.UUID
 			&i.Color,
 			&i.Content,
 			&i.Plain,
+			&i.Style,
+			&i.Locked,
+			&i.GroupIds,
 		); err != nil {
 			return nil, err
 		}
@@ -1164,7 +1200,7 @@ func (q *Queries) ListWbCardsForCopy(ctx context.Context, boardIds []pgtype.UUID
 
 const listWbCardsSince = `-- name: ListWbCardsSince :many
 SELECT c.id, c.board_id, c.kind, c.ref_board_id, c.x, c.y, c.w, c.h, c.z, c.color, c.content, c.version,
-       c.content_version, c.seq, c.updated_by, c.updated_at, c.file_id, c.column_id, c.col_order,
+       c.content_version, c.seq, c.updated_by, c.updated_at, c.file_id, c.column_id, c.col_order, c.style, c.locked, c.group_ids,
        coalesce(rb.title, '')::text AS ref_title, coalesce(rb.version, 0)::int AS ref_version,
        (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind = 'board')::bigint AS ref_boards,
        (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind <> 'board')::bigint AS ref_cards,
@@ -1212,6 +1248,9 @@ type ListWbCardsSinceRow struct {
 	FileID             pgtype.UUID
 	ColumnID           pgtype.UUID
 	ColOrder           pgtype.Float8
+	Style              []byte
+	Locked             bool
+	GroupIds           []pgtype.UUID
 	RefTitle           string
 	RefVersion         int32
 	RefBoards          int64
@@ -1265,6 +1304,9 @@ func (q *Queries) ListWbCardsSince(ctx context.Context, arg ListWbCardsSincePara
 			&i.FileID,
 			&i.ColumnID,
 			&i.ColOrder,
+			&i.Style,
+			&i.Locked,
+			&i.GroupIds,
 			&i.RefTitle,
 			&i.RefVersion,
 			&i.RefBoards,
@@ -1569,6 +1611,37 @@ func (q *Queries) ListWbExpiredBatches(ctx context.Context, before pgtype.Timest
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWbLockedCards = `-- name: ListWbLockedCards :many
+SELECT id FROM wb_cards
+WHERE board_id = $1 AND deleted_at IS NULL AND locked AND id = ANY($2::uuid[])
+`
+
+type ListWbLockedCardsParams struct {
+	BoardID pgtype.UUID
+	Ids     []pgtype.UUID
+}
+
+// Kartu terkunci di antara id ini (revisi 50): ditolak saat dihapus.
+func (q *Queries) ListWbLockedCards(ctx context.Context, arg ListWbLockedCardsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listWbLockedCards, arg.BoardID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -1951,12 +2024,16 @@ SET x = coalesce($1, x),
     col_order = CASE WHEN $6::bool THEN NULL ELSE coalesce($8, col_order) END,
     color = CASE WHEN $9::bool THEN NULL ELSE coalesce($10, color) END,
     content = coalesce($11, content),
-    plain = coalesce($12, plain),
+    style = coalesce($12, style),
+    locked = coalesce($13, locked),
+    group_ids = CASE WHEN $14::bool THEN $15::uuid[] ELSE group_ids END,
+    file_id = coalesce($16, file_id),
+    plain = coalesce($17, plain),
     content_version = content_version + CASE WHEN $11::jsonb IS NULL THEN 0 ELSE 1 END,
     version = version + 1,
-    seq = $13,
-    updated_by = $14
-WHERE id = $15 AND board_id = $16 AND deleted_at IS NULL
+    seq = $18,
+    updated_by = $19
+WHERE id = $20 AND board_id = $21 AND deleted_at IS NULL
 `
 
 type PatchWbCardParams struct {
@@ -1971,6 +2048,11 @@ type PatchWbCardParams struct {
 	ClearColor  bool
 	Color       pgtype.Text
 	Content     []byte
+	Style       []byte
+	Locked      pgtype.Bool
+	SetGroups   bool
+	GroupIds    []pgtype.UUID
+	FileID      pgtype.UUID
 	Plain       pgtype.Text
 	Seq         int64
 	ActorID     int64
@@ -1993,6 +2075,11 @@ func (q *Queries) PatchWbCard(ctx context.Context, arg PatchWbCardParams) error 
 		arg.ClearColor,
 		arg.Color,
 		arg.Content,
+		arg.Style,
+		arg.Locked,
+		arg.SetGroups,
+		arg.GroupIds,
+		arg.FileID,
 		arg.Plain,
 		arg.Seq,
 		arg.ActorID,

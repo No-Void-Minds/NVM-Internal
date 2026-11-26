@@ -605,6 +605,9 @@ type WbCard struct {
 	FileID         pgtype.UUID
 	ColumnID       pgtype.UUID
 	ColOrder       pgtype.Float8
+	Style          []byte
+	Locked         bool
+	GroupIds       []pgtype.UUID
 }
 
 type WbComment struct {

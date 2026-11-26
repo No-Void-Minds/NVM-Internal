@@ -308,10 +308,83 @@ textarea:focus-visible:not([aria-invalid='true']) {
     transparent 1.5px
   );
 }
+/* Gaya kartu revisi 50 (utils/wbStyle.ts). Di luar @layer supaya menang atas utilitas bawaan kartu (bg-*, border,
+   shadow-sm, p-3), dan ditulis sebelum garis pilihan supaya garis pilihan dan bingkai kolaborasi tetap terlihat.
+   Bayangan hanya untuk hierarki: "tegas" menandai kartu yang perlu menonjol, bukan dekorasi. Warna garis tepi memakai
+   token warna pena, minimal 3:1 terhadap kanvas di kedua tema. */
+.wb-st-clear {
+  background-color: transparent;
+}
+.wb-st-b0 {
+  border-width: 0;
+}
+.wb-st-b2 {
+  border-width: 2px;
+}
+.wb-st-b4 {
+  border-width: 4px;
+}
+.wb-st-bc-tinta {
+  border-color: var(--color-ink);
+}
+.wb-st-bc-abu {
+  border-color: var(--color-requested-fg);
+}
+.wb-st-bc-hijau {
+  border-color: var(--color-progress-fg);
+}
+.wb-st-bc-kuning {
+  border-color: var(--color-ready-fg);
+}
+.wb-st-bc-biru {
+  border-color: var(--color-collab-2);
+}
+.wb-st-bc-krem {
+  border-color: var(--color-high);
+}
+.wb-st-bc-merah {
+  border-color: var(--color-danger);
+}
+.wb-st-dashed {
+  border-style: dashed;
+}
+.wb-st-dotted {
+  border-style: dotted;
+}
+.wb-st-r0 {
+  border-radius: 0;
+}
+.wb-st-r2 {
+  border-radius: 12px;
+}
+.wb-st-r3 {
+  border-radius: 24px;
+}
+.wb-st-sh0 {
+  box-shadow: none;
+}
+.wb-st-sh2 {
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--color-ink) 22%, transparent);
+}
+/* Bentuk tidak berkotak: bayangan mengikuti garis bentuknya, bukan kotak kartunya. */
+.wb-card-shape.wb-st-sh2 {
+  box-shadow: none;
+  filter: drop-shadow(0 6px 10px color-mix(in srgb, var(--color-ink) 28%, transparent));
+}
+.wb-st-p1 {
+  padding: 0.375rem;
+}
+.wb-st-p3 {
+  padding: 1.25rem;
+}
 /* Garis pilihan dan cincin fokus kartu. --wb-ring dibagi zoom di WbCard, jadi tebalnya tetap 2 px di layar.
    Pilihan garis penuh, fokus keyboard garis putus-putus di luarnya, jadi keduanya terlihat bersamaan. */
 .wb-card-selected {
   box-shadow: 0 0 0 var(--wb-ring) var(--color-mark);
+}
+/* Bingkai grup terpilih (revisi 50): putus-putus seperti fokus, tebal tetap 2 px di layar. */
+.wb-group-frame {
+  outline: var(--wb-ring) dashed var(--color-mark);
 }
 .wb-card:focus {
   outline: none;

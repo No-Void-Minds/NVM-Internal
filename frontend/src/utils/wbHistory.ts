@@ -14,9 +14,25 @@ type Card = {
   color: CardColor | null
   content: unknown
   content_version: number
+  style?: Record<string, unknown>
+  locked?: boolean
+  group_ids?: string[]
+  file?: { id: string }
 }
 
-export type Geo = { x?: number; y?: number; w?: number; h?: number; z?: number; color?: CardColor | null }
+// Revisi 50: gaya, kunci, grup, dan berkas ikut langkah tata letak (salin gaya, kunci, grup, ganti gambar).
+export type Geo = {
+  x?: number
+  y?: number
+  w?: number
+  h?: number
+  z?: number
+  color?: CardColor | null
+  style?: Record<string, unknown>
+  locked?: boolean
+  group_ids?: string[]
+  file_id?: string
+}
 export type GeoPatch = {
   id: string
   x?: number
@@ -25,6 +41,10 @@ export type GeoPatch = {
   h?: number
   z?: number
   color?: CardColor | ''
+  style?: Record<string, unknown>
+  locked?: boolean
+  group_ids?: string[]
+  file_id?: string
 }
 
 export type ChecklistInverse = { undo: Record<string, unknown>; redo: Record<string, unknown> }
@@ -35,15 +55,29 @@ export type Step =
   | { kind: 'create'; ids: string[]; batch?: string }
   | { kind: 'delete'; ids: string[]; batch: string }
   | { kind: 'checklist'; id: string; ops: ChecklistInverse }
+  // Garis baru dari Hubungkan dengan garis (revisi 50); batches diisi saat undo untuk redo lewat pemulihan.
+  | { kind: 'connectors'; ids: string[]; batches: string[] }
 
 export const MAX_STEPS = 100
 
-const fields = ['x', 'y', 'w', 'h', 'z', 'color'] as const
+const fields = ['x', 'y', 'w', 'h', 'z', 'color', 'style', 'locked', 'group_ids', 'file_id'] as const
+type Field = (typeof fields)[number]
+
+function valueOf(card: Card, f: Field): unknown {
+  if (f === 'file_id') return card.file?.id
+  if (f === 'style') return card.style ?? {}
+  if (f === 'locked') return card.locked ?? false
+  if (f === 'group_ids') return card.group_ids ?? []
+  return card[f]
+}
+
+// Nilai objek dan larik (gaya, jalur grup) dibandingkan isinya.
+const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
 
 // geo mengambil field tata letak sebuah kartu, untuk dicatat sebelum dan sesudah aksi.
-export function geo(card: Card, only: readonly (typeof fields)[number][] = fields): Geo {
+export function geo(card: Card, only: readonly Field[] = ['x', 'y', 'w', 'h', 'z', 'color']): Geo {
   const out: Geo = {}
-  for (const f of only) (out as Record<string, unknown>)[f] = card[f]
+  for (const f of only) (out as Record<string, unknown>)[f] = valueOf(card, f)
   return out
 }
 
@@ -68,9 +102,9 @@ export function layoutPatches(
     let any = false
     for (const f of fields) {
       if (!(f in target)) continue
-      const now = card[f] ?? null
+      const now = valueOf(card, f) ?? null
       const was = (expect as Record<string, unknown>)[f] ?? null
-      if (now !== was) {
+      if (!same(now, was)) {
         skipped++
         continue
       }

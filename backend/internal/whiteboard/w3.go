@@ -139,8 +139,108 @@ func columnPatch(ctx context.Context, q *sqlc.Queries, boardID, id pgtype.UUID, 
 // ---------------------------------------------------------------------------------------------------------------
 // Berkas dan gambar
 
+// upload: berkas yang sudah ditulis ke tmp/, dicek tipenya dari isi, dan (untuk gambar) dibuatkan thumbnail, tetapi
+// belum tercatat di wb_files. Dipakai unggah kartu baru dan ganti gambar atau berkas (revisi 50).
+type upload struct {
+	tmpPath, thumbTmp, name, mime, kind, sum string
+	size                                     int64
+	width, height                            pgtype.Int4
+}
+
+func (u *upload) cleanup() {
+	_ = os.Remove(u.tmpPath)
+	if u.thumbTmp != "" {
+		_ = os.Remove(u.thumbTmp)
+	}
+}
+
+// prepareUpload: alur berkasnya sama dengan lampiran: tmp/ sambil dihitung SHA-256, tipe dari isi.
+func (s *Service) prepareUpload(originalName string, r io.Reader) (*upload, error) {
+	if s.store == nil {
+		return nil, ErrNoStorage
+	}
+	tmp, err := s.store.CreateTemp()
+	if err != nil {
+		return nil, err
+	}
+	u := &upload{tmpPath: tmp.Name()}
+	ok := false
+	defer func() {
+		_ = tmp.Close()
+		if !ok {
+			u.cleanup()
+		}
+	}()
+	h := sha256.New()
+	n, err := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(r, MaxFileSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if n > MaxFileSize {
+		return nil, ErrTooLarge
+	}
+	if n == 0 {
+		return nil, apperr.Invalid("Berkas kosong.")
+	}
+	u.size, u.sum = n, hex.EncodeToString(h.Sum(nil))
+	u.name = attachment.CleanName(originalName)
+	if u.mime, err = attachment.DetectWhiteboard(tmp, n, u.name); err != nil {
+		var rej *attachment.Rejected
+		if errors.As(err, &rej) {
+			return nil, apperr.Invalid(rej.Message)
+		}
+		return nil, err
+	}
+	u.kind = KindFile
+	if strings.HasPrefix(u.mime, "image/") {
+		if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+			return nil, err
+		}
+		w, h, thumb, err := makeThumb(tmp)
+		if err != nil {
+			return nil, err
+		}
+		u.kind = KindImage
+		u.width, u.height = pgtype.Int4{Int32: int32(w), Valid: true}, pgtype.Int4{Int32: int32(h), Valid: true}
+		if u.thumbTmp, err = s.writeTemp(thumb); err != nil {
+			return nil, err
+		}
+	}
+	if err := tmp.Close(); err != nil {
+		return nil, err
+	}
+	ok = true
+	return u, nil
+}
+
+func (u *upload) insert(ctx context.Context, q *sqlc.Queries, fileID, boardID pgtype.UUID, actor Actor) error {
+	return q.InsertWbFile(ctx, sqlc.InsertWbFileParams{
+		ID: fileID, BoardID: boardID, Kind: u.kind, OriginalName: u.name, MimeType: u.mime, SizeBytes: u.size,
+		Checksum: u.sum, Width: u.width, Height: u.height, HasThumb: u.thumbTmp != "",
+		UploadedBy: pgtype.Int8{Int64: actor.ID, Valid: true},
+	})
+}
+
+// commit memindah thumbnail lalu berkas asli ke tempatnya, di akhir transaksi. Thumbnail lebih dulu: kalau berkas
+// asli gagal, transaksi batal dan thumbnail yatim dibersihkan pembersih berkas yatim.
+func (s *Service) commitUpload(u *upload, fileID pgtype.UUID) error {
+	if u.thumbTmp != "" {
+		dst, err := s.store.ThumbPath(idString(fileID))
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
+			return err
+		}
+		if err := os.Rename(u.thumbTmp, dst); err != nil {
+			return err
+		}
+	}
+	return s.store.Commit(u.tmpPath, idString(fileID))
+}
+
 // Upload menyimpan berkas lalu membuat kartu gambar (bila bisa dibuatkan thumbnail) atau kartu berkas, dalam satu
-// transaksi. Alur berkasnya sama dengan lampiran: tmp/ sambil dihitung SHA-256, tipe dari isi, dipindah paling akhir.
+// transaksi.
 func (s *Service) Upload(ctx context.Context, actor Actor, boardText string, in CardInput, originalName string, r io.Reader) (Card, error) {
 	if s.store == nil {
 		return Card{}, ErrNoStorage
@@ -158,57 +258,14 @@ func (s *Service) Upload(ctx context.Context, actor Actor, boardText string, in 
 	if err != nil {
 		return Card{}, err
 	}
-	tmp, err := s.store.CreateTemp()
+	u, err := s.prepareUpload(originalName, r)
 	if err != nil {
 		return Card{}, err
 	}
-	tmpPath := tmp.Name()
-	thumbTmp := ""
-	defer func() {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-		if thumbTmp != "" {
-			_ = os.Remove(thumbTmp)
-		}
-	}()
-	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(r, MaxFileSize+1))
-	if err != nil {
-		return Card{}, err
-	}
-	if n > MaxFileSize {
-		return Card{}, ErrTooLarge
-	}
-	if n == 0 {
-		return Card{}, apperr.Invalid("Berkas kosong.")
-	}
-	name := attachment.CleanName(originalName)
-	mime, err := attachment.DetectWhiteboard(tmp, n, name)
-	if err != nil {
-		var rej *attachment.Rejected
-		if errors.As(err, &rej) {
-			return Card{}, apperr.Invalid(rej.Message)
-		}
-		return Card{}, err
-	}
-	kind, width, height := KindFile, pgtype.Int4{}, pgtype.Int4{}
-	if strings.HasPrefix(mime, "image/") {
-		if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-			return Card{}, err
-		}
-		w, h, thumb, err := makeThumb(tmp)
-		if err != nil {
-			return Card{}, err
-		}
-		kind, width, height = KindImage, pgtype.Int4{Int32: int32(w), Valid: true}, pgtype.Int4{Int32: int32(h), Valid: true}
-		if thumbTmp, err = s.writeTemp(thumb); err != nil {
-			return Card{}, err
-		}
+	defer u.cleanup()
+	if u.kind == KindImage {
 		// Tinggi kartu mengikuti perbandingan sisi gambar, supaya gambar tidak terpotong saat pertama muncul.
-		in.H = math.Max(minSize, math.Min(maxSize, math.Round(in.W*float64(h)/float64(w))))
-	}
-	if err := tmp.Close(); err != nil {
-		return Card{}, err
+		in.H = math.Max(minSize, math.Min(maxSize, math.Round(in.W*float64(u.height.Int32)/float64(u.width.Int32))))
 	}
 	var fileID pgtype.UUID
 	if err := fileID.Scan(newUUIDString()); err != nil {
@@ -228,11 +285,7 @@ func (s *Service) Upload(ctx context.Context, actor Actor, boardText string, in 
 			}
 			return err
 		}
-		if err := q.InsertWbFile(ctx, sqlc.InsertWbFileParams{
-			ID: fileID, BoardID: boardID, Kind: kind, OriginalName: name, MimeType: mime, SizeBytes: n,
-			Checksum: hex.EncodeToString(h.Sum(nil)), Width: width, Height: height, HasThumb: thumbTmp != "",
-			UploadedBy: pgtype.Int8{Int64: actor.ID, Valid: true},
-		}); err != nil {
+		if err := u.insert(ctx, q, fileID, boardID, actor); err != nil {
 			return err
 		}
 		z, err := q.MaxWbCardZ(ctx, boardID)
@@ -240,34 +293,117 @@ func (s *Service) Upload(ctx context.Context, actor Actor, boardText string, in 
 			return err
 		}
 		if err := q.InsertWbCard(ctx, sqlc.InsertWbCardParams{
-			ID: cardID, BoardID: boardID, Kind: kind, FileID: fileID, X: in.X, Y: in.Y, W: in.W, H: in.H,
-			Z: math.Min(z+1, maxZ), Content: content, Plain: name, Seq: seq, ActorID: actor.ID,
+			ID: cardID, BoardID: boardID, Kind: u.kind, FileID: fileID, X: in.X, Y: in.Y, W: in.W, H: in.H,
+			Z: math.Min(z+1, maxZ), Content: content, Plain: u.name, Seq: seq, ActorID: actor.ID,
+			Style: []byte(`{}`), GroupIds: []pgtype.UUID{},
 		}); err != nil {
 			return err
 		}
 		if out, err = getCard(ctx, q, cardID); err != nil {
 			return err
 		}
-		if err := record(ctx, q, boardID, actor.ID, "card_created", cardID, map[string]any{"kind": kind, "excerpt": excerpt(name)}); err != nil {
+		if err := record(ctx, q, boardID, actor.ID, "card_created", cardID, map[string]any{"kind": u.kind, "excerpt": excerpt(u.name)}); err != nil {
 			return err
 		}
-		// Thumbnail dipindah sebelum berkas asli: kalau berkas asli gagal, transaksi batal dan thumbnail yatim
-		// dibersihkan pembersih berkas yatim.
-		if thumbTmp != "" {
-			dst, err := s.store.ThumbPath(idString(fileID))
-			if err != nil {
-				return err
-			}
-			if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
-				return err
-			}
-			if err := os.Rename(thumbTmp, dst); err != nil {
-				return err
-			}
-		}
-		return s.store.Commit(tmpPath, idString(fileID))
+		return s.commitUpload(u, fileID)
 	})
 	return out, err
+}
+
+// ReplaceFile mengganti berkas kartu gambar atau berkas (revisi 50). Posisi, ukuran, gaya, keterangan, grup, kunci,
+// dan garis tetap; potongan gambar dilepas karena berlaku untuk gambar lama. Baris berkas lama tidak dihapus: job
+// harian (DeleteWbUnusedFiles) membersihkannya setelah tidak dipakai kartu mana pun, jadi undo bisa memakainya lagi.
+// Hasilnya juga id berkas lama, untuk langkah undo di klien.
+func (s *Service) ReplaceFile(ctx context.Context, actor Actor, boardText, cardText, originalName string, r io.Reader) (Card, string, error) {
+	boardID, err := s.boardID(ctx, actor, boardText)
+	if err != nil {
+		return Card{}, "", err
+	}
+	cardID, err := ParseID(cardText)
+	if err != nil {
+		return Card{}, "", apperr.Invalid("Id kartu tidak sah.")
+	}
+	u, err := s.prepareUpload(originalName, r)
+	if err != nil {
+		return Card{}, "", err
+	}
+	defer u.cleanup()
+	var fileID pgtype.UUID
+	if err := fileID.Scan(newUUIDString()); err != nil {
+		return Card{}, "", err
+	}
+	var out Card
+	var old string
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		q := sqlc.New(tx)
+		seq, err := q.BumpWbBoardSeq(ctx, boardID)
+		if err != nil {
+			return notFound(err)
+		}
+		cur, err := q.GetWbCardForUpdate(ctx, sqlc.GetWbCardForUpdateParams{ID: cardID, BoardID: boardID})
+		if err != nil {
+			return notFound(err)
+		}
+		if err := replaceKindMatches(cur.Kind, u.kind); err != nil {
+			return err
+		}
+		if err := u.insert(ctx, q, fileID, boardID, actor); err != nil {
+			return err
+		}
+		var caption CaptionContent
+		_ = json.Unmarshal(cur.Content, &caption)
+		content, _ := json.Marshal(CaptionContent{Caption: caption.Caption})
+		plain := caption.Caption
+		if plain == "" {
+			plain = u.name
+		}
+		if err := q.PatchWbCard(ctx, sqlc.PatchWbCardParams{
+			FileID: fileID, Content: content, Plain: pgtype.Text{String: plain, Valid: true}, Seq: seq, ActorID: actor.ID,
+			ID: cardID, BoardID: boardID,
+		}); err != nil {
+			return err
+		}
+		if out, err = getCard(ctx, q, cardID); err != nil {
+			return err
+		}
+		old = idString(cur.FileID)
+		if err := record(ctx, q, boardID, actor.ID, "file_replaced", cardID, map[string]any{"kind": cur.Kind, "excerpt": excerpt(u.name)}); err != nil {
+			return err
+		}
+		return s.commitUpload(u, fileID)
+	})
+	return out, old, err
+}
+
+// replaceKindMatches: kartu gambar hanya menerima gambar; kartu berkas menerima berkas yang bukan gambar, supaya
+// jenis kartu selalu sama dengan jenis berkasnya (salin tempel memeriksa itu).
+func replaceKindMatches(cardKind, fileKind string) error {
+	switch {
+	case cardKind != KindImage && cardKind != KindFile:
+		return apperr.Invalid("Hanya kartu gambar dan berkas yang bisa diganti berkasnya.")
+	case cardKind == KindImage && fileKind != KindImage:
+		return apperr.Invalid("Kartu gambar hanya bisa diganti dengan gambar (JPEG, PNG, WebP, atau GIF).")
+	case cardKind == KindFile && fileKind == KindImage:
+		return apperr.Invalid("Gambar ditaruh sebagai kartu gambar. Kartu berkas diganti dengan berkas yang bukan gambar.")
+	}
+	return nil
+}
+
+// replaceFilePatch: patch file_id (undo dan redo ganti gambar) memakai berkas yang sudah ada dengan jenis yang sama.
+func replaceFilePatch(ctx context.Context, q *sqlc.Queries, cardKind, fileText string, params *sqlc.PatchWbCardParams) error {
+	fileID, err := ParseID(fileText)
+	if err != nil {
+		return apperr.Invalid("Id berkas tidak sah.")
+	}
+	f, err := q.GetWbFile(ctx, fileID)
+	if err != nil {
+		return apperr.Invalid("Berkas itu sudah tidak ada. Unggah ulang berkasnya.")
+	}
+	if err := replaceKindMatches(cardKind, f.Kind); err != nil {
+		return err
+	}
+	params.FileID = fileID
+	return nil
 }
 
 // newCardID memakai id dari klien bila ada (kartu sudah tampil sebelum server menjawab), atau membuat yang baru.

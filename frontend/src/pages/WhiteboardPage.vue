@@ -18,6 +18,9 @@ import WbListView from '../components/whiteboard/WbListView.vue'
 import WbShapePalette from '../components/whiteboard/WbShapePalette.vue'
 import WbShapeStyle from '../components/whiteboard/WbShapeStyle.vue'
 import WbDiagramHandles from '../components/whiteboard/WbDiagramHandles.vue'
+import WbContextMenu, { type MenuItem } from '../components/whiteboard/WbContextMenu.vue'
+import WbStylePanel from '../components/whiteboard/WbStylePanel.vue'
+import WbImageDialog from '../components/whiteboard/WbImageDialog.vue'
 import type { DrawnLine } from '../components/whiteboard/WbConnectorLayer.vue'
 import type { ConnectorUpdate } from '../components/whiteboard/WbConnectorDialog.vue'
 import {
@@ -46,6 +49,7 @@ import {
   createDrawing,
   deleteCards,
   deleteConnector,
+  downloadUrl,
   drawingOp,
   fetchPreview,
   fromTemplate,
@@ -53,6 +57,7 @@ import {
   moveCards,
   patchCards,
   renameBoard,
+  replaceFile,
   restoreBatch,
   searchBoards,
   setTemplate,
@@ -110,8 +115,11 @@ import {
   wheelZoomFactor,
   zoomAt,
   type Activity,
+  type CaptionContent,
   type Card,
   type CardColor,
+  type CardStyle,
+  type Crop,
   type CardKind,
   type ChecklistContent,
   type Connector,
@@ -124,6 +132,20 @@ import {
 } from '../utils/whiteboard'
 import { geo, layoutPatches, push, type Geo, type Step } from '../utils/wbHistory'
 import { WbSocket, reconnectDelay, type SocketState } from '../utils/wbSocket'
+import {
+  arrange,
+  expand,
+  group as groupPaths,
+  hasGroup,
+  remap,
+  tidy,
+  ungroup as ungroupPaths,
+  unitOf,
+  units,
+  type AlignKind,
+} from '../utils/wbGroups'
+import { normalize, pasteStyle, styleKeys, type StyleKey } from '../utils/wbStyle'
+import { find as findShortcut, label as keyLabel, type ShortcutId } from '../utils/wbShortcuts'
 
 // Whiteboard seperti Milanote (docs/whiteboard.md): semua adalah papan. /whiteboard membuka papan akar bersama,
 // /whiteboard/:id membuka papan lain di kanvas yang sama. Data dari server adalah sumber kebenaran: perubahan
@@ -387,6 +409,8 @@ const worldStyle = computed(() => ({
   transform: `translate(${view.value.x}px, ${view.value.y}px) scale(${view.value.zoom})`,
 }))
 const gridOn = ref(true)
+// Snap terpisah dari grid sejak revisi 50 (menu klik kanan punya keduanya).
+const snapOn = ref(true)
 const gridStyle = computed(() => {
   const step = GRID * 4 * view.value.zoom
   return gridOn.value
@@ -549,8 +573,8 @@ async function placeTemplate(t: TemplateInfo) {
     const res = await fromTemplate(bid.value, {
       template_id: t.id,
       id: newId(),
-      x: clamp(snap(c.x - dim.w / 2, gridOn.value), -COORD_LIMIT, COORD_LIMIT),
-      y: clamp(snap(c.y - dim.h / 2, gridOn.value), -COORD_LIMIT, COORD_LIMIT),
+      x: clamp(snap(c.x - dim.w / 2, snapOn.value), -COORD_LIMIT, COORD_LIMIT),
+      y: clamp(snap(c.y - dim.h / 2, snapOn.value), -COORD_LIMIT, COORD_LIMIT),
       w: dim.w,
       h: dim.h,
     })
@@ -1133,8 +1157,8 @@ async function addCard(
   const input: NewCard = {
     id: newId(),
     kind,
-    x: clamp(snap(c.x - dim.w / 2 + offset, gridOn.value), -COORD_LIMIT, COORD_LIMIT),
-    y: clamp(snap(c.y - dim.h / 2 + offset, gridOn.value), -COORD_LIMIT, COORD_LIMIT),
+    x: clamp(snap(c.x - dim.w / 2 + offset, snapOn.value), -COORD_LIMIT, COORD_LIMIT),
+    y: clamp(snap(c.y - dim.h / 2 + offset, snapOn.value), -COORD_LIMIT, COORD_LIMIT),
     w: dim.w,
     h: dim.h,
     color: '',
@@ -1432,6 +1456,10 @@ async function deleteIds(ids: string[]) {
 
 async function removeSelected() {
   if (!canWrite.value || selected.value.size === 0) return
+  if (anyLocked.value) {
+    lockedToast()
+    return
+  }
   const ids = [...selected.value]
   if (editingId.value && ids.includes(editingId.value)) editingId.value = null
   const boards = ids.filter((id) => byId.value.get(id)?.kind === 'board').length
@@ -1480,6 +1508,10 @@ function onMoreAction(e: Event) {
   else if (action === 'move') {
     moveError.value = ''
     moveOpen.value = true
+  } else if (action === 'menu') {
+    // Menu klik kanan lewat bar pilihan: jalur untuk layar sentuh tanpa tekan lama dan untuk pengguna keyboard.
+    const r = el.getBoundingClientRect()
+    openMenu(r.left, r.bottom + 4, el, true)
   }
 }
 
@@ -1547,7 +1579,6 @@ async function sendGeometry(patches: CardPatch[]) {
 }
 
 // Rata dan sebar beberapa kartu terpilih.
-type AlignKind = 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom' | 'hspread' | 'vspread'
 const alignOptions: { value: AlignKind; label: string; min: number }[] = [
   { value: 'left', label: 'Rata kiri', min: 2 },
   { value: 'hcenter', label: 'Rata tengah mendatar', min: 2 },
@@ -1560,40 +1591,699 @@ const alignOptions: { value: AlignKind; label: string; min: number }[] = [
 ]
 
 function align(kind: string) {
-  const list = [...selected.value].map((id) => byId.value.get(id)).filter((c): c is Card => !!c)
-  const b = bounds(list)
-  if (!b || list.length < 2) return
-  const out: { id: string; after: Geo }[] = []
-  if (kind === 'hspread' || kind === 'vspread') {
-    const horiz = kind === 'hspread'
-    const sorted = [...list].sort((a, c) => (horiz ? a.x - c.x : a.y - c.y))
-    const total = sorted.reduce((s, c) => s + (horiz ? c.w : c.h), 0)
-    const gap = ((horiz ? b.w : b.h) - total) / (sorted.length - 1)
-    let pos = horiz ? b.x : b.y
-    for (const c of sorted) {
-      out.push({ id: c.id, after: horiz ? { x: Math.round(pos) } : { y: Math.round(pos) } })
-      pos += (horiz ? c.w : c.h) + gap
-    }
-  } else {
-    for (const c of list) {
-      const after: Geo =
-        kind === 'left'
-          ? { x: b.x }
-          : kind === 'right'
-            ? { x: b.x + b.w - c.w }
-            : kind === 'hcenter'
-              ? { x: Math.round(b.x + b.w / 2 - c.w / 2) }
-              : kind === 'top'
-                ? { y: b.y }
-                : kind === 'bottom'
-                  ? { y: b.y + b.h - c.h }
-                  : { y: Math.round(b.y + b.h / 2 - c.h / 2) }
-      out.push({ id: c.id, after })
-    }
+  if (anyLocked.value) {
+    lockedToast()
+    return
   }
-  applyLayout(out)
-  announce.value = `${list.length} kartu dirapikan.`
+  const groups = units([...selected.value], cards.value, groupScope.value)
+  const out = arrange(groups, kind as AlignKind)
+  if (!out.size) return
+  applyLayout([...out].map(([id, pos]) => ({ id, after: pos })))
+  announce.value = `${groups.length} kartu atau grup dirapikan.`
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Revisi 50: grup, kunci posisi, gaya kartu, menu klik kanan, dan alat gambar
+
+// Grup yang sedang dimasuki lewat dobel klik; klik di dalamnya memilih satu tingkat di bawahnya. Escape keluar.
+const groupScope = ref<string[]>([])
+watch(bid, () => (groupScope.value = []))
+
+function unitIds(id: string): string[] {
+  const c = byId.value.get(id)
+  return c ? unitOf(c, cards.value, groupScope.value) : [id]
+}
+
+// Dobel klik pada kartu bergrup masuk satu tingkat ke grupnya dan memilih kartu itu (atau subgrupnya), bukan membuka
+// editor. Dobel klik berikutnya baru mengedit. Mengembalikan true bila masuk grup.
+function enterGroup(card: Card): boolean {
+  const p = card.group_ids ?? []
+  const s = groupScope.value
+  const inside = s.every((g, i) => p[i] === g)
+  const depth = inside ? s.length : 0
+  if (p.length <= depth) return false
+  groupScope.value = [...p.slice(0, depth + 1)]
+  select(unitOf(card, cards.value, groupScope.value))
+  focusedId.value = card.id
+  announce.value = 'Masuk ke grup. Klik memilih satu anggota; Escape untuk keluar.'
+  return true
+}
+
+function exitGroup() {
+  const s = groupScope.value
+  const member = cards.value.find((c) => s.every((g, i) => c.group_ids?.[i] === g))
+  groupScope.value = s.slice(0, -1)
+  if (member) select(unitOf(member, cards.value, groupScope.value))
+  announce.value = 'Keluar dari grup.'
+}
+
+// Bingkai grup yang terpilih utuh, mengikuti seret yang sedang berjalan.
+const groupFrames = computed(() => {
+  const out: Rect[] = []
+  const depth = groupScope.value.length
+  const seen = new Set<string>()
+  for (const id of selected.value) {
+    const c = shownById.value.get(id)
+    const g = c?.group_ids?.[depth]
+    if (!c || !g || seen.has(g)) continue
+    seen.add(g)
+    const members = shownCards.value
+      .filter((m) => m.group_ids?.[depth] === g)
+      .map((m) => (dragged(m) ? { ...m, x: m.x + dragOffset.value.dx, y: m.y + dragOffset.value.dy } : m))
+    const b = bounds(members)
+    if (b) out.push({ x: b.x - 8, y: b.y - 8, w: b.w + 16, h: b.h + 16 })
+  }
+  return out
+})
+
+const selCards = computed(() => [...selected.value].flatMap((id) => byId.value.get(id) ?? []))
+const anyLocked = computed(() => selCards.value.some((c) => c.locked))
+// Rata dan sebar berlaku per unit (grup utuh atau kartu tunggal).
+const selUnitCount = computed(() => units([...selected.value], cards.value, groupScope.value).length)
+
+function lockedToast(n = selCards.value.filter((c) => c.locked).length) {
+  showToast(
+    `${n} kartu terkunci. Buka kunci dulu (${keyLabel('lock')}) untuk memindah, mengubah ukuran, memutar, atau menghapusnya.`,
+  )
+}
+
+function groupSelected() {
+  if (!canWrite.value) return
+  const ids = [...selected.value]
+  const map = groupPaths(ids, cards.value, newId())
+  if (!map) {
+    showToast(
+      ids.length < 2
+        ? 'Pilih minimal dua kartu untuk dijadikan grup.'
+        : 'Grup bersarang paling dalam 8 tingkat.',
+    )
+    return
+  }
+  applyLayout([...map].map(([id, g]) => ({ id, after: { group_ids: g } })))
+  announce.value = `${map.size} kartu dijadikan satu grup.`
+}
+
+function ungroupSelected() {
+  if (!canWrite.value) return
+  const map = ungroupPaths([...selected.value], cards.value, groupScope.value)
+  if (!map.size) return
+  applyLayout([...map].map(([id, g]) => ({ id, after: { group_ids: g } })))
+  announce.value = 'Grup dipisahkan.'
+}
+
+function toggleLock() {
+  if (!canWrite.value || !selCards.value.length) return
+  const lock = !selCards.value.every((c) => c.locked)
+  applyLayout(selCards.value.map((c) => ({ id: c.id, after: { locked: lock } })))
+  announce.value = lock
+    ? `Posisi ${selCards.value.length} kartu dikunci.`
+    : `Kunci posisi ${selCards.value.length} kartu dibuka.`
+}
+
+// Gaya: salin dari kartu pertama yang dipilih, tempel ke semua kartu terpilih (hanya bagian yang berlaku untuk jenis
+// kartu tujuan). Warna kartu ikut, kecuali untuk bentuk, gambar, dan gambar bebas yang punya warna sendiri.
+const copiedStyle = ref<{ style: CardStyle; color: CardColor | null } | null>(null)
+const colorable = (c: Card) => c.kind !== 'shape' && c.kind !== 'image' && c.kind !== 'drawing'
+function copyStyle() {
+  const c = selCards.value[0]
+  if (!c) return
+  copiedStyle.value = { style: { ...(c.style ?? {}) }, color: c.color }
+  announce.value = 'Gaya kartu disalin.'
+}
+function pasteStyleSel() {
+  const s = copiedStyle.value
+  if (!canWrite.value || !s || !selCards.value.length) return
+  applyLayout(
+    selCards.value.map((c) => ({
+      id: c.id,
+      after: { style: pasteStyle(c.style, s.style, c.kind), ...(colorable(c) ? { color: s.color } : {}) },
+    })),
+  )
+  announce.value = `Gaya ditempel ke ${selCards.value.length} kartu.`
+}
+const stylePanelOpen = ref(false)
+function applyStyle(patch: Partial<Record<StyleKey, string | number>>) {
+  applyLayout(
+    selCards.value.map((c) => {
+      const keys = styleKeys(c.kind)
+      const next: Record<string, unknown> = { ...(c.style ?? {}) }
+      for (const [k, v] of Object.entries(patch)) if (keys.includes(k as StyleKey)) next[k] = v
+      return { id: c.id, after: { style: normalize(next as CardStyle) } }
+    }),
+  )
+}
+
+// Urutan tumpuk: paling depan dan paling belakang melompati semua kartu; maju dan mundur melewati satu kartu lain.
+function reorder(kind: 'front' | 'forward' | 'backward' | 'back') {
+  if (!canWrite.value || !selCards.value.length) return
+  const sel = selected.value
+  const sorted = [...cards.value].sort((a, b) => a.z - b.z)
+  const others = sorted.filter((c) => !sel.has(c.id))
+  const list = sorted.filter((c) => sel.has(c.id))
+  const top = sorted.at(-1)?.z ?? 0
+  const bottom = sorted[0]?.z ?? 0
+  const out = list.map((c, i) => {
+    let z = c.z
+    if (kind === 'front') z = top + 1 + i
+    else if (kind === 'back') z = bottom - list.length + i
+    else if (kind === 'forward') {
+      const k = others.findIndex((o) => o.z > c.z)
+      if (k >= 0) z = others[k + 1] ? (others[k]!.z + others[k + 1]!.z) / 2 + i * 1e-3 : others[k]!.z + 1 + i
+    } else {
+      const k = others.map((o) => o.z < c.z).lastIndexOf(true)
+      if (k >= 0)
+        z = k > 0 ? (others[k]!.z + others[k - 1]!.z) / 2 + i * 1e-3 : others[k]!.z - list.length + i
+    }
+    return { id: c.id, after: { z } }
+  })
+  applyLayout(out)
+  announce.value =
+    kind === 'front'
+      ? 'Dibawa ke paling depan.'
+      : kind === 'back'
+        ? 'Dikirim ke paling belakang.'
+        : kind === 'forward'
+          ? 'Maju satu lapis.'
+          : 'Mundur satu lapis.'
+}
+
+function matchSize(kind: 'w' | 'h' | 'wh') {
+  const list = selCards.value.filter((c) => c.kind !== 'drawing')
+  const ref = list[0]
+  if (!canWrite.value || !ref || list.length < 2) return
+  if (anyLocked.value) {
+    lockedToast()
+    return
+  }
+  applyLayout(
+    list.slice(1).map((c) => ({
+      id: c.id,
+      after: kind === 'w' ? { w: ref.w } : kind === 'h' ? { h: ref.h } : { w: ref.w, h: ref.h },
+    })),
+  )
+  announce.value = `Ukuran ${list.length - 1} kartu disamakan dengan kartu yang pertama dipilih.`
+}
+
+function tidySelected() {
+  if (!canWrite.value) return
+  if (anyLocked.value) {
+    lockedToast()
+    return
+  }
+  const groups = units([...selected.value], cards.value, groupScope.value)
+  applyLayout([...tidy(groups)].map(([id, pos]) => ({ id, after: pos })))
+  announce.value = `${groups.length} kartu atau grup dirapikan menjadi grid.`
+}
+
+// Putar dan balik bentuk: perubahan isi dengan langkah undo.
+function shapeChange(change: (s: ShapeContent) => ShapeContent) {
+  const list = selCards.value.filter((c) => c.kind === 'shape')
+  for (const c of list) {
+    const after = change(c.content as ShapeContent)
+    record({ kind: 'content', id: c.id, before: c.content, after, version: c.content_version + 1 })
+    onContent(c.id, after)
+  }
+}
+function rotate90() {
+  if (!canWrite.value) return
+  if (selCards.value.some((c) => c.kind === 'shape' && c.locked)) {
+    lockedToast()
+    return
+  }
+  shapeChange((s) => ({ ...s, rotation: ((s.rotation || 0) + 90) % 360 }))
+  announce.value = 'Bentuk diputar 90 derajat.'
+}
+function flip(axis: 'x' | 'y') {
+  if (!canWrite.value) return
+  shapeChange((s) => (axis === 'x' ? { ...s, flip_x: !s.flip_x } : { ...s, flip_y: !s.flip_y }))
+  announce.value = axis === 'x' ? 'Bentuk dibalik mendatar.' : 'Bentuk dibalik tegak.'
+}
+
+// Garis yang kedua ujungnya ikut terseret bersama (grup) ikut bergeser titik beloknya.
+function shiftBends(moved: Set<string>, dx: number, dy: number) {
+  for (const c of connectors.value) {
+    if (!c.from || !c.to || !moved.has(c.from) || !moved.has(c.to) || !c.geometry.points.length) continue
+    const points = c.geometry.points.map(
+      ([x, y]) => [Math.round(x + dx), Math.round(y + dy)] as [number, number],
+    )
+    void onConnectorUpdate(c.id, { geometry: { ...c.geometry, points } })
+  }
+}
+
+// Jadikan papan baru: kartu papan baru di pojok kiri atas pilihan, lalu pilihan dipindah ke dalamnya.
+async function boardFromSelection() {
+  if (!canWrite.value) return
+  const ids = [...selected.value]
+  const b = bounds(selCards.value)
+  if (!b || !ids.length) return
+  const dim = defaultSize.board
+  const card = await addCard('board', { x: b.x + dim.w / 2, y: b.y + dim.h / 2 })
+  if (card?.ref) await moveTo(ids, card.ref.id, card.ref.title)
+}
+
+function copyCardLink() {
+  const id = [...selected.value][0]
+  if (!id || !board.value) return
+  const href = router.resolve({
+    name: 'whiteboard-board',
+    params: { id: board.value.id },
+    query: { kartu: id },
+  }).href
+  navigator.clipboard
+    ?.writeText(new URL(href, location.origin).toString())
+    .then(() => (announce.value = 'Tautan kartu disalin.'))
+    .catch(() => showToast('Tautan tidak bisa disalin di browser ini.'))
+  announce.value = 'Tautan kartu disalin.'
+}
+
+function zoomToSelection() {
+  const list = selCards.value.map((c) => shownById.value.get(c.id) ?? c)
+  if (!list.length) return
+  const phone = size.value.w < 768
+  view.value = fitView(
+    list,
+    size.value.w,
+    size.value.h,
+    phone ? FIT_TOP_PHONE : 48,
+    phone ? FIT_BOTTOM_PHONE : 48,
+  )
+}
+
+function selectSameKind() {
+  const kinds = new Set(selCards.value.map((c) => c.kind))
+  const ids = cards.value.filter((c) => kinds.has(c.kind)).map((c) => c.id)
+  select(ids)
+  announce.value = `${ids.length} kartu sejenis terpilih.`
+}
+
+function cutSelection() {
+  if (!canWrite.value || !selected.value.size) return
+  if (anyLocked.value) {
+    lockedToast()
+    return
+  }
+  copySelection()
+  void removeSelected()
+}
+
+function pasteHere(at?: { x: number; y: number }) {
+  if (!canWrite.value) return
+  const read = navigator.clipboard?.readText?.()
+  if (!read) {
+    void pasteText(clipMemory, false, at)
+    return
+  }
+  read
+    .then((t) => pasteText(t.startsWith(CLIP_PREFIX) ? t : clipMemory, false, at))
+    .catch(() => pasteText(clipMemory, false, at))
+}
+
+function toggleGrid() {
+  gridOn.value = !gridOn.value
+  announce.value = gridOn.value ? 'Grid tampil.' : 'Grid disembunyikan.'
+}
+function toggleSnap() {
+  snapOn.value = !snapOn.value
+  announce.value = snapOn.value ? 'Snap ke grid menyala.' : 'Snap ke grid mati.'
+}
+
+// Gambar dan berkas: ganti, potong, posisi dan zoom, lihat ukuran penuh, unduh.
+const imageDialog = ref<{ mode: 'view' | 'crop' | 'frame'; id: string } | null>(null)
+const imageCard = computed(() => (imageDialog.value ? (byId.value.get(imageDialog.value.id) ?? null) : null))
+const replaceInput = ref<HTMLInputElement | null>(null)
+let replaceTarget: string | null = null
+const only = computed(() => (selCards.value.length === 1 ? selCards.value[0] : undefined))
+
+function pickReplace() {
+  if (!only.value || !canWrite.value) return
+  replaceTarget = only.value.id
+  replaceInput.value?.click()
+}
+function onReplacePicked(e: Event) {
+  const el = e.target as HTMLInputElement
+  const f = el.files?.[0]
+  el.value = ''
+  if (f && replaceTarget) void replaceCardFile(replaceTarget, f)
+}
+
+// Ganti berkas: posisi, ukuran, gaya, keterangan, grup, kunci, dan garis tetap. Undo memakai berkas lama lewat patch
+// file_id (berkas lama tidak dihapus server; job harian membersihkannya setelah tidak dipakai kartu mana pun).
+async function replaceCardFile(id: string, file: File) {
+  const c = byId.value.get(id)
+  if (!c || !canWrite.value) return
+  const err = precheckFile(file)
+  if (err) {
+    showToast(err)
+    return
+  }
+  const image = file.type.startsWith('image/')
+  if (c.kind === 'image' && !image) {
+    showToast('Kartu gambar hanya bisa diganti dengan gambar (JPEG, PNG, WebP, atau GIF).')
+    return
+  }
+  if (c.kind === 'file' && image) {
+    showToast('Gambar ditaruh sebagai kartu gambar. Kartu berkas diganti dengan berkas yang bukan gambar.')
+    return
+  }
+  uploadStatus.value = `Mengganti dengan ${file.name}`
+  try {
+    const res = await saving(() =>
+      replaceFile(
+        bid.value,
+        id,
+        file,
+        (p) => (uploadStatus.value = `Mengganti dengan ${file.name} (${Math.round(p * 100)}%)`),
+      ),
+    )
+    if (!res) return
+    upsert([res.card])
+    record({
+      kind: 'layout',
+      cards: [{ id, before: { file_id: res.old_file_id }, after: { file_id: res.card.file?.id } }],
+    })
+    announce.value = `Berkas kartu diganti dengan ${file.name}.`
+  } catch (e) {
+    if (e instanceof ApiError) showToast(e.message)
+  } finally {
+    uploadStatus.value = ''
+  }
+}
+
+function openImage(mode: 'view' | 'crop' | 'frame') {
+  if (only.value?.kind === 'image' && only.value.file) imageDialog.value = { mode, id: only.value.id }
+}
+
+// Potong bebas mengubah tinggi kartu mengikuti perbandingan potongan, supaya gambar tidak gepeng; posisi dan zoom
+// memakai perbandingan bingkai yang ada.
+function saveCrop(crop: Crop | null) {
+  const c = imageCard.value
+  const mode = imageDialog.value?.mode
+  imageDialog.value = null
+  if (!c || !canWrite.value) return
+  const before = c.content as CaptionContent
+  const after: CaptionContent = { caption: before.caption, ...(crop ? { crop } : {}) }
+  record({ kind: 'content', id: c.id, before, after, version: c.content_version + 1 })
+  onContent(c.id, after)
+  if (mode === 'crop' && crop && c.file?.width && c.file.height && !c.locked) {
+    const pad = before.caption ? 72 : 24
+    const h = Math.round((c.w * crop.h * c.file.height) / (crop.w * c.file.width)) + pad
+    applyLayout([{ id: c.id, after: { h: clamp(h, MIN_SIZE, MAX_SIZE) } }])
+  }
+  announce.value = crop ? 'Potongan gambar disimpan.' : 'Gambar ditampilkan utuh.'
+}
+
+function downloadOriginal() {
+  const f = only.value?.file
+  if (!f) return
+  const a = document.createElement('a')
+  a.href = downloadUrl(f.id)
+  a.download = f.name
+  a.click()
+}
+
+// Satu tabel aksi untuk menu dan pintasan keyboard. Setiap aksi memeriksa sendiri apakah berlaku.
+const actions: Partial<Record<ShortcutId, () => void>> = {
+  cut: cutSelection,
+  copy: copySelection,
+  paste: () => pasteHere(),
+  duplicate: () => canWrite.value && duplicateSelection(),
+  remove: () => void removeSelected(),
+  copyStyle,
+  pasteStyle: pasteStyleSel,
+  stylePanel: () => selCards.value.length && (stylePanelOpen.value = true),
+  group: groupSelected,
+  ungroup: ungroupSelected,
+  lock: toggleLock,
+  front: () => reorder('front'),
+  forward: () => reorder('forward'),
+  backward: () => reorder('backward'),
+  back: () => reorder('back'),
+  alignLeft: () => canWrite.value && align('left'),
+  alignHCenter: () => canWrite.value && align('hcenter'),
+  alignRight: () => canWrite.value && align('right'),
+  alignTop: () => canWrite.value && align('top'),
+  alignVCenter: () => canWrite.value && align('vcenter'),
+  alignBottom: () => canWrite.value && align('bottom'),
+  spreadH: () => canWrite.value && align('hspread'),
+  spreadV: () => canWrite.value && align('vspread'),
+  sameWidth: () => matchSize('w'),
+  sameHeight: () => matchSize('h'),
+  sameSize: () => matchSize('wh'),
+  tidy: tidySelected,
+  rotate90,
+  flipH: () => flip('x'),
+  flipV: () => flip('y'),
+  connect: () => canWrite.value && selected.value.size >= 2 && void connectInOrder(),
+  newBoard: () => void boardFromSelection(),
+  moveBoard: () => {
+    if (!canWrite.value || !selected.value.size) return
+    moveError.value = ''
+    moveOpen.value = true
+  },
+  comments: () => only.value && (commentsFor.value = only.value.id),
+  copyLink: copyCardLink,
+  exportSel: () => selected.value.size && (exportOpen.value = true),
+  zoomSel: zoomToSelection,
+  sameKind: selectSameKind,
+  replaceFile: pickReplace,
+  crop: () => canWrite.value && openImage('crop'),
+  frame: () => canWrite.value && openImage('frame'),
+  viewFull: () => openImage('view'),
+  download: downloadOriginal,
+  addNote: () => void addCard('note', menuAt ?? undefined),
+  addHeading: () => void addCard('heading', menuAt ?? undefined),
+  addChecklist: () => void addCard('checklist', menuAt ?? undefined),
+  addTable: () => void addCard('table', menuAt ?? undefined),
+  addShape: () => void addCard('shape', menuAt ?? undefined, newShapeContent('rect'), { w: 160, h: 100 }),
+  snap: toggleSnap,
+}
+// Pintasan yang ditangani tabel ini; sisanya (Ctrl+C, Ctrl+D, Ctrl+Z, Ctrl+A, N, G, Delete) tetap di penangan lama.
+const KEY_ACTIONS: ShortcutId[] = (Object.keys(actions) as ShortcutId[]).filter(
+  (k) => !['copy', 'paste', 'duplicate', 'remove', 'addNote'].includes(k),
+)
+
+// Menu klik kanan: hanya aksi yang berlaku untuk pilihan saat itu. Kartu terkunci tidak menawarkan potong, hapus,
+// rata, ukuran, dan putar; Admin (hanya baca) hanya aksi baca.
+const menu = ref<{
+  x: number
+  y: number
+  items: MenuItem[]
+  label: string
+  opener: HTMLElement | null
+} | null>(null)
+let menuAt: { x: number; y: number } | null = null
+// Waktu menu dibuka oleh tekan lama, supaya event contextmenu browser yang menyusul tekan lama tidak membukanya lagi.
+let pressOpenedAt = -Infinity
+
+function mi(id: ShortcutId, text: string): MenuItem {
+  return { id, label: text, key: keyLabel(id), run: actions[id] }
+}
+
+function selectionMenu(): MenuItem[] {
+  const list = selCards.value
+  const w = canWrite.value
+  const locked = anyLocked.value
+  const n = list.length
+  const one = only.value
+  const out: MenuItem[] = []
+  if (w && !locked) out.push(mi('cut', 'Potong'))
+  out.push(mi('copy', 'Salin'))
+  if (w) out.push(mi('paste', 'Tempel'), mi('duplicate', 'Duplikat'))
+  if (w && !locked) out.push({ ...mi('remove', 'Hapus'), danger: true })
+  if (w) {
+    out.push(mi('copyStyle', 'Salin gaya'))
+    if (copiedStyle.value) out.push(mi('pasteStyle', 'Tempel gaya'))
+    out.push(mi('stylePanel', 'Panel gaya'))
+    if (units([...selected.value], cards.value, groupScope.value).length >= 2)
+      out.push(mi('group', 'Jadikan grup'))
+    if (hasGroup([...selected.value], cards.value, groupScope.value)) out.push(mi('ungroup', 'Pisahkan grup'))
+    out.push(mi('lock', list.every((c) => c.locked) ? 'Buka kunci posisi' : 'Kunci posisi'))
+    out.push({
+      id: 'urutan',
+      label: 'Urutan',
+      children: [
+        mi('front', 'Paling depan'),
+        mi('forward', 'Maju'),
+        mi('backward', 'Mundur'),
+        mi('back', 'Paling belakang'),
+      ],
+    })
+  }
+  const unitCount = units([...selected.value], cards.value, groupScope.value).length
+  if (w && !locked && unitCount >= 2) {
+    out.push({
+      id: 'rata',
+      label: 'Rata',
+      children: [
+        mi('alignLeft', 'Rata kiri'),
+        mi('alignHCenter', 'Rata tengah mendatar'),
+        mi('alignRight', 'Rata kanan'),
+        mi('alignTop', 'Rata atas'),
+        mi('alignVCenter', 'Rata tengah tegak'),
+        mi('alignBottom', 'Rata bawah'),
+        ...(unitCount >= 3 ? [mi('spreadH', 'Sebar mendatar'), mi('spreadV', 'Sebar tegak')] : []),
+      ],
+    })
+  }
+  if (w && !locked && n >= 2) {
+    out.push({
+      id: 'ukuran',
+      label: 'Ukuran',
+      children: [
+        mi('sameWidth', 'Samakan lebar'),
+        mi('sameHeight', 'Samakan tinggi'),
+        mi('sameSize', 'Samakan keduanya'),
+      ],
+    })
+    out.push(mi('tidy', 'Rapikan jadi grid'))
+  }
+  if (w && list.some((c) => c.kind === 'shape')) {
+    if (!list.some((c) => c.kind === 'shape' && c.locked)) out.push(mi('rotate90', 'Putar 90 derajat'))
+    out.push(mi('flipH', 'Balik mendatar'), mi('flipV', 'Balik tegak'))
+  }
+  if (w && n >= 2) out.push(mi('connect', 'Hubungkan dengan garis (urutan pilih)'))
+  if (w) out.push(mi('newBoard', 'Jadikan papan baru'), mi('moveBoard', 'Pindahkan ke papan lain'))
+  if (one) out.push(mi('comments', 'Komentar'), mi('copyLink', 'Salin tautan kartu'))
+  if (one?.kind === 'image' && one.file) {
+    if (w)
+      out.push(
+        mi('replaceFile', 'Ganti gambar'),
+        mi('crop', 'Potong gambar'),
+        mi('frame', 'Atur posisi dan zoom'),
+      )
+    out.push(mi('viewFull', 'Lihat ukuran penuh'), mi('download', 'Unduh berkas asli'))
+  } else if (one?.kind === 'file' && one.file) {
+    if (w) out.push(mi('replaceFile', 'Ganti berkas'))
+    out.push(mi('download', 'Unduh berkas'))
+  }
+  out.push(mi('exportSel', 'Ekspor pilihan (PNG atau PDF)'), mi('zoomSel', 'Zoom ke pilihan'))
+  out.push(mi('sameKind', 'Pilih semua yang sejenis'))
+  return out
+}
+
+function emptyMenu(): MenuItem[] {
+  const out: MenuItem[] = []
+  if (canWrite.value) {
+    out.push({
+      id: 'pasteHere',
+      label: 'Tempel di sini',
+      key: keyLabel('paste'),
+      run: () => pasteHere(menuAt ?? undefined),
+    })
+    out.push({
+      id: 'tambah',
+      label: 'Tambah kartu di sini',
+      children: [
+        mi('addNote', 'Catatan'),
+        mi('addHeading', 'Judul'),
+        mi('addChecklist', 'Checklist'),
+        mi('addTable', 'Tabel'),
+        mi('addShape', 'Bentuk'),
+      ],
+    })
+  }
+  out.push(
+    {
+      id: 'selectAll',
+      label: 'Pilih semua',
+      key: keyLabel('selectAll'),
+      run: () => {
+        select(cards.value.map((c) => c.id))
+        announce.value = `${cards.value.length} kartu terpilih.`
+      },
+    },
+    { id: 'fit', label: 'Pas ke layar', key: keyLabel('fit'), run: fit },
+    { id: 'grid', label: 'Grid', key: keyLabel('grid'), checked: gridOn.value, run: toggleGrid },
+    { id: 'snap', label: 'Snap ke grid', key: keyLabel('snap'), checked: snapOn.value, run: toggleSnap },
+  )
+  if (canWrite.value && canUndo.value)
+    out.push({ id: 'undo', label: 'Urungkan', key: keyLabel('undo'), run: () => void runStep('undo') })
+  if (canWrite.value && canRedo.value)
+    out.push({ id: 'redo', label: 'Ulangi', key: keyLabel('redo'), run: () => void runStep('redo') })
+  return out
+}
+
+function openMenu(x: number, y: number, opener: HTMLElement | null, onCard: boolean) {
+  menu.value = onCard
+    ? { x, y, opener, items: selectionMenu(), label: `Aksi untuk ${selected.value.size} kartu terpilih` }
+    : { x, y, opener, items: emptyMenu(), label: 'Aksi kanvas' }
+}
+
+function closeMenu(refocus: boolean) {
+  const opener = menu.value?.opener
+  menu.value = null
+  if (refocus) (opener ?? canvas.value)?.focus({ preventScroll: true })
+}
+
+function worldAt(clientX: number, clientY: number) {
+  const r = canvas.value!.getBoundingClientRect()
+  return toWorld(view.value, clientX - r.left, clientY - r.top)
+}
+
+// Klik kanan menggantikan menu browser hanya di kanvas dan kartu yang tidak sedang diedit. Di editor teks, isian,
+// dan kartu yang sedang diedit, menu bawaan browser tetap muncul (salin, tempel, ejaan).
+function onContextMenu(e: MouseEvent) {
+  const t = e.target as HTMLElement
+  if (t.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]')) return
+  const id = t.closest<HTMLElement>('[data-card]')?.dataset.card
+  if (id && id === editingId.value) return
+  e.preventDefault()
+  // Tekan lama di layar sentuh sudah membuka menu sendiri; event contextmenu browser yang menyusul diabaikan.
+  if (performance.now() - pressOpenedAt < 800) return
+  if (penOn.value) return
+  if (id && byId.value.has(id)) {
+    if (!selected.value.has(id)) select(unitIds(id))
+    focusedId.value = id
+    openMenu(e.clientX, e.clientY, t.closest<HTMLElement>('[data-card]'), true)
+  } else {
+    menuAt = worldAt(e.clientX, e.clientY)
+    openMenu(e.clientX, e.clientY, canvas.value, false)
+  }
+}
+
+function openMenuFromKeyboard() {
+  const id = focusedId.value && selected.value.has(focusedId.value) ? focusedId.value : null
+  const el = id ? canvas.value?.querySelector<HTMLElement>(`[data-card="${id}"]`) : null
+  if (id && el) {
+    const r = el.getBoundingClientRect()
+    openMenu(r.left + Math.min(r.width / 2, 40), r.top + Math.min(r.height / 2, 40), el, true)
+    return
+  }
+  const r = canvas.value!.getBoundingClientRect()
+  menuAt = worldAt(r.left + r.width / 2, r.top + r.height / 2)
+  openMenu(r.left + r.width / 2, r.top + r.height / 2, canvas.value, false)
+}
+
+// Tekan lama 500 ms di layar sentuh membuka menu; geser lebih dari 8 px membatalkannya.
+let pressTimer: ReturnType<typeof setTimeout> | undefined
+let pressStart: { x: number; y: number } | null = null
+function startPress(e: PointerEvent, id: string | null) {
+  clearTimeout(pressTimer)
+  const x = e.clientX
+  const y = e.clientY
+  pressStart = { x, y }
+  pressTimer = setTimeout(() => {
+    pressStart = null
+    pressOpenedAt = performance.now()
+    gesture = null
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    window.removeEventListener('pointercancel', onUp)
+    dragOffset.value = { dx: 0, dy: 0 }
+    if (id && byId.value.has(id)) {
+      if (!selected.value.has(id)) select(unitIds(id))
+      openMenu(x, y, canvas.value?.querySelector<HTMLElement>(`[data-card="${id}"]`) ?? null, true)
+    } else {
+      menuAt = worldAt(x, y)
+      openMenu(x, y, canvas.value, false)
+    }
+  }, 500)
+}
+function cancelPress() {
+  clearTimeout(pressTimer)
+  pressStart = null
+}
+onBeforeUnmount(() => clearTimeout(pressTimer))
 
 // ---------------------------------------------------------------------------------------------------------------
 // Undo dan redo (hanya aksi sendiri)
@@ -1672,6 +2362,19 @@ async function runStep(dir: 'undo' | 'redo') {
       case 'checklist':
         await onChecklist(step.id, (dir === 'undo' ? step.ops.undo : step.ops.redo) as ChecklistOp, false)
         break
+      case 'connectors':
+        if (dir === 'undo') {
+          step.batches = []
+          for (const id of step.ids) {
+            const res = await saving(() => deleteConnector(bid.value, id))
+            if (res) step.batches.push(res.batch)
+          }
+          removeConnectors(step.ids)
+        } else {
+          for (const b of step.batches) await saving(() => restoreBatch(b))
+          await load(true)
+        }
+        break
     }
   } catch {
     // Pesan galat sudah tampil di penanda simpan.
@@ -1696,6 +2399,9 @@ type ClipCard = {
   content: Card['content']
   title?: string
   file_id?: string
+  style?: CardStyle
+  locked?: boolean
+  group_ids?: string[]
 }
 let clipMemory = ''
 
@@ -1714,6 +2420,9 @@ function clipOf(ids: string[]): string {
       content: c.content,
       title: c.ref?.title,
       file_id: c.file?.id,
+      style: c.style,
+      locked: c.locked,
+      group_ids: c.group_ids,
     }))
   return CLIP_PREFIX + JSON.stringify({ v: 1, board: bid.value, cards: list })
 }
@@ -1725,7 +2434,7 @@ function copySelection() {
   announce.value = `${selected.value.size} kartu disalin.`
 }
 
-async function pasteText(text: string, sameOffset = false) {
+async function pasteText(text: string, sameOffset = false, at?: { x: number; y: number }) {
   if (!canWrite.value || !text.startsWith(CLIP_PREFIX)) return false
   let data: { board?: string; cards?: ClipCard[] }
   try {
@@ -1738,10 +2447,24 @@ async function pasteText(text: string, sameOffset = false) {
   if (!b) return false
   // Di papan yang sama kartu digeser 24 px; di papan lain kelompoknya ditaruh di tengah layar.
   const c = centerWorld()
-  const dx = data.board === bid.value || sameOffset ? 24 : Math.round(c.x - (b.x + b.w / 2))
-  const dy = data.board === bid.value || sameOffset ? 24 : Math.round(c.y - (b.y + b.h / 2))
+  // "Tempel di sini" (menu klik kanan): pojok kiri atas kelompok di titik klik.
+  const dx = at
+    ? Math.round(at.x - b.x)
+    : data.board === bid.value || sameOffset
+      ? 24
+      : Math.round(c.x - (b.x + b.w / 2))
+  const dy = at
+    ? Math.round(at.y - b.y)
+    : data.board === bid.value || sameOffset
+      ? 24
+      : Math.round(c.y - (b.y + b.h / 2))
+  // Salinan mendapat id grup baru, supaya tidak bergabung ke grup aslinya; gaya dan kunci ikut.
+  const paths = remap(
+    list.map((k) => k.group_ids ?? []),
+    newId,
+  )
   const made: string[] = []
-  for (const k of list) {
+  for (const [i, k] of list.entries()) {
     const input: NewCard = {
       id: newId(),
       kind: k.kind,
@@ -1755,6 +2478,9 @@ async function pasteText(text: string, sameOffset = false) {
     if (k.kind === 'board') input.title = `${k.title ?? 'Papan'} (salinan)`.slice(0, 120)
     else input.content = k.content
     if (k.file_id) input.file_id = k.file_id
+    if (k.style) input.style = k.style
+    if (k.locked) input.locked = true
+    if (paths[i]?.length) input.group_ids = paths[i]
     try {
       const res = await saving(() => createCard(bid.value, input))
       if (res) {
@@ -1783,6 +2509,13 @@ function onPaste(e: ClipboardEvent) {
   if (editingId.value || !canvas.value || !(el === canvas.value || canvas.value.contains(el))) return
   // Tangkapan layar dan berkas dari clipboard menjadi kartu gambar atau berkas di tengah layar.
   const files = pastedFiles(e.clipboardData, new Date())
+  // Satu kartu gambar atau berkas terpilih: tempelan mengganti berkasnya (revisi 50), bukan kartu baru.
+  const only = selected.value.size === 1 ? byId.value.get([...selected.value][0]!) : undefined
+  if (files.length === 1 && canWrite.value && (only?.kind === 'image' || only?.kind === 'file')) {
+    e.preventDefault()
+    replaceCardFile(only.id, files[0]!)
+    return
+  }
   if (files.length && canWrite.value) {
     e.preventDefault()
     uploadFiles(files)
@@ -2207,8 +2940,8 @@ async function runUploads() {
           bid.value,
           {
             id: newId(),
-            x: clamp(snap(at.x - dim.w / 2, gridOn.value), -COORD_LIMIT, COORD_LIMIT),
-            y: clamp(snap(at.y - dim.h / 2, gridOn.value), -COORD_LIMIT, COORD_LIMIT),
+            x: clamp(snap(at.x - dim.w / 2, snapOn.value), -COORD_LIMIT, COORD_LIMIT),
+            y: clamp(snap(at.y - dim.h / 2, snapOn.value), -COORD_LIMIT, COORD_LIMIT),
             w: dim.w,
             h: dim.h,
           },
@@ -2247,8 +2980,18 @@ function onDrop(e: DragEvent) {
   fileOver.value = false
   if (!canWrite.value || !hasFiles(e) || !canvas.value) return
   e.preventDefault()
+  const files = [...(e.dataTransfer?.files ?? [])]
+  // Berkas dilepas di atas kartu gambar atau berkas yang terpilih: berkasnya diganti (revisi 50).
+  const id = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest<HTMLElement>(
+    '[data-card]',
+  )?.dataset.card
+  const target = id && selected.value.has(id) ? byId.value.get(id) : undefined
+  if (files.length === 1 && (target?.kind === 'image' || target?.kind === 'file')) {
+    replaceCardFile(target.id, files[0]!)
+    return
+  }
   const r = canvas.value.getBoundingClientRect()
-  uploadFiles([...(e.dataTransfer?.files ?? [])], toWorld(view.value, e.clientX - r.left, e.clientY - r.top))
+  uploadFiles(files, toWorld(view.value, e.clientX - r.left, e.clientY - r.top))
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -2301,8 +3044,8 @@ function placeAt(kind: CardKind, at?: { x: number; y: number }) {
   const dim = defaultSize[kind]
   const c = at ?? centerWorld()
   return {
-    x: clamp(snap(c.x - dim.w / 2, gridOn.value), -COORD_LIMIT, COORD_LIMIT),
-    y: clamp(snap(c.y - dim.h / 2, gridOn.value), -COORD_LIMIT, COORD_LIMIT),
+    x: clamp(snap(c.x - dim.w / 2, snapOn.value), -COORD_LIMIT, COORD_LIMIT),
+    y: clamp(snap(c.y - dim.h / 2, snapOn.value), -COORD_LIMIT, COORD_LIMIT),
     w: dim.w,
     h: dim.h,
   }
@@ -2550,8 +3293,28 @@ function cardName(id: string) {
 }
 
 async function connectSelected() {
-  const [from, to] = [...selected.value]
-  if (!from || !to) return
+  await connectInOrder()
+  const last = connectors.value.at(-1)
+  if (selected.value.size === 2 && last) connectorIds.value = [last.id]
+}
+
+// Hubungkan kartu terpilih berurutan sesuai urutan pilih (revisi 50): 1 ke 2, 2 ke 3, dan seterusnya. Satu langkah
+// undo untuk semua garis baru.
+async function connectInOrder() {
+  const ids = [...selected.value]
+  const made: string[] = []
+  for (let i = 0; i + 1 < ids.length; i++) {
+    const id = await connectPair(ids[i]!, ids[i + 1]!)
+    if (id) made.push(id)
+  }
+  if (made.length) {
+    record({ kind: 'connectors', ids: made, batches: [] })
+    announce.value =
+      made.length === 1 ? 'Garis ditambahkan.' : `${made.length} garis ditambahkan sesuai urutan pilih.`
+  }
+}
+
+async function connectPair(from: string, to: string): Promise<string | null> {
   try {
     const shape = byId.value.get(from)?.kind === 'shape' || byId.value.get(to)?.kind === 'shape'
     const res = await saving(() =>
@@ -2566,12 +3329,12 @@ async function connectSelected() {
           : {}),
       }),
     )
-    if (!res) return
+    if (!res) return null
     upsertConnectors([res.connector])
-    announce.value = 'Garis ditambahkan.'
-    connectorIds.value = [res.connector.id]
+    return res.connector.id
   } catch {
     // Pesan galat sudah tampil di penanda simpan.
+    return null
   }
 }
 
@@ -2780,6 +3543,9 @@ function begin(e: PointerEvent) {
 function onCanvasDown(e: PointerEvent) {
   if (e.target !== canvas.value && !(e.target as HTMLElement).classList.contains('wb-world')) return
   selectedConnector.value = null
+  // Klik di area kosong keluar dari grup yang sedang dimasuki.
+  groupScope.value = []
+  if (e.pointerType === 'touch') startPress(e, null)
   if (editingId.value) stopEdit()
   // Fokus ke kanvas supaya pintasan keyboard langsung berlaku setelah klik di area kosong.
   canvas.value?.focus({ preventScroll: true })
@@ -2807,6 +3573,7 @@ function onCardGrab(card: Card, e: PointerEvent) {
   if (e.button !== 0 && e.pointerType === 'mouse') return
   if (editingId.value && editingId.value !== card.id) stopEdit()
   focusedId.value = card.id
+  if (e.pointerType === 'touch') startPress(e, card.id)
   if (trackTouch(e)) return
   const p = local(e)
   // Sentuhan pada kartu yang belum terpilih menggeser kanvas, supaya papan penuh kartu tetap bisa digeser di
@@ -2816,14 +3583,20 @@ function onCardGrab(card: Card, e: PointerEvent) {
     begin(e)
     return
   }
+  // Klik memilih seluruh grup (atau satu tingkat di bawah grup yang sedang dimasuki); Shift menambah atau melepas
+  // seluruh unit itu.
+  const unit = unitIds(card.id)
   if (e.shiftKey) {
     const next = new Set(selected.value)
-    if (next.has(card.id)) next.delete(card.id)
-    else next.add(card.id)
+    const has = next.has(card.id)
+    for (const id of unit) {
+      if (has) next.delete(id)
+      else next.add(id)
+    }
     selected.value = next
     return
   }
-  if (!selected.value.has(card.id)) select([card.id])
+  if (!selected.value.has(card.id)) select(unit)
   gesture = {
     kind: 'move',
     startX: p.x,
@@ -2864,7 +3637,7 @@ function onGrabResult(granted: string[], denied: { id: string; user: Who }[]) {
   const deniedIds = new Set(denied.map((d) => d.id))
   const who = denied[0]!.user.name
   if (g?.kind === 'move') {
-    if (deniedIds.has(g.anchor)) {
+    if (deniedIds.has(g.anchor) || granted.length === 0) {
       g.cancelled = true
       g.ids = []
       dragOffset.value = { dx: 0, dy: 0 }
@@ -2912,6 +3685,7 @@ function sendMoves(force = false) {
 }
 
 function onMove(e: PointerEvent) {
+  if (pressStart && Math.hypot(e.clientX - pressStart.x, e.clientY - pressStart.y) > 8) cancelPress()
   if (!gesture || !canvas.value) return
   const p = local(e)
   if (e.pointerType === 'touch' && touches.has(e.pointerId)) touches.set(e.pointerId, p)
@@ -2941,7 +3715,7 @@ function onMove(e: PointerEvent) {
       const a = toWorld(view.value, x, y)
       const rect = { x: a.x, y: a.y, w: box.value.w / z, h: box.value.h / z }
       const hit = shownCards.value.filter((c) => intersects(rect, c)).map((c) => c.id)
-      selected.value = new Set([...gesture.base, ...hit])
+      selected.value = new Set([...gesture.base, ...expand(hit, cards.value, groupScope.value)])
       return
     }
     case 'move': {
@@ -2949,7 +3723,17 @@ function onMove(e: PointerEvent) {
       if (!gesture.started && Math.hypot(p.x - gesture.startX, p.y - gesture.startY) < 4) return
       if (!gesture.started) {
         gesture.started = true
-        if (gesture.ids.length) send({ t: 'grab', ids: gesture.ids })
+        // Kartu terkunci tidak bisa digeser; seret yang memuatnya dibatalkan utuh supaya grup tidak terpecah.
+        const locked = gesture.ids.filter((id) => byId.value.get(id)?.locked).length
+        if (locked) {
+          gesture.cancelled = true
+          gesture.ids = []
+          lockedToast(locked)
+          return
+        }
+        // Grup bergerak utuh: grab semua atau tidak sama sekali (server menolak bila satu anggota dipegang orang lain).
+        const all = gesture.ids.some((id) => byId.value.get(id)?.group_ids?.length)
+        if (gesture.ids.length) send({ t: 'grab', ids: gesture.ids, all })
       }
       if (gesture.ids.length === 0) return
       const dx = (p.x - gesture.startX) / z
@@ -2958,8 +3742,8 @@ function onMove(e: PointerEvent) {
       const anchor = shownById.value.get(gesture.anchor)
       if (!anchor) return
       dragOffset.value = {
-        dx: snap(anchor.x + dx, gridOn.value) - anchor.x,
-        dy: snap(anchor.y + dy, gridOn.value) - anchor.y,
+        dx: snap(anchor.x + dx, snapOn.value) - anchor.x,
+        dy: snap(anchor.y + dy, snapOn.value) - anchor.y,
       }
       sendMoves()
       return
@@ -2969,8 +3753,8 @@ function onMove(e: PointerEvent) {
       const card = byId.value.get(gesture.id)
       if (!card) return
       if (gesture.handle === 'se' && card.kind !== 'shape') {
-        const w = clamp(snap(card.w + (p.x - gesture.startX) / z, gridOn.value), MIN_SIZE, MAX_SIZE)
-        const h = clamp(snap(card.h + (p.y - gesture.startY) / z, gridOn.value), MIN_SIZE, MAX_SIZE)
+        const w = clamp(snap(card.w + (p.x - gesture.startX) / z, snapOn.value), MIN_SIZE, MAX_SIZE)
+        const h = clamp(snap(card.h + (p.y - gesture.startY) / z, snapOn.value), MIN_SIZE, MAX_SIZE)
         resizeDelta.value = { dx: 0, dy: 0, dw: w - card.w, dh: h - card.h }
       } else {
         const s0 = gesture.start
@@ -3016,7 +3800,7 @@ function onMove(e: PointerEvent) {
       if (!b) return
       const w = toWorld(view.value, p.x, p.y)
       const pts = [...b.points]
-      pts[gesture.index] = [Math.round(snap(w.x, gridOn.value)), Math.round(snap(w.y, gridOn.value))]
+      pts[gesture.index] = [Math.round(snap(w.x, snapOn.value)), Math.round(snap(w.y, snapOn.value))]
       bendDraft.value = { id: b.id, points: pts }
       return
     }
@@ -3024,6 +3808,7 @@ function onMove(e: PointerEvent) {
 }
 
 function onUp(e: PointerEvent) {
+  cancelPress()
   touches.delete(e.pointerId)
   const g = gesture
   if (g?.kind === 'pinch' && touches.size > 0) return
@@ -3052,7 +3837,8 @@ function onUp(e: PointerEvent) {
         const double = lastTap?.id === g.anchor && performance.now() - lastTap.at < 350
         lastTap = double ? null : { id: g.anchor, at: performance.now() }
         if (double && card?.kind === 'board') openBoard(card)
-        else if (double) startEdit(g.anchor, caretHint(e.clientX, e.clientY, e.target))
+        else if (double && card && !enterGroup(card))
+          startEdit(g.anchor, caretHint(e.clientX, e.clientY, e.target))
       }
       return
     }
@@ -3075,6 +3861,7 @@ function onUp(e: PointerEvent) {
     })
     announce.value = `${changes.length} kartu dipindah.`
     applyLayout(changes)
+    shiftBends(new Set(g.ids), dx, dy)
   }
   if (g.kind === 'resize') {
     const { dx, dy, dw, dh } = resizeDelta.value
@@ -3184,7 +3971,7 @@ function onCanvasDblClick(e: MouseEvent) {
   const card = id ? byId.value.get(id) : undefined
   if (!card || editingId.value === card.id) return
   if (card.kind === 'board') openBoard(card)
-  else startEdit(card.id, caretHint(e.clientX, e.clientY, el))
+  else if (!enterGroup(card)) startEdit(card.id, caretHint(e.clientX, e.clientY, el))
 }
 
 let tapSelectAt = 0
@@ -3260,6 +4047,10 @@ let nudgeTimer: ReturnType<typeof setTimeout> | undefined
 const nudgeStart = new Map<string, Geo>()
 
 function nudge(dx: number, dy: number) {
+  if (anyLocked.value) {
+    lockedToast()
+    return
+  }
   for (const id of selected.value) {
     const c = byId.value.get(id)
     if (!c || c.column_id) continue
@@ -3324,6 +4115,18 @@ function onKeydown(e: KeyboardEvent) {
   }
   if (target.closest('input, textarea, select, [contenteditable="true"]')) return
   if (onConnectorKey(e)) return
+  // Menu klik kanan lewat keyboard: Shift+F10 atau tombol Menu.
+  if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+    e.preventDefault()
+    openMenuFromKeyboard()
+    return
+  }
+  const sc = findShortcut(e, KEY_ACTIONS)
+  if (sc && actions[sc]) {
+    e.preventDefault()
+    actions[sc]!()
+    return
+  }
   const mod = e.ctrlKey || e.metaKey
   if (e.key === ' ' && !mod) {
     spaceHeld.value = true
@@ -3396,6 +4199,12 @@ function onKeydown(e: KeyboardEvent) {
       return
     }
     case 'Escape':
+      // Di dalam grup: Escape keluar satu tingkat dan memilih grup itu utuh.
+      if (groupScope.value.length) {
+        e.preventDefault()
+        exitGroup()
+        return
+      }
       if (selected.value.size > 0) {
         e.preventDefault()
         select([])
@@ -3427,8 +4236,7 @@ function onKeydown(e: KeyboardEvent) {
     case 'g':
     case 'G':
       e.preventDefault()
-      gridOn.value = !gridOn.value
-      announce.value = gridOn.value ? 'Grid dan snap menyala.' : 'Grid dan snap mati.'
+      toggleGrid()
   }
 }
 
@@ -3902,6 +4710,7 @@ const toolBtn =
           @keydown="onKeydown"
           @keyup="onKeyup"
           @dblclick="onCanvasDblClick"
+          @contextmenu="onContextMenu"
           @dragover="onDragOver"
           @dragleave="fileOver = false"
           @drop="onDrop"
@@ -3913,6 +4722,20 @@ const toolBtn =
               :zoom="view.zoom"
               @select="onConnectorSelect"
               @open="connectorIds = [$event]"
+            />
+            <!-- Bingkai grup terpilih (revisi 50): putus-putus di sekeliling seluruh anggotanya. -->
+            <div
+              v-for="(f, i) in groupFrames"
+              :key="`grup-${i}`"
+              aria-hidden="true"
+              class="wb-group-frame pointer-events-none absolute top-0 left-0"
+              :style="{
+                transform: `translate(${f.x}px, ${f.y}px)`,
+                width: `${f.w}px`,
+                height: `${f.h}px`,
+                '--wb-ring': `${2 / view.zoom}px`,
+              }"
+              data-testid="wb-group-frame"
             />
             <template v-for="c in rendered" :key="c.id">
               <WbInk
@@ -4124,8 +4947,9 @@ const toolBtn =
             </option>
             <option v-if="selected.size === 2" value="connect">Hubungkan dengan garis</option>
             <option value="move">Pindahkan ke papan</option>
+            <option value="menu">Semua aksi (Shift+F10)</option>
           </select>
-          <template v-if="selected.size >= 2">
+          <template v-if="selUnitCount >= 2">
             <label :for="`${uid}-align`" class="sr-only">Rapikan kartu terpilih</label>
             <select
               :id="`${uid}-align`"
@@ -4135,7 +4959,7 @@ const toolBtn =
             >
               <option value="" disabled>Rapikan...</option>
               <option
-                v-for="o in alignOptions.filter((a) => selected.size >= a.min)"
+                v-for="o in alignOptions.filter((a) => selUnitCount >= a.min)"
                 :key="o.value"
                 :value="o.value"
               >
@@ -4502,6 +5326,36 @@ const toolBtn =
       :error="templateError"
       @close="templateOpen = false"
       @pick="placeTemplate"
+    />
+    <WbContextMenu
+      v-if="menu"
+      :items="menu.items"
+      :x="menu.x"
+      :y="menu.y"
+      :label="menu.label"
+      @close="closeMenu"
+    />
+    <WbStylePanel
+      :open="stylePanelOpen"
+      :cards="selCards"
+      :can-write="canWrite"
+      @close="stylePanelOpen = false"
+      @apply="applyStyle"
+    />
+    <WbImageDialog
+      :mode="imageDialog?.mode ?? null"
+      :card="imageCard"
+      @close="imageDialog = null"
+      @save="saveCrop"
+    />
+    <input
+      ref="replaceInput"
+      type="file"
+      class="sr-only"
+      tabindex="-1"
+      aria-hidden="true"
+      :accept="acceptFiles"
+      @change="onReplacePicked"
     />
     <WbExportDialog
       :open="exportOpen"

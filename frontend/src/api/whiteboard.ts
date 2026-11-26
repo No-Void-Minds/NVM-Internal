@@ -8,6 +8,7 @@ import type {
   ConnectorGeometry,
   ConnectorStyle,
   PMNode,
+  CardStyle,
   PreviewInfo,
 } from '../utils/whiteboard'
 
@@ -56,6 +57,11 @@ export type CardPatch = {
   // "" mengeluarkan kartu dari kolom.
   column_id?: string
   col_order?: number
+  // Revisi 50: gaya utuh, kunci posisi, jalur grup utuh ([] keluar dari semua grup), dan berkas (undo ganti gambar).
+  style?: CardStyle
+  locked?: boolean
+  group_ids?: string[]
+  file_id?: string
 }
 
 export type NewCard = {
@@ -71,6 +77,9 @@ export type NewCard = {
   title?: string
   // Kartu gambar atau berkas hasil salin tempel memakai berkas yang sudah ada.
   file_id?: string
+  style?: CardStyle
+  locked?: boolean
+  group_ids?: string[]
 }
 
 export type ChecklistOp =
@@ -177,6 +186,11 @@ export function fileUrl(id: string, thumb = false) {
   return `/api/whiteboard/files/${id}${thumb ? '?thumb=1' : ''}`
 }
 
+// Unduh berkas asli: selalu sebagai unduhan, juga untuk gambar dan PDF (revisi 50).
+export function downloadUrl(id: string) {
+  return `/api/whiteboard/files/${id}?download=1`
+}
+
 export type UploadHandle = { promise: Promise<Card>; abort: () => void }
 
 // XMLHttpRequest supaya progres unggahan terbaca, sama dengan lampiran task. Kartu dibuat server bersama berkasnya.
@@ -194,17 +208,43 @@ export function uploadFile(
     w: String(at.w),
     h: String(at.h),
   })
-  const promise = new Promise<Card>((resolve, reject) => {
-    xhr.open('POST', `/api/whiteboard/boards/${board}/files?${q}`)
+  const promise = postFile<{ card: Card }>(
+    xhr,
+    `/api/whiteboard/boards/${board}/files?${q}`,
+    file,
+    onProgress,
+  ).then((b) => b.card)
+  return { promise, abort: () => xhr.abort() }
+}
+
+// Ganti berkas kartu gambar atau berkas (revisi 50). old_file_id dipakai langkah undo.
+export function replaceFile(board: string, card: string, file: File, onProgress: (fraction: number) => void) {
+  const xhr = new XMLHttpRequest()
+  return postFile<{ card: Card; old_file_id: string }>(
+    xhr,
+    `/api/whiteboard/boards/${board}/cards/${card}/file`,
+    file,
+    onProgress,
+  )
+}
+
+function postFile<T extends { card: Card }>(
+  xhr: XMLHttpRequest,
+  url: string,
+  file: File,
+  onProgress: (fraction: number) => void,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    xhr.open('POST', url)
     xhr.responseType = 'json'
     xhr.setRequestHeader('Accept', 'application/json')
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(e.loaded / e.total)
     }
     xhr.onload = () => {
-      const body = xhr.response as { card?: Card; error?: { code?: string; message?: string } } | null
-      if (xhr.status === 201 && body?.card) {
-        resolve(body.card)
+      const body = xhr.response as (T & { error?: { code?: string; message?: string } }) | null
+      if ((xhr.status === 201 || xhr.status === 200) && body?.card) {
+        resolve(body)
         return
       }
       if (xhr.status === 401) notifyUnauthorized()
@@ -223,7 +263,6 @@ export function uploadFile(
     form.append('file', file)
     xhr.send(form)
   })
-  return { promise, abort: () => xhr.abort() }
 }
 
 export type BoardOption = { id: string; title: string; parent_id: string | null; is_root: boolean }

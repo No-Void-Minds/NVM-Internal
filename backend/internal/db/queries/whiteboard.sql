@@ -73,7 +73,7 @@ RETURNING seq;
 -- name: ListWbCards :many
 -- Kartu papan membawa judul papan anak dan ringkasan isinya ("3 papan, 12 kartu").
 SELECT c.id, c.board_id, c.kind, c.ref_board_id, c.x, c.y, c.w, c.h, c.z, c.color, c.content, c.version,
-       c.content_version, c.seq, c.updated_by, c.updated_at, c.file_id, c.column_id, c.col_order,
+       c.content_version, c.seq, c.updated_by, c.updated_at, c.file_id, c.column_id, c.col_order, c.style, c.locked, c.group_ids,
        coalesce(rb.title, '')::text AS ref_title, coalesce(rb.version, 0)::int AS ref_version,
        (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind = 'board')::bigint AS ref_boards,
        (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind <> 'board')::bigint AS ref_cards,
@@ -95,10 +95,15 @@ WHERE c.board_id = @board_id AND c.deleted_at IS NULL
 ORDER BY c.z, c.created_at, c.id;
 
 -- name: GetWbCardForUpdate :one
-SELECT id, board_id, kind, ref_board_id, content, content_version, column_id
+SELECT id, board_id, kind, ref_board_id, content, content_version, column_id, locked, file_id
 FROM wb_cards
 WHERE id = @id AND board_id = @board_id AND deleted_at IS NULL
 FOR UPDATE;
+
+-- name: ListWbLockedCards :many
+-- Kartu terkunci di antara id ini (revisi 50): ditolak saat dihapus.
+SELECT id FROM wb_cards
+WHERE board_id = @board_id AND deleted_at IS NULL AND locked AND id = ANY(@ids::uuid[]);
 
 -- name: WbCardExists :one
 SELECT EXISTS (SELECT 1 FROM wb_cards WHERE id = @id)::bool;
@@ -107,9 +112,10 @@ SELECT EXISTS (SELECT 1 FROM wb_cards WHERE id = @id)::bool;
 SELECT coalesce(max(z), 0)::double precision FROM wb_cards WHERE board_id = @board_id AND deleted_at IS NULL;
 
 -- name: InsertWbCard :exec
-INSERT INTO wb_cards (id, board_id, kind, ref_board_id, file_id, x, y, w, h, z, color, content, plain, seq, created_by, updated_by)
+INSERT INTO wb_cards (id, board_id, kind, ref_board_id, file_id, x, y, w, h, z, color, content, plain, seq, created_by, updated_by,
+                      style, locked, group_ids)
 VALUES (@id, @board_id, @kind, sqlc.narg(ref_board_id), sqlc.narg(file_id), @x, @y, @w, @h, @z, sqlc.narg(color), @content,
-        @plain, @seq, @actor_id, @actor_id);
+        @plain, @seq, @actor_id, @actor_id, @style, @locked, @group_ids::uuid[]);
 
 -- name: PatchWbCard :exec
 -- Hanya field yang dikirim yang berubah (last-write-wins per field). Warna dikosongkan lewat clear_color, karena
@@ -124,6 +130,10 @@ SET x = coalesce(sqlc.narg(x), x),
     col_order = CASE WHEN @clear_column::bool THEN NULL ELSE coalesce(sqlc.narg(col_order), col_order) END,
     color = CASE WHEN @clear_color::bool THEN NULL ELSE coalesce(sqlc.narg(color), color) END,
     content = coalesce(sqlc.narg(content), content),
+    style = coalesce(sqlc.narg(style), style),
+    locked = coalesce(sqlc.narg(locked), locked),
+    group_ids = CASE WHEN @set_groups::bool THEN @group_ids::uuid[] ELSE group_ids END,
+    file_id = coalesce(sqlc.narg(file_id), file_id),
     plain = coalesce(sqlc.narg(plain), plain),
     content_version = content_version + CASE WHEN sqlc.narg(content)::jsonb IS NULL THEN 0 ELSE 1 END,
     version = version + 1,
@@ -214,7 +224,7 @@ LIMIT 200;
 
 -- name: GetWbCard :one
 SELECT c.id, c.board_id, c.kind, c.ref_board_id, c.x, c.y, c.w, c.h, c.z, c.color, c.content, c.version,
-       c.content_version, c.seq, c.updated_by, c.updated_at, c.file_id, c.column_id, c.col_order,
+       c.content_version, c.seq, c.updated_by, c.updated_at, c.file_id, c.column_id, c.col_order, c.style, c.locked, c.group_ids,
        coalesce(rb.title, '')::text AS ref_title, coalesce(rb.version, 0)::int AS ref_version,
        (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind = 'board')::bigint AS ref_boards,
        (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind <> 'board')::bigint AS ref_cards,
@@ -244,7 +254,7 @@ SELECT count(*)::bigint FROM wb_cards WHERE board_id = @board_id AND seq > @seq;
 -- Sinkron ulang setelah koneksi putus: semua kartu yang berubah sesudah seq itu, termasuk yang masuk Tempat sampah
 -- (deleted true) supaya klien bisa membuangnya.
 SELECT c.id, c.board_id, c.kind, c.ref_board_id, c.x, c.y, c.w, c.h, c.z, c.color, c.content, c.version,
-       c.content_version, c.seq, c.updated_by, c.updated_at, c.file_id, c.column_id, c.col_order,
+       c.content_version, c.seq, c.updated_by, c.updated_at, c.file_id, c.column_id, c.col_order, c.style, c.locked, c.group_ids,
        coalesce(rb.title, '')::text AS ref_title, coalesce(rb.version, 0)::int AS ref_version,
        (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind = 'board')::bigint AS ref_boards,
        (SELECT count(*) FROM wb_cards k WHERE k.board_id = c.ref_board_id AND k.deleted_at IS NULL AND k.kind <> 'board')::bigint AS ref_cards,
@@ -484,16 +494,17 @@ SELECT id, parent_id, title, is_template, depth::int AS depth FROM down ORDER BY
 
 -- name: ListWbCardsForCopy :many
 -- Kolom lebih dulu, supaya column_id isi kolom salinan menunjuk kolom yang sudah ada.
-SELECT id, board_id, kind, ref_board_id, file_id, column_id, col_order, x, y, w, h, z, color, content, plain
+SELECT id, board_id, kind, ref_board_id, file_id, column_id, col_order, x, y, w, h, z, color, content, plain,
+       style, locked, group_ids
 FROM wb_cards
 WHERE board_id = ANY(@board_ids::uuid[]) AND deleted_at IS NULL
 ORDER BY (column_id IS NOT NULL), board_id, z, id;
 
 -- name: InsertWbCardCopy :exec
 INSERT INTO wb_cards (id, board_id, kind, ref_board_id, file_id, column_id, col_order, x, y, w, h, z, color, content,
-                      plain, created_by, updated_by)
+                      plain, created_by, updated_by, style, locked, group_ids)
 VALUES (@id, @board_id, @kind, sqlc.narg(ref_board_id), sqlc.narg(file_id), sqlc.narg(column_id), sqlc.narg(col_order),
-        @x, @y, @w, @h, @z, sqlc.narg(color), @content, @plain, @actor_id, @actor_id);
+        @x, @y, @w, @h, @z, sqlc.narg(color), @content, @plain, @actor_id, @actor_id, @style, @locked, @group_ids::uuid[]);
 
 -- name: ListWbConnectorsForCopy :many
 SELECT board_id, from_card_id, to_card_id, geometry, style, label, label_start, label_end

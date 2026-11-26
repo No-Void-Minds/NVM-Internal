@@ -60,6 +60,38 @@ func (s *Server) wbUpload(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"card": card})
 }
 
+// wbReplaceFile mengganti berkas kartu gambar atau berkas (revisi 50). Batas ukuran dan jenis sama dengan unggahan;
+// kartu yang sedang diedit akun lain ditolak dengan nama pemegangnya.
+func (s *Server) wbReplaceFile(c *gin.Context) {
+	if s.wbLocked(c, c.Param("cardId")) {
+		return
+	}
+	_ = http.NewResponseController(c.Writer).SetReadDeadline(time.Now().Add(uploadTimeout))
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, whiteboard.MaxFileSize+(1<<20))
+	mr, err := c.Request.MultipartReader()
+	if err != nil {
+		writeError(c, http.StatusBadRequest, CodeBadRequest, "Unggahan harus berupa multipart/form-data.")
+		return
+	}
+	part, err := filePart(mr)
+	if err != nil {
+		writeError(c, http.StatusBadRequest, CodeBadRequest, "Tidak ada berkas di unggahan ini.")
+		return
+	}
+	defer func() { _ = part.Close() }()
+	card, old, err := s.whiteboard.ReplaceFile(c.Request.Context(), wbActor(c), c.Param("id"), c.Param("cardId"), part.FileName(), part)
+	var tooBig *http.MaxBytesError
+	if errors.As(err, &tooBig) {
+		err = whiteboard.ErrTooLarge
+	}
+	if err != nil {
+		s.writeWbError(c, err)
+		return
+	}
+	s.hub.Changed(card.BoardID, []whiteboard.Card{card}, currentUser(c).ID)
+	c.JSON(http.StatusOK, gin.H{"card": card, "old_file_id": old})
+}
+
 // wbFile menyajikan berkas asli (gambar dan PDF tampil di tab, sisanya diunduh) atau thumbnail JPEG. Id berkas
 // tidak pernah dipakai ulang untuk isi lain, jadi boleh di-cache peramban.
 func (s *Server) wbFile(c *gin.Context) {
@@ -74,7 +106,8 @@ func (s *Server) wbFile(c *gin.Context) {
 	if thumb {
 		ctype = "image/jpeg"
 	}
-	if thumb || strings.HasPrefix(ctype, "image/") || ctype == "application/pdf" {
+	// download=1: tombol Unduh berkas asli (revisi 50) selalu mengunduh, juga untuk gambar dan PDF.
+	if (thumb || strings.HasPrefix(ctype, "image/") || ctype == "application/pdf") && c.Query("download") != "1" {
 		kind = "inline"
 	}
 	disposition := mime.FormatMediaType(kind, map[string]string{"filename": row.OriginalName})

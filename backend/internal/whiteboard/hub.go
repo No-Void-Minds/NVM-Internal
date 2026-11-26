@@ -256,6 +256,8 @@ type In struct {
 	Points []int  `json:"points"`
 	Color  string `json:"color"`
 	Width  int    `json:"width"`
+	// All: grab semua atau tidak sama sekali (seret grup, revisi 50).
+	All bool `json:"all"`
 }
 
 type Move struct {
@@ -302,7 +304,7 @@ func (h *Hub) Handle(ctx context.Context, c *Client, raw []byte) {
 			h.broadcast(board, c, msg{"t": "select", "user": person(c), "ids": in.IDs})
 		}
 	case "grab":
-		h.grab(c, board, in.IDs)
+		h.grab(c, board, in.IDs, in.All)
 	case "move":
 		if !h.allow(c) {
 			return
@@ -428,7 +430,7 @@ func (h *Hub) join(ctx context.Context, c *Client, in In) {
 	h.broadcastPresence(board)
 }
 
-func (h *Hub) grab(c *Client, board string, ids []string) {
+func (h *Hub) grab(c *Client, board string, ids []string, all bool) {
 	if len(ids) > maxIDs {
 		return
 	}
@@ -438,8 +440,14 @@ func (h *Hub) grab(c *Client, board string, ids []string) {
 			denied = append(denied, msg{"id": id, "user": person(g)})
 			continue
 		}
-		h.grabs[id] = c
 		granted = append(granted, id)
+	}
+	// Grup bergerak utuh: satu anggota yang dipegang orang lain menolak seluruh grab.
+	if all && len(denied) > 0 {
+		granted = []string{}
+	}
+	for _, id := range granted {
+		h.grabs[id] = c
 	}
 	h.send(c, msg{"t": "grab_result", "granted": granted, "denied": denied})
 	if len(granted) > 0 {

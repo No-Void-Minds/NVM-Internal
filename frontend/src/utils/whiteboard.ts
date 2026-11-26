@@ -4,6 +4,9 @@
 // Ekstensi .ts: modul ini juga diimpor test Node (tsconfig.node.json, resolusi node16).
 import type { ShapeContent } from './wbShapes.ts'
 import { inlineRuns, type Run } from './wbRich.ts'
+import type { CardStyle } from './wbStyle.ts'
+
+export type { CardStyle }
 
 export type CardKind =
   | 'note'
@@ -37,7 +40,9 @@ export type ChecklistContent = { title: string; title_doc?: PMNode | null; items
 export type BoardRef = { id: string; title: string; version: number; boards: number; cards: number }
 export type BoardContent = Record<string, never>
 // W3: isi kartu gambar dan berkas hanya keterangan; berkasnya di field file.
-export type CaptionContent = { caption: string }
+// crop: potongan dan posisi zoom gambar di bingkai kartu (revisi 50), pecahan 0 sampai 1 dari sisi berkas asli.
+export type Crop = { x: number; y: number; w: number; h: number }
+export type CaptionContent = { caption: string; crop?: Crop | null }
 export type LinkContent = { url: string; preview_id: string }
 export type ColumnContent = { title: string; title_doc?: PMNode | null }
 // Goresan objek gambar bebas (revisi A): piksel dunia bilangan bulat relatif ke pojok kotak batas objek, x,y berpasangan.
@@ -127,6 +132,10 @@ export type Card = {
   col_order?: number | null
   comments?: number
   created_by_name?: string
+  // Revisi 50: gaya kartu, kunci posisi, dan jalur grup dari terluar ke terdalam.
+  style?: CardStyle
+  locked?: boolean
+  group_ids?: string[]
   version: number
   content_version: number
   seq: number
@@ -627,6 +636,12 @@ export function activityText(a: Activity): string {
       return 'memindahkan garis penghubung ke Tempat sampah'
     case 'comment_added':
       return `mengomentari kartu${ex}`
+    case 'card_locked':
+      return `mengunci posisi ${label}`
+    case 'card_unlocked':
+      return `membuka kunci posisi ${label}`
+    case 'file_replaced':
+      return `mengganti berkas ${label}${ex}`
     default:
       return 'mengubah papan'
   }

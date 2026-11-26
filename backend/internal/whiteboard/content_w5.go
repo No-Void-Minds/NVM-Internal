@@ -38,8 +38,11 @@ var (
 )
 
 type ShapeContent struct {
-	Shape       string `json:"shape"`
-	Rotation    int    `json:"rotation"`
+	Shape    string `json:"shape"`
+	Rotation int    `json:"rotation"`
+	// Balik mendatar dan tegak (revisi 50): hanya gambar bentuknya, teks tetap terbaca.
+	FlipX       bool   `json:"flip_x,omitempty"`
+	FlipY       bool   `json:"flip_y,omitempty"`
 	Fill        string `json:"fill"`
 	Stroke      string `json:"stroke"`
 	StrokeWidth int    `json:"stroke_width"`

@@ -157,6 +157,10 @@ func (s *Server) wbPatchCards(c *gin.Context) {
 	// Isi tabel dan gambar bebas hanya diubah pemegang kunci lunaknya; catatan dijaga content_version (W2).
 	board := ""
 	for _, p := range req.Cards {
+		// Ganti berkas (undo dan redo) juga ditolak saat kartunya diedit akun lain (revisi 50).
+		if p.FileID != nil && s.wbLocked(c, p.ID) {
+			return
+		}
 		if len(p.Content) == 0 || string(p.Content) == "null" {
 			continue
 		}

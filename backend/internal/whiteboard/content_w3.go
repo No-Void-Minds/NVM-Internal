@@ -40,6 +40,8 @@ var DrawingWidths = map[int]bool{2: true, 4: true, 8: true}
 
 type CaptionContent struct {
 	Caption string `json:"caption"`
+	// Crop: potongan dan posisi zoom di bingkai kartu gambar (revisi 50). Kartu berkas tidak memakainya.
+	Crop *Crop `json:"crop,omitempty"`
 }
 
 type LinkContent struct {
@@ -78,7 +80,11 @@ func cleanCaption(raw json.RawMessage) (CaptionContent, string, error) {
 		return in, "", err
 	}
 	c, err := CleanText(in.Caption, MaxCaption, "Keterangan")
-	return CaptionContent{Caption: c}, c, err
+	if err != nil {
+		return in, "", err
+	}
+	crop, err := cleanCrop(in.Crop)
+	return CaptionContent{Caption: c, Crop: crop}, c, err
 }
 
 // CleanLinkURL hanya menerima http dan https untuk kartu tautan (mailto tidak punya halaman untuk dipratinjau).

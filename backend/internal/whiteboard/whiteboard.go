@@ -226,6 +226,10 @@ type Card struct {
 	ColOrder       *float64        `json:"col_order"`
 	Comments       int64           `json:"comments"`
 	CreatedByName  string          `json:"created_by_name"`
+	// Revisi 50: gaya kartu (CardStyle), kunci posisi, dan jalur grup dari terluar ke terdalam.
+	Style    json.RawMessage `json:"style"`
+	Locked   bool            `json:"locked"`
+	GroupIDs []string        `json:"group_ids"`
 }
 
 // FileInfo: berkas kartu gambar atau berkas. Thumb true berarti ada thumbnail JPEG untuk ditampilkan di kanvas.
@@ -278,6 +282,12 @@ func cardOf(r sqlc.ListWbCardsRow) Card {
 	}
 	c.Comments = r.CommentCount
 	c.CreatedByName = r.CreatedByName
+	c.Style = json.RawMessage(r.Style)
+	if len(c.Style) == 0 {
+		c.Style = json.RawMessage(`{}`)
+	}
+	c.Locked = r.Locked
+	c.GroupIDs = groupStrings(r.GroupIds)
 	return c
 }
 
@@ -469,6 +479,10 @@ type CardInput struct {
 	Title string `json:"title"`
 	// FileID: berkas yang sudah diunggah, untuk kartu gambar atau berkas hasil salin tempel.
 	FileID string `json:"file_id"`
+	// Revisi 50: salin tempel dan duplikat membawa gaya, kunci, dan grup (id grup sudah dipetakan ulang klien).
+	Style    json.RawMessage `json:"style"`
+	Locked   bool            `json:"locked"`
+	GroupIDs []string        `json:"group_ids"`
 }
 
 // CreateCard menaruh kartu baru di atas tumpukan. Kartu jenis board sekaligus membuat papan anak di papan ini.
@@ -483,6 +497,14 @@ func (s *Service) CreateCard(ctx context.Context, actor Actor, boardText string,
 		if e != nil {
 			return Card{}, e
 		}
+	}
+	style, err := CleanStyle(in.Style)
+	if err != nil {
+		return Card{}, err
+	}
+	groups, err := cleanGroups(in.GroupIDs)
+	if err != nil {
+		return Card{}, err
 	}
 	var content []byte
 	var plain, title string
@@ -563,6 +585,7 @@ func (s *Service) CreateCard(ctx context.Context, actor Actor, boardText string,
 		if err := q.InsertWbCard(ctx, sqlc.InsertWbCardParams{
 			ID: cardID, BoardID: boardID, Kind: in.Kind, RefBoardID: ref, FileID: fileID, X: in.X, Y: in.Y, W: in.W, H: in.H, Z: math.Min(z+1, maxZ),
 			Color: pgtype.Text{String: in.Color, Valid: in.Color != ""}, Content: content, Plain: plain, Seq: seq, ActorID: actor.ID,
+			Style: style, Locked: in.Locked, GroupIds: groups,
 		}); err != nil {
 			return err
 		}
@@ -589,6 +612,12 @@ type CardPatch struct {
 	// ColumnID: id kartu kolom tujuan, atau "" untuk keluar dari kolom. ColOrder urutan di dalam kolom.
 	ColumnID *string  `json:"column_id"`
 	ColOrder *float64 `json:"col_order"`
+	// Revisi 50. Style menggantikan seluruh gaya; GroupIDs menggantikan seluruh jalur grup ([] keluar dari semua grup);
+	// FileID mengganti berkas kartu gambar atau berkas (undo ganti gambar).
+	Style    json.RawMessage `json:"style"`
+	Locked   *bool           `json:"locked"`
+	GroupIDs *[]string       `json:"group_ids"`
+	FileID   *string         `json:"file_id"`
 }
 
 func f8(v *float64) pgtype.Float8 {
@@ -625,6 +654,25 @@ func (p CardPatch) check() error {
 }
 
 func (p CardPatch) hasContent() bool { return len(p.Content) > 0 && string(p.Content) != "null" }
+
+func (p CardPatch) hasStyle() bool { return len(p.Style) > 0 && string(p.Style) != "null" }
+
+// moves: perubahan yang ditolak pada kartu terkunci (posisi, ukuran, dan masuk atau keluar kolom).
+func (p CardPatch) moves() bool {
+	return p.X != nil || p.Y != nil || p.W != nil || p.H != nil || p.ColumnID != nil || p.ColOrder != nil
+}
+
+// ErrLocked: kartu terkunci tidak bisa digeser, diubah ukuran, diputar, atau dihapus; isinya tetap bisa diedit.
+var ErrLocked = apperr.Invalid("Kartu terkunci. Buka kunci dulu untuk memindah, mengubah ukuran, memutar, atau menghapusnya.")
+
+// rotation membaca sudut kartu bentuk; isi lain bernilai 0.
+func rotation(content []byte) int {
+	var v struct {
+		Rotation int `json:"rotation"`
+	}
+	_ = json.Unmarshal(content, &v)
+	return v.Rotation
+}
 
 // PatchCards menerapkan perubahan beberapa kartu di satu papan dalam satu transaksi. Posisi, ukuran, urutan, dan
 // warna digabung per field (yang terakhir sampai menang); isi dijaga content_version.
@@ -673,6 +721,36 @@ func (s *Service) PatchCards(ctx context.Context, actor Actor, boardText string,
 				params.ClearColor = *p.Color == ""
 				params.Color = pgtype.Text{String: *p.Color, Valid: *p.Color != ""}
 			}
+			// Kunci posisi dinilai terhadap keadaan sesudah patch: membuka kunci sambil menggeser di satu patch boleh.
+			lockedAfter := cur.Locked
+			if p.Locked != nil {
+				lockedAfter = *p.Locked
+				params.Locked = pgtype.Bool{Bool: *p.Locked, Valid: true}
+			}
+			if cur.Locked && lockedAfter && p.moves() {
+				return ErrLocked
+			}
+			if p.hasStyle() {
+				style, err := CleanStyle(p.Style)
+				if err != nil {
+					return err
+				}
+				params.Style = style
+			}
+			if p.GroupIDs != nil {
+				groups, err := cleanGroups(*p.GroupIDs)
+				if err != nil {
+					return err
+				}
+				params.SetGroups, params.GroupIds = true, groups
+			} else {
+				params.GroupIds = []pgtype.UUID{}
+			}
+			if p.FileID != nil {
+				if err := replaceFilePatch(ctx, q, cur.Kind, *p.FileID, &params); err != nil {
+					return err
+				}
+			}
 			if err := columnPatch(ctx, q, boardID, id, cur.Kind, p, &params); err != nil {
 				return err
 			}
@@ -695,6 +773,9 @@ func (s *Service) PatchCards(ctx context.Context, actor Actor, boardText string,
 				if err != nil {
 					return err
 				}
+				if cur.Kind == KindShape && cur.Locked && lockedAfter && rotation(content) != rotation(cur.Content) {
+					return ErrLocked
+				}
 				params.Content = content
 				params.Plain = pgtype.Text{String: pl, Valid: true}
 				plain = pl
@@ -712,8 +793,24 @@ func (s *Service) PatchCards(ctx context.Context, actor Actor, boardText string,
 					return err
 				}
 			}
-			if p.X != nil || p.Y != nil || p.W != nil || p.H != nil || p.Z != nil || p.Color != nil || p.ColumnID != nil || p.ColOrder != nil {
+			if p.X != nil || p.Y != nil || p.W != nil || p.H != nil || p.Z != nil || p.Color != nil || p.ColumnID != nil || p.ColOrder != nil ||
+				p.hasStyle() || p.GroupIDs != nil {
 				layoutIDs = append(layoutIDs, idString(id))
+			}
+			// Kunci dan ganti berkas dicatat sendiri: siapa pun boleh membuka kunci, jadi riwayatnya harus terbaca.
+			if p.Locked != nil && *p.Locked != cur.Locked {
+				action := "card_unlocked"
+				if *p.Locked {
+					action = "card_locked"
+				}
+				if err := record(ctx, q, boardID, actor.ID, action, id, map[string]any{"kind": cur.Kind}); err != nil {
+					return err
+				}
+			}
+			if p.FileID != nil && c.File != nil && (!cur.FileID.Valid || c.File.ID != idString(cur.FileID)) {
+				if err := record(ctx, q, boardID, actor.ID, "file_replaced", id, map[string]any{"kind": cur.Kind, "excerpt": excerpt(c.File.Name)}); err != nil {
+					return err
+				}
 			}
 		}
 		if len(layoutIDs) > 0 {
@@ -898,6 +995,13 @@ func (s *Service) DeleteCards(ctx context.Context, actor Actor, boardText string
 		seq, err := q.BumpWbBoardSeq(ctx, boardID)
 		if err != nil {
 			return notFound(err)
+		}
+		locked, err := q.ListWbLockedCards(ctx, sqlc.ListWbLockedCardsParams{BoardID: boardID, Ids: uuids})
+		if err != nil {
+			return err
+		}
+		if len(locked) > 0 {
+			return apperr.Invalid(fmt.Sprintf("%d kartu terkunci. Buka kuncinya dulu, lalu hapus lagi.", len(locked)))
 		}
 		if batch, err = newBatch(); err != nil {
 			return err
@@ -1381,6 +1485,7 @@ func (s *Service) Since(ctx context.Context, boardText string, seq int64) (Sync,
 			FileHeight: r.FileHeight, PreviewID: r.PreviewID, PreviewTitle: r.PreviewTitle, PreviewDescription: r.PreviewDescription,
 			PreviewSite: r.PreviewSite, PreviewFinalUrl: r.PreviewFinalUrl, PreviewStatus: r.PreviewStatus,
 			PreviewImage: r.PreviewImage, CommentCount: r.CommentCount, CreatedByName: r.CreatedByName,
+			Style: r.Style, Locked: r.Locked, GroupIds: r.GroupIds,
 		}))
 	}
 	conns, err := q.ListWbConnectorsSince(ctx, sqlc.ListWbConnectorsSinceParams{BoardID: b, Seq: seq})

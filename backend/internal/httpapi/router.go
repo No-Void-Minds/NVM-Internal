@@ -231,6 +231,7 @@ func New(log *slog.Logger, pool *pgxpool.Pool, cfg config.Config) (*gin.Engine, 
 	wb.GET("/boards", s.wbBoards)
 	wb.GET("/files/:fileId", s.wbFile)
 	wbWrite.POST("/boards/:id/files", s.wbUpload)
+	wbWrite.POST("/boards/:id/cards/:cardId/file", s.wbReplaceFile)
 	wbWrite.POST("/preview", s.wbPreview)
 	wbWrite.POST("/boards/:id/cards/:cardId/table", s.wbTable)
 	wbWrite.POST("/boards/:id/drawings", s.wbCreateDrawing)

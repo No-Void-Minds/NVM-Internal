@@ -9,6 +9,8 @@ import { fileUrl, type ChecklistOp, type TableOp } from '../../api/whiteboard'
 import { formatBytes } from '../../utils/attachment'
 import type { CaretHint } from './caret'
 import { HANDLES, handleSign, type Handle, type ShapeContent } from '../../utils/wbShapes'
+import { styleClasses, styleOpacity } from '../../utils/wbStyle'
+import { cropBox } from '../../utils/wbCrop'
 import {
   LOD_ZOOM,
   cardLabel,
@@ -101,7 +103,24 @@ const style = computed(() => ({
   minHeight: `${props.card.h + props.dh}px`,
   zIndex: props.editing ? 100000 : Math.round(props.card.z),
   '--wb-ring': `${2 / props.zoom}px`,
+  opacity: styleOpacity(props.card.style, props.card.kind),
 }))
+
+// Gaya kartu (revisi 50). Kartu tanpa latar tidak memakai warna kartu, juga tidak memaksa token terang kartu krem:
+// teksnya di atas kanvas, jadi memakai token tema yang lolos AA terhadap kanvas terang dan gelap.
+const clear = computed(
+  () => props.card.style?.bg === 'transparan' && !isShape.value && props.card.kind !== 'image',
+)
+const cardClasses = computed(() => [
+  ...styleClasses(props.card.style, props.card.kind),
+  isShape.value ? 'wb-card-shape' : '',
+])
+// Pegangan ubah ukuran dan putar tidak tampil untuk kartu terkunci (server juga menolaknya).
+const canResize = computed(() => props.selected && props.canWrite && !props.editing && !props.card.locked)
+const lockStyle = computed(() => ({ width: `${22 / props.zoom}px`, height: `${22 / props.zoom}px` }))
+const crop = computed(() =>
+  props.card.kind === 'image' ? ((props.card.content as CaptionContent).crop ?? null) : null,
+)
 
 // Pegangan bentuk: gambar 10 px dan area sentuh 44 px di layar pada zoom berapa pun.
 const handleBox = computed(() => 44 / props.zoom)
@@ -143,6 +162,8 @@ const label = computed(
   () =>
     cardLabel(props.card) +
     (isShape.value && deg.value ? `, diputar ${deg.value} derajat` : '') +
+    (props.card.locked ? ', posisi terkunci' : '') +
+    (props.card.group_ids?.length ? ', dalam grup' : '') +
     (props.selected ? ', terpilih' : '') +
     (props.remote ? `, ${props.remote.label}` : ''),
 )
@@ -269,7 +290,8 @@ function onPointerDown(e: PointerEvent) {
     class="wb-card absolute top-0 left-0 flex flex-col text-ink select-none"
     :class="[
       isShape ? 'origin-center' : 'rounded-card border border-line p-3 shadow-sm',
-      isShape ? '' : card.color ? colorClass[card.color] : 'bg-surface',
+      isShape || clear ? '' : card.color ? colorClass[card.color] : 'bg-surface',
+      cardClasses,
       selected ? 'wb-card-selected' : '',
       !selected && remote ? (remote.strong ? 'wb-card-remote-strong' : 'wb-card-remote') : '',
       editing ? 'cursor-auto select-text' : canWrite ? 'cursor-grab' : 'cursor-default',
@@ -345,8 +367,24 @@ function onPointerDown(e: PointerEvent) {
     </template>
 
     <template v-else-if="card.kind === 'image' || card.kind === 'file'">
+      <!-- Potongan dan posisi zoom (revisi 50): bingkai menampilkan bagian potongan saja, dari berkas asli supaya tajam. -->
+      <div
+        v-if="card.kind === 'image' && card.file?.thumb && crop"
+        class="relative -m-3 mb-0 overflow-hidden rounded-t-card bg-canvas"
+        :style="imageStyle"
+        data-testid="wb-cropped"
+      >
+        <img
+          :src="fileUrl(card.file.id)"
+          :alt="caption || card.file.name"
+          draggable="false"
+          loading="lazy"
+          class="absolute block max-w-none"
+          :style="cropBox(crop)"
+        />
+      </div>
       <img
-        v-if="card.kind === 'image' && card.file?.thumb"
+        v-else-if="card.kind === 'image' && card.file?.thumb"
         :src="fileUrl(card.file.id, true)"
         :alt="caption || card.file.name"
         draggable="false"
@@ -567,7 +605,7 @@ function onPointerDown(e: PointerEvent) {
     </span>
     <!-- Bentuk: delapan pegangan ubah ukuran (Shift menjaga proporsi) dan pegangan putar (Shift kelipatan 15 derajat).
          Jalur keyboard untuk keduanya ada di panel gaya bentuk. -->
-    <template v-if="isShape && selected && canWrite && !editing">
+    <template v-if="isShape && canResize">
       <div
         v-for="h in HANDLES"
         :key="h"
@@ -591,12 +629,32 @@ function onPointerDown(e: PointerEvent) {
     </template>
     <!-- Pegangan ubah ukuran: gambarnya kecil, area sentuhnya 44x44 px. -->
     <div
-      v-else-if="selected && canWrite && !editing"
+      v-else-if="canResize"
       aria-hidden="true"
       class="absolute -right-5 -bottom-5 flex size-11 cursor-nwse-resize items-center justify-center touch-none"
       @pointerdown.stop="emit('resize', $event)"
     >
       <span class="size-3 rounded-chip border-2 border-mark bg-surface" />
     </div>
+    <!-- Gembok kartu terkunci (revisi 50), hanya saat dipilih; pembaca layar mendapatnya dari label kartu. -->
+    <span
+      v-if="card.locked && selected"
+      aria-hidden="true"
+      data-testid="wb-lock"
+      class="absolute top-0 left-0 inline-flex -translate-1/2 items-center justify-center rounded-full border border-line bg-surface text-ink"
+      :style="lockStyle"
+    >
+      <svg
+        viewBox="0 0 24 24"
+        class="size-3/5"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+      >
+        <rect x="5" y="11" width="14" height="9" rx="2" />
+        <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+      </svg>
+    </span>
   </article>
 </template>

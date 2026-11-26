@@ -185,10 +185,24 @@ func (s *Service) FromTemplate(ctx context.Context, actor Actor, boardText strin
 			}
 			cardMap[c.ID.Bytes] = nid
 		}
+		// Grup salinan memakai id baru, supaya template yang ditaruh dua kali di papan yang sama tidak menggabungkan grupnya.
+		groupMap := map[[16]byte]pgtype.UUID{}
 		for _, c := range cards {
+			groups := make([]pgtype.UUID, len(c.GroupIds))
+			for i, g := range c.GroupIds {
+				ng, ok := groupMap[g.Bytes]
+				if !ok {
+					if err := ng.Scan(newUUIDString()); err != nil {
+						return err
+					}
+					groupMap[g.Bytes] = ng
+				}
+				groups[i] = ng
+			}
 			p := sqlc.InsertWbCardCopyParams{
 				ID: cardMap[c.ID.Bytes], BoardID: boardMap[c.BoardID.Bytes], Kind: c.Kind, FileID: c.FileID,
 				X: c.X, Y: c.Y, W: c.W, H: c.H, Z: c.Z, Color: c.Color, Content: c.Content, Plain: c.Plain, ActorID: actor.ID,
+				Style: c.Style, Locked: c.Locked, GroupIds: groups,
 			}
 			if c.RefBoardID.Valid {
 				p.RefBoardID = boardMap[c.RefBoardID.Bytes]
@@ -229,6 +243,7 @@ func (s *Service) FromTemplate(ctx context.Context, actor Actor, boardText strin
 		if err := q.InsertWbCard(ctx, sqlc.InsertWbCardParams{
 			ID: cardID, BoardID: boardID, Kind: KindBoard, RefBoardID: boardMap[tplID.Bytes], X: in.X, Y: in.Y, W: in.W, H: in.H,
 			Z: math.Min(z+1, maxZ), Content: []byte(`{}`), Plain: title, Seq: seq, ActorID: actor.ID,
+			Style: []byte(`{}`), GroupIds: []pgtype.UUID{},
 		}); err != nil {
 			return err
 		}

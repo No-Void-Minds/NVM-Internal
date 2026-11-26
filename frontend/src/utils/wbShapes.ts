@@ -43,6 +43,9 @@ export type ShapeContent = {
   name?: string
   attributes?: string
   methods?: string
+  // Balik mendatar dan tegak (revisi 50): hanya gambar bentuknya.
+  flip_x?: boolean
+  flip_y?: boolean
   doc?: PMNode | null
   name_doc?: PMNode | null
   attributes_doc?: PMNode | null
