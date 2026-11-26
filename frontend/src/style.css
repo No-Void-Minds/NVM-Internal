@@ -386,6 +386,84 @@ img.ProseMirror-separator {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+/* Format teks revisi 49: nama dari daftar tetap (wbFormat.ts, server memakai daftar yang sama), dipasang sebagai kelas
+   karena CSP memblokir atribut style dari ProseMirror. Warna teks minimal 4,5:1 terhadap semua latar kartu, kanvas,
+   dan kartu krem di kedua tema; stabilo minimal 4,5:1 di bawah semua warna teks itu (tabel di docs/sprint.md). */
+.wb-c-abu {
+  color: var(--color-ink-muted);
+}
+.wb-c-merah {
+  color: var(--color-danger);
+}
+.wb-c-oranye {
+  color: var(--color-collab-5);
+}
+.wb-c-coklat {
+  color: var(--color-high);
+}
+.wb-c-hijau {
+  color: var(--color-collab-8);
+}
+.wb-c-biru {
+  color: var(--color-collab-2);
+}
+.wb-c-ungu {
+  color: var(--color-collab-4);
+}
+.wb-c-merah_muda {
+  color: var(--color-collab-7);
+}
+/* Warna teks mark bawaan browser (hitam) dibuang; teks di stabilo memakai warna teksnya sendiri. */
+.wb-h-kuning,
+.wb-h-hijau,
+.wb-h-biru,
+.wb-h-merah,
+.wb-h-abu {
+  color: inherit;
+  border-radius: 2px;
+}
+.wb-h-kuning {
+  background-color: var(--color-ready-bg);
+}
+.wb-h-hijau {
+  background-color: var(--color-progress-bg);
+}
+.wb-h-biru {
+  background-color: var(--color-completed-bg);
+}
+.wb-h-merah {
+  background-color: var(--color-danger-bg);
+}
+.wb-h-abu {
+  background-color: var(--color-requested-bg);
+}
+.wb-fs-kecil {
+  font-size: 0.8125em;
+}
+.wb-fs-besar {
+  font-size: 1.25em;
+}
+.wb-fs-sangat_besar {
+  font-size: 1.625em;
+}
+.wb-al-center {
+  text-align: center;
+}
+.wb-al-right {
+  text-align: right;
+}
+.wb-al-justify {
+  text-align: justify;
+}
+.wb-editor hr,
+.wb-richtext hr {
+  border: 0;
+  border-top: 1px solid var(--color-line);
+  margin: 0.5rem 0;
+}
+.wb-editor hr.ProseMirror-selectednode {
+  outline: 2px solid var(--color-mark);
+}
 /* Kartu krem tetap terang di mode gelap (seperti label hangtag), jadi isinya memakai nilai token mode terang. Tanpa
    ini ink-muted gelap di atas krem hanya 2,51:1, dan input serta tombol editor di dalamnya bertinta terang di atas
    krem. Nilai di bawah sama dengan @theme (mode terang). Ditimpa di anak kartu saja, supaya garis pilihan kartu
@@ -407,6 +485,16 @@ img.ProseMirror-separator {
   --color-ready-fg: #5b4720;
   --color-high: #7a5a1c;
   --color-collab-2: #1d4ed8;
+  /* Warna teks dan stabilo format (revisi 49) di kartu krem: nilai mode terang. */
+  --color-collab-4: #6d28d9;
+  --color-collab-5: #a1440b;
+  --color-collab-7: #b0175a;
+  --color-collab-8: #4d6a0f;
+  --color-requested-bg: #ebe9e3;
+  --color-progress-bg: #e4e9e3;
+  --color-ready-bg: #efe7d6;
+  --color-completed-bg: #e2e6e9;
+  --color-danger-bg: #f6e6e2;
   color-scheme: light;
 }
 

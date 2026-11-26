@@ -51,6 +51,11 @@ type ShapeContent struct {
 	Name       string `json:"name,omitempty"`
 	Attributes string `json:"attributes,omitempty"`
 	Methods    string `json:"methods,omitempty"`
+	// Pasangan dokumen berformat (revisi 49); teks di atas tetap teks polosnya.
+	Doc           *Node `json:"doc,omitempty"`
+	NameDoc       *Node `json:"name_doc,omitempty"`
+	AttributesDoc *Node `json:"attributes_doc,omitempty"`
+	MethodsDoc    *Node `json:"methods_doc,omitempty"`
 }
 
 // cleanMultiline seperti CleanText tetapi mempertahankan baris baru (atribut dan metode UML satu per baris).
@@ -101,21 +106,22 @@ func CleanShape(raw json.RawMessage) (ShapeContent, string, error) {
 	out := in
 	var err error
 	if in.Shape == "uml_class" {
-		out.Text = ""
-		if out.Name, err = CleanText(in.Name, MaxHeadingText, "Nama kelas"); err != nil {
+		out.Text, out.Doc = "", nil
+		if out.Name, out.NameDoc, err = cleanRich(in.Name, in.NameDoc, MaxHeadingText, "Nama kelas", CleanText); err != nil {
 			return in, "", err
 		}
-		if out.Attributes, err = cleanMultiline(in.Attributes, MaxShapeText, "Atribut kelas"); err != nil {
+		if out.Attributes, out.AttributesDoc, err = cleanRich(in.Attributes, in.AttributesDoc, MaxShapeText, "Atribut kelas", cleanMultiline); err != nil {
 			return in, "", err
 		}
-		if out.Methods, err = cleanMultiline(in.Methods, MaxShapeText, "Metode kelas"); err != nil {
+		if out.Methods, out.MethodsDoc, err = cleanRich(in.Methods, in.MethodsDoc, MaxShapeText, "Metode kelas", cleanMultiline); err != nil {
 			return in, "", err
 		}
 		plain := strings.TrimSpace(strings.Join([]string{out.Name, out.Attributes, out.Methods}, "\n"))
 		return out, plain, nil
 	}
 	out.Name, out.Attributes, out.Methods = "", "", ""
-	if out.Text, err = cleanMultiline(in.Text, MaxShapeText, "Teks bentuk"); err != nil {
+	out.NameDoc, out.AttributesDoc, out.MethodsDoc = nil, nil, nil
+	if out.Text, out.Doc, err = cleanRich(in.Text, in.Doc, MaxShapeText, "Teks bentuk", cleanMultiline); err != nil {
 		return in, "", err
 	}
 	return out, out.Text, nil

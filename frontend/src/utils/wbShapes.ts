@@ -1,6 +1,8 @@
 // Bentuk dan diagram Whiteboard (W5, revisi C). Bagian murni tanpa Vue supaya bisa diuji dengan node --test: daftar
 // bentuk, path SVG dari angka, port garis setelah putar, dan jalur lurus, siku, serta melengkung.
 
+import type { PMNode } from './whiteboard.ts'
+
 export type Pt = { x: number; y: number }
 export type Box = { x: number; y: number; w: number; h: number }
 
@@ -41,6 +43,10 @@ export type ShapeContent = {
   name?: string
   attributes?: string
   methods?: string
+  doc?: PMNode | null
+  name_doc?: PMNode | null
+  attributes_doc?: PMNode | null
+  methods_doc?: PMNode | null
 }
 
 export const SHAPE_GROUPS = ['Dasar', 'Flowchart', 'UML', 'Panah blok'] as const

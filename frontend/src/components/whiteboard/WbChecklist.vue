@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { nextTick, ref, useId, watch } from 'vue'
+import { useId, watch } from 'vue'
 import type { ChecklistOp } from '../../api/whiteboard'
 import { newId, type ChecklistContent } from '../../utils/whiteboard'
-import { placeCaret, type CaretHint } from './caret'
-import { useDrafts } from './drafts'
+import type { CaretHint } from './caret'
+import WbRichField, { activateField } from './WbRichField.vue'
+import WbRichText from './WbRichText'
 
 // Checklist di kartu. Setiap perubahan dikirim sebagai operasi per butir (centang, teks, tambah, hapus), bukan isi
-// utuh, jadi dua orang yang mengubah butir berbeda tidak saling menimpa. Centang boleh tanpa membuka editor.
+// utuh, jadi dua orang yang mengubah butir berbeda tidak saling menimpa. Centang boleh tanpa membuka editor. Judul
+// dan teks butir berformat (revisi 49): satu field aktif sekaligus, dikirim saat pindah field atau editor ditutup.
 const props = defineProps<{
   content: ChecklistContent
   editing: boolean
@@ -16,98 +18,48 @@ const props = defineProps<{
 const emit = defineEmits<{ op: [op: ChecklistOp]; close: [] }>()
 
 const uid = useId()
-const root = ref<HTMLElement | null>(null)
-// Kunci "title" untuk judul, id butir untuk teks butir.
-const drafts = useDrafts(() =>
-  Object.fromEntries([['title', props.content.title], ...props.content.items.map((i) => [i.id, i.text])]),
-)
+const key = (id: string) => `${uid}:${id}`
 
-// Editor ditutup tanpa blur (klik di kanvas melepas input dari DOM, jadi change tidak terpanggil): isian yang
-// berubah dikirim sebelum DOM diperbarui. Watch bawaan berjalan sebelum render, saat input masih ada.
-// Dobel klik pada teks butir: kursor diletakkan di butir itu, di posisi klik.
+// Dobel klik pada teks butir: butir itu dibuka dengan kursor di posisi klik.
 watch(
   () => props.editing,
-  async (on) => {
-    if (!on || !props.caret?.item) return
-    await nextTick()
-    placeCaret(
-      root.value?.querySelector<HTMLInputElement>(`[data-item="${props.caret.item}"]`),
-      props.caret.offset,
-    )
+  (on) => {
+    if (on && props.caret?.item) activateField(key(props.caret.item))
   },
+  { immediate: true },
 )
+const caretFor = (id: string) =>
+  props.caret?.item === id ? (props.caret.textIndex ?? props.caret.offset ?? null) : null
 
-watch(
-  () => props.editing,
-  (on, was) => {
-    if (!was || on) return
-    const title = root.value?.querySelector<HTMLInputElement>(`#${CSS.escape(`${uid}-title`)}`)
-    if (title && title.value.trim() !== props.content.title)
-      emit('op', { op: 'title', text: title.value.trim() })
-    for (const el of root.value?.querySelectorAll<HTMLInputElement>('[data-item]') ?? []) {
-      const cur = props.content.items.find((i) => i.id === el.dataset.item)
-      if (cur && el.value.trim() !== cur.text)
-        emit('op', { op: 'set', item_id: cur.id, text: el.value.trim() })
-    }
-  },
-)
-
-function setTitle(e: Event) {
-  const text = (e.target as HTMLInputElement).value.trim()
-  if (text !== props.content.title) emit('op', { op: 'title', text })
-}
-
-function setText(id: string, e: Event) {
-  const text = (e.target as HTMLInputElement).value.trim()
-  const cur = props.content.items.find((i) => i.id === id)
-  if (cur && text !== cur.text) emit('op', { op: 'set', item_id: id, text })
-}
-
-async function add(index?: number) {
+function add(index?: number) {
   const id = newId()
   emit('op', { op: 'add', item_id: id, text: '', index })
-  await nextTick()
-  // Butir baru muncul setelah server menjawab; fokus dipindah begitu inputnya ada.
-  const focusNew = (tries: number) => {
-    const el = root.value?.querySelector<HTMLInputElement>(`[data-item="${id}"]`)
-    if (el) el.focus()
-    else if (tries > 0) setTimeout(() => focusNew(tries - 1), 100)
-  }
-  focusNew(20)
+  // Butir baru muncul setelah server menjawab; field itu aktif begitu terpasang.
+  activateField(key(id))
 }
 
-function onItemKey(e: KeyboardEvent, index: number) {
-  if (e.key === 'Enter') {
-    e.preventDefault()
-    ;(e.target as HTMLInputElement).blur()
-    add(index + 1)
-  }
-}
-
-function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape' && props.editing) {
-    e.preventDefault()
-    e.stopPropagation()
-    ;(document.activeElement as HTMLElement | null)?.blur()
-    emit('close')
-  }
+function onTitleEnter() {
+  const first = props.content.items[0]
+  if (first) activateField(key(first.id))
+  else add()
 }
 </script>
 
 <template>
-  <div ref="root" class="flex flex-col gap-1" @keydown="onKeydown">
-    <template v-if="editing">
-      <label :for="`${uid}-title`" class="sr-only">Judul checklist</label>
-      <input
-        :id="`${uid}-title`"
-        v-model="drafts.title"
-        maxlength="200"
-        placeholder="Judul checklist"
-        class="min-h-11 rounded-card border border-line bg-surface px-2 font-semibold text-ink"
-        @pointerdown.stop
-        @change="setTitle"
-      />
-    </template>
+  <div class="flex flex-col gap-1">
+    <WbRichField
+      v-if="editing"
+      :field-key="key('title')"
+      :text="content.title"
+      :doc="content.title_doc"
+      label="Judul checklist"
+      placeholder="Judul checklist"
+      class="rounded-card border border-line bg-surface px-2 py-2 font-semibold text-ink"
+      @commit="emit('op', { op: 'title', ...$event })"
+      @enter="onTitleEnter"
+      @close="emit('close')"
+    />
+    <WbRichText v-else-if="content.title_doc" :doc="content.title_doc" class="font-semibold" />
     <p v-else-if="content.title" class="font-semibold break-words">{{ content.title }}</p>
     <p v-else class="text-ink-muted">Checklist tanpa judul</p>
 
@@ -129,16 +81,17 @@ function onKeydown(e: KeyboardEvent) {
           />
         </label>
         <template v-if="editing">
-          <label :for="`${uid}-${item.id}`" class="sr-only">Teks butir {{ i + 1 }}</label>
-          <input
-            :id="`${uid}-${item.id}`"
-            v-model="drafts[item.id]"
+          <WbRichField
+            :field-key="key(item.id)"
+            :text="item.text"
+            :doc="item.doc"
+            :label="`Teks butir ${i + 1}`"
+            :caret-index="caretFor(item.id)"
             :data-item="item.id"
-            maxlength="500"
-            class="min-h-11 min-w-0 flex-1 rounded-card border border-line bg-surface px-2 text-ink"
-            @pointerdown.stop
-            @change="setText(item.id, $event)"
-            @keydown="onItemKey($event, i)"
+            class="flex-1 rounded-card border border-line bg-surface px-2 py-2 text-ink"
+            @commit="emit('op', { op: 'set', item_id: item.id, ...$event })"
+            @enter="add(i + 1)"
+            @close="emit('close')"
           />
           <button
             type="button"
@@ -167,7 +120,8 @@ function onKeydown(e: KeyboardEvent) {
           :data-item-text="item.id"
           :data-caret="item.text ? '' : undefined"
         >
-          {{ item.text || 'Butir kosong' }}
+          <WbRichText v-if="item.doc" :doc="item.doc" />
+          <template v-else>{{ item.text || 'Butir kosong' }}</template>
         </span>
       </li>
     </ul>

@@ -1240,15 +1240,16 @@ function flushNotes() {
   }
 }
 
-function onHeading(id: string, text: string) {
+// Teks judul berformat (revisi 49): doc null berarti teks polos tanpa format.
+function onHeading(id: string, v: { text: string; doc: PMNode | null }) {
   const card = byId.value.get(id)
   if (!card) return
-  queueContent(id, { text, level: (card.content as HeadingContent).level ?? 1 })
+  queueContent(id, { ...v, level: (card.content as HeadingContent).level ?? 1 })
 }
 
-function onHeadingDraft(id: string, text: string) {
+function onHeadingDraft(id: string, v: { text: string; doc: PMNode | null }) {
   const card = byId.value.get(id)
-  if (card) sendDraft(id, { text, level: (card.content as HeadingContent).level ?? 1 })
+  if (card) sendDraft(id, { ...v, level: (card.content as HeadingContent).level ?? 1 })
 }
 
 // Keterangan, judul kolom, dan goresan gambar bebas: isi utuh, dijaga content_version seperti catatan. Goresan juga
@@ -1284,13 +1285,13 @@ async function onRenameRef(id: string, title: string) {
 function checklistInverse(before: ChecklistContent, op: ChecklistOp): ChecklistOp | null {
   switch (op.op) {
     case 'title':
-      return { op: 'title', text: before.title }
+      return { op: 'title', text: before.title, doc: before.title_doc ?? null }
     case 'add':
       return { op: 'remove', item_id: op.item_id }
     case 'remove': {
       const i = before.items.findIndex((it) => it.id === op.item_id)
       const it = before.items[i]
-      return it ? { op: 'add', item_id: it.id, text: it.text, index: i } : null
+      return it ? { op: 'add', item_id: it.id, text: it.text, index: i, doc: it.doc ?? null } : null
     }
     case 'set': {
       const it = before.items.find((x) => x.id === op.item_id)
@@ -1299,6 +1300,7 @@ function checklistInverse(before: ChecklistContent, op: ChecklistOp): ChecklistO
         op: 'set',
         item_id: it.id,
         text: op.text === undefined ? undefined : it.text,
+        doc: op.text === undefined ? undefined : (it.doc ?? null),
         done: op.done === undefined ? undefined : it.done,
       }
     }

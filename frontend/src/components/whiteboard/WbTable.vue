@@ -1,114 +1,41 @@
 <script setup lang="ts">
-import { nextTick, ref, useId, watch } from 'vue'
+import { useId, watch } from 'vue'
 import type { TableOp } from '../../api/whiteboard'
 import { MAX_TABLE_COLS, MAX_TABLE_ROWS, type TableContent } from '../../utils/whiteboard'
-import { placeCaret, type CaretHint } from './caret'
+import type { CaretHint } from './caret'
+import WbRichField, { activateField } from './WbRichField.vue'
+import WbRichText from './WbRichText'
 
-// Tabel teks polos. Setiap perubahan dikirim sebagai operasi per sel, baris, atau kolom; selama diedit kartu
-// dikunci (kunci lunak W2), jadi indeks tidak bergeser oleh orang lain.
+// Tabel. Setiap perubahan dikirim sebagai operasi per sel, baris, atau kolom; selama diedit kartu dikunci (kunci
+// lunak W2), jadi indeks tidak bergeser oleh orang lain. Judul dan sel berformat (revisi 49): satu field aktif
+// sekaligus, dikirim saat pindah sel atau editor ditutup.
 const props = defineProps<{ content: TableContent; editing: boolean; caret?: CaretHint | null }>()
 const emit = defineEmits<{ op: [op: TableOp]; close: [] }>()
 
 const uid = useId()
-const root = ref<HTMLElement | null>(null)
+const cellKey = (r: number, c: number) => `${uid}:${r},${c}`
+const docAt = (r: number, c: number) => props.content.docs?.[r]?.[c] ?? null
 
-// Draf lokal: jawaban server untuk operasi lain (mis. judul atau tambah baris) merender ulang tabel; tanpa draf,
-// Vue menimpa nilai input dan ketikan yang belum dikirim hilang. Sel yang belum diubah pengguna ikut nilai server.
-const draft = ref<string[][]>([])
-const titleDraft = ref('')
-let known: string[][] = []
-let knownTitle = ''
+// Dobel klik pada sel: sel itu dibuka dengan kursor di posisi klik.
 watch(
-  () => props.content,
-  (c) => {
-    draft.value = c.rows.map((row, r) =>
-      row.map((v, i) => {
-        const d = draft.value[r]?.[i]
-        return d !== undefined && d !== known[r]?.[i] ? d : v
-      }),
-    )
-    known = c.rows.map((row) => [...row])
-    if (titleDraft.value === knownTitle) titleDraft.value = c.title ?? ''
-    knownTitle = c.title ?? ''
+  () => props.editing,
+  (on) => {
+    if (on && props.caret?.cell) {
+      const [r, c] = props.caret.cell.split(',').map(Number)
+      activateField(cellKey(r ?? 0, c ?? 0))
+    }
   },
   { immediate: true },
 )
+const caretFor = (r: number, c: number) =>
+  props.caret?.cell === `${r},${c}` ? (props.caret.textIndex ?? props.caret.offset ?? null) : null
 
-// Editor ditutup tanpa blur: sel yang berubah dikirim sebelum input hilang dari DOM (sama dengan checklist).
-watch(
-  () => props.editing,
-  (on, was) => {
-    if (!was || on) return
-    for (const el of root.value?.querySelectorAll<HTMLInputElement>('[data-cell]') ?? []) setCell(el)
-    const title = root.value?.querySelector<HTMLInputElement>('[data-title]')
-    if (title) setTitle(title)
-  },
-)
-
-// Dobel klik pada sel: kursor diletakkan di sel itu, di posisi klik.
-watch(
-  () => props.editing,
-  async (on) => {
-    if (!on || !props.caret?.cell) return
-    await nextTick()
-    placeCaret(
-      root.value?.querySelector<HTMLInputElement>(`[data-cell="${props.caret.cell}"]`),
-      props.caret.offset,
-    )
-  },
-)
-
-function setTitle(el: HTMLInputElement) {
-  const text = el.value.trim()
-  if (text !== (props.content.title ?? '')) emit('op', { op: 'title', text })
-}
-
-function onTitleKey(e: KeyboardEvent) {
-  if (e.key === 'Enter') {
-    e.preventDefault()
-    setTitle(e.target as HTMLInputElement)
-    focusCell(0, 0)
-  } else if (e.key === 'Escape') {
-    e.preventDefault()
-    e.stopPropagation()
-    setTitle(e.target as HTMLInputElement)
-    emit('close')
-  }
-}
-
-function setCell(el: HTMLInputElement) {
-  const [r, c] = (el.dataset.cell ?? '').split(',').map(Number)
-  const text = el.value.trim()
-  if (r === undefined || c === undefined || props.content.rows[r]?.[c] === undefined) return
-  if (text !== props.content.rows[r]![c]) emit('op', { op: 'set', row: r, col: c, text })
-}
-
-async function focusCell(r: number, c: number) {
-  await nextTick()
-  // Baris atau kolom baru muncul setelah server menjawab.
-  const find = (tries: number) => {
-    const el = root.value?.querySelector<HTMLInputElement>(`[data-cell="${r},${c}"]`)
-    if (el) el.focus()
-    else if (tries > 0) setTimeout(() => find(tries - 1), 100)
-  }
-  find(20)
-}
-
-function onCellKey(e: KeyboardEvent, r: number, c: number) {
-  if (e.key === 'Enter') {
-    e.preventDefault()
-    setCell(e.target as HTMLInputElement)
-    if (r + 1 < props.content.rows.length) focusCell(r + 1, c)
-    else if (props.content.rows.length < MAX_TABLE_ROWS) {
-      emit('op', { op: 'add_row' })
-      focusCell(r + 1, c)
-    }
-  } else if (e.key === 'Escape') {
-    e.preventDefault()
-    e.stopPropagation()
-    setCell(e.target as HTMLInputElement)
-    ;(e.target as HTMLInputElement).blur()
-    emit('close')
+// Enter turun ke baris berikutnya; di baris terakhir baris baru ditambahkan (sel aktif begitu terpasang).
+function onCellEnter(r: number, c: number) {
+  if (r + 1 < props.content.rows.length) activateField(cellKey(r + 1, c))
+  else if (props.content.rows.length < MAX_TABLE_ROWS) {
+    emit('op', { op: 'add_row' })
+    activateField(cellKey(r + 1, c))
   }
 }
 
@@ -117,21 +44,21 @@ const btn =
 </script>
 
 <template>
-  <div ref="root" class="flex min-w-0 flex-col gap-1">
-    <template v-if="editing">
-      <label :for="`${uid}-title`" class="sr-only">Judul tabel</label>
-      <input
-        :id="`${uid}-title`"
-        v-model="titleDraft"
-        data-title
-        maxlength="200"
-        placeholder="Judul tabel"
-        class="min-h-11 rounded-card border border-line bg-surface px-2 font-semibold text-ink"
-        @pointerdown.stop
-        @change="setTitle($event.target as HTMLInputElement)"
-        @keydown="onTitleKey"
-      />
-    </template>
+  <div class="flex min-w-0 flex-col gap-1">
+    <WbRichField
+      v-if="editing"
+      :field-key="`${uid}:title`"
+      :text="content.title ?? ''"
+      :doc="content.title_doc"
+      label="Judul tabel"
+      placeholder="Judul tabel"
+      data-title
+      class="rounded-card border border-line bg-surface px-2 py-2 font-semibold text-ink"
+      @commit="emit('op', { op: 'title', ...$event })"
+      @enter="activateField(cellKey(0, 0))"
+      @close="emit('close')"
+    />
+    <WbRichText v-else-if="content.title_doc" :doc="content.title_doc" class="font-semibold" />
     <p v-else-if="content.title" class="font-semibold break-words">{{ content.title }}</p>
     <div class="min-w-0 overflow-x-auto" @pointerdown="editing && $event.stopPropagation()">
       <table class="w-full border-collapse text-sm">
@@ -153,24 +80,27 @@ const btn =
               :scope="r === 0 && content.header ? 'col' : undefined"
               class="border border-line p-0 text-left align-top"
             >
-              <template v-if="editing">
-                <label :for="`${uid}-${r}-${c}`" class="sr-only">Baris {{ r + 1 }}, kolom {{ c + 1 }}</label>
-                <input
-                  :id="`${uid}-${r}-${c}`"
-                  v-model="draft[r]![c]"
-                  :data-cell="`${r},${c}`"
-                  maxlength="500"
-                  class="min-h-11 w-full min-w-24 bg-surface px-2 text-ink"
-                  @change="setCell($event.target as HTMLInputElement)"
-                  @keydown="onCellKey($event, r, c)"
-                />
-              </template>
+              <WbRichField
+                v-if="editing"
+                :field-key="cellKey(r, c)"
+                :text="cell"
+                :doc="docAt(r, c)"
+                :label="`Baris ${r + 1}, kolom ${c + 1}`"
+                :caret-index="caretFor(r, c)"
+                :data-cell="`${r},${c}`"
+                class="w-full min-w-24 bg-surface px-2 py-2.5 text-ink"
+                @commit="emit('op', { op: 'set', row: r, col: c, ...$event })"
+                @enter="onCellEnter(r, c)"
+                @close="emit('close')"
+              />
               <span
                 v-else
                 class="block min-h-8 px-2 py-1.5 break-words"
                 :data-cell-text="`${r},${c}`"
                 :data-caret="cell ? '' : undefined"
-                >{{ cell }}</span
+                ><WbRichText v-if="docAt(r, c)" :doc="docAt(r, c)!" /><template v-else>{{
+                  cell
+                }}</template></span
               >
             </component>
           </tr>

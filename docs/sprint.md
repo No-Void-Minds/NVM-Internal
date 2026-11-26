@@ -1662,7 +1662,7 @@ Keputusan teknis:
 **Keputusan W4:**
 - Template: papan mana pun kecuali papan akar boleh ditandai template oleh Staf dan Manajer (pertanyaan 4, bawaan). Papan akar ditolak 400. Membuat dari template menyalin papan beserta semua papan turunannya, kartu, isi kolom, dan garis yang kedua ujungnya ikut tersalin; komentar, riwayat, dan kartu di Tempat sampah tidak ikut. Salinan bukan template. Kartu gambar dan berkas memakai berkas yang sama (`file_id`), seperti salin tempel, bukan hardlink seperti rancangan W0: tidak ada byte yang disalin, dan job harian sudah menjaga berkas yang masih dipakai kartu mana pun. Batas 2.000 kartu per salinan dan batas kedalaman papan tetap berlaku. Template yang sedang dibuka tidak bisa dipilih di papannya sendiri, supaya template tidak membesar berisi salinan dirinya.
 - Pencarian isi: kata kunci 2 sampai 100 karakter (`%` dan `_` dicari apa adanya), mencari teks kartu (`plain`, sudah mencakup catatan, judul, checklist, tabel, keterangan berkas) dan judul pratinjau tautan, hanya kartu yang tidak di Tempat sampah, paling banyak 50 hasil. Tiap hasil membawa jalur papannya dan cuplikan sekitar kata kunci.
-- Ekspor: dikerjakan di peramban, tidak ada yang dikirim ke server. Digambar ulang dari data kartu (bukan tangkapan DOM, karena kartu di luar layar tidak di-mount dan tangkapan DOM butuh pustaka tambahan): teks polos per baris tanpa format huruf, gambar dari thumbnail, tabel sebagai kisi, goresan, dan garis dengan panah dan label. Warna selalu token mode terang supaya layak dicetak. Skala 2x, diperkecil bila melewati 16 juta piksel atau 16.384 px per sisi, dengan keterangan skala di dialog. PDF satu halaman berisi JPEG (DCTDecode) dengan ukuran halaman 96 dpi, maksimal 14.400 poin per sisi. Nama berkas dari judul papan.
+- Ekspor: dikerjakan di peramban, tidak ada yang dikirim ke server. Digambar ulang dari data kartu (bukan tangkapan DOM, karena kartu di luar layar tidak di-mount dan tangkapan DOM butuh pustaka tambahan): teks per baris (tanpa format huruf sampai revisi 49; sejak revisi 49 format ikut digambar, Sprint 12h), gambar dari thumbnail, tabel sebagai kisi, goresan, dan garis dengan panah dan label. Warna selalu token mode terang supaya layak dicetak. Skala 2x, diperkecil bila melewati 16 juta piksel atau 16.384 px per sisi, dengan keterangan skala di dialog. PDF satu halaman berisi JPEG (DCTDecode) dengan ukuran halaman 96 dpi, maksimal 14.400 poin per sisi. Nama berkas dari judul papan.
 - Tampilan Daftar: tombol Daftar (toggle) mengganti kanvas menjadi daftar per kolom lalu "Di luar kolom", urutan baca. Aksi sama dengan kanvas lewat fungsi halaman yang sama: Lihat di kanvas, Buka papan, Ubah, centang butir checklist, Pindah ke papan lain, Hapus (ke Tempat sampah dengan Urungkan). Kanvas tetap terpasang, jadi kembali ke kanvas tidak memuat ulang papan.
 - Level of detail: di bawah zoom 40% kartu hanya menampilkan judul ringkas dan warnanya, huruf dibagi zoom supaya sekitar 14 px di layar. Gambar tetap menampilkan pratinjaunya; kartu yang sedang diedit selalu utuh. Label aksesibel kartu tidak berubah.
 - Performa (build produksi, `vite preview`, 1280 px, papan 500 kartu termasuk 50 gambar dan 20 gambar bebas, 100 garis): muat 187 sampai 223 ms, p95 frame 13,4 ms saat geser 3 detik (batas 2 detik dan 20 ms). Lewat Vite dev p95 berkisar 13 sampai 27 ms karena Vue mode pengembangan, jadi E2E hanya menilai batas frame di build produksi. EXPLAIN 5.000 kartu di test DB: muat papan 15,5 ms memakai `wb_cards_board_idx`; cari 3,1 ms dengan seq scan (planner tidak memilih indeks trigram di 5.000 baris; ditinjau ulang bila papan jauh lebih besar).
@@ -1724,6 +1724,40 @@ Keputusan teknis:
 - Revisi 48: hanya di layout dengan kolom kiri di samping papan (container papan minimal 90rem, sekitar 1520 px lebar layar ke atas; di 1280 px kolom kiri masih di atas papan). Kolom kiri sticky dengan tinggi maksimal `100dvh` dikurangi header 57 px, padding atas, jarak sticky, dan safe-area bawah, `overflow-y: auto` dan `overscroll-behavior: contain`, jadi menggulirnya tidak ikut menggulir halaman. Kartu profil tidak menyusut; di layar pendek ia ikut tergulir. Di kartu To Do (prop `fill`) daftar item dan bagian Selesai menjadi satu area gulir (minimal 6rem), judul To Do di atasnya dan baris Tulis to do di kaki kartu selalu terlihat; baris tambah dipindah lewat Teleport yang dinonaktifkan di luar mode ini, jadi panel To Do di layar sempit tetap sama persis. Fokus keyboard yang masuk ke area daftar memanggil `scrollIntoView({ block: 'nearest' })`.
 
 **Tindak lanjut (belum dikerjakan):** realtime untuk Aktivitas Harian dan Timeline memakai koneksi yang sama (event jenis baru di hub `taskLive`). Arsip sudah ikut di revisi 47.
+
+## Sprint 12h: Format teks Whiteboard (revisi 49)
+
+**Tujuan:** toolbar format melayang untuk semua teks berformat di Whiteboard, seperti Google Docs atau Notion. Revisi 50 (gaya kartu, menu klik kanan, grup, kunci posisi, ganti dan potong gambar) dan revisi 51 (kartu anggota tim) dikerjakan setelah revisi 49 lolos gerbang, berurutan.
+
+- [x] S12h-01 Server: daftar putih mark dan atribut baru (`superscript`, `subscript`, `textStyle` dengan `color` dan `fontSize`, `highlight` dengan `color`, `textAlign` di paragraf dan judul, node `horizontalRule`). Field yang tadinya teks polos mendapat pasangan dokumen opsional: `doc` (kartu judul, butir checklist, teks bentuk), `title_doc` (checklist, tabel, kolom), `docs` per sel tabel, `name_doc`, `attributes_doc`, `methods_doc` (kelas UML). Operasi checklist dan tabel menerima `doc`. Tanpa migrasi SQL: isinya tetap di kolom `content` jsonb. Test `TestCleanNoteFormatBaru`, `TestCleanFieldBerformat`, `TestTableOpFormatSel`.
+- [x] S12h-02 Klien: ekstensi TipTap sendiri berbasis kelas (`wbFormat.ts`), toolbar melayang `WbFormatBar.vue`, field berformat `WbRichField.vue`, renderer JSON `WbRichText.ts`, helper murni `utils/wbRich.ts` dengan unit test `tests/wbRich.test.ts`.
+- [x] S12h-03 Dipasang di catatan, kartu judul, checklist (judul dan setiap butir), tabel (judul dan setiap sel), teks bentuk dan tiga bagian kelas UML, judul kolom. Tetap teks polos: judul papan, komentar, label garis, keterangan berkas dan gambar.
+- [x] S12h-04 Ekspor PNG dan PDF menggambar tebal, miring, garis bawah (juga tautan), coret, kode, superskrip, subskrip, warna, stabilo, ukuran, perataan, dan garis pemisah.
+- [x] S12h-05 E2E `scripts/e2e/uji-r49.mjs` (360 px sentuh dan 1280 px). Bagian wb1, wb2, dan wb5 `uji13.mjs` disesuaikan: field berformat diklik dulu sebelum diisi, dan posisi kursor dibaca dari seleksi dokumen, bukan `selectionStart`.
+
+**Keputusan:**
+- Tanpa dependensi baru. TipTap tetap 3.33.0 (core, pm, starter-kit). StarterKit 3.33.0 sudah memuat garis bawah, tautan, kode, kutipan, garis pemisah, dan daftar dengan Tab dan Shift+Tab. Warna, stabilo, ukuran, superskrip, subskrip, dan perataan ditulis sendiri (sekitar 150 baris) karena paket TipTap resminya merender atribut `style`, yang diblokir CSP `style-src 'self'` saat ProseMirror memasangnya lewat `setAttribute`. Versi sendiri merender kelas CSS statis (`wb-c-*`, `wb-h-*`, `wb-fs-*`, `wb-al-*`) di `style.css`. Toolbar diposisikan sendiri (koordinat seleksi ProseMirror), tanpa BubbleMenu atau floating-ui. CSP tidak berubah.
+- Nilai warna, stabilo, ukuran, dan perataan adalah nama dari daftar yang sama di server (`content.go`) dan klien (`utils/wbRich.ts`); nilai lain ditolak 400 ("Warna teks tidak dikenal.", "Warna stabilo tidak dikenal.", "Ukuran huruf tidak dikenal.", "Perataan teks tidak dikenal."). Rata kiri adalah bawaan dan tidak disimpan. `textStyle` tanpa atribut dibuang. Href tetap hanya http, https, dan mailto. Batas kedalaman (6), jumlah node (2.000), dan panjang tetap; panjang field dihitung dari teks polos dokumennya.
+- Teks polos field (`text`, `title`, sel `rows`, `name`, `attributes`, `methods`) selalu dihasilkan server dari dokumennya, jadi pencarian, label pembaca layar, riwayat, dan Tampilan Daftar tidak berubah. Dokumen tanpa format apa pun (satu paragraf teks polos) tidak disimpan; field itu tetap teks saja, sama dengan data lama. Data lama tanpa dokumen tetap sah sebagai paragraf biasa.
+- Satu editor TipTap terpasang sekaligus di seluruh halaman. Field lain di kartu yang sedang diedit tampil dari JSON dengan `role="textbox"` dan `tabindex="0"`; fokus (klik atau Tab) memindahkan editor ke field itu dan field yang ditinggalkan mengirim isinya (operasi per butir atau per sel seperti sebelumnya). Menutup editor kartu mengirim field yang aktif. Di field satu baris (judul, butir, sel, nama kelas, judul kolom) Enter tidak membuat paragraf baru: butir dan sel pindah ke berikutnya seperti sebelumnya, judul menutup editor. Teks bentuk, atribut, dan metode kelas boleh banyak baris.
+- Toolbar: `role="toolbar"` berlabel "Format teks", satu tab stop dengan panah kiri dan kanan (Home, End), tombol toggle memakai `aria-pressed`, tombol panel memakai `aria-expanded`. Alt+F10 dari teks ke toolbar, Escape menutup panel lalu kembali ke teks. Diletakkan di atas baris yang dipilih, di bawahnya bila di atas kurang dari tinggi toolbar, dan dijepit 8 px di dalam layar. Di layar sentuh (`pointer: coarse`) menempel di bawah `visualViewport` (di atas keyboard virtual), satu baris yang digulir menyamping. Semua tombol 44 px. Tanpa animasi.
+- Pintasan (tampil di tooltip dan `aria-keyshortcuts`): Ctrl+B, Ctrl+I, Ctrl+U, Ctrl+Shift+S coret, Ctrl+E kode, Ctrl+. superskrip, Ctrl+, subskrip, Ctrl+Shift+. dan Ctrl+Shift+, ukuran naik dan turun, Ctrl+Alt+0 sampai 3 paragraf dan judul, Ctrl+Shift+H stabilo kuning, Ctrl+Shift+L, E, R, J perataan, Ctrl+Shift+8 dan 7 daftar, Tab dan Shift+Tab menjorok di daftar, Ctrl+Shift+B kutipan, Ctrl+Shift+Enter garis pemisah, Ctrl+K tautan, Ctrl+\ hapus format. Warna teks tidak punya pintasan standar di Google Docs maupun Notion, jadi hanya lewat toolbar (Alt+F10).
+- Kontras warna teks (minimum terhadap kanvas, putih, dan semua warna kartu; kartu krem memakai nilai mode terang di kedua tema), dihitung dengan rumus luminans WCAG dari nilai token di `style.css`:
+
+| Warna | Token | Terang | Gelap | Kartu krem di gelap |
+|---|---|---|---|---|
+| Abu | ink-muted | 5,01 | 5,09 | 5,01 |
+| Merah | danger | 6,44 | 8,14 | 6,44 |
+| Oranye | collab-5 | 4,89 | 9,35 | 4,89 |
+| Cokelat | high | 4,95 | 8,76 | 4,95 |
+| Hijau | collab-8 | 4,84 | 10,77 | 4,84 |
+| Biru | collab-2 | 5,23 | 7,83 | 5,23 |
+| Ungu | collab-4 | 5,54 | 7,97 | 5,54 |
+| Merah muda | collab-7 | 5,26 | 7,80 | 5,26 |
+
+  Tidak ditawarkan: collab-3 (4,28 di terang) dan collab-6 (4,497 di kartu terang). collab-1 dan urgent lolos tetapi terlalu mirip merah, jadi tidak ditambahkan.
+- Kontras stabilo (minimum semua warna teks di atas, termasuk tinta): kuning (ready-bg) 5,04 dan 5,09, hijau (progress-bg) 5,04 dan 5,16, biru (completed-bg) 4,94 dan 5,31, merah (danger-bg) 5,12 dan 5,42, abu (requested-bg) 5,11 dan 5,20 (terang dan gelap). Krem (tag) tidak ditawarkan: tag tetap terang di mode gelap, jadi teks terang di atasnya hanya 1,07:1. Di kartu krem nilai token stabilo dan warna collab ditimpa ke nilai mode terang (`.wb-card-krem > *`).
+- Ekspor sekarang ikut menggambar format huruf; keputusan W4 "teks diekspor tanpa format huruf" diganti (Riwayat keputusan `docs/whiteboard.md`). Sel tabel tetap satu baris di ekspor. Warna tetap token mode terang.
 
 ## Sprint 12: Persiapan deploy dan migrasi data
 
@@ -1927,10 +1961,13 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 46 | 2026-11-25 | Ubah To Do lewat dobel klik dengan kursor di posisi klik, isian selebar baris, mode Atur tidak menyempitkan teks | Sprint 12g |
 | 47 | 2026-11-25 | Papan task realtime lewat WebSocket bersama, Task saya untuk Manajer dan Arsip, kontrol To Do hanya di mode Atur | Sprint 12g |
 | 48 | 2026-11-26 | Kolom kiri papan task (kartu profil dan To Do) bisa dijangkau dari posisi gulir mana pun | Sprint 12g |
+| 49 | 2026-11-26 | Whiteboard: toolbar format teks melayang untuk catatan, kartu judul, checklist, tabel, teks bentuk, dan judul kolom; ekspor ikut menggambar format | Sprint 12h |
+| 50 | 2026-11-26 | Whiteboard: gaya kartu, menu klik kanan, grup, kunci posisi; ganti, potong, lihat penuh, dan unduh gambar serta berkas | Sprint 12i (setelah revisi 49) |
+| 51 | 2026-11-26 | Whiteboard: kartu anggota tim (alat Tim, data orang diambil dari profil saat papan dimuat) | Sprint 12j (setelah revisi 50) |
 | 33b | 2026-11-20 | Poles tampilan kartu Aktivitas: tombol rantai pindah ke celah antar isian dan jadi ikon kecil tanpa bingkai, tombol mati tidak dirender, jam tersambung menyatu dengan jam kepalanya, status simpan punya baris tetap, Tambah berkas di sel tabel tanpa bingkai | Sprint 12c |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat keempat puluh delapan revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat kelima puluh satu revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 
@@ -1961,7 +1998,7 @@ SRS v1.0 belum memuat keempat puluh delapan revisi (revisi 5 di S14-17). SRS dip
   3. Gambar bebas paling banyak 300 goresan dan 6.000 titik per kartu (rancangan menyebut 500 goresan).
   4. Garis yang terputus karena salah satu kartunya dipindah ke papan lain masuk Tempat sampah, bukan ikut pindah.
 - Whiteboard W4, bawaan dipakai, menunggu konfirmasi:
-  1. Ekspor PNG dan PDF selalu memakai warna mode terang, dan teks catatan diekspor tanpa format huruf (tebal, miring, tautan).
+  1. Ekspor PNG dan PDF selalu memakai warna mode terang. (Teks tanpa format huruf diganti revisi 49: format sekarang ikut digambar.)
   2. Salinan template memakai berkas gambar yang sama dengan templatenya, bukan salinan berkas; menghapus template tidak merusak salinannya.
   3. Di bawah zoom 40% kartu hanya menampilkan judul ringkas (level of detail).
 - Whiteboard W5, bawaan dipakai, menunggu konfirmasi:

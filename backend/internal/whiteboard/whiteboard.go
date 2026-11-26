@@ -731,6 +731,8 @@ type ChecklistOp struct {
 	ItemID string  `json:"item_id"`
 	Text   *string `json:"text"`
 	Done   *bool   `json:"done"`
+	// Doc: isi berformat untuk title, add, dan set (revisi 49). Text saja berarti teks polos tanpa format.
+	Doc *Node `json:"doc"`
 	// Index: posisi butir baru atau tujuan pindah, dihitung dari 0. Di luar rentang berarti paling akhir.
 	Index *int `json:"index"`
 }
@@ -804,10 +806,13 @@ func applyChecklistOp(c *ChecklistContent, op ChecklistOp) error {
 	}
 	switch op.Op {
 	case "title":
-		if op.Text == nil {
+		if op.Text == nil && op.Doc == nil {
 			return apperr.Invalid("Judul checklist kosong.")
 		}
-		c.Title = *op.Text
+		if op.Text != nil {
+			c.Title = *op.Text
+		}
+		c.TitleDoc = op.Doc
 	case "add":
 		if len(c.Items) >= MaxChecklist {
 			return apperr.Invalid(fmt.Sprintf("Checklist maksimal %d butir.", MaxChecklist))
@@ -826,14 +831,17 @@ func applyChecklistOp(c *ChecklistContent, op ChecklistOp) error {
 			text = *op.Text
 		}
 		i := at(len(c.Items))
-		c.Items = append(c.Items[:i], append([]ChecklistItem{{ID: id, Text: text, Done: op.Done != nil && *op.Done}}, c.Items[i:]...)...)
+		c.Items = append(c.Items[:i], append([]ChecklistItem{{ID: id, Text: text, Done: op.Done != nil && *op.Done, Doc: op.Doc}}, c.Items[i:]...)...)
 	case "set":
 		i, err := find()
 		if err != nil {
 			return err
 		}
-		if op.Text != nil {
-			c.Items[i].Text = *op.Text
+		if op.Text != nil || op.Doc != nil {
+			if op.Text != nil {
+				c.Items[i].Text = *op.Text
+			}
+			c.Items[i].Doc = op.Doc
 		}
 		if op.Done != nil {
 			c.Items[i].Done = *op.Done

@@ -300,7 +300,7 @@ Ditolak: canvas 2D (Konva, Fabric). Lebih cepat di atas ribuan objek, tetapi 500
 
 **Keputusan: TipTap 3 di atas ProseMirror (MIT), hanya untuk kartu yang sedang diedit.** Kartu lain dirender dari JSON lewat komponen Vue sendiri (render function per jenis node), bukan dengan menjalankan editor.
 
-Ekstensi yang dipakai: paragraf, heading 1 sampai 3, tebal, miring, garis bawah, coret, kode inline, daftar berbutir dan bernomor, kutipan, tautan, hard break. Tanpa tabel, gambar di dalam teks, HTML mentah, atau gaya warna bebas.
+Ekstensi yang dipakai: paragraf, heading 1 sampai 3, tebal, miring, garis bawah, coret, kode inline, daftar berbutir dan bernomor, kutipan, tautan, hard break. Tanpa tabel, gambar di dalam teks, HTML mentah, atau gaya warna bebas. Sejak revisi 49 juga superskrip, subskrip, warna teks, stabilo, ukuran huruf, perataan, dan garis pemisah, semuanya nama dari daftar yang dirender sebagai kelas CSS (`docs/sprint.md`, Sprint 12h), dipakai juga di field kecil (judul, butir, sel, teks bentuk, judul kolom).
 
 Kecocokan dengan CSP:
 
@@ -478,7 +478,7 @@ Isi:
 - Kartu `image` dan `file` (tempel, seret, pilih berkas, thumbnail), kartu `link` dengan pratinjau aman.
 - Kartu `column` (menumpuk kartu, urutkan dengan seret dan keyboard).
 - Alat Gambar bebas: pena dengan pilihan warna (token yang sama dengan warna kartu) dan ketebalan (2, 4, atau 8 px), plus penghapus per goresan. Satu sesi menggambar disimpan sebagai satu kartu `drawing` berisi garis vektor: daftar goresan, tiap goresan berisi warna, ketebalan, dan titik relatif terhadap pojok kartu. Server memvalidasi: warna dan ketebalan dari daftar putih, koordinat angka terhingga di dalam ukuran kartu, maksimal 500 goresan per kartu, 2.000 titik per goresan, dan 64 KB isi. Titik disederhanakan di klien (Ramer-Douglas-Peucker) sebelum dikirim. Dirender sebagai `<path>` SVG yang dibangun dari angka, tanpa string SVG dari klien. Kartu gambar bisa dipindah, diubah ukuran (skala), diwarnai latarnya, dan dihapus seperti kartu lain; menggambar lagi di atasnya menambah goresan lewat patch isi biasa dengan `content_version`.
-- Kartu `table`: baris dan kolom berisi teks polos (tanpa format), maksimal 20 kolom, 100 baris, 500 karakter per sel, dan 64 KB isi. Ubah sel, tambah dan hapus baris atau kolom lewat operasi per sel atau per baris di server (pola checklist), jadi dua orang yang mengubah sel berbeda tidak saling menimpa. Navigasi sel dengan Tab dan panah, dirender sebagai `<table>` dengan judul kolom opsional.
+- Kartu `table`: baris dan kolom berisi teks polos (sejak revisi 49 boleh berformat lewat `docs` per sel), maksimal 20 kolom, 100 baris, 500 karakter per sel, dan 64 KB isi. Ubah sel, tambah dan hapus baris atau kolom lewat operasi per sel atau per baris di server (pola checklist), jadi dua orang yang mengubah sel berbeda tidak saling menimpa. Navigasi sel dengan Tab dan panah, dirender sebagai `<table>` dengan judul kolom opsional.
 - Pindah kartu antar papan (menu dan seret ke kartu papan; penghubung ke kartu yang tertinggal dihapus ke Tempat sampah dalam batch yang sama).
 - Garis dan panah penghubung dengan label.
 - Komentar di kartu.
@@ -585,3 +585,6 @@ Masuk ke "Menunggu jawaban Manajer" di `docs/sprint.md` saat W1 dimulai. Pilihan
 - 2026-11-25, W5: jalur siku, port setelah putar, ubah ukuran pada bentuk diputar, dan satu garis lengkap (`routeConnector`) adalah fungsi murni di `frontend/src/utils/wbShapes.ts` dengan unit test, dipakai bersama lapisan garis, pegangan diagram, dan ekspor.
 - 2026-11-25, W5: pegangan port 48 px layar di luar tepi kartu, bukan tepat di port, karena di sana ada pegangan ubah ukuran; pegangan putar 100 px di atas bentuk supaya tidak bertumpuk dengan port atas.
 - 2026-11-25, gerbang akhir: `uji-wss.mjs` juga menguji WebSocket papan task (revisi 47); audit luapan 768 dan 1024 px menjadi skrip tetap `scripts/e2e/uji-lebar.mjs`.
+- 2026-11-26, revisi 49: keputusan W4 "ekspor tanpa format huruf" diganti. Ekspor PNG dan PDF menggambar tebal, miring, garis bawah, coret, kode, superskrip, subskrip, warna, stabilo, ukuran, perataan, dan garis pemisah dari data kartu (`utils/wbRich.ts`, `wrapRuns`), dengan warna token mode terang seperti sebelumnya.
+- 2026-11-26, revisi 49: format teks memakai ekstensi TipTap sendiri yang merender kelas, bukan paket TipTap Color, Highlight, TextStyle, TextAlign, Subscript, dan Superscript, karena paket itu merender atribut `style` yang diblokir CSP. Toolbar diposisikan sendiri, tanpa BubbleMenu dan floating-ui. Tidak ada dependensi baru dan CSP tidak berubah.
+- 2026-11-26, revisi 49: satu editor TipTap terpasang sekaligus; field lain dirender dari JSON. Field kecil menyimpan dokumen di pasangan `doc`, `title_doc`, `docs`, atau `*_doc` di `content` yang sama, jadi tidak ada migrasi SQL.

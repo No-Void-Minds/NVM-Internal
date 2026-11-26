@@ -50,10 +50,3 @@ export function caretHint(x: number, y: number, target: EventTarget | null): Car
 function leadingSpace(t: string) {
   return t.length - t.trimStart().length
 }
-
-export function placeCaret(input: HTMLInputElement | null | undefined, offset: number | undefined) {
-  if (!input) return
-  input.focus()
-  const at = offset === undefined ? input.value.length : Math.max(0, Math.min(input.value.length, offset))
-  input.setSelectionRange(at, at)
-}

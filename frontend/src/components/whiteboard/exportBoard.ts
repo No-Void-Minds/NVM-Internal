@@ -1,19 +1,23 @@
 // Penggambar ekspor papan ke kanvas (W4). Digambar ulang dari data kartu, bukan tangkapan DOM, karena kartu di luar
-// layar tidak di-mount (culling) dan tangkapan DOM butuh pustaka tambahan. Hasilnya teks polos per baris (format
-// huruf di dalam paragraf tidak ikut), gambar dari thumbnail, tabel sebagai kisi, goresan, dan garis penghubung.
+// layar tidak di-mount (culling) dan tangkapan DOM butuh pustaka tambahan. Hasilnya teks dengan format huruf (tebal,
+// miring, garis bawah, coret, warna, stabilo, ukuran, dan perataan; revisi 49), gambar dari thumbnail, tabel sebagai
+// kisi, goresan, dan garis penghubung.
 // Warna selalu dari token mode terang, supaya PNG dan PDF tetap layak dicetak walau aplikasi sedang di mode gelap.
 import { fileUrl } from '../../api/whiteboard'
-import { EXPORT_PAD, EXPORT_SCALE, exportScale, wrapText } from '../../utils/wbExport'
+import { EXPORT_PAD, EXPORT_SCALE, exportScale } from '../../utils/wbExport'
+import { HIGHLIGHTS, TEXT_COLORS, wrapRuns, type Run } from '../../utils/wbRich'
 import { openShape, rotatedBounds, routeConnector, shapePath, type ShapeContent } from '../../utils/wbShapes'
 import {
   bounds,
   cardLines,
+  fieldLines,
   type CaptionContent,
   type Card,
   type Connector,
   type DrawingContent,
   type Rect,
   type TableContent,
+  type TextLine,
 } from '../../utils/whiteboard'
 import { penColors } from './wbColors'
 
@@ -43,6 +47,8 @@ function lightTokens(): (name: string) => string {
     '--color-line',
     ...Object.values(cardBg),
     ...penColors.map((p) => p.css.slice(4, -1)),
+    ...TEXT_COLORS.map((c) => c.token),
+    ...HIGHLIGHTS.map((c) => c.token),
   ]
   for (const n of names) cache.set(n, cs.getPropertyValue(n).trim())
   const font = getComputedStyle(document.body).fontFamily
@@ -56,14 +62,83 @@ function ink(tok: (n: string) => string, value: string) {
   return tok(css.slice(4, -1))
 }
 
-type Laid = {
-  card: Card
-  rect: Rect
-  text: { text: string; size: number; bold?: boolean; muted?: boolean }[]
+type Tok = (n: string) => string
+// Satu baris hasil pecah: run berformat dan apakah baris terakhir paragrafnya (rata kiri-kanan tidak meregangkannya).
+type Drawn = TextLine & { runs: Run[]; last: boolean }
+type Laid = { card: Card; rect: Rect; text: Drawn[] }
+
+function fontOf(tok: Tok, size: number, bold?: boolean) {
+  return `${bold ? '700 ' : ''}${size}px ${tok('font')}`
 }
 
-function fontOf(tok: (n: string) => string, size: number, bold?: boolean) {
-  return `${bold ? '700 ' : ''}${size}px ${tok('font')}`
+function runSize(size: number, r: Run) {
+  return size * (r.scale ?? 1) * (r.sup || r.sub ? 0.75 : 1)
+}
+function runFont(tok: Tok, size: number, r: Run, bold?: boolean) {
+  const family = r.code ? 'ui-monospace, monospace' : tok('font')
+  return `${r.italic ? 'italic ' : ''}${r.bold || bold ? '700 ' : ''}${runSize(size, r)}px ${family}`
+}
+
+function wrapLine(ctx: CanvasRenderingContext2D, tok: Tok, l: TextLine, maxW: number): Drawn[] {
+  if (l.rule) return [{ ...l, runs: [], last: true }]
+  const measure = (r: Run, t: string) => {
+    ctx.font = runFont(tok, l.size, r, l.bold)
+    return ctx.measureText(t).width
+  }
+  const lines = wrapRuns(l.runs ?? [{ text: l.text }], maxW, measure)
+  return lines.map((runs, i) => ({ ...l, runs, last: i === lines.length - 1 }))
+}
+
+function lineHeight(l: Drawn) {
+  return l.size * Math.max(1, ...l.runs.map((r) => r.scale ?? 1)) * 1.4
+}
+
+// Menggambar satu baris di kotak selebar maxW mulai x, dengan perataan baris itu (atau align bila tidak ada).
+function drawLine(
+  ctx: CanvasRenderingContext2D,
+  tok: Tok,
+  l: Drawn,
+  x: number,
+  y: number,
+  maxW: number,
+  color: string,
+  align = 'left',
+) {
+  const lh = lineHeight(l)
+  if (l.rule) {
+    ctx.fillStyle = tok('--color-line')
+    ctx.fillRect(x, y + lh / 2, maxW, 1)
+    return
+  }
+  const widths = l.runs.map((r) => {
+    ctx.font = runFont(tok, l.size, r, l.bold)
+    return ctx.measureText(r.text).width
+  })
+  const free = Math.max(0, maxW - widths.reduce((a, b) => a + b, 0))
+  const al = l.align ?? align
+  const spaces =
+    al === 'justify' && !l.last ? l.runs.reduce((n, r) => n + (r.text.match(/ /g)?.length ?? 0), 0) : 0
+  const gap = spaces ? free / spaces : 0
+  let cx = x + (al === 'center' ? free / 2 : al === 'right' ? free : 0)
+  const base = y + lh * 0.75
+  ctx.textBaseline = 'alphabetic'
+  for (const r of l.runs) {
+    ctx.font = runFont(tok, l.size, r, l.bold)
+    const fs = runSize(l.size, r)
+    const by = base + (r.sup ? -fs * 0.5 : r.sub ? fs * 0.25 : 0)
+    for (const piece of gap ? r.text.split(/(?<= )/) : [r.text]) {
+      const w = ctx.measureText(piece).width
+      if (r.highlight) {
+        ctx.fillStyle = tok(r.highlight)
+        ctx.fillRect(cx, y + 1, w, lh - 2)
+      }
+      ctx.fillStyle = r.color ? tok(r.color) : color
+      ctx.fillText(piece, cx, by)
+      if (r.underline) ctx.fillRect(cx, by + Math.max(1, fs * 0.12), w, Math.max(1, fs / 14))
+      if (r.strike) ctx.fillRect(cx, by - fs * 0.3, w, Math.max(1, fs / 14))
+      cx += w + (piece.endsWith(' ') ? gap : 0)
+    }
+  }
 }
 
 function loadImage(src: string): Promise<HTMLImageElement | null> {
@@ -84,13 +159,8 @@ export async function renderBoard(cards: Card[], connectors: Connector[]): Promi
 
   // Tinggi kartu teks mengikuti isinya, seperti di layar (min-height), supaya teks panjang tidak terpotong.
   const laid: Laid[] = cards.map((card) => {
-    const text: Laid['text'] = []
-    for (const l of cardLines(card)) {
-      measure.font = fontOf(tok, l.size, l.bold)
-      for (const t of wrapText(l.text, Math.max(20, card.w - PAD * 2), (x) => measure.measureText(x).width))
-        text.push({ ...l, text: t })
-    }
-    let need = PAD * 2 + text.reduce((n, l) => n + l.size * 1.4, 0)
+    const text = cardLines(card).flatMap((l) => wrapLine(measure, tok, l, Math.max(20, card.w - PAD * 2)))
+    let need = PAD * 2 + text.reduce((n, l) => n + lineHeight(l), 0)
     if (card.kind === 'table') need += ((card.content as TableContent).rows.length || 1) * 28
     if (card.kind === 'image' || card.kind === 'shape') need = card.h
     return {
@@ -222,27 +292,34 @@ export async function renderBoard(cards: Card[], connectors: Connector[]): Promi
     ctx.beginPath()
     ctx.rect(rect.x, rect.y, rect.w, rect.h)
     ctx.clip()
-    ctx.textBaseline = 'top'
     for (const l of text) {
-      ctx.font = fontOf(tok, l.size, l.bold)
-      ctx.fillStyle = tok(l.muted ? '--color-ink-muted' : '--color-ink')
-      ctx.fillText(l.text, rect.x + PAD, y)
-      y += l.size * 1.4
+      drawLine(
+        ctx,
+        tok,
+        l,
+        rect.x + PAD,
+        y,
+        rect.w - PAD * 2,
+        tok(l.muted ? '--color-ink-muted' : '--color-ink'),
+      )
+      y += lineHeight(l)
     }
     if (card.kind === 'table') {
-      const rows = (card.content as TableContent).rows
-      const header = (card.content as TableContent).header
+      const t = card.content as TableContent
+      const rows = t.rows
+      const header = t.header
       const cols = Math.max(1, ...rows.map((r) => r.length))
       const cw = (rect.w - PAD * 2) / cols
       ctx.strokeStyle = tok('--color-line')
       rows.forEach((row, r) => {
         for (let c = 0; c < cols; c++) {
           const x = rect.x + PAD + c * cw
+          ctx.strokeStyle = tok('--color-line')
           ctx.strokeRect(x, y, cw, 28)
-          ctx.font = fontOf(tok, 13, header && r === 0)
-          ctx.fillStyle = tok('--color-ink')
-          const cell = wrapText(row[c] ?? '', cw - 8, (x) => ctx.measureText(x).width)[0] ?? ''
-          ctx.fillText(cell, x + 4, y + 7)
+          // Sel hanya satu baris di ekspor: baris pertama sel, dipotong selebar sel.
+          const first = fieldLines(row[c] ?? '', t.docs?.[r]?.[c], { size: 13, bold: header && r === 0 })[0]
+          const line = first && wrapLine(ctx, tok, first, cw - 8)[0]
+          if (line) drawLine(ctx, tok, line, x + 4, y + 4, cw - 8, tok('--color-ink'))
         }
         y += 28
       })
@@ -256,7 +333,7 @@ const shapeFill: Record<string, string> = { putih: '--color-surface', ...cardBg 
 
 // Bentuk diputar terhadap pusatnya, digambar dari path yang sama dengan layar, lalu teksnya dipecah per baris di
 // tengah bentuk. Kelas UML: nama tebal, garis pemisah, atribut, garis pemisah, metode.
-function drawShape(ctx: CanvasRenderingContext2D, tok: (n: string) => string, c: ShapeContent, r: Box) {
+function drawShape(ctx: CanvasRenderingContext2D, tok: Tok, c: ShapeContent, r: Box) {
   const sw = c.stroke_width
   ctx.save()
   ctx.translate(r.x + r.w / 2, r.y + r.h / 2)
@@ -277,20 +354,20 @@ function drawShape(ctx: CanvasRenderingContext2D, tok: (n: string) => string, c:
   ctx.stroke(path)
   ctx.setLineDash([])
   ctx.restore()
-  ctx.fillStyle = tok('--color-ink')
-  ctx.textBaseline = 'top'
   const fs = c.font_size
-  const lh = fs * 1.3
-  const fit = (t: string, maxW: number) => wrapText(t, maxW, (x) => ctx.measureText(x).width)
+  const ink0 = tok('--color-ink')
+  const lay = (text: string, doc: Parameters<typeof fieldLines>[1], maxW: number, bold?: boolean) =>
+    fieldLines(text, doc, { size: fs, bold }).flatMap((l) => wrapLine(ctx, tok, l, maxW))
   if (c.shape === 'uml_class') {
     let y = 6
-    ctx.font = fontOf(tok, fs, true)
-    for (const l of fit(c.name || 'Kelas', r.w - 16)) {
-      ctx.fillText(l, (r.w - ctx.measureText(l).width) / 2, y)
-      y += lh
+    for (const l of lay(c.name || 'Kelas', c.name_doc, r.w - 16, true)) {
+      drawLine(ctx, tok, l, 8, y, r.w - 16, ink0, 'center')
+      y += lineHeight(l)
     }
-    ctx.font = fontOf(tok, fs)
-    for (const part of [c.attributes ?? '', c.methods ?? '']) {
+    for (const [part, doc] of [
+      [c.attributes ?? '', c.attributes_doc],
+      [c.methods ?? '', c.methods_doc],
+    ] as const) {
       y += 4
       ctx.strokeStyle = ink(tok, c.stroke)
       ctx.lineWidth = sw
@@ -299,21 +376,18 @@ function drawShape(ctx: CanvasRenderingContext2D, tok: (n: string) => string, c:
       ctx.lineTo(r.w, y)
       ctx.stroke()
       y += 6
-      for (const l of fit(part, r.w - 16)) {
-        if (y + lh > r.h) break
-        ctx.fillText(l, 8, y)
-        y += lh
+      for (const l of lay(part, doc, r.w - 16)) {
+        if (y + lineHeight(l) > r.h) break
+        drawLine(ctx, tok, l, 8, y, r.w - 16, ink0)
+        y += lineHeight(l)
       }
     }
   } else if (c.text) {
-    ctx.font = fontOf(tok, fs)
-    const lines = fit(c.text, r.w * 0.7)
-    let y = (r.h - lines.length * lh) / 2
+    const lines = lay(c.text, c.doc, r.w * 0.7)
+    let y = (r.h - lines.reduce((n, l) => n + lineHeight(l), 0)) / 2
     for (const l of lines) {
-      const tw = ctx.measureText(l).width
-      const x = c.align === 'left' ? r.w * 0.15 : c.align === 'right' ? r.w * 0.85 - tw : (r.w - tw) / 2
-      ctx.fillText(l, x, y)
-      y += lh
+      drawLine(ctx, tok, l, r.w * 0.15, y, r.w * 0.7, ink0, c.align)
+      y += lineHeight(l)
     }
   }
   ctx.restore()

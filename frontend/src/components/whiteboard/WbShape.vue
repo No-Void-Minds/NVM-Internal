@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, ref, useId, watch } from 'vue'
+import type { PMNode } from '../../utils/whiteboard'
+import WbRichField, { activateField } from './WbRichField.vue'
+import WbRichText from './WbRichText'
 import { inkColor } from './wbColors'
 import { openShape, shapePath, type ShapeContent } from '../../utils/wbShapes'
 
@@ -64,48 +67,40 @@ const textStyle = computed(() => ({
 }))
 const divider = computed(() => ({ borderTop: `${sw.value}px solid ${stroke.value}` }))
 
-// Draf lokal selama mengedit; siaran orang lain tidak menimpa ketikan (sama dengan drafts.ts untuk checklist).
+// Draf lokal selama mengedit: gabungan semua bagian yang sudah diketik, dikirim utuh sebagai draf langsung dan saat
+// bagian itu selesai diedit (pindah bagian atau editor ditutup). Siaran orang lain tidak menimpa ketikan.
+type Part = 'text' | 'name' | 'attributes' | 'methods'
+const docKey = {
+  text: 'doc',
+  name: 'name_doc',
+  attributes: 'attributes_doc',
+  methods: 'methods_doc',
+} as const
+const uid = useId()
+const key = (p: Part) => `${uid}:${p}`
 const draft = ref<ShapeContent>({ ...props.content })
 watch(
   () => props.editing,
-  async (on) => {
+  (on) => {
     if (!on) return
     draft.value = { ...props.content }
-    await nextTick()
-    const el = first.value
-    el?.focus()
-    if (el && 'setSelectionRange' in el) el.setSelectionRange(el.value.length, el.value.length)
+    activateField(key(isClass.value ? 'name' : 'text'))
   },
   { immediate: true },
 )
-const first = ref<HTMLTextAreaElement | HTMLInputElement | null>(null)
-const editor = ref<HTMLElement | null>(null)
 
-function input() {
+function put(p: Part, v: { text: string; doc: PMNode | null }) {
+  draft.value = { ...draft.value, [p]: v.text, [docKey[p]]: v.doc }
+}
+function input(p: Part, v: { text: string; doc: PMNode | null }) {
+  put(p, v)
   emit('live', { ...draft.value })
 }
-function save() {
-  const c = props.content
-  const d2 = draft.value
-  if (d2.text !== c.text || d2.name !== c.name || d2.attributes !== c.attributes || d2.methods !== c.methods)
-    emit('save', { ...d2 })
+function save(p: Part, v: { text: string; doc: PMNode | null }) {
+  put(p, v)
+  emit('save', { ...draft.value })
 }
-// Simpan saat fokus keluar dari seluruh editor (bukan antar isian kelas UML).
-function onFocusOut(e: FocusEvent) {
-  if (editor.value?.contains(e.relatedTarget as Node)) return
-  save()
-  emit('close')
-}
-function onKey(e: KeyboardEvent) {
-  if (e.key === 'Escape') {
-    e.preventDefault()
-    e.stopPropagation()
-    save()
-    emit('close')
-  }
-}
-const field =
-  'block w-full resize-none bg-transparent outline-none placeholder:text-ink-muted focus-visible:bg-surface/60'
+const field = 'block w-full'
 </script>
 
 <template>
@@ -126,76 +121,83 @@ const field =
     <!-- Kelas UML: tiga bagian bergaris pemisah. -->
     <div
       v-if="isClass"
-      ref="editor"
       class="absolute inset-0 flex flex-col overflow-hidden text-ink"
       :style="{ fontSize: `${content.font_size}px` }"
-      @focusout="editing && onFocusOut($event)"
-      @keydown="editing && onKey($event)"
     >
       <template v-if="editing">
-        <input
-          ref="first"
-          v-model="draft.name"
-          aria-label="Nama kelas"
-          maxlength="200"
+        <WbRichField
+          :field-key="key('name')"
+          :text="content.name ?? ''"
+          :doc="content.name_doc"
+          label="Nama kelas"
+          placeholder="Kelas"
           :class="field"
           class="px-2 py-1 text-center font-bold"
-          @pointerdown.stop
-          @input="input"
+          @input="input('name', $event)"
+          @commit="save('name', $event)"
+          @enter="activateField(key('attributes'))"
+          @close="emit('close')"
         />
-        <textarea
-          v-model="draft.attributes"
-          aria-label="Atribut kelas, satu per baris"
-          maxlength="2000"
-          rows="3"
+        <WbRichField
+          :field-key="key('attributes')"
+          :text="content.attributes ?? ''"
+          :doc="content.attributes_doc"
+          label="Atribut kelas, satu per baris"
+          :single-line="false"
           :class="field"
           :style="divider"
           class="flex-1 px-2 py-1 font-mono"
-          @pointerdown.stop
-          @input="input"
+          @input="input('attributes', $event)"
+          @commit="save('attributes', $event)"
+          @close="emit('close')"
         />
-        <textarea
-          v-model="draft.methods"
-          aria-label="Metode kelas, satu per baris"
-          maxlength="2000"
-          rows="3"
+        <WbRichField
+          :field-key="key('methods')"
+          :text="content.methods ?? ''"
+          :doc="content.methods_doc"
+          label="Metode kelas, satu per baris"
+          :single-line="false"
           :class="field"
           :style="divider"
           class="flex-1 px-2 py-1 font-mono"
-          @pointerdown.stop
-          @input="input"
+          @input="input('methods', $event)"
+          @commit="save('methods', $event)"
+          @close="emit('close')"
         />
       </template>
       <template v-else>
-        <p class="px-2 py-1 text-center font-bold break-words" data-caret>{{ content.name || 'Kelas' }}</p>
-        <p class="min-h-6 flex-1 px-2 py-1 font-mono break-words whitespace-pre-wrap" :style="divider">
-          {{ content.attributes }}
+        <WbRichText v-if="content.name_doc" :doc="content.name_doc" class="px-2 py-1 text-center font-bold" />
+        <p v-else class="px-2 py-1 text-center font-bold break-words" data-caret>
+          {{ content.name || 'Kelas' }}
         </p>
-        <p class="min-h-6 flex-1 px-2 py-1 font-mono break-words whitespace-pre-wrap" :style="divider">
-          {{ content.methods }}
-        </p>
+        <div class="min-h-6 flex-1 px-2 py-1 font-mono break-words whitespace-pre-wrap" :style="divider">
+          <WbRichText v-if="content.attributes_doc" :doc="content.attributes_doc" />
+          <template v-else>{{ content.attributes }}</template>
+        </div>
+        <div class="min-h-6 flex-1 px-2 py-1 font-mono break-words whitespace-pre-wrap" :style="divider">
+          <WbRichText v-if="content.methods_doc" :doc="content.methods_doc" />
+          <template v-else>{{ content.methods }}</template>
+        </div>
       </template>
     </div>
 
-    <div
-      v-else
-      ref="editor"
-      class="absolute flex items-center text-ink"
-      :style="textStyle"
-      @focusout="editing && onFocusOut($event)"
-      @keydown="editing && onKey($event)"
-    >
-      <textarea
+    <div v-else class="absolute flex items-center text-ink" :style="textStyle">
+      <WbRichField
         v-if="editing"
-        ref="first"
-        v-model="draft.text"
-        aria-label="Teks bentuk"
-        maxlength="2000"
-        :class="field"
-        class="h-full leading-snug"
-        :style="{ textAlign: content.align }"
-        @pointerdown.stop
-        @input="input"
+        :field-key="key('text')"
+        :text="content.text"
+        :doc="content.doc"
+        label="Teks bentuk"
+        :single-line="false"
+        class="max-h-full w-full overflow-auto leading-snug"
+        @input="input('text', $event)"
+        @commit="save('text', $event)"
+        @close="emit('close')"
+      />
+      <WbRichText
+        v-else-if="content.doc"
+        :doc="content.doc"
+        class="max-h-full w-full overflow-hidden leading-snug [overflow-wrap:anywhere]"
       />
       <p
         v-else-if="content.text"

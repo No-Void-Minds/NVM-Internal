@@ -7,6 +7,7 @@ import type {
   Connector,
   ConnectorGeometry,
   ConnectorStyle,
+  PMNode,
   PreviewInfo,
 } from '../utils/whiteboard'
 
@@ -73,9 +74,9 @@ export type NewCard = {
 }
 
 export type ChecklistOp =
-  | { op: 'title'; text: string }
-  | { op: 'add'; item_id: string; text: string; index?: number }
-  | { op: 'set'; item_id: string; text?: string; done?: boolean }
+  | { op: 'title'; text: string; doc?: PMNode | null }
+  | { op: 'add'; item_id: string; text: string; index?: number; doc?: PMNode | null }
+  | { op: 'set'; item_id: string; text?: string; done?: boolean; doc?: PMNode | null }
   | { op: 'remove'; item_id: string }
   | { op: 'move'; item_id: string; index: number }
 
@@ -143,12 +144,12 @@ export function restoreBatch(batch: string) {
 }
 
 export type TableOp =
-  | { op: 'set'; row: number; col: number; text: string }
+  | { op: 'set'; row: number; col: number; text: string; doc?: PMNode | null }
   | { op: 'add_row' | 'add_col'; index?: number }
   | { op: 'remove_row'; index: number }
   | { op: 'remove_col'; index: number }
   | { op: 'header'; on: boolean }
-  | { op: 'title'; text: string }
+  | { op: 'title'; text: string; doc?: PMNode | null }
 
 export type PenStroke = { color: string; width: number; points: number[] }
 export type DrawingOp =

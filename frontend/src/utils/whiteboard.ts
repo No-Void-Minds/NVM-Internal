@@ -3,6 +3,7 @@
 
 // Ekstensi .ts: modul ini juga diimpor test Node (tsconfig.node.json, resolusi node16).
 import type { ShapeContent } from './wbShapes.ts'
+import { inlineRuns, type Run } from './wbRich.ts'
 
 export type CardKind =
   | 'note'
@@ -27,9 +28,10 @@ export type PMNode = {
   marks?: PMMark[]
 }
 export type NoteContent = { doc: PMNode }
-export type HeadingContent = { text: string; level: 1 | 2 }
-export type ChecklistItem = { id: string; text: string; done: boolean }
-export type ChecklistContent = { title: string; items: ChecklistItem[] }
+// doc, title_doc, docs: pasangan berformat (revisi 49); teks polosnya tetap di text atau title dan dihasilkan server.
+export type HeadingContent = { text: string; level: 1 | 2; doc?: PMNode | null }
+export type ChecklistItem = { id: string; text: string; done: boolean; doc?: PMNode | null }
+export type ChecklistContent = { title: string; title_doc?: PMNode | null; items: ChecklistItem[] }
 
 // Papan anak yang ditunjuk kartu jenis board.
 export type BoardRef = { id: string; title: string; version: number; boards: number; cards: number }
@@ -37,11 +39,17 @@ export type BoardContent = Record<string, never>
 // W3: isi kartu gambar dan berkas hanya keterangan; berkasnya di field file.
 export type CaptionContent = { caption: string }
 export type LinkContent = { url: string; preview_id: string }
-export type ColumnContent = { title: string }
+export type ColumnContent = { title: string; title_doc?: PMNode | null }
 // Goresan objek gambar bebas (revisi A): piksel dunia bilangan bulat relatif ke pojok kotak batas objek, x,y berpasangan.
 export type Stroke = { color: string; width: number; points: number[] }
 export type DrawingContent = { strokes: Stroke[] }
-export type TableContent = { title?: string; header: boolean; rows: string[][] }
+export type TableContent = {
+  title?: string
+  title_doc?: PMNode | null
+  header: boolean
+  rows: string[][]
+  docs?: (PMNode | null)[][]
+}
 export type FileInfo = {
   id: string
   name: string
@@ -669,7 +677,18 @@ export function shapeText(c: ShapeContent): string {
   return c.text
 }
 
-export type TextLine = { text: string; size: number; bold?: boolean; muted?: boolean }
+// Baris teks kartu untuk ekspor dan Tampilan Daftar. text: teks polos baris itu; runs: teks yang sama dengan format
+// huruf (revisi 49); rule: garis pemisah.
+export type TextLine = {
+  text: string
+  size: number
+  bold?: boolean
+  muted?: boolean
+  runs?: Run[]
+  align?: string
+  rule?: boolean
+}
+type LineBase = { size: number; bold?: boolean; muted?: boolean }
 
 function inlineText(node: PMNode): string {
   if (node.type === 'text') return node.text ?? ''
@@ -677,38 +696,64 @@ function inlineText(node: PMNode): string {
   return (node.content ?? []).map(inlineText).join('')
 }
 
-function docLines(node: PMNode, out: TextLine[], prefix: string) {
+function docLines(node: PMNode, out: TextLine[], prefix: string, base: LineBase = { size: 14 }) {
   const kids = node.content ?? []
+  const line = (l: LineBase) => {
+    const align = typeof node.attrs?.textAlign === 'string' ? node.attrs.textAlign : undefined
+    out.push({
+      ...l,
+      text: prefix + inlineText(node),
+      runs: [...(prefix ? [{ text: prefix }] : []), ...inlineRuns(node)],
+      ...(align ? { align } : {}),
+    })
+  }
   switch (node.type) {
     case 'paragraph':
-      out.push({ text: prefix + inlineText(node), size: 14 })
+      line(base)
       return
     case 'heading': {
       const level = Number(node.attrs?.level ?? 1)
-      out.push({
-        text: prefix + inlineText(node),
-        size: level === 1 ? 20 : level === 2 ? 17 : 15,
-        bold: true,
-      })
+      const k = level === 1 ? 20 / 14 : level === 2 ? 17 / 14 : 15 / 14
+      line({ ...base, size: Math.round(base.size * k), bold: true })
       return
     }
+    case 'horizontalRule':
+      out.push({ text: '', size: base.size, rule: true })
+      return
     case 'bulletList':
     case 'orderedList': {
       const start = Number(node.attrs?.start ?? 1)
       kids.forEach((item, i) =>
         (item.content ?? []).forEach((block, j) =>
-          docLines(block, out, j > 0 ? '   ' : node.type === 'bulletList' ? '• ' : `${start + i}. `),
+          docLines(block, out, j > 0 ? '   ' : node.type === 'bulletList' ? '• ' : `${start + i}. `, base),
         ),
       )
       return
     }
     default:
-      kids.forEach((k) => docLines(k, out, prefix))
+      kids.forEach((k) => docLines(k, out, prefix, base))
   }
 }
 
-// Baris teks kartu untuk ekspor PNG dan PDF (teks polos; format huruf di dalam paragraf tidak ikut). Gambar, tabel,
-// dan goresan digambar terpisah oleh penggambar ekspor.
+// Field berformat (revisi 49): dokumennya bila ada, selain itu teks polosnya.
+export function fieldLines(
+  text: string,
+  doc: PMNode | null | undefined,
+  base: LineBase,
+  prefix = '',
+): TextLine[] {
+  if (!doc) return [{ ...base, text: prefix + text }]
+  const out: TextLine[] = []
+  docLines(doc, out, '', base)
+  if (prefix && out[0]) {
+    out[0].text = prefix + out[0].text
+    out[0].runs = [{ text: prefix }, ...(out[0].runs ?? [])]
+  }
+  return out
+}
+
+// Baris teks kartu untuk ekspor PNG dan PDF, dengan format huruf (revisi 49). Gambar, sel tabel, bentuk, dan goresan
+// digambar terpisah oleh penggambar ekspor.
 export function cardLines(card: Card): TextLine[] {
   switch (card.kind) {
     case 'note': {
@@ -718,13 +763,15 @@ export function cardLines(card: Card): TextLine[] {
     }
     case 'heading': {
       const h = card.content as HeadingContent
-      return [{ text: h.text, size: h.level === 2 ? 18 : 22, bold: true }]
+      return fieldLines(h.text, h.doc, { size: h.level === 2 ? 18 : 22, bold: true })
     }
     case 'checklist': {
       const c = card.content as ChecklistContent
       return [
-        ...(c.title ? [{ text: c.title, size: 15, bold: true }] : []),
-        ...c.items.map((i) => ({ text: `${i.done ? '☑' : '☐'} ${i.text}`, size: 14, muted: i.done })),
+        ...(c.title ? fieldLines(c.title, c.title_doc, { size: 15, bold: true }) : []),
+        ...c.items.flatMap((i) =>
+          fieldLines(i.text, i.doc, { size: 14, muted: i.done }, `${i.done ? '☑' : '☐'} `),
+        ),
       ]
     }
     case 'board':
@@ -746,11 +793,13 @@ export function cardLines(card: Card): TextLine[] {
         { text: (card.content as LinkContent).url, size: 12, muted: true },
       ]
     }
-    case 'column':
-      return [{ text: cardTitle(card), size: 15, bold: true }]
+    case 'column': {
+      const c = card.content as ColumnContent
+      return fieldLines(cardTitle(card), c.title ? c.title_doc : null, { size: 15, bold: true })
+    }
     case 'table': {
-      const t = (card.content as TableContent).title
-      return t ? [{ text: t, size: 15, bold: true }] : []
+      const t = card.content as TableContent
+      return t.title ? fieldLines(t.title, t.title_doc, { size: 15, bold: true }) : []
     }
     case 'drawing':
       return []

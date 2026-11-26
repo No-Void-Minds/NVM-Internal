@@ -4,9 +4,10 @@ import WbRichText from './WbRichText'
 import WbChecklist from './WbChecklist.vue'
 import WbTable from './WbTable.vue'
 import WbShape from './WbShape.vue'
+import WbRichField, { activateField } from './WbRichField.vue'
 import { fileUrl, type ChecklistOp, type TableOp } from '../../api/whiteboard'
 import { formatBytes } from '../../utils/attachment'
-import { placeCaret, type CaretHint } from './caret'
+import type { CaretHint } from './caret'
 import { HANDLES, handleSign, type Handle, type ShapeContent } from '../../utils/wbShapes'
 import {
   LOD_ZOOM,
@@ -55,9 +56,9 @@ const emit = defineEmits<{
   live: [content: Card['content']]
   close: []
   note: [doc: PMNode]
-  heading: [text: string]
+  heading: [v: { text: string; doc: PMNode | null }]
   rename: [title: string]
-  draft: [text: string]
+  draft: [v: { text: string; doc: PMNode | null }]
   checklist: [op: ChecklistOp]
   table: [op: TableOp]
   content: [content: Card['content']]
@@ -146,50 +147,17 @@ const label = computed(
     (props.remote ? `, ${props.remote.label}` : ''),
 )
 
-const headingDraft = ref('')
-const headingInput = ref<HTMLInputElement | null>(null)
-// Teks terakhir yang sudah dikirim, supaya Enter lalu blur tidak menyimpan dua kali.
-let lastSent = ''
+// Kartu judul dan judul kolom: satu field berformat (revisi 49), dibuka langsung saat kartu diedit. Isinya dikirim
+// saat Enter atau editor ditutup (field dilepas dari DOM).
+const fieldKey = computed(() => `${props.card.id}:teks`)
 watch(
   () => props.editing,
-  async (on, was) => {
-    if (props.card.kind !== 'heading') return
-    // Editor bisa ditutup tanpa blur (klik di kanvas melepas input dari DOM), jadi teksnya disimpan di sini juga.
-    if (was && !on) {
-      saveHeading()
-      return
-    }
-    if (!on) return
-    headingDraft.value = (props.card.content as HeadingContent).text
-    lastSent = headingDraft.value
-    await nextTick()
-    if (props.caret?.offset !== undefined) placeCaret(headingInput.value, props.caret.offset)
-    else {
-      headingInput.value?.focus()
-      headingInput.value?.select()
-    }
+  (on) => {
+    if (on && (props.card.kind === 'heading' || props.card.kind === 'column')) activateField(fieldKey.value)
   },
   { immediate: true },
 )
-
-function saveHeading() {
-  const text = headingDraft.value.trim()
-  if (text === lastSent) return
-  lastSent = text
-  emit('heading', text)
-}
-
-function onHeadingKey(e: KeyboardEvent) {
-  if (e.key === 'Enter') {
-    e.preventDefault()
-    saveHeading()
-    emit('close')
-  } else if (e.key === 'Escape') {
-    e.preventDefault()
-    e.stopPropagation()
-    emit('close')
-  }
-}
+const caretIndex = computed(() => props.caret?.textIndex ?? props.caret?.offset ?? null)
 
 // Kartu papan: judulnya judul papan anak. Saat kartu baru dibuat, kartunya langsung dibuka untuk diberi judul.
 const titleDraft = ref('')
@@ -236,13 +204,7 @@ function onTitleKey(e: KeyboardEvent) {
 const textDraft = ref('')
 const textInput = ref<HTMLInputElement | null>(null)
 let textSent = ''
-const textKind = computed(() =>
-  props.card.kind === 'column'
-    ? 'title'
-    : props.card.kind === 'image' || props.card.kind === 'file'
-      ? 'caption'
-      : '',
-)
+const textKind = computed(() => (props.card.kind === 'image' || props.card.kind === 'file' ? 'caption' : ''))
 watch(
   () => props.editing,
   async (on, was) => {
@@ -252,8 +214,7 @@ watch(
       return
     }
     if (!on) return
-    const c = props.card.content as CaptionContent & ColumnContent
-    textDraft.value = (textKind.value === 'title' ? c.title : c.caption) ?? ''
+    textDraft.value = (props.card.content as CaptionContent).caption ?? ''
     textSent = textDraft.value
     await nextTick()
     textInput.value?.focus()
@@ -265,7 +226,7 @@ function saveText() {
   const t = textDraft.value.trim()
   if (t === textSent) return
   textSent = t
-  emit('content', textKind.value === 'title' ? { title: t } : { caption: t })
+  emit('content', { caption: t })
 }
 
 function onTextKey(e: KeyboardEvent) {
@@ -485,20 +446,24 @@ function onPointerDown(e: PointerEvent) {
     </template>
 
     <template v-else-if="card.kind === 'column'">
-      <template v-if="editing">
-        <label :for="`k-${card.id}`" class="sr-only">Judul kolom</label>
-        <input
-          :id="`k-${card.id}`"
-          ref="textInput"
-          v-model="textDraft"
-          maxlength="200"
-          placeholder="Judul kolom"
-          class="min-h-11 w-full rounded-card border border-line bg-surface px-2 font-bold text-ink"
-          @pointerdown.stop
-          @keydown="onTextKey"
-          @blur="saveText"
-        />
-      </template>
+      <WbRichField
+        v-if="editing"
+        :field-key="fieldKey"
+        :text="(card.content as ColumnContent).title"
+        :doc="(card.content as ColumnContent).title_doc"
+        label="Judul kolom"
+        placeholder="Judul kolom"
+        :caret-index="caretIndex"
+        class="rounded-card border border-line bg-surface px-2 py-2 font-bold text-ink"
+        @commit="emit('content', { title: $event.text, title_doc: $event.doc })"
+        @enter="emit('close')"
+        @close="emit('close')"
+      />
+      <WbRichText
+        v-else-if="(card.content as ColumnContent).title_doc"
+        :doc="(card.content as ColumnContent).title_doc!"
+        class="min-h-8 font-bold"
+      />
       <p v-else class="min-h-8 font-bold break-words">
         {{ (card.content as ColumnContent).title || 'Kolom tanpa judul' }}
       </p>
@@ -514,20 +479,25 @@ function onPointerDown(e: PointerEvent) {
     />
 
     <template v-else-if="card.kind === 'heading'">
-      <template v-if="editing">
-        <label :for="`h-${card.id}`" class="sr-only">Teks judul</label>
-        <input
-          :id="`h-${card.id}`"
-          ref="headingInput"
-          v-model="headingDraft"
-          maxlength="200"
-          class="min-h-11 w-full rounded-card border border-line bg-surface px-2 text-lg font-bold text-ink"
-          @pointerdown.stop
-          @keydown="onHeadingKey"
-          @input="emit('draft', headingDraft)"
-          @blur="saveHeading"
-        />
-      </template>
+      <WbRichField
+        v-if="editing"
+        :field-key="fieldKey"
+        :text="(card.content as HeadingContent).text"
+        :doc="(card.content as HeadingContent).doc"
+        label="Teks judul"
+        :caret-index="caretIndex"
+        :select-all="caretIndex === null"
+        class="rounded-card border border-line bg-surface px-2 py-1.5 text-lg leading-snug font-bold text-ink"
+        @input="emit('draft', $event)"
+        @commit="emit('heading', $event)"
+        @enter="emit('close')"
+        @close="emit('close')"
+      />
+      <WbRichText
+        v-else-if="(card.content as HeadingContent).doc"
+        :doc="(card.content as HeadingContent).doc!"
+        class="text-lg leading-snug font-bold"
+      />
       <p
         v-else-if="(card.content as HeadingContent).text"
         data-caret

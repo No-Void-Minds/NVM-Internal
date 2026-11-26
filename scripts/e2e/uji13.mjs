@@ -3861,6 +3861,15 @@ async function wbNoScroll(page) {
 
 // Papan akar, kartu papan dan membukanya, breadcrumb dan tombol kembali browser, alat klik dan seret, catatan,
 // checklist, seret kartu, hapus dan Urungkan, panel Tempat sampah, riwayat, ganti judul, cari, urutan navbar.
+// Revisi 49: field berformat (judul, butir, sel, teks bentuk) memasang editor saat difokus, jadi diklik dulu; locator
+// yang sama lalu menunjuk editornya (label sama).
+async function fillRich(loc, text) {
+  await loc.click();
+  await loc.fill(text);
+}
+const caretAt = (loc, offset) =>
+  loc.evaluate((el, offset) => el === document.activeElement && getSelection()?.anchorOffset === offset, offset);
+
 async function checkWbDasar(width) {
   const where = (w) => `wbdasar ${width} ${w}`;
   const expect = (cond, w, msg) => {
@@ -3939,11 +3948,11 @@ async function checkWbDasar(width) {
 
     // Checklist: judul, satu butir, tutup, lalu centang tanpa membuka editor.
     await wbTool(page, width, "Checklist");
-    await page.getByLabel("Judul checklist").fill("Rilis E2E");
+    await fillRich(page.getByLabel("Judul checklist"), "Rilis E2E");
     await page.getByRole("button", { name: "Tambah butir" }).click();
     const item = page.getByLabel("Teks butir 1");
     await item.waitFor({ timeout: 10000 });
-    await item.fill("Butir satu");
+    await fillRich(item, "Butir satu");
     await page.keyboard.press("Escape");
     await wbSaved(page);
     await page.getByRole("checkbox", { name: "Selesai: Butir satu" }).check();
@@ -4675,7 +4684,7 @@ if (ONLY === "wbhadir") for (const w of [360, 1280]) await checkWbHadir(w);
 if (ONLY === "wblangsung") for (const w of [360, 1280]) await checkWbLangsung(w);
 if (ONLY === "wbseret") for (const w of [360, 1280]) await checkWbSeret(w);
 if (ONLY === "wbhapusedit") for (const w of [360, 1280]) await checkWbHapusEdit(w);
-if (ONLY === "wbputus") for (const w of [360, 1280]) await checkWbPutus(w);
+if (ONLY === "wbputus") for (const w of process.env.E2E_WIDTH ? [Number(process.env.E2E_WIDTH)] : [360, 1280]) await checkWbPutus(w);
 if (ONLY === "wbundo") for (const w of [360, 1280]) await checkWbUndo(w);
 if (ONLY === "wbduatab") for (const w of [360, 1280]) await checkWbDuaTab(w);
 if (ONLY === "navbar") await checkNavbar();
@@ -5105,13 +5114,19 @@ async function checkWbTabel(width) {
     await wbTool(ps, width, "Tabel");
     const title = ps.getByLabel("Judul tabel");
     await title.waitFor({ timeout: 10000 });
-    await title.fill("Harga paket");
+    await fillRich(title, "Harga paket");
     await title.press("Enter");
     const cell = ps.getByLabel("Baris 1, kolom 1");
     await cell.waitFor({ timeout: 10000 });
-    await cell.fill("Harga");
+    await fillRich(cell, "Harga");
     await cell.press("Enter");
-    expect(await ps.getByLabel("Baris 2, kolom 1").evaluate((el) => el === document.activeElement), "enter", "Enter tidak pindah ke baris berikut");
+    expect(
+      await ps
+        .waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Baris 2, kolom 1", null, { timeout: 5000 })
+        .then(() => true, () => false),
+      "enter",
+      "Enter tidak pindah ke baris berikut",
+    );
     await ps.getByRole("button", { name: "Tambah baris" }).click();
     await ps.getByLabel("Baris 3, kolom 1").waitFor({ timeout: 10000 }).catch(() => {});
     await wbSaved(ps);
@@ -5302,7 +5317,8 @@ async function checkWbDobel(width) {
     pt = await wordAt(`[data-card="${list.id}"] [data-item-text]`, "kertas");
     await ps.mouse.dblclick(pt.x, pt.y);
     await ps.getByLabel("Teks butir 1").waitFor({ timeout: 10000 });
-    expect(await ps.getByLabel("Teks butir 1").evaluate((el) => el === document.activeElement && el.selectionStart === 5), "butir", "kursor butir tidak di posisi klik");
+    await ps.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Teks butir 1", null, { timeout: 5000 }).catch(() => {});
+    expect(await caretAt(ps.getByLabel("Teks butir 1"), 5), "butir", "kursor butir tidak di posisi klik");
     await ps.keyboard.type("Z");
     await ps.keyboard.press("Escape");
     await wbSaved(ps);
@@ -5317,7 +5333,8 @@ async function checkWbDobel(width) {
     pt = await wordAt(`[data-card="${tb.id}"] [data-cell-text="0,1"]`, "Isi");
     await ps.mouse.dblclick(pt.x, pt.y);
     await ps.getByLabel("Baris 1, kolom 2").waitFor({ timeout: 10000 });
-    expect(await ps.getByLabel("Baris 1, kolom 2").evaluate((el) => el === document.activeElement && el.selectionStart === 0), "sel", "kursor sel tidak di posisi klik");
+    await ps.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Baris 1, kolom 2", null, { timeout: 5000 }).catch(() => {});
+    expect(await caretAt(ps.getByLabel("Baris 1, kolom 2"), 0), "sel", "kursor sel tidak di posisi klik");
     await ps.keyboard.type("W");
     await ps.keyboard.press("Escape");
     await wbSaved(ps);
@@ -5374,14 +5391,14 @@ async function checkWbKetik(width) {
     await ps.keyboard.press("Enter");
     const title = ps.getByLabel("Judul checklist");
     await title.waitFor({ timeout: 10000 });
-    await title.fill("Tugas minggu ini");
+    await fillRich(title, "Tugas minggu ini");
     const item = ps.getByLabel("Teks butir 1");
-    await item.fill("Satu diketik");
+    await fillRich(item, "Satu diketik");
     await mgr.call("POST", `/whiteboard/boards/${board}/cards/${list.id}/checklist`, { op: "set", item_id: i2, done: true });
     await changed(`[data-card="${list.id}"] input[type=checkbox]:checked`);
     await ps.waitForTimeout(200);
-    expect((await title.inputValue()) === "Tugas minggu ini", "judul checklist", `judul jadi "${await title.inputValue()}"`);
-    expect((await item.inputValue()) === "Satu diketik", "butir checklist", `butir jadi "${await item.inputValue()}"`);
+    expect((await title.innerText()).trim() === "Tugas minggu ini", "judul checklist", `judul jadi "${await title.innerText()}"`);
+    expect((await item.innerText()).trim() === "Satu diketik", "butir checklist", `butir jadi "${await item.innerText()}"`);
     await ps.keyboard.press("Escape");
     await wbSaved(ps);
     const c = (await wbCards(api, board)).find((x) => x.id === list.id).content;
@@ -5393,11 +5410,11 @@ async function checkWbKetik(width) {
     await ps.keyboard.press("Enter");
     const cell = ps.getByLabel("Baris 1, kolom 1");
     await cell.waitFor({ timeout: 10000 });
-    await cell.fill("a diketik");
+    await fillRich(cell, "a diketik");
     await ps.getByRole("button", { name: "Tambah baris" }).click();
     await changed(`[data-card="${tb.id}"] [data-cell="1,0"]`);
     await ps.waitForTimeout(200);
-    expect((await cell.inputValue()) === "a diketik", "sel tabel", `sel jadi "${await cell.inputValue()}"`);
+    expect((await cell.innerText()).trim() === "a diketik", "sel tabel", `sel jadi "${await cell.innerText()}"`);
     await ps.keyboard.press("Escape");
     await wbSaved(ps);
 
@@ -5940,8 +5957,11 @@ async function checkWb5(width) {
       const name = ps.getByRole("textbox", { name: "Nama kelas" });
       expect(await name.waitFor({ timeout: 5000 }).then(() => true, () => false), "kelas edit", "isian kelas tidak terbuka");
       await name.fill("Pesanan");
-      await ps.getByRole("textbox", { name: "Atribut kelas, satu per baris" }).fill("+ id: int\n+ total: int");
-      await ps.getByRole("textbox", { name: "Metode kelas, satu per baris" }).fill("+ bayar()");
+      await ps.getByRole("textbox", { name: "Atribut kelas, satu per baris" }).click();
+      await ps.keyboard.type("+ id: int");
+      await ps.keyboard.press("Enter");
+      await ps.keyboard.type("+ total: int");
+      await fillRich(ps.getByRole("textbox", { name: "Metode kelas, satu per baris" }), "+ bayar()");
       await ps.keyboard.press("Escape");
       await wbSaved(ps);
       const saved = (await shapes()).find((c) => c.id === cls.id);

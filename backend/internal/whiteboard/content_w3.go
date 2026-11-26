@@ -48,7 +48,8 @@ type LinkContent struct {
 }
 
 type ColumnContent struct {
-	Title string `json:"title"`
+	Title    string `json:"title"`
+	TitleDoc *Node  `json:"title_doc,omitempty"`
 }
 
 type Stroke struct {
@@ -62,9 +63,13 @@ type DrawingContent struct {
 }
 
 type TableContent struct {
-	Title  string     `json:"title"`
-	Header bool       `json:"header"`
-	Rows   [][]string `json:"rows"`
+	Title    string     `json:"title"`
+	TitleDoc *Node      `json:"title_doc,omitempty"`
+	Header   bool       `json:"header"`
+	Rows     [][]string `json:"rows"`
+	// Docs sejajar dengan Rows (revisi 49): dokumen sel yang berformat, null untuk sel teks polos. Tidak disimpan
+	// bila tidak ada sel berformat.
+	Docs [][]*Node `json:"docs,omitempty"`
 }
 
 func cleanCaption(raw json.RawMessage) (CaptionContent, string, error) {
@@ -110,8 +115,8 @@ func cleanColumn(raw json.RawMessage) (ColumnContent, string, error) {
 	if err := decodeStrict(raw, &in); err != nil {
 		return in, "", err
 	}
-	t, err := CleanText(in.Title, MaxHeadingText, "Judul kolom")
-	return ColumnContent{Title: t}, t, err
+	t, doc, err := cleanRich(in.Title, in.TitleDoc, MaxHeadingText, "Judul kolom", CleanText)
+	return ColumnContent{Title: t, TitleDoc: doc}, t, err
 }
 
 // CleanDrawing memeriksa setiap goresan: warna dari daftar warna kartu atau tinta, ketebalan 2, 4, atau 8, jumlah
@@ -171,11 +176,13 @@ func CleanTable(raw json.RawMessage) (TableContent, string, error) {
 	if cols == 0 || cols > MaxTableCols {
 		return in, "", apperr.Invalid(fmt.Sprintf("Tabel harus 1 sampai %d kolom.", MaxTableCols))
 	}
-	title, err := CleanText(in.Title, MaxHeadingText, "Judul tabel")
+	title, titleDoc, err := cleanRich(in.Title, in.TitleDoc, MaxHeadingText, "Judul tabel", CleanText)
 	if err != nil {
 		return in, "", err
 	}
-	out := TableContent{Title: title, Header: in.Header, Rows: make([][]string, 0, len(in.Rows))}
+	out := TableContent{Title: title, TitleDoc: titleDoc, Header: in.Header, Rows: make([][]string, 0, len(in.Rows))}
+	docs := make([][]*Node, 0, len(in.Rows))
+	anyDoc := false
 	var plain strings.Builder
 	if title != "" {
 		plain.WriteString(title)
@@ -186,18 +193,29 @@ func CleanTable(raw json.RawMessage) (TableContent, string, error) {
 			return in, "", apperr.Invalid("Semua baris tabel harus punya jumlah kolom yang sama.")
 		}
 		clean := make([]string, cols)
+		rowDocs := make([]*Node, cols)
 		for i, cell := range row {
-			t, err := CleanText(cell, MaxCellText, "Isi sel")
+			var d *Node
+			if r := len(out.Rows); r < len(in.Docs) && i < len(in.Docs[r]) {
+				d = in.Docs[r][i]
+			}
+			t, doc, err := cleanRich(cell, d, MaxCellText, "Isi sel", CleanText)
 			if err != nil {
 				return in, "", err
 			}
 			clean[i] = t
+			rowDocs[i] = doc
+			anyDoc = anyDoc || doc != nil
 			if t != "" {
 				plain.WriteString(t)
 				plain.WriteString(" ")
 			}
 		}
 		out.Rows = append(out.Rows, clean)
+		docs = append(docs, rowDocs)
+	}
+	if anyDoc {
+		out.Docs = docs
 	}
 	return out, strings.TrimSpace(plain.String()), nil
 }
@@ -211,6 +229,8 @@ type TableOp struct {
 	Index *int   `json:"index"`
 	Text  string `json:"text"`
 	On    bool   `json:"on"`
+	// Doc: isi berformat untuk set dan title (revisi 49); tanpa Doc teksnya polos.
+	Doc *Node `json:"doc"`
 }
 
 func applyTableOp(t *TableContent, op TableOp) error {
@@ -225,24 +245,37 @@ func applyTableOp(t *TableContent, op TableOp) error {
 		}
 		return *op.Index
 	}
+	// Docs disejajarkan dengan Rows dulu (data lama tanpa Docs, atau Docs yang lebih pendek), supaya tambah dan hapus
+	// baris atau kolom menggeser format sel bersama teksnya.
+	docs := make([][]*Node, rows)
+	for r := range docs {
+		docs[r] = make([]*Node, cols)
+		if r < len(t.Docs) {
+			copy(docs[r], t.Docs[r])
+		}
+	}
+	t.Docs = docs
 	switch op.Op {
 	case "set":
 		if op.Row < 0 || op.Row >= rows || op.Col < 0 || op.Col >= cols {
 			return apperr.Invalid("Sel tabel tidak ditemukan. Muat ulang papan, lalu coba lagi.")
 		}
 		t.Rows[op.Row][op.Col] = op.Text
+		t.Docs[op.Row][op.Col] = op.Doc
 	case "add_row":
 		if rows >= MaxTableRows {
 			return apperr.Invalid(fmt.Sprintf("Tabel maksimal %d baris.", MaxTableRows))
 		}
 		i := at(rows)
 		t.Rows = append(t.Rows[:i], append([][]string{make([]string, cols)}, t.Rows[i:]...)...)
+		t.Docs = append(t.Docs[:i], append([][]*Node{make([]*Node, cols)}, t.Docs[i:]...)...)
 	case "remove_row":
 		if rows <= 1 {
 			return apperr.Invalid("Tabel minimal satu baris.")
 		}
 		i := at(rows - 1)
 		t.Rows = append(t.Rows[:i], t.Rows[i+1:]...)
+		t.Docs = append(t.Docs[:i], t.Docs[i+1:]...)
 	case "add_col":
 		if cols >= MaxTableCols {
 			return apperr.Invalid(fmt.Sprintf("Tabel maksimal %d kolom.", MaxTableCols))
@@ -250,6 +283,7 @@ func applyTableOp(t *TableContent, op TableOp) error {
 		i := at(cols)
 		for r := range t.Rows {
 			t.Rows[r] = append(t.Rows[r][:i], append([]string{""}, t.Rows[r][i:]...)...)
+			t.Docs[r] = append(t.Docs[r][:i], append([]*Node{nil}, t.Docs[r][i:]...)...)
 		}
 	case "remove_col":
 		if cols <= 1 {
@@ -258,14 +292,25 @@ func applyTableOp(t *TableContent, op TableOp) error {
 		i := at(cols - 1)
 		for r := range t.Rows {
 			t.Rows[r] = append(t.Rows[r][:i], t.Rows[r][i+1:]...)
+			t.Docs[r] = append(t.Docs[r][:i], t.Docs[r][i+1:]...)
 		}
 	case "header":
 		t.Header = op.On
 	case "title":
 		t.Title = op.Text
+		t.TitleDoc = op.Doc
 	default:
 		return apperr.Invalid("Perubahan tabel tidak dikenal.")
 	}
+	// Tanpa sel berformat, Docs tidak disimpan (sama dengan CleanTable).
+	for _, row := range t.Docs {
+		for _, d := range row {
+			if d != nil {
+				return nil
+			}
+		}
+	}
+	t.Docs = nil
 	return nil
 }
 
