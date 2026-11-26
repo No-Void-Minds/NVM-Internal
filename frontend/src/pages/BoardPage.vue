@@ -467,8 +467,15 @@ const buttonSecondary =
     <div class="grid items-start gap-6 @min-[90rem]/board:grid-cols-[17rem_minmax(0,1fr)]">
       <!-- Kolom kiri: kartu profil, lalu kartu To Do. Lebarnya tetap 17rem dan kolom papan memakai
            minmax(0,1fr), jadi daftar yang panjang tidak pernah menyempitkan papan (revisi 28). -->
-      <aside class="sticky top-4 hidden space-y-4 @min-[90rem]/board:block">
+      <!-- Revisi 48: kolom kiri setinggi sisa layar di bawah header (57 px, padding atas halaman, dan jarak sticky) dan
+           bergulir sendiri tanpa ikut menggulir halaman, supaya To Do bisa dijangkau dari posisi gulir papan mana pun.
+           Kartu profil tidak menyusut; di layar pendek ia ikut tergulir. -->
+      <aside
+        class="sticky top-4 hidden max-h-[calc(100dvh-57px-2.5rem-env(safe-area-inset-bottom))] flex-col gap-4 overflow-y-auto overscroll-contain @min-[90rem]/board:flex"
+        data-testid="board-side"
+      >
         <ProfileCard
+          class="shrink-0"
           variant="card"
           :counts="counts"
           :counts-state="countsState"
@@ -477,7 +484,7 @@ const buttonSecondary =
           @pick="pickCount"
           @retry="loadCounts"
         />
-        <TodoCard />
+        <TodoCard fill />
       </aside>
       <div class="min-w-0">
         <PageHeader title="Papan Task">

@@ -12,6 +12,17 @@ import { caretHint } from './whiteboard/caret'
 // Token mode-peka seperti ink-muted, danger, dan mark dirancang untuk latar yang ikut berganti, jadi di atas
 // krem yang tetap terang kontrasnya jatuh di mode gelap.
 const uid = useId()
+
+// fill (revisi 48): kartu di kolom kiri papan yang tingginya dibatasi. Daftar item dan bagian Selesai menjadi satu
+// area gulir, sedangkan judul dan baris Tulis to do tetap terlihat. Di luar itu (panel To Do di layar sempit) markupnya
+// sama dengan sebelumnya.
+const props = defineProps<{ fill?: boolean }>()
+const addSlot = `${uid}-tambah`
+
+// Fokus keyboard ke item di luar area terlihat menggulirkan area itu seperlunya.
+function revealFocus(e: FocusEvent) {
+  if (props.fill) (e.target as HTMLElement).scrollIntoView({ block: 'nearest' })
+}
 const {
   items,
   state,
@@ -184,7 +195,7 @@ function titleUrl(title: string): string | null {
 </script>
 
 <template>
-  <section class="overflow-hidden rounded-card bg-tag text-tag-ink">
+  <section class="overflow-hidden rounded-card bg-tag text-tag-ink" :class="fill ? 'flex flex-col' : ''">
     <header class="flex flex-wrap items-center justify-between gap-x-2 px-3 pt-2">
       <h2 class="font-semibold">To Do</h2>
       <!-- Kartu kosong tidak punya yang bisa diringkas atau diatur, jadi keduanya tidak ditampilkan. -->
@@ -214,288 +225,45 @@ function titleUrl(title: string): string | null {
     </div>
 
     <template v-else>
-      <!-- Daftar panjang bergulir di dalam kartunya sendiri, jadi kolom papan tidak ikut memanjang. -->
-      <ul class="max-h-[22rem] divide-y overflow-y-auto border-t" :class="[rule, 'divide-tag-ink/60']">
-        <!-- Kosong: satu kalimat, dan mengkliknya memfokuskan isian di baris bawahnya. Tanpa garis kosong,
+      <!-- Daftar panjang bergulir di dalam kartunya sendiri, jadi kolom papan tidak ikut memanjang. Di mode fill
+           yang bergulir adalah daftar dan bagian Selesai bersama (min-h-24: tetap ada ruang saat layar pendek). -->
+      <div
+        :class="fill ? 'min-h-24 flex-auto overflow-y-auto overscroll-contain' : ''"
+        @focusin="revealFocus"
+      >
+        <ul
+          class="divide-y border-t"
+          :class="[rule, 'divide-tag-ink/60', fill ? '' : 'max-h-[22rem] overflow-y-auto']"
+        >
+          <!-- Kosong: satu kalimat, dan mengkliknya memfokuskan isian di baris bawahnya. Tanpa garis kosong,
              karena garis yang tidak bisa diklik terbaca seperti baris isian yang rusak. aria-label di isian
              tetap menang sebagai nama aksesibelnya, jadi label ini hanya menambah area klik. -->
-        <li v-if="items.length === 0" class="px-1">
-          <label :for="`${uid}-add`" class="block min-h-11 cursor-text px-2 py-3 text-sm" :class="muted">
-            Belum ada to do.
-          </label>
-        </li>
-
-        <li
-          v-for="(item, i) in open"
-          :key="item.id"
-          draggable="true"
-          class="relative px-1"
-          :class="dragId === item.id ? 'bg-tag-ink/10' : ''"
-          @dragstart="dragId = item.id"
-          @dragend="dragId = null"
-          @dragover.prevent
-          @drop.prevent="onDrop(item)"
-        >
-          <div class="flex min-h-11 items-start gap-1">
-            <label class="relative flex size-11 shrink-0 cursor-pointer items-center justify-center">
-              <span class="sr-only">Tandai selesai {{ item.title }}</span>
-              <input type="checkbox" class="peer sr-only" :checked="item.done" @change="toggle(item.id)" />
-              <span
-                class="flex size-5 items-center justify-center rounded-[2px] border peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-tag-ink"
-                :class="rule"
-              >
-                <!-- Centang digambar 150 ms lewat stroke-dashoffset; diam saat prefers-reduced-motion. -->
-                <svg
-                  aria-hidden="true"
-                  viewBox="0 0 24 24"
-                  class="size-4"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="3"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <path
-                    d="M5 13l4 4L19 7"
-                    class="transition-[stroke-dashoffset] duration-150 ease-out motion-reduce:transition-none"
-                    :style="{ strokeDasharray: 24, strokeDashoffset: item.done ? 0 : 24 }"
-                  />
-                </svg>
-              </span>
+          <li v-if="items.length === 0" class="px-1">
+            <label :for="`${uid}-add`" class="block min-h-11 cursor-text px-2 py-3 text-sm" :class="muted">
+              Belum ada to do.
             </label>
+          </li>
 
-            <form v-if="editingId === item.id" class="min-w-0 flex-1 py-1" @submit.prevent="commitEdit(item)">
-              <label :for="`${uid}-edit-${item.id}`" class="sr-only">Ubah to do</label>
-              <!-- Selebar baris dan tumbuh mengikuti isinya; kontrol baris disembunyikan selama mengetik. Garis
-                   bawah tag-ink 2 px menjadi penanda fokus yang selalu terlihat. -->
-              <textarea
-                :id="`${uid}-edit-${item.id}`"
-                :ref="setEditInput"
-                v-model="editDraft"
-                rows="1"
-                maxlength="200"
-                class="block min-h-11 w-full min-w-0 resize-none overflow-hidden border-b-2 border-tag-ink bg-transparent px-1 py-2.5 leading-6 outline-none [overflow-wrap:anywhere]"
-                @input="grow"
-                @keydown="onEditKey($event, item)"
-                @keydown.esc.stop.prevent="cancelEdit(item)"
-                @blur="commitEdit(item)"
-              />
-            </form>
-            <!-- overflow-wrap anywhere: judul berupa URL panjang tanpa spasi tetap patah di lebar baris,
-               bukan memaksa barisnya melebar. -->
-            <button
-              v-else
-              :id="`${uid}-title-${item.id}`"
-              type="button"
-              data-caret
-              class="min-w-0 flex-1 touch-manipulation py-3 text-left [overflow-wrap:anywhere]"
-              :class="focusRing"
-              :aria-label="`Ubah ${item.title}`"
-              title="Dobel klik atau Enter untuk mengubah"
-              @click="onTitleClick(item, $event)"
-              @dblclick="editAt(item, $event)"
-              @pointerup="onTitleTap(item, $event)"
-            >
-              {{ item.title }}
-            </button>
-            <!-- Judul yang memuat URL tetap teks biasa, supaya mengkliknya membuka mode ubah. Tautannya dibuka
-                 lewat ikon ini, di slot 44 px tetap di samping teks: selalu tampil, jadi baris tidak bergeser. -->
-            <a
-              v-if="editingId !== item.id && titleUrl(item.title)"
-              :href="titleUrl(item.title) ?? undefined"
-              target="_blank"
-              rel="noopener noreferrer"
-              :class="iconButton"
-              :aria-label="`Buka tautan ${item.title}`"
-            >
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                class="size-5"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.75"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path
-                  d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"
-                />
-              </svg>
-            </a>
-          </div>
-
-          <div v-if="manage && editingId !== item.id" :class="rowControls">
-            <span class="hidden size-11 cursor-grab items-center justify-center sm:flex" aria-hidden="true">
-              <svg
-                viewBox="0 0 24 24"
-                class="size-4"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.75"
-                stroke-linecap="round"
-              >
-                <path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01" />
-              </svg>
-            </span>
-            <button
-              type="button"
-              :class="iconButton"
-              :disabled="i === 0"
-              :aria-label="`Naikkan ${item.title}`"
-              @click="move(item.id, -1)"
-            >
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                class="size-5"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.75"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path d="M12 19V5M6 11l6-6 6 6" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              :class="iconButton"
-              :disabled="i >= open.length - 1"
-              :aria-label="`Turunkan ${item.title}`"
-              @click="move(item.id, 1)"
-            >
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                class="size-5"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.75"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path d="M12 5v14M6 13l6 6 6-6" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              :class="iconButton"
-              :aria-label="`Hapus ${item.title}`"
-              @click="remove(item.id)"
-            >
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                class="size-5"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.75"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12" />
-              </svg>
-            </button>
-          </div>
-        </li>
-
-        <!-- Baris tambah: baris terakhir daftar, gaya sama, isian tanpa kotak. -->
-        <li class="flex min-h-11 items-center gap-1 px-1">
-          <span class="flex size-11 shrink-0 items-center justify-center" aria-hidden="true">
-            <svg
-              viewBox="0 0 24 24"
-              class="size-5"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.75"
-              stroke-linecap="round"
-            >
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          </span>
-          <form class="flex min-w-0 flex-1 items-center gap-1" @submit.prevent="submit">
-            <input
-              :id="`${uid}-add`"
-              ref="input"
-              v-model="draft"
-              type="text"
-              maxlength="200"
-              :disabled="full"
-              aria-label="Tulis to do"
-              :aria-describedby="full ? `${uid}-full` : undefined"
-              placeholder="Tulis to do..."
-              class="min-h-11 w-full min-w-0 bg-transparent outline-none placeholder:text-tag-ink/70 disabled:cursor-not-allowed"
-              :class="focusRing"
-            />
-            <button
-              type="submit"
-              :class="iconButton"
-              :disabled="full || !draft.trim()"
-              aria-label="Tambah to do"
-            >
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                class="size-5"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.75"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <path d="M5 12h13M12 5l7 7-7 7" />
-              </svg>
-            </button>
-          </form>
-        </li>
-      </ul>
-
-      <p v-if="full" :id="`${uid}-full`" class="px-3 py-2 text-sm" :class="muted">
-        Daftar sudah penuh ({{ max }} item). Hapus atau bersihkan yang selesai dulu.
-      </p>
-
-      <!-- Yang selesai pindah ke kelompoknya sendiri, dengan tombol Bersihkan di kepalanya. -->
-      <section v-if="doneCount > 0" class="border-t" :class="rule">
-        <div class="flex items-center justify-between gap-2 px-1">
-          <button
-            type="button"
-            :class="headButton"
-            :aria-expanded="doneOpen"
-            :aria-controls="`${uid}-done`"
-            @click="doneChoice = !doneOpen"
+          <li
+            v-for="(item, i) in open"
+            :key="item.id"
+            draggable="true"
+            class="relative px-1"
+            :class="dragId === item.id ? 'bg-tag-ink/10' : ''"
+            @dragstart="dragId = item.id"
+            @dragend="dragId = null"
+            @dragover.prevent
+            @drop.prevent="onDrop(item)"
           >
-            <svg
-              aria-hidden="true"
-              viewBox="0 0 24 24"
-              class="mr-1 size-4 transition-transform motion-reduce:transition-none"
-              :class="doneOpen ? 'rotate-90' : ''"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.75"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="M9 6l6 6-6 6" />
-            </svg>
-            Selesai ({{ doneCount }})
-          </button>
-          <button type="button" :class="headButton" @click="clearDone">Bersihkan</button>
-        </div>
-        <ul
-          v-show="doneOpen"
-          :id="`${uid}-done`"
-          class="divide-y border-t"
-          :class="[rule, 'divide-tag-ink/60']"
-        >
-          <li v-for="item in done" :key="item.id" class="relative px-1">
             <div class="flex min-h-11 items-start gap-1">
               <label class="relative flex size-11 shrink-0 cursor-pointer items-center justify-center">
-                <span class="sr-only">Batalkan centang {{ item.title }}</span>
-                <input type="checkbox" class="peer sr-only" :checked="true" @change="toggle(item.id)" />
+                <span class="sr-only">Tandai selesai {{ item.title }}</span>
+                <input type="checkbox" class="peer sr-only" :checked="item.done" @change="toggle(item.id)" />
                 <span
-                  class="flex size-5 items-center justify-center rounded-[2px] border border-tag-ink peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-tag-ink"
+                  class="flex size-5 items-center justify-center rounded-[2px] border peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-tag-ink"
+                  :class="rule"
                 >
+                  <!-- Centang digambar 150 ms lewat stroke-dashoffset; diam saat prefers-reduced-motion. -->
                   <svg
                     aria-hidden="true"
                     viewBox="0 0 24 24"
@@ -506,18 +274,133 @@ function titleUrl(title: string): string | null {
                     stroke-linecap="round"
                     stroke-linejoin="round"
                   >
-                    <path d="M5 13l4 4L19 7" :style="{ strokeDasharray: 24, strokeDashoffset: 0 }" />
+                    <path
+                      d="M5 13l4 4L19 7"
+                      class="transition-[stroke-dashoffset] duration-150 ease-out motion-reduce:transition-none"
+                      :style="{ strokeDasharray: 24, strokeDashoffset: item.done ? 0 : 24 }"
+                    />
                   </svg>
                 </span>
               </label>
-              <p
-                class="min-w-0 flex-1 py-3 line-through decoration-1 [overflow-wrap:anywhere]"
-                :class="muted"
+
+              <form
+                v-if="editingId === item.id"
+                class="min-w-0 flex-1 py-1"
+                @submit.prevent="commitEdit(item)"
+              >
+                <label :for="`${uid}-edit-${item.id}`" class="sr-only">Ubah to do</label>
+                <!-- Selebar baris dan tumbuh mengikuti isinya; kontrol baris disembunyikan selama mengetik. Garis
+                   bawah tag-ink 2 px menjadi penanda fokus yang selalu terlihat. -->
+                <textarea
+                  :id="`${uid}-edit-${item.id}`"
+                  :ref="setEditInput"
+                  v-model="editDraft"
+                  rows="1"
+                  maxlength="200"
+                  class="block min-h-11 w-full min-w-0 resize-none overflow-hidden border-b-2 border-tag-ink bg-transparent px-1 py-2.5 leading-6 outline-none [overflow-wrap:anywhere]"
+                  @input="grow"
+                  @keydown="onEditKey($event, item)"
+                  @keydown.esc.stop.prevent="cancelEdit(item)"
+                  @blur="commitEdit(item)"
+                />
+              </form>
+              <!-- overflow-wrap anywhere: judul berupa URL panjang tanpa spasi tetap patah di lebar baris,
+               bukan memaksa barisnya melebar. -->
+              <button
+                v-else
+                :id="`${uid}-title-${item.id}`"
+                type="button"
+                data-caret
+                class="min-w-0 flex-1 touch-manipulation py-3 text-left [overflow-wrap:anywhere]"
+                :class="focusRing"
+                :aria-label="`Ubah ${item.title}`"
+                title="Dobel klik atau Enter untuk mengubah"
+                @click="onTitleClick(item, $event)"
+                @dblclick="editAt(item, $event)"
+                @pointerup="onTitleTap(item, $event)"
               >
                 {{ item.title }}
-              </p>
+              </button>
+              <!-- Judul yang memuat URL tetap teks biasa, supaya mengkliknya membuka mode ubah. Tautannya dibuka
+                 lewat ikon ini, di slot 44 px tetap di samping teks: selalu tampil, jadi baris tidak bergeser. -->
+              <a
+                v-if="editingId !== item.id && titleUrl(item.title)"
+                :href="titleUrl(item.title) ?? undefined"
+                target="_blank"
+                rel="noopener noreferrer"
+                :class="iconButton"
+                :aria-label="`Buka tautan ${item.title}`"
+              >
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  class="size-5"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.75"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path
+                    d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"
+                  />
+                </svg>
+              </a>
             </div>
-            <div v-if="manage" :class="rowControls">
+
+            <div v-if="manage && editingId !== item.id" :class="rowControls">
+              <span class="hidden size-11 cursor-grab items-center justify-center sm:flex" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  class="size-4"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.75"
+                  stroke-linecap="round"
+                >
+                  <path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01" />
+                </svg>
+              </span>
+              <button
+                type="button"
+                :class="iconButton"
+                :disabled="i === 0"
+                :aria-label="`Naikkan ${item.title}`"
+                @click="move(item.id, -1)"
+              >
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  class="size-5"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.75"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M12 19V5M6 11l6-6 6 6" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                :class="iconButton"
+                :disabled="i >= open.length - 1"
+                :aria-label="`Turunkan ${item.title}`"
+                @click="move(item.id, 1)"
+              >
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  class="size-5"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.75"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M12 5v14M6 13l6 6 6-6" />
+                </svg>
+              </button>
               <button
                 type="button"
                 :class="iconButton"
@@ -539,8 +422,153 @@ function titleUrl(title: string): string | null {
               </button>
             </div>
           </li>
+
+          <!-- Baris tambah: baris terakhir daftar, gaya sama, isian tanpa kotak. Di mode fill dipindah ke kaki kartu
+             supaya selalu terlihat. -->
+          <Teleport defer :to="`#${addSlot}`" :disabled="!fill">
+            <li class="flex min-h-11 items-center gap-1 px-1">
+              <span class="flex size-11 shrink-0 items-center justify-center" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  class="size-5"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.75"
+                  stroke-linecap="round"
+                >
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </span>
+              <form class="flex min-w-0 flex-1 items-center gap-1" @submit.prevent="submit">
+                <input
+                  :id="`${uid}-add`"
+                  ref="input"
+                  v-model="draft"
+                  type="text"
+                  maxlength="200"
+                  :disabled="full"
+                  aria-label="Tulis to do"
+                  :aria-describedby="full ? `${uid}-full` : undefined"
+                  placeholder="Tulis to do..."
+                  class="min-h-11 w-full min-w-0 bg-transparent outline-none placeholder:text-tag-ink/70 disabled:cursor-not-allowed"
+                  :class="focusRing"
+                />
+                <button
+                  type="submit"
+                  :class="iconButton"
+                  :disabled="full || !draft.trim()"
+                  aria-label="Tambah to do"
+                >
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    class="size-5"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.75"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="M5 12h13M12 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </form>
+            </li>
+          </Teleport>
         </ul>
-      </section>
+
+        <p v-if="full" :id="`${uid}-full`" class="px-3 py-2 text-sm" :class="muted">
+          Daftar sudah penuh ({{ max }} item). Hapus atau bersihkan yang selesai dulu.
+        </p>
+
+        <!-- Yang selesai pindah ke kelompoknya sendiri, dengan tombol Bersihkan di kepalanya. -->
+        <section v-if="doneCount > 0" class="border-t" :class="rule">
+          <div class="flex items-center justify-between gap-2 px-1">
+            <button
+              type="button"
+              :class="headButton"
+              :aria-expanded="doneOpen"
+              :aria-controls="`${uid}-done`"
+              @click="doneChoice = !doneOpen"
+            >
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                class="mr-1 size-4 transition-transform motion-reduce:transition-none"
+                :class="doneOpen ? 'rotate-90' : ''"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.75"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M9 6l6 6-6 6" />
+              </svg>
+              Selesai ({{ doneCount }})
+            </button>
+            <button type="button" :class="headButton" @click="clearDone">Bersihkan</button>
+          </div>
+          <ul
+            v-show="doneOpen"
+            :id="`${uid}-done`"
+            class="divide-y border-t"
+            :class="[rule, 'divide-tag-ink/60']"
+          >
+            <li v-for="item in done" :key="item.id" class="relative px-1">
+              <div class="flex min-h-11 items-start gap-1">
+                <label class="relative flex size-11 shrink-0 cursor-pointer items-center justify-center">
+                  <span class="sr-only">Batalkan centang {{ item.title }}</span>
+                  <input type="checkbox" class="peer sr-only" :checked="true" @change="toggle(item.id)" />
+                  <span
+                    class="flex size-5 items-center justify-center rounded-[2px] border border-tag-ink peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-tag-ink"
+                  >
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      class="size-4"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="3"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path d="M5 13l4 4L19 7" :style="{ strokeDasharray: 24, strokeDashoffset: 0 }" />
+                    </svg>
+                  </span>
+                </label>
+                <p
+                  class="min-w-0 flex-1 py-3 line-through decoration-1 [overflow-wrap:anywhere]"
+                  :class="muted"
+                >
+                  {{ item.title }}
+                </p>
+              </div>
+              <div v-if="manage" :class="rowControls">
+                <button
+                  type="button"
+                  :class="iconButton"
+                  :aria-label="`Hapus ${item.title}`"
+                  @click="remove(item.id)"
+                >
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    class="size-5"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.75"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12" />
+                  </svg>
+                </button>
+              </div>
+            </li>
+          </ul>
+        </section>
+      </div>
+      <ul v-if="fill" :id="addSlot" class="shrink-0 border-t" :class="rule" />
 
       <!-- Hapus tidak pakai konfirmasi; yang terhapus bisa diurungkan selama enam detik. -->
       <div

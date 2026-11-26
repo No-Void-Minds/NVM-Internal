@@ -1699,6 +1699,8 @@ Keputusan teknis:
 - Perbaikan: token kolaborasi dan token teks per warna `--color-on-collab-1` sampai `8` di blok `:root` biasa untuk kedua tema; aturan `[data-collab='n']` memasang `--wb-remote` (latar solid) dan `--wb-remote-on` (teks) per indeks, dipakai kursor, label kursor, label dan bingkai kartu, gambar bebas, dan avatar kehadiran. Label diberi tepi tipis warna kanvas supaya tetap terbaca di atas gambar. Label kursor pindah ke kiri panah di dekat tepi kanan dan naik di dekat tepi bawah, supaya tidak terpotong kanvas.
 - Terhitung: teks label mode terang putih 5,48 sampai 7,10:1, mode gelap tinta 7,45 sampai 11,24:1; panah dan bingkai terhadap kanvas minimal 4,90:1 (terang) dan 8,70:1 (gelap).
 - Test: `scripts/e2e/uji-kursor.mjs` membaca `getComputedStyle` (latar, teks, isian panah, warna bayangan bingkai, opacity efektif termasuk induk) untuk kedelapan indeks di tema terang dan gelap, di 360 dan 1280 px, lalu menghitung kontrasnya; juga label kursor di tepi kanan dan bawah. Gagal di kode sebelum perbaikan (71 dari 200 pemeriksaan), lolos sesudahnya.
+- Audit token setelahnya: semua rujukan variabel desain di luar utilitas Tailwind (binding `:style`, peta warna di `WbShape.vue` dan `wbColors.ts`, `getPropertyValue` di `exportBoard.ts`, kelas arbitrer `accent-[var(--color-mark)]`) sudah ada di CSS build. Nama yang ditulis lengkap sebagai string ikut dikeluarkan Tailwind; yang hilang hanya nama yang dirakit dinamis. Aturan baru: nama token tidak boleh dirakit dari template string; pakai nama lengkap atau aturan CSS statis.
+- Pengecekan tetap: `frontend/scripts/cek-token.mjs` di `./scripts/check.sh` (jadi juga di job CI pra-deploy) menolak nama token yang dirakit dinamis dan membangun CSS ke folder sementara untuk memastikan setiap token yang dirujuk punya nilai di build untuk setiap tema yang mendefinisikannya. Diuji `tests/cekToken.test.ts` (termasuk kasus bug ini) dan terhadap kode sebelum perbaikan kursor (gagal di keempat rakitan `--color-collab-${...}`).
 
 ## Sprint 12g: Task saya untuk peminta, edit To Do, dan papan task realtime (revisi 45 sampai 47)
 
@@ -1717,6 +1719,9 @@ Keputusan teknis:
 - Revisi 47, keputusan Manajer 1: klik angka di kartu profil membuka Task saya untuk Staf dan Manajer. Manajer mendapat saklar Task saya dan Semua task di papan dan Arsip; bawaannya Semua task, jadi `scope=mine` miliknya ditulis ke URL. Filter Orang nama sendiri di akun Manajer tetap filter Orang.
 - Revisi 47, keputusan Manajer 2: Arsip `scope=mine` dan `GET /api/tasks?scope=mine` memakai aturan revisi 45 (PIC task, PIC sub task, atau peminta); penanda "Kamu peminta" juga di Arsip.
 - Revisi 47, keputusan Manajer 3: kontrol To Do (naik, turun, hapus) hanya tampil di mode Atur, di baris sendiri di bawah teks. Ruang tetap di kanan tidak dipakai karena kartu 17rem tidak muat lima tombol 44 px. Ikon buka tautan di slot 44 px tetap di samping teks. Teks tidak pernah tertutup dan baris tidak bergeser saat hover.
+
+- [x] S12g-04 Revisi 48: kolom kiri papan task bergulir sendiri dan To Do selalu terjangkau. Tanpa perubahan backend. E2E `scripts/e2e/uji-r48.mjs`.
+- Revisi 48: hanya di layout dengan kolom kiri di samping papan (container papan minimal 90rem, sekitar 1520 px lebar layar ke atas; di 1280 px kolom kiri masih di atas papan). Kolom kiri sticky dengan tinggi maksimal `100dvh` dikurangi header 57 px, padding atas, jarak sticky, dan safe-area bawah, `overflow-y: auto` dan `overscroll-behavior: contain`, jadi menggulirnya tidak ikut menggulir halaman. Kartu profil tidak menyusut; di layar pendek ia ikut tergulir. Di kartu To Do (prop `fill`) daftar item dan bagian Selesai menjadi satu area gulir (minimal 6rem), judul To Do di atasnya dan baris Tulis to do di kaki kartu selalu terlihat; baris tambah dipindah lewat Teleport yang dinonaktifkan di luar mode ini, jadi panel To Do di layar sempit tetap sama persis. Fokus keyboard yang masuk ke area daftar memanggil `scrollIntoView({ block: 'nearest' })`.
 
 **Tindak lanjut (belum dikerjakan):** realtime untuk Aktivitas Harian dan Timeline memakai koneksi yang sama (event jenis baru di hub `taskLive`). Arsip sudah ikut di revisi 47.
 
@@ -1921,10 +1926,11 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 45 | 2026-11-25 | "Task saya" dan angka kartu profil memuat task yang diminta pengguna, dengan penanda "Kamu peminta" | Sprint 12g |
 | 46 | 2026-11-25 | Ubah To Do lewat dobel klik dengan kursor di posisi klik, isian selebar baris, mode Atur tidak menyempitkan teks | Sprint 12g |
 | 47 | 2026-11-25 | Papan task realtime lewat WebSocket bersama, Task saya untuk Manajer dan Arsip, kontrol To Do hanya di mode Atur | Sprint 12g |
+| 48 | 2026-11-26 | Kolom kiri papan task (kartu profil dan To Do) bisa dijangkau dari posisi gulir mana pun | Sprint 12g |
 | 33b | 2026-11-20 | Poles tampilan kartu Aktivitas: tombol rantai pindah ke celah antar isian dan jadi ikon kecil tanpa bingkai, tombol mati tidak dirender, jam tersambung menyatu dengan jam kepalanya, status simpan punya baris tetap, Tambah berkas di sel tabel tanpa bingkai | Sprint 12c |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat keempat puluh tujuh revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat keempat puluh delapan revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 
