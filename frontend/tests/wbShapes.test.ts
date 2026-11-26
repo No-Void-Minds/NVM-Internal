@@ -6,7 +6,16 @@ import assert from 'node:assert/strict'
 
 import {
   END_KINDS,
+  LINE_PRESETS,
+  PALETTE,
   SHAPES,
+  hasGeometry,
+  newShapeContent,
+  openShape,
+  pushRecent,
+  shapeMarks,
+  strokeScale,
+  textBox,
   autoPort,
   endMarker,
   orthogonalRoute,
@@ -40,13 +49,50 @@ function assertClear(pts: Pt[], boxes: Box[]) {
   }
 }
 
-test('semua bentuk punya path SVG yang sah', () => {
-  // 22 sejak W5, ditambah Batas sistem dan Use case (revisi 53).
-  assert.equal(SHAPES.length, 24)
+const valid = (d: string) => d.startsWith('M') && !d.includes('NaN') && !d.includes('Infinity')
+
+test('semua bentuk di katalog punya geometri, path, dan tanda yang sah untuk setiap varian', () => {
+  assert.ok(SHAPES.length >= 33)
   for (const s of SHAPES) {
-    const d = shapePath(s.id, s.w, s.h)
-    assert.ok(d.startsWith('M') && !d.includes('NaN') && !d.includes('Infinity'), `${s.id}: ${d}`)
+    assert.ok(hasGeometry(s.id), `${s.id} tanpa geometri`)
+    assert.ok(valid(shapePath(s.id, s.w, s.h)), s.id)
+    for (const v of s.variants ?? [{ id: '' }]) {
+      for (const m of shapeMarks({ shape: s.id, variant: v.id }, s.w, s.h))
+        assert.ok(valid(m.d), `${s.id}:${v.id}`)
+    }
+    const t = textBox(s.id, s.w, s.h)
+    assert.ok(Number.isFinite(t.x + t.y + t.w + t.h) && t.w > 0, `${s.id} kotak teks ${JSON.stringify(t)}`)
   }
+  // Varian yang punya ikon benar-benar menggambar sesuatu.
+  for (const [shape, variant] of [
+    ['bpmn_start', 'message'],
+    ['bpmn_intermediate', 'timer'],
+    ['bpmn_end', 'cancel'],
+    ['bpmn_task', 'service'],
+    ['bpmn_gateway', 'parallel'],
+  ] as const)
+    assert.ok(shapeMarks({ shape, variant }, 64, 64).length > 0, `${shape}:${variant}`)
+  // Event antara bercincin ganda, event selesai bergaris tebal, anotasi terbuka.
+  assert.ok(shapeMarks({ shape: 'bpmn_intermediate', variant: 'none' }, 56, 56).length === 1)
+  assert.equal(strokeScale('bpmn_end'), 2)
+  assert.ok(openShape('bpmn_annotation') && !openShape('bpmn_task'))
+})
+
+test('palet: satu entri per varian, kunci unik; terakhir dipakai paling banyak 12 tanpa duplikat', () => {
+  const keys = PALETTE.map((e) => e.key)
+  assert.equal(new Set(keys).size, keys.length)
+  assert.ok(PALETTE.some((e) => e.key === 'bpmn_task:user' && e.label === 'Task pengguna'))
+  assert.equal(newShapeContent('bpmn_gateway').variant, 'exclusive')
+  assert.equal(newShapeContent('rect').variant, undefined)
+  let r: string[] = []
+  for (let i = 0; i < 20; i++) r = pushRecent(r, `k${i}`)
+  assert.equal(r.length, 12)
+  assert.equal(r[0], 'k19')
+  r = pushRecent(r, 'k15')
+  assert.deepEqual(r.slice(0, 2), ['k15', 'k19'])
+  assert.equal(new Set(r).size, r.length)
+  for (const p of LINE_PRESETS)
+    assert.ok(END_KINDS.some((k) => k.id === p.end) && END_KINDS.some((k) => k.id === p.start), p.id)
 })
 
 test('port setelah putar: atas jadi kanan di 90 derajat, arah ikut berputar', () => {

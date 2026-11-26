@@ -26,7 +26,6 @@ import WbPicker from '../components/whiteboard/WbPicker.vue'
 import type { DrawnLine } from '../components/whiteboard/WbConnector.vue'
 import type { ConnectorUpdate } from '../components/whiteboard/WbConnectorDialog.vue'
 import {
-  SHAPES,
   angleFrom,
   center as boxCenter,
   newShapeContent,
@@ -40,7 +39,7 @@ import {
   type Port,
   type Pt,
   type ShapeContent,
-  type ShapeType,
+  type PaletteEntry,
 } from '../utils/wbShapes'
 import { inkColor, penColors } from '../components/whiteboard/wbColors'
 import { caretHint, type CaretHint } from '../components/whiteboard/caret'
@@ -3278,10 +3277,10 @@ function placeAt(kind: CardKind, at?: { x: number; y: number }) {
 // Bentuk dan diagram (W5)
 
 const shapePaletteOpen = ref(false)
-async function addShape(t: ShapeType) {
+async function addShape(e: PaletteEntry) {
   shapePaletteOpen.value = false
-  const s = SHAPES.find((x) => x.id === t)!
-  const card = await addCard('shape', toolAt, newShapeContent(t), { w: s.w, h: s.h })
+  const t = e.shape
+  const card = await addCard('shape', toolAt, newShapeContent(t, e.variant), { w: e.w, h: e.h })
   // Batas sistem (revisi 53) langsung ke paling belakang supaya aktor, use case, dan garisnya tetap di atasnya.
   if (card && t === 'uml_system') {
     const z = Math.min(...cards.value.filter((c) => c.id !== card.id).map((c) => c.z), card.z) - 1

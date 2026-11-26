@@ -7,7 +7,16 @@
 import { fileUrl } from '../../api/whiteboard'
 import { EXPORT_PAD, EXPORT_SCALE, exportScale } from '../../utils/wbExport'
 import { HIGHLIGHTS, TEXT_COLORS, wrapRuns, type Run } from '../../utils/wbRich'
-import { openShape, rotatedBounds, routeConnector, shapePath, type ShapeContent } from '../../utils/wbShapes'
+import {
+  openShape,
+  rotatedBounds,
+  routeConnector,
+  shapeMarks,
+  shapePath,
+  strokeScale,
+  textBox,
+  type ShapeContent,
+} from '../../utils/wbShapes'
 import { stackOrder } from '../../utils/wbStack'
 import {
   bounds,
@@ -196,7 +205,15 @@ export async function renderBoard(cards: Card[], connectors: Connector[]): Promi
     ) as [string, number][],
   )
   // Bentuk yang diputar bisa keluar dari kotak tegaknya; batas gambar memakai kotak setelah diputar.
-  const box = bounds(laid.map((l) => rotatedBounds(l.rect, rot.get(l.card.id) ?? 0)))
+  // Label bentuk kecil (event, gateway, aktor) ada di bawah kotaknya; batas gambar ikut memuatnya.
+  const box = bounds(
+    laid.flatMap((l) => {
+      const rr = rotatedBounds(l.rect, rot.get(l.card.id) ?? 0)
+      if (l.card.kind !== 'shape' || !(l.card.content as ShapeContent).text) return [rr]
+      const t = textBox((l.card.content as ShapeContent).shape, l.rect.w, l.rect.h)
+      return [rr, { x: l.rect.x + t.x, y: l.rect.y + t.y, w: t.w, h: Math.max(t.h, 20) }]
+    }),
+  )
   if (!box) return null
   const w = box.w + EXPORT_PAD * 2
   const h = box.h + EXPORT_PAD * 2
@@ -476,7 +493,7 @@ const shapeFill: Record<string, string> = { putih: '--color-surface', ...cardBg 
 // Bentuk diputar terhadap pusatnya, digambar dari path yang sama dengan layar, lalu teksnya dipecah per baris di
 // tengah bentuk. Kelas UML: nama tebal, garis pemisah, atribut, garis pemisah, metode.
 function drawShape(ctx: CanvasRenderingContext2D, tok: Tok, c: ShapeContent, r: Box) {
-  const sw = c.stroke_width
+  const sw = c.stroke_width * strokeScale(c.shape)
   ctx.save()
   ctx.translate(r.x + r.w / 2, r.y + r.h / 2)
   ctx.rotate(((c.rotation || 0) * Math.PI) / 180)
@@ -502,6 +519,23 @@ function drawShape(ctx: CanvasRenderingContext2D, tok: Tok, c: ShapeContent, r: 
   ctx.setLineDash(c.stroke_style === 'dashed' ? [sw * 4, sw * 3] : [])
   ctx.stroke(path)
   ctx.setLineDash([])
+  // Tanda di dalam bentuk (ikon BPMN), sama dengan WbShape.vue.
+  for (const m of shapeMarks(c, pw, ph)) {
+    const mp = new Path2D(m.d)
+    const paint = (v: 'line' | 'surface' | 'none' | undefined) =>
+      v === 'line' ? ink(tok, c.stroke) : v === 'surface' ? tok('--color-surface') : null
+    const fillWith = paint(m.fill)
+    if (fillWith) {
+      ctx.fillStyle = fillWith
+      ctx.fill(mp)
+    }
+    const strokeWith = m.stroke === 'none' ? null : (paint(m.stroke) ?? ink(tok, c.stroke))
+    if (strokeWith) {
+      ctx.strokeStyle = strokeWith
+      ctx.lineWidth = c.stroke_width * (m.width ?? 1)
+      ctx.stroke(mp)
+    }
+  }
   ctx.restore()
   const fs = c.font_size
   const ink0 = tok('--color-ink')
@@ -532,11 +566,14 @@ function drawShape(ctx: CanvasRenderingContext2D, tok: Tok, c: ShapeContent, r: 
       }
     }
   } else if (c.text) {
-    const lines = lay(c.text, c.doc, r.w * 0.7, c.shape === 'uml_system')
-    // Batas sistem (revisi 53): judul di dalam atas, bukan di tengah.
-    let y = c.shape === 'uml_system' ? 8 : (r.h - lines.reduce((n, l) => n + lineHeight(l), 0)) / 2
+    // Area teks dari definisi bentuk (revisi 54), sama dengan layar: judul di atas untuk batas sistem, label di bawah
+    // untuk event dan gateway.
+    const t = textBox(c.shape, r.w, r.h)
+    const lines = lay(c.text, c.doc, Math.max(20, t.w), t.valign === 'top')
+    const total = lines.reduce((n, l) => n + lineHeight(l), 0)
+    let y = t.valign === 'top' || t.y >= r.h ? t.y : t.y + (t.h - total) / 2
     for (const l of lines) {
-      drawLine(ctx, tok, l, r.w * 0.15, y, r.w * 0.7, ink0, c.align)
+      drawLine(ctx, tok, l, t.x, y, Math.max(20, t.w), ink0, c.align)
       y += lineHeight(l)
     }
   }

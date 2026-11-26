@@ -2,38 +2,19 @@
 // bentuk, path SVG dari angka, port garis setelah putar, dan jalur lurus, siku, serta melengkung.
 
 import type { PMNode } from './whiteboard.ts'
+import catalog from './wbShapeCatalog.json' with { type: 'json' }
 
 export type Pt = { x: number; y: number }
 export type Box = { x: number; y: number; w: number; h: number }
 
-export type ShapeType =
-  | 'rect'
-  | 'rounded'
-  | 'ellipse'
-  | 'triangle'
-  | 'diamond'
-  | 'hexagon'
-  | 'star'
-  | 'process'
-  | 'decision'
-  | 'terminator'
-  | 'data'
-  | 'database'
-  | 'document'
-  | 'uml_class'
-  | 'uml_actor'
-  | 'uml_note'
-  | 'uml_package'
-  | 'uml_system'
-  | 'uml_usecase'
-  | 'arrow_right'
-  | 'arrow_left'
-  | 'arrow_up'
-  | 'arrow_down'
-  | 'arrow_both'
+// Jenis bentuk diturunkan dari tabel geometri GEO di bawah; daftar, label, ukuran, dan varian dari katalog JSON yang
+// juga dibaca test Go (daftar putih server), jadi keduanya tidak bisa menyimpang diam-diam.
+export type ShapeType = keyof typeof GEO
 
 export type ShapeContent = {
   shape: ShapeType
+  // Varian bentuk (revisi 54), mis. jenis event atau task BPMN; kosong berarti varian pertama di katalog.
+  variant?: string
   rotation: number
   fill: string
   stroke: string
@@ -54,53 +35,58 @@ export type ShapeContent = {
   methods_doc?: PMNode | null
 }
 
-export const SHAPE_GROUPS = ['Dasar', 'Flowchart', 'UML', 'Panah blok'] as const
-export const SHAPES: {
+export type ShapeVariant = { id: string; label: string }
+export type ShapeInfo = {
   id: ShapeType
   label: string
-  group: (typeof SHAPE_GROUPS)[number]
+  group: string
   w: number
   h: number
-}[] = [
-  { id: 'rect', label: 'Persegi', group: 'Dasar', w: 160, h: 100 },
-  { id: 'rounded', label: 'Persegi sudut bulat', group: 'Dasar', w: 160, h: 100 },
-  { id: 'ellipse', label: 'Elips', group: 'Dasar', w: 160, h: 100 },
-  { id: 'triangle', label: 'Segitiga', group: 'Dasar', w: 140, h: 120 },
-  { id: 'diamond', label: 'Belah ketupat', group: 'Dasar', w: 140, h: 120 },
-  { id: 'hexagon', label: 'Segi enam', group: 'Dasar', w: 160, h: 120 },
-  { id: 'star', label: 'Bintang', group: 'Dasar', w: 140, h: 140 },
-  { id: 'process', label: 'Proses', group: 'Flowchart', w: 180, h: 80 },
-  { id: 'decision', label: 'Keputusan', group: 'Flowchart', w: 180, h: 120 },
-  { id: 'terminator', label: 'Mulai atau selesai', group: 'Flowchart', w: 180, h: 64 },
-  { id: 'data', label: 'Data', group: 'Flowchart', w: 180, h: 80 },
-  { id: 'database', label: 'Database', group: 'Flowchart', w: 120, h: 140 },
-  { id: 'document', label: 'Dokumen', group: 'Flowchart', w: 180, h: 100 },
-  { id: 'uml_class', label: 'Kelas', group: 'UML', w: 220, h: 180 },
-  { id: 'uml_actor', label: 'Aktor', group: 'UML', w: 80, h: 160 },
-  { id: 'uml_note', label: 'Catatan UML', group: 'UML', w: 180, h: 100 },
-  { id: 'uml_package', label: 'Paket', group: 'UML', w: 220, h: 160 },
-  // Diagram use case (revisi 53): batas sistem tanpa latar dengan judul di dalam atas, use case berupa elips.
-  { id: 'uml_system', label: 'Batas sistem', group: 'UML', w: 480, h: 360 },
-  { id: 'uml_usecase', label: 'Use case', group: 'UML', w: 180, h: 90 },
-  { id: 'arrow_right', label: 'Panah kanan', group: 'Panah blok', w: 180, h: 100 },
-  { id: 'arrow_left', label: 'Panah kiri', group: 'Panah blok', w: 180, h: 100 },
-  { id: 'arrow_up', label: 'Panah atas', group: 'Panah blok', w: 100, h: 180 },
-  { id: 'arrow_down', label: 'Panah bawah', group: 'Panah blok', w: 100, h: 180 },
-  { id: 'arrow_both', label: 'Panah dua arah', group: 'Panah blok', w: 200, h: 100 },
-]
+  variants?: ShapeVariant[]
+}
+export const SHAPE_GROUPS: string[] = catalog.groups
+export const SHAPES = catalog.shapes as ShapeInfo[]
+const INFO = new Map(SHAPES.map((s) => [s.id, s]))
+export const shapeInfo = (id: string) => INFO.get(id as ShapeType)
+export const shapeLabel = (id: string) => INFO.get(id as ShapeType)?.label ?? 'Bentuk'
 export const FONT_SIZES = [12, 14, 16, 20, 24, 32] as const
-export const shapeLabel = (id: string) => SHAPES.find((s) => s.id === id)?.label ?? 'Bentuk'
 
-export function newShapeContent(shape: ShapeType): ShapeContent {
+// Entri palet: satu per bentuk, atau satu per varian untuk bentuk bervarian (mis. "Event mulai pesan").
+export type PaletteEntry = {
+  key: string
+  shape: ShapeType
+  variant?: string
+  label: string
+  group: string
+  w: number
+  h: number
+}
+export const PALETTE: PaletteEntry[] = SHAPES.flatMap((s): PaletteEntry[] =>
+  s.variants?.length
+    ? s.variants.map((v) => ({
+        key: `${s.id}:${v.id}`,
+        shape: s.id,
+        variant: v.id,
+        label: v.label,
+        group: s.group,
+        w: s.w,
+        h: s.h,
+      }))
+    : [{ key: s.id, shape: s.id, label: s.label, group: s.group, w: s.w, h: s.h }],
+)
+
+export function newShapeContent(shape: ShapeType, variant?: string): ShapeContent {
+  const g = GEO[shape] as Geo
   return {
     shape,
+    ...(INFO.get(shape)?.variants?.length ? { variant: variant ?? INFO.get(shape)!.variants![0]!.id } : {}),
     rotation: 0,
-    fill: shape === 'uml_actor' || shape === 'uml_system' ? '' : shape === 'uml_note' ? 'kuning' : 'putih',
+    fill: g.fill ?? 'putih',
     stroke: 'tinta',
     stroke_width: 2,
     stroke_style: 'solid',
-    text: shape === 'uml_system' ? 'Sistem' : shape === 'uml_usecase' ? 'Use case' : '',
-    align: shape === 'uml_note' ? 'left' : 'center',
+    text: g.text ?? '',
+    align: g.align ?? 'center',
     font_size: 16,
     ...(shape === 'uml_class' ? { name: 'Kelas', attributes: '', methods: '' } : {}),
   }
@@ -109,9 +95,10 @@ export function newShapeContent(shape: ShapeType): ShapeContent {
 const f = (n: number) => Math.round(n * 100) / 100
 const poly = (pts: [number, number][]) => 'M' + pts.map(([x, y]) => `${f(x)} ${f(y)}`).join('L') + 'Z'
 
-// Path bentuk di kotak 0..w x 0..h, sebelum diputar. Kelas UML dan paket punya garis pemisah sendiri (shapeExtras).
-export function shapePath(shape: ShapeType, w: number, h: number): string {
+// Path bentuk dasar di kotak 0..w x 0..h, sebelum diputar; dipakai tabel GEO. Jenis tak dikenal digambar persegi.
+function basePath(shape: string, w: number, h: number): string {
   switch (shape) {
+    default:
     case 'rect':
     case 'process':
     case 'uml_class':
@@ -254,8 +241,329 @@ export function shapePath(shape: ShapeType, w: number, h: number): string {
   }
 }
 
-// Bentuk yang garisnya tidak tertutup (aktor) digambar tanpa isian.
-export const openShape = (s: ShapeType) => s === 'uml_actor'
+// ---------------------------------------------------------------------------------------------------------------
+// Definisi bentuk sebagai data (revisi 54): geometri, tanda di dalam bentuk (ikon BPMN dan sejenisnya), area teks, dan
+// perilaku. Satu renderer (WbShape.vue) dan ekspor (exportBoard.ts) membaca tabel yang sama; tidak ada komponen per
+// bentuk. Ikon digambar sendiri dari garis dan bangun sederhana.
+
+// Area teks di dalam kotak bentuk, sebagai nilai CSS (persen dari tinggi atau lebar, atau px). auto di bawah berarti
+// tinggi mengikuti isi (judul di atas).
+export type Inset = { top: string; right: string; bottom: string; left: string }
+// Tanda: path di kotak bentuk yang sama. fill dan stroke: line memakai warna garis bentuk, surface warna permukaan.
+export type Mark = {
+  d: string
+  fill?: 'line' | 'surface' | 'none'
+  stroke?: 'line' | 'surface' | 'none'
+  width?: number
+}
+type Geo = {
+  path: (w: number, h: number) => string
+  marks?: (w: number, h: number, variant: string) => Mark[]
+  inset?: Inset
+  valign?: 'top' | 'center'
+  // Garis terbuka (tanpa isian), mis. aktor dan anotasi.
+  open?: boolean
+  // Pengali tebal garis tepi, mis. event selesai BPMN yang bergaris tebal.
+  strokeScale?: number
+  fill?: string
+  text?: string
+  align?: 'left' | 'center' | 'right'
+}
+
+const DEFAULT_INSET: Inset = { top: '8px', bottom: '8px', left: '10px', right: '10px' }
+const pct = (top: number, bottom: number, left: number, right: number): Inset => ({
+  top: `${top}%`,
+  bottom: `${bottom}%`,
+  left: `${left}%`,
+  right: `${right}%`,
+})
+// Label di bawah bentuk kecil (event, gateway, data), seperti nama di bawah aktor.
+const BELOW: Inset = { top: '104%', bottom: '-48px', left: '-80%', right: '-80%' }
+
+const circ = (cx: number, cy: number, r: number) =>
+  `M${f(cx + r)} ${f(cy)}A${f(r)} ${f(r)} 0 1 0 ${f(cx - r)} ${f(cy)}A${f(r)} ${f(r)} 0 1 0 ${f(cx + r)} ${f(cy)}Z`
+const roundRect = (x: number, y: number, w: number, h: number, r: number) => {
+  r = Math.min(r, w / 2, h / 2)
+  return `M${f(x + r)} ${f(y)}H${f(x + w - r)}Q${f(x + w)} ${f(y)} ${f(x + w)} ${f(y + r)}V${f(y + h - r)}Q${f(x + w)} ${f(y + h)} ${f(x + w - r)} ${f(y + h)}H${f(x + r)}Q${f(x)} ${f(y + h)} ${f(x)} ${f(y + h - r)}V${f(y + r)}Q${f(x)} ${f(y)} ${f(x + r)} ${f(y)}Z`
+}
+// Titik relatif (satuan s) di sekitar pusat, sebagai poligon tertutup.
+const rel = (cx: number, cy: number, s: number, pts: [number, number][]) =>
+  poly(pts.map(([x, y]) => [cx + x * s, cy + y * s]))
+
+// Amplop: kotak dan tutup. filled: amplop penuh warna garis dengan tutup warna permukaan (BPMN "melempar").
+function envelope(x: number, y: number, w: number, h: number, filled: boolean): Mark[] {
+  const box = poly([
+    [x, y],
+    [x + w, y],
+    [x + w, y + h],
+    [x, y + h],
+  ])
+  const flap = `M${f(x)} ${f(y)}L${f(x + w / 2)} ${f(y + h * 0.55)}L${f(x + w)} ${f(y)}`
+  return filled
+    ? [
+        { d: box, fill: 'line' },
+        { d: flap, stroke: 'surface' },
+      ]
+    : [{ d: box }, { d: flap }]
+}
+
+function eventMarks(w: number, h: number, variant: string, filled: boolean): Mark[] {
+  const cx = w / 2
+  const cy = h / 2
+  const r = Math.min(w, h) / 2
+  const s = r * 0.5
+  const fill = filled ? 'line' : 'none'
+  switch (variant) {
+    case 'message':
+      return envelope(cx - s, cy - s * 0.68, s * 2, s * 1.36, filled)
+    case 'timer':
+      return [
+        { d: circ(cx, cy, r * 0.6) },
+        { d: `M${f(cx)} ${f(cy - r * 0.42)}L${f(cx)} ${f(cy)}L${f(cx + r * 0.3)} ${f(cy + r * 0.12)}` },
+      ]
+    case 'error':
+      return [
+        {
+          d: rel(cx, cy, s * 1.1, [
+            [-0.55, 0.6],
+            [-0.2, -0.5],
+            [0.12, 0.12],
+            [0.55, -0.6],
+            [0.2, 0.5],
+            [-0.12, -0.12],
+          ]),
+          fill,
+        },
+      ]
+    case 'signal':
+      return [
+        {
+          d: rel(cx, cy, s * 1.15, [
+            [0, -0.65],
+            [0.6, 0.45],
+            [-0.6, 0.45],
+          ]),
+          fill,
+        },
+      ]
+    case 'cancel':
+      return [
+        {
+          d: `M${f(cx - s * 0.7)} ${f(cy - s * 0.7)}L${f(cx + s * 0.7)} ${f(cy + s * 0.7)}M${f(cx + s * 0.7)} ${f(cy - s * 0.7)}L${f(cx - s * 0.7)} ${f(cy + s * 0.7)}`,
+          width: filled ? 2 : 1.5,
+        },
+      ]
+    default:
+      return []
+  }
+}
+
+// Ikon jenis task di pojok kiri atas, kotak 18 px.
+function taskIcon(variant: string): Mark[] {
+  const x = 10
+  const y = 10
+  switch (variant) {
+    case 'user':
+      return [
+        { d: circ(x + 9, y + 5, 4) },
+        {
+          d: `M${x + 2} ${y + 18}Q${x + 2} ${y + 10} ${x + 9} ${y + 10}Q${x + 16} ${y + 10} ${x + 16} ${y + 18}Z`,
+        },
+      ]
+    case 'service': {
+      const pts: [number, number][] = []
+      for (let i = 0; i < 16; i++) {
+        const a = (i * Math.PI) / 8
+        const rr = i % 2 ? 6 : 8.5
+        pts.push([x + 9 + Math.cos(a) * rr, y + 9 + Math.sin(a) * rr])
+      }
+      return [{ d: poly(pts) }, { d: circ(x + 9, y + 9, 2.5) }]
+    }
+    case 'script':
+      return [
+        {
+          d: `M${x + 3} ${y + 1}H${x + 15}V${y + 17}H${x + 3}ZM${x + 6} ${y + 6}H${x + 12}M${x + 6} ${y + 9.5}H${x + 12}M${x + 6} ${y + 13}H${x + 12}`,
+        },
+      ]
+    case 'manual':
+      return [
+        {
+          d: `M${x + 2} ${y + 9}V${y + 17}H${x + 13}Q${x + 17} ${y + 17} ${x + 17} ${y + 13}V${y + 7}M${x + 5} ${y + 10}V${y + 3}M${x + 8.5} ${y + 10}V${y + 1.5}M${x + 12} ${y + 10}V${y + 3}M${x + 15} ${y + 10}V${y + 5}`,
+        },
+      ]
+    case 'send':
+      return envelope(x, y + 3, 18, 12, true)
+    case 'receive':
+      return envelope(x, y + 3, 18, 12, false)
+    default:
+      return []
+  }
+}
+
+function gatewayMarks(w: number, h: number, variant: string): Mark[] {
+  const cx = w / 2
+  const cy = h / 2
+  const s = Math.min(w, h) * 0.2
+  switch (variant) {
+    case 'exclusive':
+      return [
+        {
+          d: `M${f(cx - s)} ${f(cy - s)}L${f(cx + s)} ${f(cy + s)}M${f(cx + s)} ${f(cy - s)}L${f(cx - s)} ${f(cy + s)}`,
+          width: 2,
+        },
+      ]
+    case 'parallel':
+      return [
+        {
+          d: `M${f(cx)} ${f(cy - s * 1.2)}V${f(cy + s * 1.2)}M${f(cx - s * 1.2)} ${f(cy)}H${f(cx + s * 1.2)}`,
+          width: 2,
+        },
+      ]
+    case 'inclusive':
+      return [{ d: circ(cx, cy, s * 1.15), width: 1.75 }]
+    case 'event': {
+      const pent: [number, number][] = []
+      for (let i = 0; i < 5; i++) {
+        const a = -Math.PI / 2 + (i * 2 * Math.PI) / 5
+        pent.push([cx + Math.cos(a) * s * 0.75, cy + Math.sin(a) * s * 0.75])
+      }
+      return [{ d: circ(cx, cy, s * 1.35) }, { d: circ(cx, cy, s * 1.1) }, { d: poly(pent) }]
+    }
+    default:
+      return []
+  }
+}
+
+const base = (id: string, rest: Omit<Geo, 'path'> = {}): Geo => ({
+  path: (w, h) => basePath(id, w, h),
+  ...rest,
+})
+
+const GEO = {
+  rect: base('rect'),
+  rounded: base('rounded'),
+  ellipse: base('ellipse', { inset: pct(16, 16, 14, 14) }),
+  triangle: base('triangle', { inset: pct(45, 8, 24, 24) }),
+  diamond: base('diamond', { inset: pct(28, 28, 24, 24) }),
+  hexagon: base('hexagon'),
+  star: base('star', { inset: pct(28, 28, 24, 24) }),
+  process: base('process'),
+  decision: base('decision', { inset: pct(28, 28, 24, 24) }),
+  terminator: base('terminator'),
+  data: base('data'),
+  database: base('database', { inset: { top: '24%', bottom: '10%', left: '8px', right: '8px' } }),
+  document: base('document'),
+  uml_class: base('uml_class'),
+  uml_actor: base('uml_actor', {
+    open: true,
+    fill: '',
+    inset: { top: '102%', bottom: '-30%', left: '-40%', right: '-40%' },
+  }),
+  uml_note: base('uml_note', { fill: 'kuning', align: 'left' }),
+  uml_package: base('uml_package', { inset: { top: '22%', bottom: '8px', left: '8px', right: '8px' } }),
+  uml_system: base('uml_system', {
+    fill: '',
+    text: 'Sistem',
+    valign: 'top',
+    inset: { top: '8px', bottom: 'auto', left: '10px', right: '10px' },
+  }),
+  uml_usecase: base('uml_usecase', { text: 'Use case', inset: pct(16, 16, 14, 14) }),
+  bpmn_start: {
+    path: (w, h) => circ(w / 2, h / 2, Math.min(w, h) / 2),
+    marks: (w, h, v) => eventMarks(w, h, v, false),
+    inset: BELOW,
+  },
+  bpmn_intermediate: {
+    path: (w, h) => circ(w / 2, h / 2, Math.min(w, h) / 2),
+    marks: (w, h, v) => [
+      { d: circ(w / 2, h / 2, Math.min(w, h) / 2 - 4) },
+      ...eventMarks(w, h, v, v === 'error' || v === 'cancel'),
+    ],
+    inset: BELOW,
+  },
+  bpmn_end: {
+    path: (w, h) => circ(w / 2, h / 2, Math.min(w, h) / 2),
+    marks: (w, h, v) => eventMarks(w, h, v, true),
+    strokeScale: 2,
+    inset: BELOW,
+  },
+  bpmn_task: {
+    path: (w, h) => roundRect(0, 0, w, h, 10),
+    marks: (_w, _h, v) => taskIcon(v),
+    inset: { top: '10px', bottom: '8px', left: '12px', right: '12px' },
+  },
+  bpmn_subprocess: {
+    path: (w, h) => roundRect(0, 0, w, h, 10),
+    marks: (w, h) => [
+      { d: `M${f(w / 2 - 8)} ${f(h - 22)}H${f(w / 2 + 8)}V${f(h - 6)}H${f(w / 2 - 8)}Z` },
+      { d: `M${f(w / 2)} ${f(h - 19)}V${f(h - 9)}M${f(w / 2 - 5)} ${f(h - 14)}H${f(w / 2 + 5)}` },
+    ],
+    inset: { top: '8px', bottom: '26px', left: '10px', right: '10px' },
+  },
+  bpmn_gateway: { path: (w, h) => basePath('diamond', w, h), marks: gatewayMarks, inset: BELOW },
+  bpmn_data_object: {
+    path: (w, h) => {
+      const c = Math.min(14, w / 3, h / 3)
+      return poly([
+        [0, 0],
+        [w - c, 0],
+        [w, c],
+        [w, h],
+        [0, h],
+      ])
+    },
+    marks: (w, h) => {
+      const c = Math.min(14, w / 3, h / 3)
+      return [{ d: `M${f(w - c)} 0V${f(c)}H${f(w)}` }]
+    },
+    inset: BELOW,
+  },
+  bpmn_data_store: base('database', { inset: BELOW }),
+  bpmn_annotation: {
+    path: (w, h) => {
+      const b = Math.min(16, w * 0.15)
+      return `M${f(b)} 0H0V${f(h)}H${f(b)}`
+    },
+    open: true,
+    fill: '',
+    align: 'left',
+    inset: { top: '8px', bottom: '8px', left: '14px', right: '6px' },
+  },
+  arrow_right: base('arrow_right', { inset: pct(26, 26, 14, 14) }),
+  arrow_left: base('arrow_left', { inset: pct(26, 26, 14, 14) }),
+  arrow_up: base('arrow_up'),
+  arrow_down: base('arrow_down'),
+  arrow_both: base('arrow_both', { inset: pct(26, 26, 14, 14) }),
+} satisfies Record<string, Geo>
+
+const geoOf = (s: string): Geo => (GEO as Record<string, Geo>)[s] ?? GEO.rect
+export const shapePath = (shape: string, w: number, h: number) => geoOf(shape).path(w, h)
+export const shapeMarks = (c: Pick<ShapeContent, 'shape' | 'variant'>, w: number, h: number): Mark[] =>
+  geoOf(c.shape).marks?.(w, h, c.variant || shapeInfo(c.shape)?.variants?.[0]?.id || '') ?? []
+// Bentuk yang garisnya tidak tertutup (aktor, anotasi) digambar tanpa isian.
+export const openShape = (s: string) => !!geoOf(s).open
+export const strokeScale = (s: string) => geoOf(s).strokeScale ?? 1
+export const shapeInset = (s: string): Inset => geoOf(s).inset ?? DEFAULT_INSET
+export const shapeValign = (s: string) => geoOf(s).valign ?? 'center'
+export const hasGeometry = (s: string) => s in GEO
+
+// Kotak teks dalam angka (untuk ekspor), dari nilai CSS yang sama dengan layar.
+export function textBox(s: string, w: number, h: number): Box & { valign: 'top' | 'center' } {
+  const i = shapeInset(s)
+  const v = (x: string, size: number) =>
+    x === 'auto' ? null : x.endsWith('%') ? (parseFloat(x) / 100) * size : parseFloat(x)
+  const top = v(i.top, h) ?? 0
+  const left = v(i.left, w) ?? 0
+  const right = v(i.right, w) ?? 0
+  const bottom = v(i.bottom, h)
+  return {
+    x: left,
+    y: top,
+    w: w - left - right,
+    h: bottom === null ? h - top : h - top - bottom,
+    valign: shapeValign(s),
+  }
+}
 
 // ---------------------------------------------------------------------------------------------------------------
 // Port dan putar
@@ -780,3 +1088,49 @@ export function snap45(from: Pt, p: Pt): Pt {
   const k = (dx * ux + dy * uy) / (ux * ux + uy * uy)
   return { x: from.x + ux * k, y: from.y + uy * k }
 }
+
+// Terakhir dipakai di palet: yang baru di depan, tanpa duplikat, paling banyak max.
+export function pushRecent(list: string[], key: string, max = 12): string[] {
+  return [key, ...list.filter((k) => k !== key)].slice(0, max)
+}
+
+// Preset garis per jenis diagram (revisi 53 dan 54). text: label tengah yang diisi preset (tetap bisa diubah).
+export type LinePreset = {
+  id: string
+  label: string
+  group: string
+  line: 'solid' | 'dashed' | 'dotted'
+  start: EndKind
+  end: EndKind
+  text?: string
+}
+export const LINE_PRESETS: LinePreset[] = [
+  {
+    id: 'include',
+    label: 'Include',
+    group: 'Use case',
+    line: 'dashed',
+    start: 'none',
+    end: 'open_arrow',
+    text: '«include»',
+  },
+  {
+    id: 'extend',
+    label: 'Extend',
+    group: 'Use case',
+    line: 'dashed',
+    start: 'none',
+    end: 'open_arrow',
+    text: '«extend»',
+  },
+  { id: 'sequence_flow', label: 'Sequence flow', group: 'BPMN', line: 'solid', start: 'none', end: 'arrow' },
+  {
+    id: 'message_flow',
+    label: 'Message flow',
+    group: 'BPMN',
+    line: 'dashed',
+    start: 'circle',
+    end: 'open_arrow',
+  },
+  { id: 'association', label: 'Association', group: 'BPMN', line: 'dotted', start: 'none', end: 'none' },
+]

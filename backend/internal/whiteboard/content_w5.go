@@ -3,6 +3,7 @@ package whiteboard
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -28,8 +29,20 @@ var (
 		"uml_class": true, "uml_actor": true, "uml_note": true, "uml_package": true,
 		// Diagram use case (revisi 53): batas sistem (judul di dalam atas) dan use case (elips).
 		"uml_system": true, "uml_usecase": true,
+		// BPMN (revisi 54a)
+		"bpmn_start": true, "bpmn_intermediate": true, "bpmn_end": true, "bpmn_task": true, "bpmn_subprocess": true,
+		"bpmn_gateway": true, "bpmn_data_object": true, "bpmn_data_store": true, "bpmn_annotation": true,
 		// Panah blok
 		"arrow_right": true, "arrow_left": true, "arrow_up": true, "arrow_down": true, "arrow_both": true,
+	}
+	// ShapeVariants: varian per jenis bentuk (revisi 54), urutan sama dengan katalog klien; yang pertama bawaan.
+	// Daftar ini dan ShapeTypes dicek sama dengan frontend/src/utils/wbShapeCatalog.json oleh TestKatalogBentuk.
+	ShapeVariants = map[string][]string{
+		"bpmn_start":        {"none", "message", "timer", "signal", "error"},
+		"bpmn_intermediate": {"none", "message", "timer", "error", "signal", "cancel"},
+		"bpmn_end":          {"none", "message", "error", "signal", "cancel"},
+		"bpmn_task":         {"none", "user", "service", "script", "manual", "send", "receive"},
+		"bpmn_gateway":      {"exclusive", "parallel", "inclusive", "event"},
 	}
 	// Isian memakai nama warna kartu; "" berarti tanpa isian, "putih" latar surface.
 	shapeFills = map[string]bool{"": true, "putih": true, "abu": true, "hijau": true, "kuning": true, "biru": true, "krem": true, "merah": true}
@@ -40,7 +53,9 @@ var (
 )
 
 type ShapeContent struct {
-	Shape    string `json:"shape"`
+	Shape string `json:"shape"`
+	// Variant: varian bentuk dari ShapeVariants (revisi 54); kosong berarti varian pertama.
+	Variant  string `json:"variant,omitempty"`
 	Rotation int    `json:"rotation"`
 	// Balik mendatar dan tegak (revisi 50): hanya gambar bentuknya, teks tetap terbaca.
 	FlipX       bool   `json:"flip_x,omitempty"`
@@ -86,6 +101,9 @@ func CleanShape(raw json.RawMessage) (ShapeContent, string, error) {
 	}
 	if !ShapeTypes[in.Shape] {
 		return in, "", apperr.Invalid("Jenis bentuk tidak dikenal.")
+	}
+	if in.Variant != "" && !slices.Contains(ShapeVariants[in.Shape], in.Variant) {
+		return in, "", apperr.Invalid("Varian bentuk tidak dikenal untuk jenis bentuk ini.")
 	}
 	if in.Rotation < 0 || in.Rotation > 359 {
 		return in, "", apperr.Invalid("Sudut putar harus 0 sampai 359 derajat.")

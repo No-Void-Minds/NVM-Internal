@@ -1850,6 +1850,30 @@ Keputusan teknis:
 - Kontras: tombol baru memakai gaya tombol panel yang sudah ada (tinta di surface); tombol Otomatis aktif memakai accent dengan teks on-accent. Tanpa warna baru dan tanpa animasi baru.
 - Gerbang akhir: garis yang ujungnya lebih depan dari kartu yang dilintasinya digambar di atas kartu itu dan menangkap klik di sepanjang garisnya (16 px). Ini akibat yang disengaja dari urutan tumpuk, bukan bug; uji seret di wbperforma sekarang menekan titik kartu yang tidak tertutup garis. Frame p95 bimodal (13,4 dan 26,5 ms) sebelumnya muncul juga di HEAD dan hilang setelah preview dan Vite uji sisa dimatikan; mode headed dan flag `--disable-renderer-backgrounding` memberi 13,4 ms yang sama, jadi bukan throttling headless. uji13 menerima `E2E_HEADED=1` dan `E2E_ARGS` untuk pemeriksaan seperti ini.
 
+## Sprint 12m: Pustaka bentuk lengkap (revisi 54)
+
+**Tujuan:** pustaka bentuk diagram yang lengkap (BPMN, wadah, activity dan state, sequence, ERD dan class, serta bentuk lain), didefinisikan sebagai data dan dirender satu renderer. Dikerjakan per kelompok, satu commit per kelompok.
+
+- [x] S12m-01 (54a) Fondasi: katalog `frontend/src/utils/wbShapeCatalog.json` (id, kelompok, label, ukuran bawaan, varian) sebagai sumber tunggal; tabel geometri `GEO` di `utils/wbShapes.ts` (path, tanda di dalam bentuk, area teks, perilaku: garis terbuka, pengali tebal garis, isian dan teks bawaan). `WbShape.vue` dan ekspor membaca tabel yang sama. Server: `ShapeTypes` dan `ShapeVariants` di `content_w5.go`, `TestKatalogBentuk` membandingkannya dengan katalog JSON klien.
+- [x] S12m-02 (54a) Palet: entri per varian, cari lintas kelompok, kelompok bisa dilipat, Terakhir dipakai (maksimal 12, localStorage per pengguna), pratinjau besar untuk opsi aktif. Panel Gaya bentuk mendapat pemilih Varian.
+- [x] S12m-03 (54a) BPMN: event mulai, antara, dan selesai dengan varian; task dengan tujuh varian; sub-proses; gateway eksklusif, paralel, inklusif, berbasis event; data object, data store, anotasi. Preset garis sequence flow, message flow, dan association di pemilih Preset garis panel garis (include dan extend pindah ke pemilih yang sama).
+- [x] S12m-04 (54a) Test: `TestKatalogBentuk`, unit test katalog dan palet di `tests/wbShapes.test.ts`, E2E `scripts/e2e/uji-r54a.mjs`; `uji-r53.mjs` memakai pemilih preset.
+- [ ] S12m-05 (54b) Wadah: pool dan lane, swimlane, state komposit, fragmen sequence, batas sistem.
+- [ ] S12m-06 (54c) Activity dan state machine.
+- [ ] S12m-07 (54d) Sequence diagram.
+- [ ] S12m-08 (54e) ERD dan class, ujung crow's foot.
+- [ ] S12m-09 (54f) Flowchart lanjutan, arsitektur, wireframe, mind map, callout, chevron, corong, garis waktu.
+
+**Keputusan:**
+- Varian disimpan di isi bentuk (`content.variant`), bukan sebagai jenis bentuk terpisah, supaya event atau task bisa diganti variannya lewat Gaya bentuk tanpa membuat kartu baru; palet tetap menampilkan satu entri per varian supaya bisa dicari ("waktu", "pengguna"). Kosong berarti varian pertama di katalog. Server menolak varian di luar daftar jenis bentuknya, dan varian pada bentuk tanpa varian.
+- Varian event mengikuti BPMN yang sah, jadi tidak semua kombinasi ada: event mulai (polos, pesan, waktu, sinyal, error untuk sub-proses event), event antara (polos, pesan, waktu, error, sinyal, batal), event selesai (polos, pesan, error, sinyal, batal; tanpa waktu). Event antara bercincin ganda, event selesai bergaris dua kali lebih tebal; ikon event selesai dan event antara error atau batal diisi penuh (melempar), lainnya garis saja (menangkap).
+- Label event, gateway, data object, dan data store ada di bawah bentuknya, seperti nama aktor; ekspor memperluas batas gambar supaya label itu tidak terpotong.
+- Ikon digambar sendiri dari garis dan bangun sederhana (amplop, jam, petir, segitiga, silang, orang, roda gigi, kertas, tangan), tidak menyalin ikon pihak lain. Warna ikon sama dengan garis bentuk (warna pena, minimal 3:1 terhadap kanvas), ikon isi penuh memakai warna permukaan untuk detailnya.
+- Message flow: putus-putus, lingkaran kosong di pangkal, panah terbuka di ujung; association: titik-titik tanpa ujung; sequence flow: utuh dengan panah penuh.
+- Terakhir dipakai disimpan di localStorage dengan kunci per id pengguna; galat penyimpanan (mode privat, kebijakan peramban) diabaikan dan daftar dianggap kosong. Saat mencari, kelompok terlipat ikut terbuka supaya hasil tidak tersembunyi; opsi di kelompok terlipat tidak ikut navigasi panah.
+- Palet, perbaikan aksesibilitas: label kelompok memakai id berindeks (sebelumnya nama kelompok berspasi seperti "Panah blok" memecah `aria-labelledby`), dan hover memakai `mousemove` supaya hasil cari yang bergeser ke bawah kursor diam tidak merebut opsi aktif pilihan keyboard.
+- Contoh proses BPMN di E2E 54a belum memakai pool dan lane; wadah dikerjakan di 54b dan E2E-nya memuat pool dua lane.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -2057,10 +2081,11 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 51 | 2026-11-26 | Whiteboard: kartu anggota tim (alat Tim, data orang diambil dari profil saat papan dimuat) | Sprint 12j |
 | 52 | 2026-11-26 | Whiteboard: panel format menempel di bar pilihan (tidak lagi melayang di atas teks), bar pilihan tanpa select bawaan browser (palet warna dan tombol menu Aksi memakai menu klik kanan) | Sprint 12k |
 | 53 | 2026-11-26 | Whiteboard: garis ikut urutan tumpuk (otomatis di atas kartu ujung, urutan manual lewat menu), bentuk Batas sistem dan Use case, preset include dan extend, jalur Bebas, garis elastis saat kartu ujung digeser | Sprint 12l |
+| 54 | 2026-11-26 | Whiteboard: pustaka bentuk lengkap per kelompok (BPMN, wadah, activity dan state, sequence, ERD dan class, lainnya), bentuk sebagai data, palet dengan cari, lipat kelompok, Terakhir dipakai, dan pratinjau | Sprint 12m |
 | 33b | 2026-11-20 | Poles tampilan kartu Aktivitas: tombol rantai pindah ke celah antar isian dan jadi ikon kecil tanpa bingkai, tombol mati tidak dirender, jam tersambung menyatu dengan jam kepalanya, status simpan punya baris tetap, Tambah berkas di sel tabel tanpa bingkai | Sprint 12c |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat kelima puluh tiga revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat kelima puluh empat revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

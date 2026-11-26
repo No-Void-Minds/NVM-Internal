@@ -4,7 +4,7 @@ import { useDrafts } from './drafts'
 import BaseDialog from '../BaseDialog.vue'
 import WbPicker from './WbPicker.vue'
 import type { Connector, ConnectorGeometry, ConnectorStyle } from '../../utils/whiteboard'
-import { END_KINDS, portsFor } from '../../utils/wbShapes'
+import { END_KINDS, LINE_PRESETS, portsFor } from '../../utils/wbShapes'
 import { penColors } from './wbColors'
 
 // Panel gaya garis (W5): tiga label, tujuh jenis ujung per sisi, tiga gaya garis, warna, jalur, port per ujung, dan
@@ -63,9 +63,16 @@ function setRoute(c: Connector, v: string) {
 function setPort(c: Connector, side: 'from' | 'to', port: string) {
   emit('update', c.id, { geometry: { ...c.geometry, [side]: { ...c.geometry[side], port } } })
 }
-// Preset diagram use case (revisi 53): putus-putus, panah terbuka, label tengah yang tetap bisa diubah.
-function preset(c: Connector, name: 'include' | 'extend') {
-  emit('update', c.id, { style: { ...c.style, line: 'dashed', end: 'open_arrow' }, label: `«${name}»` })
+// Preset garis per jenis diagram (LINE_PRESETS di utils/wbShapes.ts): gaya garis dan ujung, plus label tengah
+// bila presetnya punya (include, extend); label tetap bisa diubah sesudahnya.
+const presetOpts = LINE_PRESETS.map((p) => ({ value: p.id, label: `${p.group}: ${p.label}` }))
+function preset(c: Connector, id: string) {
+  const p = LINE_PRESETS.find((x) => x.id === id)
+  if (!p) return
+  emit('update', c.id, {
+    style: { ...c.style, line: p.line, start: p.start, end: p.end },
+    ...(p.text !== undefined ? { label: p.text } : {}),
+  })
 }
 const ORDER = [
   { kind: 'front', label: 'Paling depan' },
@@ -235,10 +242,16 @@ const btn =
               />
             </div>
           </div>
-          <div class="flex flex-wrap items-center gap-2" role="group" :aria-label="`Preset garis ${i + 1}`">
-            <span class="text-sm">Preset use case:</span>
-            <button type="button" :class="btn" @click="preset(c, 'include')">Include</button>
-            <button type="button" :class="btn" @click="preset(c, 'extend')">Extend</button>
+          <div :class="cell">
+            <label :for="`${uid}-${i}-preset`">Preset garis</label>
+            <WbPicker
+              :id="`${uid}-${i}-preset`"
+              label="Preset garis"
+              class="w-full"
+              :options="presetOpts"
+              :model-value="null"
+              @update:model-value="preset(c, $event)"
+            />
           </div>
           <div class="flex flex-wrap items-center gap-2" role="group" :aria-label="`Urutan garis ${i + 1}`">
             <span class="text-sm">Urutan:</span>

@@ -4,7 +4,15 @@ import type { PMNode } from '../../utils/whiteboard'
 import WbRichField, { activateField } from './WbRichField.vue'
 import WbRichText from './WbRichText'
 import { inkColor } from './wbColors'
-import { openShape, shapePath, type ShapeContent } from '../../utils/wbShapes'
+import {
+  openShape,
+  shapeInset,
+  shapeMarks,
+  shapePath,
+  shapeValign,
+  strokeScale,
+  type ShapeContent,
+} from '../../utils/wbShapes'
 
 // Isi kartu bentuk (W5): SVG dari angka (tanpa markup pengguna) dan teks lewat interpolasi Vue. Putaran diterapkan
 // WbCard ke seluruh kartu, jadi di sini bentuk digambar tegak di kotak w x h.
@@ -21,7 +29,8 @@ const fillVar: Record<string, string> = {
   merah: 'var(--color-danger-bg)',
 }
 
-const sw = computed(() => props.content.stroke_width)
+// Tebal garis tepi efektif: event selesai BPMN memakai garis tebal (pengali di definisi bentuk).
+const sw = computed(() => props.content.stroke_width * strokeScale(props.content.shape))
 // Garis tepi digambar di dalam kotak: path dikecilkan setengah tebal garis supaya tidak terpotong tepi SVG.
 const inset = computed(() => sw.value / 2)
 const d = computed(() =>
@@ -40,34 +49,15 @@ const pathTransform = computed(() => {
 })
 const isClass = computed(() => props.content.shape === 'uml_class')
 
-// Area teks di dalam bentuk: bentuk runcing (belah ketupat, segitiga, bintang) memberi ruang lebih sempit.
-const textInset = computed(() => {
-  switch (props.content.shape) {
-    case 'diamond':
-    case 'decision':
-    case 'star':
-      return { top: '28%', bottom: '28%', left: '24%', right: '24%' }
-    case 'triangle':
-      return { top: '45%', bottom: '8%', left: '24%', right: '24%' }
-    case 'ellipse':
-    case 'uml_usecase':
-      return { top: '16%', bottom: '16%', left: '14%', right: '14%' }
-    case 'uml_system':
-      return { top: '8px', bottom: 'auto', left: '10px', right: '10px' }
-    case 'uml_actor':
-      return { top: '102%', bottom: '-30%', left: '-40%', right: '-40%' }
-    case 'uml_package':
-      return { top: '22%', bottom: '8px', left: '8px', right: '8px' }
-    case 'database':
-      return { top: '24%', bottom: '10%', left: '8px', right: '8px' }
-    case 'arrow_right':
-    case 'arrow_left':
-    case 'arrow_both':
-      return { top: '26%', bottom: '26%', left: '14%', right: '14%' }
-    default:
-      return { top: '8px', bottom: '8px', left: '10px', right: '10px' }
-  }
-})
+// Area teks dan tanda di dalam bentuk dari definisi bentuk (utils/wbShapes.ts), sama dengan ekspor.
+const textInset = computed(() => shapeInset(props.content.shape))
+const top = computed(() => shapeValign(props.content.shape) === 'top')
+const marks = computed(() =>
+  shapeMarks(props.content, Math.max(1, props.w - sw.value), Math.max(1, props.h - sw.value)),
+)
+const markWidth = computed(() => props.content.stroke_width)
+const paint = (v: 'line' | 'surface' | 'none' | undefined, fallback: string) =>
+  v === 'line' ? stroke.value : v === 'surface' ? 'var(--color-surface)' : v === 'none' ? 'none' : fallback
 const textStyle = computed(() => ({
   ...textInset.value,
   fontSize: `${props.content.font_size}px`,
@@ -125,6 +115,17 @@ const field = 'block w-full'
         stroke-linejoin="round"
         stroke-linecap="round"
         :style="{ stroke }"
+      />
+      <path
+        v-for="(m, i) in marks"
+        :key="i"
+        :d="m.d"
+        :transform="pathTransform"
+        :style="{ fill: paint(m.fill, 'none'), stroke: paint(m.stroke, stroke) }"
+        :stroke-width="markWidth * (m.width ?? 1)"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+        data-mark
       />
     </svg>
 
@@ -193,8 +194,8 @@ const field = 'block w-full'
 
     <div
       v-else
-      class="absolute flex items-center text-ink"
-      :class="content.shape === 'uml_system' ? 'font-semibold' : ''"
+      class="absolute flex text-ink"
+      :class="top ? 'items-start font-semibold' : 'items-center'"
       :style="textStyle"
     >
       <WbRichField

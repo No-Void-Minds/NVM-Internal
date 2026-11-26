@@ -1,0 +1,105 @@
+{
+  "groups": ["Dasar", "Flowchart", "UML", "BPMN", "Panah blok"],
+  "shapes": [
+    { "id": "rect", "label": "Persegi", "group": "Dasar", "w": 160, "h": 100 },
+    { "id": "rounded", "label": "Persegi sudut bulat", "group": "Dasar", "w": 160, "h": 100 },
+    { "id": "ellipse", "label": "Elips", "group": "Dasar", "w": 160, "h": 100 },
+    { "id": "triangle", "label": "Segitiga", "group": "Dasar", "w": 140, "h": 120 },
+    { "id": "diamond", "label": "Belah ketupat", "group": "Dasar", "w": 140, "h": 120 },
+    { "id": "hexagon", "label": "Segi enam", "group": "Dasar", "w": 160, "h": 120 },
+    { "id": "star", "label": "Bintang", "group": "Dasar", "w": 140, "h": 140 },
+    { "id": "process", "label": "Proses", "group": "Flowchart", "w": 180, "h": 80 },
+    { "id": "decision", "label": "Keputusan", "group": "Flowchart", "w": 180, "h": 120 },
+    { "id": "terminator", "label": "Mulai atau selesai", "group": "Flowchart", "w": 180, "h": 64 },
+    { "id": "data", "label": "Data", "group": "Flowchart", "w": 180, "h": 80 },
+    { "id": "database", "label": "Database", "group": "Flowchart", "w": 120, "h": 140 },
+    { "id": "document", "label": "Dokumen", "group": "Flowchart", "w": 180, "h": 100 },
+    { "id": "uml_class", "label": "Kelas", "group": "UML", "w": 220, "h": 180 },
+    { "id": "uml_actor", "label": "Aktor", "group": "UML", "w": 80, "h": 160 },
+    { "id": "uml_note", "label": "Catatan UML", "group": "UML", "w": 180, "h": 100 },
+    { "id": "uml_package", "label": "Paket", "group": "UML", "w": 220, "h": 160 },
+    { "id": "uml_system", "label": "Batas sistem", "group": "UML", "w": 480, "h": 360 },
+    { "id": "uml_usecase", "label": "Use case", "group": "UML", "w": 180, "h": 90 },
+    {
+      "id": "bpmn_start",
+      "label": "Event mulai",
+      "group": "BPMN",
+      "w": 56,
+      "h": 56,
+      "variants": [
+        { "id": "none", "label": "Event mulai" },
+        { "id": "message", "label": "Event mulai pesan" },
+        { "id": "timer", "label": "Event mulai waktu" },
+        { "id": "signal", "label": "Event mulai sinyal" },
+        { "id": "error", "label": "Event mulai error" }
+      ]
+    },
+    {
+      "id": "bpmn_intermediate",
+      "label": "Event antara",
+      "group": "BPMN",
+      "w": 56,
+      "h": 56,
+      "variants": [
+        { "id": "none", "label": "Event antara" },
+        { "id": "message", "label": "Event antara pesan" },
+        { "id": "timer", "label": "Event antara waktu" },
+        { "id": "error", "label": "Event antara error" },
+        { "id": "signal", "label": "Event antara sinyal" },
+        { "id": "cancel", "label": "Event antara batal" }
+      ]
+    },
+    {
+      "id": "bpmn_end",
+      "label": "Event selesai",
+      "group": "BPMN",
+      "w": 56,
+      "h": 56,
+      "variants": [
+        { "id": "none", "label": "Event selesai" },
+        { "id": "message", "label": "Event selesai pesan" },
+        { "id": "error", "label": "Event selesai error" },
+        { "id": "signal", "label": "Event selesai sinyal" },
+        { "id": "cancel", "label": "Event selesai batal" }
+      ]
+    },
+    {
+      "id": "bpmn_task",
+      "label": "Task",
+      "group": "BPMN",
+      "w": 160,
+      "h": 90,
+      "variants": [
+        { "id": "none", "label": "Task" },
+        { "id": "user", "label": "Task pengguna" },
+        { "id": "service", "label": "Task layanan" },
+        { "id": "script", "label": "Task skrip" },
+        { "id": "manual", "label": "Task manual" },
+        { "id": "send", "label": "Task kirim" },
+        { "id": "receive", "label": "Task terima" }
+      ]
+    },
+    { "id": "bpmn_subprocess", "label": "Sub-proses", "group": "BPMN", "w": 200, "h": 120 },
+    {
+      "id": "bpmn_gateway",
+      "label": "Gateway",
+      "group": "BPMN",
+      "w": 64,
+      "h": 64,
+      "variants": [
+        { "id": "exclusive", "label": "Gateway eksklusif" },
+        { "id": "parallel", "label": "Gateway paralel" },
+        { "id": "inclusive", "label": "Gateway inklusif" },
+        { "id": "event", "label": "Gateway berbasis event" }
+      ]
+    },
+    { "id": "bpmn_data_object", "label": "Data object", "group": "BPMN", "w": 50, "h": 64 },
+    { "id": "bpmn_data_store", "label": "Data store", "group": "BPMN", "w": 72, "h": 64 },
+    { "id": "bpmn_annotation", "label": "Anotasi", "group": "BPMN", "w": 180, "h": 80 },
+    { "id": "arrow_right", "label": "Panah kanan", "group": "Panah blok", "w": 180, "h": 100 },
+    { "id": "arrow_left", "label": "Panah kiri", "group": "Panah blok", "w": 180, "h": 100 },
+    { "id": "arrow_up", "label": "Panah atas", "group": "Panah blok", "w": 100, "h": 180 },
+    { "id": "arrow_down", "label": "Panah bawah", "group": "Panah blok", "w": 100, "h": 180 },
+    { "id": "arrow_both", "label": "Panah dua arah", "group": "Panah blok", "w": 200, "h": 100 }
+  ]
+}

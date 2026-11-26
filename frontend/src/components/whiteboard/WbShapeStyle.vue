@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, useId, watch } from 'vue'
+import { computed, ref, useId, watch } from 'vue'
 import BaseDialog from '../BaseDialog.vue'
 import WbPicker from './WbPicker.vue'
 import { penColors } from './wbColors'
-import { FONT_SIZES, SHAPES, type ShapeContent } from '../../utils/wbShapes'
+import { FONT_SIZES, SHAPES, shapeInfo, type ShapeContent } from '../../utils/wbShapes'
 
 // Panel gaya bentuk (W5). Juga jalur keyboard untuk putar dan ukuran, yang di kanvas hanya lewat pegangan.
 // Setiap perubahan langsung disimpan halaman (isi lewat content_version, ukuran lewat tata letak).
@@ -44,6 +44,16 @@ function set<K extends keyof ShapeContent>(key: K, value: ShapeContent[K]) {
   if (!props.content) return
   emit('content', { ...props.content, [key]: value })
 }
+// Varian (revisi 54) mengikuti jenis bentuk: ganti jenis memakai varian pertama jenis baru, atau tanpa varian.
+const variants = computed(() => (props.content ? (shapeInfo(props.content.shape)?.variants ?? []) : []))
+function setShape(shape: ShapeContent['shape']) {
+  if (!props.content) return
+  const next: ShapeContent = { ...props.content, shape }
+  const first = shapeInfo(shape)?.variants?.[0]?.id
+  if (first) next.variant = first
+  else delete next.variant
+  emit('content', next)
+}
 function setRotation() {
   const v = Math.round(Number(rot.value))
   if (Number.isFinite(v)) set('rotation', ((v % 360) + 360) % 360)
@@ -68,8 +78,20 @@ const lbl = 'text-sm font-semibold'
         :options="SHAPES.map((s) => ({ value: s.id, label: `${s.group}: ${s.label}` }))"
         :model-value="content.shape"
         :disabled="!canWrite"
-        @update:model-value="set('shape', $event as ShapeContent['shape'])"
+        @update:model-value="setShape($event as ShapeContent['shape'])"
       />
+      <template v-if="variants.length">
+        <label :for="`${uid}-variant`" :class="lbl" class="col-span-2">Varian</label>
+        <WbPicker
+          :id="`${uid}-variant`"
+          label="Varian"
+          class="col-span-2 w-full"
+          :options="variants.map((v) => ({ value: v.id, label: v.label }))"
+          :model-value="content.variant || variants[0]!.id"
+          :disabled="!canWrite"
+          @update:model-value="set('variant', $event)"
+        />
+      </template>
       <div>
         <label :for="`${uid}-fill`" :class="lbl">Isian</label>
         <WbPicker

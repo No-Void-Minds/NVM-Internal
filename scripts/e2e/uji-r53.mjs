@@ -153,7 +153,9 @@ try {
     await ps.getByTestId("wb-selbar").getByRole("button", { name: "Gaya garis" }).click();
     const dlg = ps.getByRole("dialog", { name: "Garis penghubung" });
     await dlg.waitFor({ timeout: 5000 });
-    await dlg.getByRole("button", { name: "Include", exact: true }).click();
+    // Revisi 54: preset garis lewat pemilih (daftarnya bertambah per jenis diagram).
+    await dlg.getByRole("button", { name: /^Preset garis/ }).click();
+    await ps.getByTestId("wb-picker").getByRole("button", { name: "Use case: Include", exact: true }).click();
     await saved(ps);
     const inc = await conn(board, panah.id);
     expect(inc.label === "«include»" && inc.style.line === "dashed" && inc.style.end === "open_arrow", where("include"), JSON.stringify({ l: inc.label, s: inc.style }));
