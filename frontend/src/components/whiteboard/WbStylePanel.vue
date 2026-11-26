@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, useId } from 'vue'
 import BaseDialog from '../BaseDialog.vue'
+import WbPicker from './WbPicker.vue'
 import { penColors } from './wbColors'
 import { STYLE_OPTIONS, styleKeys, type CardStyle, type StyleKey } from '../../utils/wbStyle'
 import { PERSON_LAYOUTS, PERSON_SIZES, PERSON_VIEWS, type PersonContent } from '../../utils/wbPerson'
@@ -44,6 +45,9 @@ function valueOf(k: StyleKey): string {
   return vals.length && vals.every((v) => v === vals[0]) ? (vals[0] ?? '') : MIXED
 }
 // Bawaan "tipis" disimpan kosong; pilihan Tipis di daftar bernilai "".
+function pickValue(k: StyleKey, v: string) {
+  emit('apply', { [k]: v })
+}
 function pick(k: StyleKey, e: Event) {
   const v = (e.target as HTMLSelectElement | HTMLInputElement).value
   if (v === MIXED) return
@@ -51,8 +55,8 @@ function pick(k: StyleKey, e: Event) {
 }
 
 const borderColors = computed(() => [
-  { value: '', label: 'Garis bawaan' },
-  ...penColors.map((p) => ({ value: p.value, label: p.label })),
+  { value: '', label: 'Garis bawaan', swatch: 'var(--color-line)' },
+  ...penColors.map((p) => ({ value: p.value, label: p.label, swatch: p.css })),
 ])
 const opacity = computed(() => (valueOf('opacity') === MIXED ? 100 : Number(valueOf('opacity'))))
 const groups: { key: StyleKey; label: string; options: readonly { value: string; label: string }[] }[] = [
@@ -86,7 +90,6 @@ const personOn = (k: 'view' | 'size' | 'layout', v: string) =>
   persons.value.length > 0 && persons.value.every((p) => p[k] === v)
 const chip =
   'inline-flex min-h-11 items-center rounded-card border border-line px-3 text-sm hover:bg-canvas aria-pressed:bg-accent aria-pressed:text-on-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark disabled:opacity-60'
-const control = 'min-h-11 w-full rounded-card border border-line bg-surface px-2 disabled:opacity-60'
 const lbl = 'text-sm font-semibold'
 </script>
 
@@ -104,29 +107,29 @@ const lbl = 'text-sm font-semibold'
       <template v-for="g in groups" :key="g.key">
         <div v-if="keys.has(g.key)" class="flex flex-col gap-1">
           <label :for="`${uid}-${g.key}`" :class="lbl">{{ g.label }}</label>
-          <select
+          <WbPicker
             :id="`${uid}-${g.key}`"
-            :class="control"
-            :value="valueOf(g.key)"
+            :label="g.label"
+            class="w-full"
+            :options="optionsFor(g)"
+            :model-value="valueOf(g.key) === MIXED ? null : valueOf(g.key)"
+            :mixed="valueOf(g.key) === MIXED"
             :disabled="!canWrite"
-            @change="pick(g.key, $event)"
-          >
-            <option v-if="valueOf(g.key) === MIXED" :value="MIXED" disabled>Campuran</option>
-            <option v-for="o in optionsFor(g)" :key="o.value" :value="o.value">{{ o.label }}</option>
-          </select>
+            @update:model-value="pickValue(g.key, $event)"
+          />
         </div>
         <div v-if="g.key === 'border' && keys.has('border_color')" class="flex flex-col gap-1">
           <label :for="`${uid}-border_color`" :class="lbl">Warna garis tepi</label>
-          <select
+          <WbPicker
             :id="`${uid}-border_color`"
-            :class="control"
-            :value="valueOf('border_color')"
+            label="Warna garis tepi"
+            class="w-full"
+            :options="borderColors"
+            :model-value="valueOf('border_color') === MIXED ? null : valueOf('border_color')"
+            :mixed="valueOf('border_color') === MIXED"
             :disabled="!canWrite"
-            @change="pick('border_color', $event)"
-          >
-            <option v-if="valueOf('border_color') === MIXED" :value="MIXED" disabled>Campuran</option>
-            <option v-for="o in borderColors" :key="o.value" :value="o.value">{{ o.label }}</option>
-          </select>
+            @update:model-value="pickValue('border_color', $event)"
+          />
         </div>
       </template>
       <div

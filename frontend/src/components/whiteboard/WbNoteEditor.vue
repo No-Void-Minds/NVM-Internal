@@ -9,7 +9,7 @@ import { formatKeys, formatMarks } from './wbFormat'
 // Editor teks berformat Whiteboard: isi catatan dan setiap field berformat (revisi 49). Dimuat hanya saat sebuah
 // field dibuka untuk diedit (dynamic import), dan hanya satu yang terpasang sekaligus (WbRichField), jadi kartu lain
 // dirender dari JSON. injectCSS false wajib: TipTap bawaannya menyisipkan tag <style>, yang diblokir CSP
-// style-src 'self'. Gaya editor ada di style.css (.wb-editor). Toolbar formatnya melayang di body.
+// style-src 'self'. Gaya editor ada di style.css (.wb-editor). Panel formatnya menempel di bar pilihan (revisi 52).
 const props = defineProps<{
   doc: PMNode
   label: string
@@ -24,6 +24,9 @@ const emit = defineEmits<{ input: [doc: PMNode]; close: []; enter: [] }>()
 const host = ref<HTMLElement | null>(null)
 const editor = shallowRef<Editor | null>(null)
 const bar = ref<InstanceType<typeof WbFormatBar> | null>(null)
+// Revisi 52: panel format menempel di slot bar pilihan (kiri atas kanvas). Di layar sentuh panel menempel di atas
+// keyboard virtual, jadi dipasang di body; tanpa slot (mis. bar pilihan tidak tampil) panel melayang seperti revisi 49.
+const slotted = !matchMedia('(pointer: coarse)').matches && !!document.getElementById('wb-format-slot')
 
 const allowedLink = (url: string) => /^(https?:\/\/|mailto:)/i.test(url.trim())
 
@@ -109,8 +112,8 @@ defineExpose({ current: () => (editor.value?.getJSON() as PMNode | undefined) ??
 <template>
   <div @keydown="onKeydown" @pointerdown.stop>
     <div ref="host" />
-    <Teleport to="body">
-      <WbFormatBar v-if="editor" ref="bar" :editor="editor" />
+    <Teleport :to="slotted ? '#wb-format-slot' : 'body'">
+      <WbFormatBar v-if="editor" ref="bar" :editor="editor" :mode="slotted ? 'slot' : 'float'" />
     </Teleport>
   </div>
 </template>

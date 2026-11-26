@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, useId, watch } from 'vue'
 import BaseDialog from '../BaseDialog.vue'
+import WbPicker from './WbPicker.vue'
 import { penColors } from './wbColors'
 import { FONT_SIZES, SHAPES, type ShapeContent } from '../../utils/wbShapes'
 
@@ -60,90 +61,93 @@ const lbl = 'text-sm font-semibold'
   <BaseDialog :open="open" title="Gaya bentuk" @close="emit('close')">
     <form v-if="content" class="grid grid-cols-2 gap-3 px-5 py-4" novalidate @submit.prevent>
       <label :for="`${uid}-shape`" :class="lbl" class="col-span-2">Jenis bentuk</label>
-      <select
+      <WbPicker
         :id="`${uid}-shape`"
-        :class="control"
-        class="col-span-2"
-        :value="content.shape"
+        label="Jenis bentuk"
+        class="col-span-2 w-full"
+        :options="SHAPES.map((s) => ({ value: s.id, label: `${s.group}: ${s.label}` }))"
+        :model-value="content.shape"
         :disabled="!canWrite"
-        @change="set('shape', ($event.target as HTMLSelectElement).value as ShapeContent['shape'])"
-      >
-        <option v-for="s in SHAPES" :key="s.id" :value="s.id">{{ s.group }}: {{ s.label }}</option>
-      </select>
+        @update:model-value="set('shape', $event as ShapeContent['shape'])"
+      />
       <div>
         <label :for="`${uid}-fill`" :class="lbl">Isian</label>
-        <select
+        <WbPicker
           :id="`${uid}-fill`"
-          :class="control"
-          :value="content.fill"
+          label="Isian"
+          class="w-full"
+          :options="fills"
+          :model-value="content.fill"
           :disabled="!canWrite"
-          @change="set('fill', ($event.target as HTMLSelectElement).value)"
-        >
-          <option v-for="f in fills" :key="f.value" :value="f.value">{{ f.label }}</option>
-        </select>
+          @update:model-value="set('fill', $event)"
+        />
       </div>
       <div>
         <label :for="`${uid}-stroke`" :class="lbl">Warna garis</label>
-        <select
+        <WbPicker
           :id="`${uid}-stroke`"
-          :class="control"
-          :value="content.stroke"
+          label="Warna garis"
+          class="w-full"
+          :options="penColors.map((c) => ({ value: c.value, label: c.label, swatch: c.css }))"
+          :model-value="content.stroke"
           :disabled="!canWrite"
-          @change="set('stroke', ($event.target as HTMLSelectElement).value)"
-        >
-          <option v-for="c in penColors" :key="c.value" :value="c.value">{{ c.label }}</option>
-        </select>
+          @update:model-value="set('stroke', $event)"
+        />
       </div>
       <div>
         <label :for="`${uid}-sw`" :class="lbl">Tebal garis</label>
-        <select
+        <WbPicker
           :id="`${uid}-sw`"
-          :class="control"
-          :value="content.stroke_width"
+          label="Tebal garis"
+          class="w-full"
+          :options="Array.from({ length: 8 }, (_, i) => ({ value: String(i + 1), label: `${i + 1} px` }))"
+          :model-value="String(content.stroke_width)"
           :disabled="!canWrite"
-          @change="set('stroke_width', Number(($event.target as HTMLSelectElement).value))"
-        >
-          <option v-for="n in 8" :key="n" :value="n">{{ n }} px</option>
-        </select>
+          @update:model-value="set('stroke_width', Number($event))"
+        />
       </div>
       <div>
         <label :for="`${uid}-ss`" :class="lbl">Gaya garis</label>
-        <select
+        <WbPicker
           :id="`${uid}-ss`"
-          :class="control"
-          :value="content.stroke_style"
+          label="Gaya garis"
+          class="w-full"
+          :options="[
+            { value: 'solid', label: 'Utuh' },
+            { value: 'dashed', label: 'Putus-putus' },
+          ]"
+          :model-value="content.stroke_style"
           :disabled="!canWrite"
-          @change="set('stroke_style', ($event.target as HTMLSelectElement).value as 'solid' | 'dashed')"
-        >
-          <option value="solid">Utuh</option>
-          <option value="dashed">Putus-putus</option>
-        </select>
+          @update:model-value="set('stroke_style', $event as 'solid' | 'dashed')"
+        />
       </div>
       <div>
         <label :for="`${uid}-fs`" :class="lbl">Ukuran huruf</label>
-        <select
+        <WbPicker
           :id="`${uid}-fs`"
-          :class="control"
-          :value="content.font_size"
+          label="Ukuran huruf"
+          class="w-full"
+          :options="FONT_SIZES.map((n) => ({ value: String(n), label: `${n} px` }))"
+          :model-value="String(content.font_size)"
           :disabled="!canWrite"
-          @change="set('font_size', Number(($event.target as HTMLSelectElement).value))"
-        >
-          <option v-for="n in FONT_SIZES" :key="n" :value="n">{{ n }} px</option>
-        </select>
+          @update:model-value="set('font_size', Number($event))"
+        />
       </div>
       <div>
         <label :for="`${uid}-al`" :class="lbl">Perataan teks</label>
-        <select
+        <WbPicker
           :id="`${uid}-al`"
-          :class="control"
-          :value="content.align"
+          label="Perataan teks"
+          class="w-full"
+          :options="[
+            { value: 'left', label: 'Kiri' },
+            { value: 'center', label: 'Tengah' },
+            { value: 'right', label: 'Kanan' },
+          ]"
+          :model-value="content.align"
           :disabled="!canWrite"
-          @change="set('align', ($event.target as HTMLSelectElement).value as ShapeContent['align'])"
-        >
-          <option value="left">Kiri</option>
-          <option value="center">Tengah</option>
-          <option value="right">Kanan</option>
-        </select>
+          @update:model-value="set('align', $event as ShapeContent['align'])"
+        />
       </div>
       <div>
         <label :for="`${uid}-rot`" :class="lbl">Putar (derajat)</label>

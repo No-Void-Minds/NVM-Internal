@@ -105,7 +105,8 @@ try {
       expect(await bar.isVisible(), where, "toolbar format tidak muncul");
       await ps.keyboard.press("Control+B");
       await bar.getByRole("button", { name: "Warna teks" }).click();
-      await bar.getByRole("button", { name: "Merah", exact: true }).click();
+      // Revisi 52: palet kotak di panel format, nama warna di aria-label.
+      await bar.getByRole("button", { name: "Warna merah", exact: true }).click();
       await ps.keyboard.press("Control+Shift+E");
       await ps.waitForTimeout(150);
 

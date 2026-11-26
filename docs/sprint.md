@@ -1804,6 +1804,22 @@ Keputusan teknis:
 - Kartu orang mendukung semua fitur kartu lain lewat jalur yang sama: garis (garis baru antar kartu orang siku dengan panah, untuk bagan organisasi), grup, kunci, gaya kartu, salin tempel, template, dan ekspor (foto digambar bulat, atau inisial).
 - Kontras: nama tinta dan jabatan atau divisi ink-muted di atas kartu (minimum 5,01:1 terang dan 5,09:1 gelap, sama dengan tabel Sprint 12h); penanda Nonaktif tinta dengan garis line (3,45:1 terhadap kanvas). E2E mengukur kontras nama di halaman.
 
+## Sprint 12k: Panel format menempel di bar pilihan, tanpa select bawaan (revisi 52)
+
+**Tujuan:** panel format tidak lagi menutupi kartu yang sedang diedit, dan semua kontrol Whiteboard memakai pola popover yang sama dengan toolbar pena.
+
+- [x] S12k-01 Panel format (`WbFormatBar.vue`) menempel di slot `#wb-format-slot` di kanan bar pilihan, turun ke baris kedua bila tidak muat; muncul hanya saat mengedit teks. Kode, superskrip, dan subskrip pindah ke popover "Lainnya"; pemisah antar kelompok; warna teks dan stabilo berupa palet kotak.
+- [x] S12k-02 Bar pilihan: palet Warna (kotak warna kartu, Tanpa latar, Gaya lainnya...) dan tombol Aksi yang membuka `WbContextMenu` dengan daftar aksi yang sama dengan klik kanan (`selectionMenu`, tidak diduplikasi). Pilihan Rapikan pindah ke submenu Rata; Garis (N) dan Gaya bentuk pindah ke menu.
+- [x] S12k-03 Semua `<select>` di Whiteboard (bar pilihan, Panel gaya, Gaya bentuk, dialog Garis penghubung) diganti `WbPicker.vue`.
+- [x] S12k-04 E2E `scripts/e2e/uji-r52.mjs` (1280 dan 360 px); `uji-r49.mjs` dan `uji-r50.mjs` disesuaikan (nama kotak warna, pemilih popover).
+
+**Keputusan:**
+- Panel format di layar non-sentuh selalu di slot bar pilihan. Bila di posisi itu panel akan beririsan dengan kartu yang sedang diedit (kartu di tepi atas kanvas, di bawah bar), panel pindah menempel di tepi bawah kanvas; kanvas tidak digeser. Di layar sentuh perilaku revisi 49 tetap (menempel di atas keyboard virtual, digulir menyamping). Tanpa bar pilihan (mis. tidak ada slot) panel melayang seperti revisi 49 sebagai cadangan.
+- Gaya panel dan bar sama dengan toolbar pena: wadah `rounded-card border border-line bg-surface p-1 shadow-menu`, tombol 44 px, hover canvas, status tertekan accent dengan teks on-accent. Keyboard: Alt+F10 ke panel, panah antar tombol, panah bawah atau Enter membuka popover, panah di dalam popover, Enter memilih, Escape menutup popover lalu kembali ke teks. Memilih dari popover mengembalikan fokus ke teks secara sinkron.
+- `WbPicker`: pemicu berlabel "Label: nilai" (juga untuk pembaca layar), popover fixed di bawah pemicu (dibalik ke atas bila tidak muat, dijepit 8 px di dalam layar; tetap terlihat di dalam dialog modal). Pilihan berupa daftar teks atau kisi kotak 44 px; setiap kotak punya nama di aria-label dan tooltip, pilihan aktif ditandai centang dan `aria-pressed`, bukan warna saja. Panah (kisi: atas dan bawah per baris), Home, End, Enter, Escape dan Tab menutup lalu fokus kembali ke pemicu.
+- Palet Warna bar pilihan: memilih warna juga mengembalikan latar kartu yang tadinya tanpa latar, supaya warnanya terlihat. "Tanpa latar" saklar gaya revisi 50 (hanya kartu yang punya latar); "Gaya lainnya..." membuka Panel gaya.
+- Kontras: teks dan ikon tombol tinta di surface (13,31:1 terang, 13,67:1 gelap), tertekan on-accent di accent (lihat token), cincin pilihan dan fokus mark (15,23:1 terhadap surface terang), garis kotak warna line (3,45:1 terhadap kanvas). Tanpa animasi baru.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -2009,7 +2025,7 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 49 | 2026-11-26 | Whiteboard: toolbar format teks melayang untuk catatan, kartu judul, checklist, tabel, teks bentuk, dan judul kolom; ekspor ikut menggambar format | Sprint 12h |
 | 50 | 2026-11-26 | Whiteboard: gaya kartu, menu klik kanan, grup, kunci posisi; ganti, potong, lihat penuh, dan unduh gambar serta berkas | Sprint 12i |
 | 51 | 2026-11-26 | Whiteboard: kartu anggota tim (alat Tim, data orang diambil dari profil saat papan dimuat) | Sprint 12j |
-| 52 | 2026-11-26 | Whiteboard: panel format menempel di bar pilihan (tidak lagi melayang di atas teks), bar pilihan tanpa select bawaan browser (palet warna dan tombol menu Aksi memakai menu klik kanan) | Sprint 12k (setelah revisi 51) |
+| 52 | 2026-11-26 | Whiteboard: panel format menempel di bar pilihan (tidak lagi melayang di atas teks), bar pilihan tanpa select bawaan browser (palet warna dan tombol menu Aksi memakai menu klik kanan) | Sprint 12k |
 | 33b | 2026-11-20 | Poles tampilan kartu Aktivitas: tombol rantai pindah ke celah antar isian dan jadi ikon kecil tanpa bingkai, tombol mati tidak dirender, jam tersambung menyatu dengan jam kepalanya, status simpan punya baris tetap, Tambah berkas di sel tabel tanpa bingkai | Sprint 12c |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 

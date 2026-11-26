@@ -22,6 +22,7 @@ import WbContextMenu, { type MenuItem } from '../components/whiteboard/WbContext
 import WbStylePanel from '../components/whiteboard/WbStylePanel.vue'
 import WbImageDialog from '../components/whiteboard/WbImageDialog.vue'
 import WbTeamDialog from '../components/whiteboard/WbTeamDialog.vue'
+import WbPicker from '../components/whiteboard/WbPicker.vue'
 import type { DrawnLine } from '../components/whiteboard/WbConnectorLayer.vue'
 import type { ConnectorUpdate } from '../components/whiteboard/WbConnectorDialog.vue'
 import {
@@ -1515,30 +1516,54 @@ function restoreFrom(info: { batch: string } | null) {
   if (info) restoreDeleted(info.batch)
 }
 
-// Aksi W3 di satu pilihan, supaya bar pilihan tetap pendek di ponsel dan tidak menutupi kartu.
-function onMoreAction(e: Event) {
-  const el = e.target as HTMLSelectElement
-  const first = [...selected.value][0]
-  const action = el.value
-  el.value = ''
-  if (action === 'comments' && first) commentsFor.value = first
-  else if (action === 'lines' && first) connectorIds.value = connectorsOf(first).map((c) => c.id)
-  else if (action === 'shapestyle' && first) shapeStyleId.value = first
-  else if (action === 'connect') connectSelected()
-  else if (action === 'move') {
-    moveError.value = ''
-    moveOpen.value = true
-  } else if (action === 'menu') {
-    // Menu klik kanan lewat bar pilihan: jalur untuk layar sentuh tanpa tekan lama dan untuk pengguna keyboard.
-    const r = el.getBoundingClientRect()
-    openMenu(r.left, r.bottom + 4, el, true)
+// Tombol Aksi di bar pilihan membuka menu yang sama dengan klik kanan (revisi 52), di bawah tombolnya.
+function openBarMenu(e: MouseEvent) {
+  const el = e.currentTarget as HTMLElement
+  if (menu.value?.opener === el) {
+    closeMenu(true)
+    return
   }
+  const r = el.getBoundingClientRect()
+  openMenu(r.left, r.bottom + 4, el, true)
 }
 
-function onAlignChange(e: Event) {
-  const el = e.target as HTMLSelectElement
-  align(el.value)
-  el.value = ''
+// Palet warna bar pilihan: kotak warna kartu, Tanpa latar (gaya revisi 50), dan Gaya lainnya (panel gaya).
+const cardSwatch: Record<string, string> = {
+  '': 'var(--color-surface)',
+  abu: 'var(--color-requested-bg)',
+  hijau: 'var(--color-progress-bg)',
+  kuning: 'var(--color-ready-bg)',
+  biru: 'var(--color-completed-bg)',
+  krem: 'var(--color-tag)',
+  merah: 'var(--color-danger-bg)',
+}
+const cardColorOptions = computed(() =>
+  colors.map((c) => ({
+    value: c.value ?? '',
+    label: `Warna ${c.label.toLowerCase()}`,
+    swatch: cardSwatch[c.value ?? ''],
+  })),
+)
+const penOptions = computed(() =>
+  penColors.map((c) => ({ value: c.value, label: `Coretan ${c.label}`, swatch: c.css })),
+)
+const allClear = computed(
+  () =>
+    selCards.value.length > 0 && selCards.value.every((c) => !colorable(c) || c.style?.bg === 'transparan'),
+)
+const colorExtras = computed(() => [
+  {
+    id: 'tanpa-latar',
+    label: 'Tanpa latar',
+    pressed: allClear.value,
+    run: () => applyStyle({ bg: allClear.value ? '' : 'transparan' }),
+  },
+  { id: 'gaya', label: 'Gaya lainnya...', run: () => (stylePanelOpen.value = true) },
+])
+// Memilih warna juga mengembalikan latar kartu yang tadinya tanpa latar, supaya warnanya terlihat.
+function pickCardColor(v: string) {
+  setColor(v)
+  if (selCards.value.some((c) => c.style?.bg === 'transparan')) applyStyle({ bg: '' })
 }
 
 async function restoreDeleted(batch: string) {
@@ -1597,18 +1622,6 @@ async function sendGeometry(patches: CardPatch[]) {
     // Papan sudah dimuat ulang oleh saving().
   }
 }
-
-// Rata dan sebar beberapa kartu terpilih.
-const alignOptions: { value: AlignKind; label: string; min: number }[] = [
-  { value: 'left', label: 'Rata kiri', min: 2 },
-  { value: 'hcenter', label: 'Rata tengah mendatar', min: 2 },
-  { value: 'right', label: 'Rata kanan', min: 2 },
-  { value: 'top', label: 'Rata atas', min: 2 },
-  { value: 'vcenter', label: 'Rata tengah tegak', min: 2 },
-  { value: 'bottom', label: 'Rata bawah', min: 2 },
-  { value: 'hspread', label: 'Sebar mendatar', min: 3 },
-  { value: 'vspread', label: 'Sebar tegak', min: 3 },
-]
 
 function align(kind: string) {
   if (anyLocked.value) {
@@ -1678,8 +1691,6 @@ const groupFrames = computed(() => {
 
 const selCards = computed(() => [...selected.value].flatMap((id) => byId.value.get(id) ?? []))
 const anyLocked = computed(() => selCards.value.some((c) => c.locked))
-// Rata dan sebar berlaku per unit (grup utuh atau kartu tunggal).
-const selUnitCount = computed(() => units([...selected.value], cards.value, groupScope.value).length)
 
 function lockedToast(n = selCards.value.filter((c) => c.locked).length) {
   showToast(
@@ -2264,6 +2275,15 @@ function selectionMenu(): MenuItem[] {
   if (w && n >= 2) out.push(mi('connect', 'Hubungkan dengan garis (urutan pilih)'))
   if (w && !locked) out.push(mi('newBoard', 'Jadikan papan baru'), mi('moveBoard', 'Pindahkan ke papan lain'))
   if (one) out.push(mi('comments', 'Komentar'), mi('copyLink', 'Salin tautan kartu'))
+  // Dulu di pilihan "Aksi lain" bar pilihan (W3 dan W5); sejak revisi 52 bar pilihan memakai menu ini.
+  if (one && connectorsOf(one.id).length)
+    out.push({
+      id: 'lines',
+      label: `Garis (${connectorsOf(one.id).length})`,
+      run: () => (connectorIds.value = connectorsOf(one.id).map((c) => c.id)),
+    })
+  if (one?.kind === 'shape' && w)
+    out.push({ id: 'shapestyle', label: 'Gaya bentuk', run: () => (shapeStyleId.value = one.id) })
   if (one?.kind === 'image' && one.file) {
     if (w)
       out.push(
@@ -3419,12 +3439,6 @@ function cardName(id: string) {
   return c ? cardLabel(c) : 'kartu'
 }
 
-async function connectSelected() {
-  await connectInOrder()
-  const last = connectors.value.at(-1)
-  if (selected.value.size === 2 && last) connectorIds.value = [last.id]
-}
-
 // Hubungkan kartu terpilih berurutan sesuai urutan pilih (revisi 50): 1 ke 2, 2 ke 3, dan seterusnya. Satu langkah
 // undo untuk semua garis baru.
 async function connectInOrder() {
@@ -4456,6 +4470,9 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointercancel', onUp)
 })
 
+// Tombol teks bar pilihan, sama dengan toolbar pena (WbPenBar).
+const barBtn =
+  'inline-flex min-h-11 shrink-0 items-center gap-1 justify-center rounded-card px-3 text-sm font-medium hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark aria-expanded:bg-canvas disabled:opacity-50'
 const btn =
   'inline-flex min-h-11 items-center justify-center gap-1.5 rounded-card border border-line bg-surface px-3 font-medium hover:bg-canvas active:translate-y-px disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark'
 const iconBtn =
@@ -5019,92 +5036,71 @@ const toolBtn =
           @undo="undoStroke"
           @done="stopPen"
         />
-        <!-- Pilihan: warna, ubah isi, hapus. -->
+        <!-- Bar pilihan (revisi 52): palet warna, Aksi (menu yang sama dengan klik kanan), Hapus. Panel format menempel di
+             kanannya (slot wb-format-slot) saat mengedit teks, dan turun ke baris kedua bila tidak muat. -->
         <div
           v-if="state === 'ok' && canWrite && selected.size > 0 && !penOn && !listMode"
-          class="absolute top-2 left-2 z-20 flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-2 rounded-card border border-line bg-surface p-1.5 shadow-menu"
-          @click.capture="guardTap"
+          class="pointer-events-none absolute top-2 right-2 left-2 z-20 flex flex-wrap items-start gap-2"
         >
-          <template v-if="onlyDrawings">
-            <label :for="`${uid}-ink`" class="sr-only">Warna coretan terpilih</label>
-            <select
-              :id="`${uid}-ink`"
-              class="min-h-11 rounded-card border border-line bg-surface px-2"
-              value=""
-              @change="
-                (recolorDrawings(($event.target as HTMLSelectElement).value),
-                (($event.target as HTMLSelectElement).value = ''))
-              "
-            >
-              <option value="" disabled>Warna coretan...</option>
-              <option v-for="pc in penColors" :key="pc.value" :value="pc.value">
-                Coretan: {{ pc.label }}
-              </option>
-            </select>
-          </template>
-          <template v-else>
-            <label :for="`${uid}-color`" class="sr-only">Warna kartu terpilih</label>
-            <select
-              :id="`${uid}-color`"
-              class="min-h-11 rounded-card border border-line bg-surface px-2"
-              :value="selectionColor"
-              @change="setColor(($event.target as HTMLSelectElement).value)"
-            >
-              <option v-if="selectionColor === 'campuran'" value="campuran" disabled>Warna campuran</option>
-              <option v-for="c in colors" :key="c.label" :value="c.value ?? ''">Warna: {{ c.label }}</option>
-            </select>
-          </template>
-          <button
-            v-if="selected.size === 1 && byId.get([...selected][0]!)?.kind !== 'link'"
-            type="button"
-            :class="btn"
-            @click="startEdit([...selected][0]!)"
+          <div
+            class="pointer-events-auto flex max-w-full flex-wrap items-center gap-0.5 rounded-card border border-line bg-surface p-1 shadow-menu"
+            data-testid="wb-selbar"
+            @click.capture="guardTap"
           >
-            {{ byId.get([...selected][0]!)?.kind === 'board' ? 'Ubah judul' : 'Ubah isi' }}
-          </button>
-          <label :for="`${uid}-more`" class="sr-only">Aksi lain untuk kartu terpilih</label>
-          <select
-            :id="`${uid}-more`"
-            class="min-h-11 rounded-card border border-line bg-surface px-2"
-            value=""
-            @change="onMoreAction"
-          >
-            <option value="" disabled>Aksi lain...</option>
-            <option v-if="selected.size === 1" value="comments">Komentar</option>
-            <option
-              v-if="selected.size === 1 && byId.get([...selected][0]!)?.kind === 'shape'"
-              value="shapestyle"
+            <WbPicker
+              v-if="onlyDrawings"
+              label="Warna coretan terpilih"
+              compact
+              class="border-0"
+              :options="penOptions"
+              :model-value="null"
+              @update:model-value="recolorDrawings"
+            />
+            <WbPicker
+              v-else
+              label="Warna kartu terpilih"
+              compact
+              class="border-0"
+              :options="cardColorOptions"
+              :model-value="selectionColor === 'campuran' ? null : selectionColor"
+              :mixed="selectionColor === 'campuran'"
+              :extras="colorExtras"
+              @update:model-value="pickCardColor"
+            />
+            <span aria-hidden="true" class="mx-0.5 h-6 w-px bg-line" />
+            <button
+              v-if="selected.size === 1 && byId.get([...selected][0]!)?.kind !== 'link'"
+              type="button"
+              :class="barBtn"
+              @click="startEdit([...selected][0]!)"
             >
-              Gaya bentuk
-            </option>
-            <option v-if="selected.size === 1 && connectorsOf([...selected][0]!).length" value="lines">
-              Garis ({{ connectorsOf([...selected][0]!).length }})
-            </option>
-            <option v-if="selected.size === 2" value="connect">Hubungkan dengan garis</option>
-            <option v-if="!anyLocked" value="move">Pindahkan ke papan</option>
-            <option value="menu">Semua aksi (Shift+F10)</option>
-          </select>
-          <template v-if="selUnitCount >= 2">
-            <label :for="`${uid}-align`" class="sr-only">Rapikan kartu terpilih</label>
-            <select
-              :id="`${uid}-align`"
-              class="min-h-11 rounded-card border border-line bg-surface px-2"
-              value=""
-              @change="onAlignChange"
+              {{ byId.get([...selected][0]!)?.kind === 'board' ? 'Ubah judul' : 'Ubah isi' }}
+            </button>
+            <button
+              type="button"
+              :class="barBtn"
+              aria-haspopup="menu"
+              :aria-expanded="menu?.opener?.dataset.menuButton === 'bar' ? 'true' : 'false'"
+              data-menu-button="bar"
+              @click="openBarMenu"
             >
-              <option value="" disabled>Rapikan...</option>
-              <option
-                v-for="o in alignOptions.filter((a) => selUnitCount >= a.min)"
-                :key="o.value"
-                :value="o.value"
+              Aksi
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                class="size-4"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.75"
               >
-                {{ o.label }}
-              </option>
-            </select>
-          </template>
-          <button type="button" :class="btn" class="text-urgent" @click="removeSelected">
-            Hapus {{ selected.size }} kartu
-          </button>
+                <path d="M4 6l4 4 4-4" />
+              </svg>
+            </button>
+            <button type="button" :class="barBtn" class="text-urgent" @click="removeSelected">
+              Hapus {{ selected.size }} kartu
+            </button>
+          </div>
+          <div id="wb-format-slot" class="pointer-events-auto max-w-full empty:hidden" />
         </div>
 
         <!-- Terputus (W2): penanda tetap, bukan toast; perubahan menunggu di antrean sampai tersambung lagi. -->

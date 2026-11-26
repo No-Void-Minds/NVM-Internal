@@ -108,6 +108,11 @@ async function pick(p, id) {
   await p.keyboard.press("Escape");
   await p.locator(`[data-card="${id}"]`).click();
 }
+// Revisi 52: select diganti pemilih popover (WbPicker): pemicu berlabel "Label: nilai", pilihan berupa tombol.
+async function choose(scope, page, label, option) {
+  await scope.getByRole("button", { name: new RegExp(`^${label}:`) }).click();
+  await page.getByTestId("wb-picker").getByRole("button", { name: option, exact: true }).click();
+}
 const selectedCount = (p) => p.locator(".wb-card-selected").count();
 const menuVisible = (p) => p.getByTestId("wb-menu").first().isVisible().catch(() => false);
 async function menuItem(p, name) {
@@ -266,8 +271,8 @@ try {
     await ps.keyboard.press("Control+Alt+s");
     const dlg = ps.getByRole("dialog", { name: "Gaya kartu" });
     await dlg.waitFor({ timeout: 5000 });
-    await dlg.getByLabel("Latar").selectOption("transparan");
-    await dlg.getByLabel("Garis tepi", { exact: true }).selectOption("tebal");
+    await choose(dlg, ps, "Latar", "Tanpa latar");
+    await choose(dlg, ps, "Garis tepi", "Tebal");
     await ps.keyboard.press("Escape");
     await ps.keyboard.press("Escape");
     await settle(ps);
@@ -351,7 +356,7 @@ try {
 
     // Salin dan tempel gaya, duplikat, potong lalu tempel di sini.
     await ps.keyboard.press("Control+Alt+s");
-    await ps.getByRole("dialog", { name: "Gaya kartu" }).getByLabel("Sudut").selectOption("bulat");
+    await choose(ps.getByRole("dialog", { name: "Gaya kartu" }), ps, "Sudut", "Bulat");
     await ps.keyboard.press("Escape");
     await settle(ps);
     await ps.keyboard.press("Control+Alt+c");

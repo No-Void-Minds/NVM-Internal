@@ -2,6 +2,7 @@
 import { useId } from 'vue'
 import { useDrafts } from './drafts'
 import BaseDialog from '../BaseDialog.vue'
+import WbPicker from './WbPicker.vue'
 import type { Connector, ConnectorGeometry, ConnectorStyle } from '../../utils/whiteboard'
 import { END_KINDS, portsFor } from '../../utils/wbShapes'
 import { penColors } from './wbColors'
@@ -45,19 +46,18 @@ const portLabel: Record<string, string> = {
   bottom_right: 'Sudut kanan bawah',
 }
 
-function setStyle(c: Connector, key: keyof ConnectorStyle, e: Event) {
-  emit('update', c.id, { style: { ...c.style, [key]: (e.target as HTMLSelectElement).value } })
+function setStyle(c: Connector, key: keyof ConnectorStyle, v: string) {
+  emit('update', c.id, { style: { ...c.style, [key]: v } })
 }
 function setLabel(c: Connector, key: 'label' | 'label_start' | 'label_end', e: Event) {
   const v = (e.target as HTMLInputElement).value.trim()
   if (v !== c[key]) emit('update', c.id, { [key]: v })
 }
-function setRoute(c: Connector, e: Event) {
-  const route = (e.target as HTMLSelectElement).value as ConnectorGeometry['route']
+function setRoute(c: Connector, v: string) {
+  const route = v as ConnectorGeometry['route']
   emit('update', c.id, { geometry: { ...c.geometry, route } })
 }
-function setPort(c: Connector, side: 'from' | 'to', e: Event) {
-  const port = (e.target as HTMLSelectElement).value
+function setPort(c: Connector, side: 'from' | 'to', port: string) {
   emit('update', c.id, { geometry: { ...c.geometry, [side]: { ...c.geometry[side], port } } })
 }
 function clearBends(c: Connector) {
@@ -65,6 +65,24 @@ function clearBends(c: Connector) {
 }
 
 const field = 'min-h-11 w-full rounded-card border border-line bg-surface px-2'
+const LINES = [
+  { value: 'solid', label: 'Utuh' },
+  { value: 'dashed', label: 'Putus-putus' },
+  { value: 'dotted', label: 'Titik-titik' },
+]
+const ROUTES = [
+  { value: 'straight', label: 'Lurus' },
+  { value: 'orthogonal', label: 'Siku' },
+  { value: 'curved', label: 'Melengkung' },
+]
+const endOpts = END_KINDS.map((k) => ({ value: k.id, label: k.label }))
+const colorOpts = penColors.map((p) => ({
+  value: p.value === 'tinta' ? '' : p.value,
+  label: p.label,
+  swatch: p.css,
+}))
+const portOpts = (shape: boolean) =>
+  ['auto', ...portsFor(shape)].map((p) => ({ value: p, label: portLabel[p] ?? p }))
 const cell = 'flex min-w-0 flex-col gap-1 text-sm'
 const btn =
   'inline-flex min-h-11 items-center justify-center rounded-card border border-line bg-surface px-3 font-medium hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark'
@@ -119,90 +137,87 @@ const btn =
           <div class="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-2">
             <div :class="cell">
               <label :for="`${uid}-${i}-start`">Ujung awal</label>
-              <select
+              <WbPicker
                 :id="`${uid}-${i}-start`"
-                :class="field"
-                :value="c.style.start"
-                @change="setStyle(c, 'start', $event)"
-              >
-                <option v-for="k in END_KINDS" :key="k.id" :value="k.id">{{ k.label }}</option>
-              </select>
+                label="Ujung awal"
+                class="w-full"
+                :options="endOpts"
+                :model-value="c.style.start"
+                :disabled="!canWrite"
+                @update:model-value="setStyle(c, 'start', $event)"
+              />
             </div>
             <div :class="cell">
               <label :for="`${uid}-${i}-end`">Ujung akhir</label>
-              <select
+              <WbPicker
                 :id="`${uid}-${i}-end`"
-                :class="field"
-                :value="c.style.end"
-                @change="setStyle(c, 'end', $event)"
-              >
-                <option v-for="k in END_KINDS" :key="k.id" :value="k.id">{{ k.label }}</option>
-              </select>
+                label="Ujung akhir"
+                class="w-full"
+                :options="endOpts"
+                :model-value="c.style.end"
+                :disabled="!canWrite"
+                @update:model-value="setStyle(c, 'end', $event)"
+              />
             </div>
             <div :class="cell">
               <label :for="`${uid}-${i}-line`">Garis</label>
-              <select
+              <WbPicker
                 :id="`${uid}-${i}-line`"
-                :class="field"
-                :value="c.style.line"
-                @change="setStyle(c, 'line', $event)"
-              >
-                <option value="solid">Utuh</option>
-                <option value="dashed">Putus-putus</option>
-                <option value="dotted">Titik-titik</option>
-              </select>
+                label="Garis"
+                class="w-full"
+                :options="LINES"
+                :model-value="c.style.line"
+                :disabled="!canWrite"
+                @update:model-value="setStyle(c, 'line', $event)"
+              />
             </div>
             <div :class="cell">
               <label :for="`${uid}-${i}-color`">Warna</label>
-              <select
+              <WbPicker
                 :id="`${uid}-${i}-color`"
-                :class="field"
-                :value="c.style.color"
-                @change="setStyle(c, 'color', $event)"
-              >
-                <option v-for="p in penColors" :key="p.value" :value="p.value === 'tinta' ? '' : p.value">
-                  {{ p.label }}
-                </option>
-              </select>
+                label="Warna"
+                class="w-full"
+                :options="colorOpts"
+                :model-value="c.style.color"
+                :disabled="!canWrite"
+                @update:model-value="setStyle(c, 'color', $event)"
+              />
             </div>
             <div :class="cell">
               <label :for="`${uid}-${i}-route`">Jalur</label>
-              <select
+              <WbPicker
                 :id="`${uid}-${i}-route`"
-                :class="field"
-                :value="c.geometry.route || 'straight'"
-                @change="setRoute(c, $event)"
-              >
-                <option value="straight">Lurus</option>
-                <option value="orthogonal">Siku</option>
-                <option value="curved">Melengkung</option>
-              </select>
+                label="Jalur"
+                class="w-full"
+                :options="ROUTES"
+                :model-value="c.geometry.route || 'straight'"
+                :disabled="!canWrite"
+                @update:model-value="setRoute(c, $event)"
+              />
             </div>
             <div v-if="c.from" :class="cell">
               <label :for="`${uid}-${i}-pf`">Menempel di awal</label>
-              <select
+              <WbPicker
                 :id="`${uid}-${i}-pf`"
-                :class="field"
-                :value="c.geometry.from.port || 'auto'"
-                @change="setPort(c, 'from', $event)"
-              >
-                <option v-for="p in ['auto', ...portsFor(isShape(c.from))]" :key="p" :value="p">
-                  {{ portLabel[p] }}
-                </option>
-              </select>
+                label="Menempel di awal"
+                class="w-full"
+                :options="portOpts(isShape(c.from))"
+                :model-value="c.geometry.from.port || 'auto'"
+                :disabled="!canWrite"
+                @update:model-value="setPort(c, 'from', $event)"
+              />
             </div>
             <div v-if="c.to" :class="cell">
               <label :for="`${uid}-${i}-pt`">Menempel di akhir</label>
-              <select
+              <WbPicker
                 :id="`${uid}-${i}-pt`"
-                :class="field"
-                :value="c.geometry.to.port || 'auto'"
-                @change="setPort(c, 'to', $event)"
-              >
-                <option v-for="p in ['auto', ...portsFor(isShape(c.to))]" :key="p" :value="p">
-                  {{ portLabel[p] }}
-                </option>
-              </select>
+                label="Menempel di akhir"
+                class="w-full"
+                :options="portOpts(isShape(c.to))"
+                :model-value="c.geometry.to.port || 'auto'"
+                :disabled="!canWrite"
+                @update:model-value="setPort(c, 'to', $event)"
+              />
             </div>
           </div>
           <div class="flex flex-wrap gap-2">
