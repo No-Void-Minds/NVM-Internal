@@ -3815,6 +3815,16 @@ async function wbCard(api, board, kind, x, y, content, extra = {}) {
   return r.body.card;
 }
 
+// Revisi 52: bar pilihan memakai tombol Aksi (menu yang sama dengan klik kanan) dan pemilih popover, bukan select.
+async function wbAction(page, name) {
+  await page.getByTestId("wb-selbar").getByRole("button", { name: "Aksi" }).click();
+  await page.getByRole("menuitem", { name }).first().click();
+}
+async function wbPick(scope, page, label, option) {
+  await scope.getByRole("button", { name: new RegExp(`^${label}:`) }).click();
+  await page.getByTestId("wb-picker").getByRole("button", { name: option, exact: true }).click();
+}
+
 async function wbCards(api, board) {
   return (await api.call("GET", `/whiteboard/boards/${board}`)).body.board.cards;
 }
@@ -4381,7 +4391,7 @@ async function checkWbLangsung(width) {
     await pm.keyboard.press("Enter");
     await pm.getByText(/sedang mengedit kartu ini/).first().waitFor({ timeout: 5000 }).catch(() => {});
     expect((await pm.getByRole("textbox", { name: "Isi catatan" }).count()) === 0, "kunci", "Manajer bisa membuka editor kartu yang dikunci");
-    await pm.getByLabel("Warna kartu terpilih").selectOption("kuning");
+    await wbPick(pm, pm, "Warna kartu terpilih", "Warna kuning");
     await wbSaved(pm);
     await ps.keyboard.press("Escape");
     await wbSaved(ps);
@@ -4504,7 +4514,7 @@ async function checkWbPutus(width) {
     expect((await ps.locator("[data-testid=wb-save]").textContent()).includes("Terputus"), "status", "status bukan Terputus");
     // Manajer mengubah warna kartu B selama Staf putus.
     await pm.locator(`[data-card="${b.id}"]`).click({ position: { x: 6, y: 6 } });
-    await pm.getByLabel("Warna kartu terpilih").selectOption("biru");
+    await wbPick(pm, pm, "Warna kartu terpilih", "Warna biru");
     await wbSaved(pm);
     await cs.setOffline(false);
     await ps.waitForFunction(() => document.querySelector("[data-testid=wb-save]")?.textContent?.trim() === "Tersimpan", null, { timeout: 40000 }).catch(() => {});
@@ -4544,11 +4554,11 @@ async function checkWbUndo(width) {
     await ps.keyboard.press("Shift+ArrowRight");
     await ps.waitForTimeout(600);
     await wbSaved(ps);
-    await ps.getByLabel("Warna kartu terpilih").selectOption("kuning");
+    await wbPick(ps, ps, "Warna kartu terpilih", "Warna kuning");
     await wbSaved(ps);
     await pm.waitForTimeout(300);
     await pm.locator(`[data-card="${note.id}"]`).click({ position: { x: 6, y: 6 } });
-    await pm.getByLabel("Warna kartu terpilih").selectOption("hijau");
+    await wbPick(pm, pm, "Warna kartu terpilih", "Warna hijau");
     await wbSaved(pm);
     await ps.waitForFunction((id) => document.querySelector(`[data-card="${id}"]`)?.className.includes("bg-progress-bg"), note.id, { timeout: 10000 }).catch(() => {});
     await loc.focus();
@@ -4939,12 +4949,12 @@ async function checkWbPenghubung(width) {
     const pm = await wbPage(cm, board, errors);
     await wbSelect(ps, a.id);
     await wbSelect(ps, b.id, { modifiers: ["Shift"] });
-    await ps.getByLabel("Aksi lain untuk kartu terpilih").selectOption("connect");
+    await wbAction(ps, "Hubungkan dengan garis (urutan pilih)");
     const dlg = ps.locator("dialog[open]");
     await dlg.getByLabel("Label tengah").waitFor({ timeout: 10000 });
     await dlg.getByLabel("Label tengah").fill("lalu");
     await dlg.getByLabel("Label tengah").press("Tab");
-    await dlg.getByLabel("Garis", { exact: true }).selectOption("dashed");
+    await wbPick(dlg, ps, "Garis", "Putus-putus");
     await wbSaved(ps);
     await audit(ps, errors, `wbpenghubung ${width} dialog`);
     await dlg.getByRole("button", { name: "Tutup" }).click();
@@ -4958,7 +4968,7 @@ async function checkWbPenghubung(width) {
     await ps.locator(".wb-canvas").focus();
     await ps.keyboard.press("Escape");
     await wbSelect(ps, a.id);
-    await ps.getByLabel("Aksi lain untuk kartu terpilih").selectOption("lines");
+    await wbAction(ps, /^Garis \(/);
     await dlg.getByRole("button", { name: "Hapus garis" }).click();
     await wbSaved(ps);
     await pm.waitForFunction(() => document.querySelectorAll("[data-testid=wb-connector]").length === 0, null, { timeout: 10000 }).catch(() => {});
@@ -4987,7 +4997,7 @@ async function checkWbKomentar(width) {
     const ps = await wbPage(cs, board, errors);
     const pm = await wbPage(cm, board, errors);
     await wbSelect(ps, note.id);
-    await ps.getByLabel("Aksi lain untuk kartu terpilih").selectOption("comments");
+    await wbAction(ps, "Komentar");
     const panel = ps.locator("dialog[open]");
     await panel.getByLabel("Komentar baru").fill("Ukuran gambarnya cek lagi");
     await panel.getByRole("button", { name: "Kirim komentar" }).click();
@@ -5165,7 +5175,7 @@ async function checkWbPindah(width) {
   try {
     const ps = await wbPage(cs, board, errors);
     await wbSelect(ps, a.id);
-    await ps.getByLabel("Aksi lain untuk kartu terpilih").selectOption("move");
+    await wbAction(ps, "Pindahkan ke papan lain");
     const dlg = ps.locator("dialog[open]");
     await dlg.getByRole("radio", { name: "Tujuan", exact: true }).check();
     await audit(ps, errors, `wbpindah ${width} dialog`);
@@ -5423,7 +5433,7 @@ async function checkWbKetik(width) {
     await ps.reload();
     await ps.waitForLoadState("networkidle");
     await ps.locator(`[data-card="${list.id}"]`).click();
-    await ps.getByLabel("Aksi lain untuk kartu terpilih").selectOption("lines");
+    await wbAction(ps, /^Garis \(/);
     const label = ps.locator("dialog[open]").getByLabel("Label tengah");
     await label.waitFor({ timeout: 10000 });
     await label.fill("lalu diketik");
@@ -5702,19 +5712,30 @@ async function checkWbPerforma() {
       multipart: { file: { name: "foto.png", mimeType: "image/png", buffer: testPng(400, 200) } },
     });
     const fileId = (await up.json()).card.file.id;
+    // Revisi 50 dan 51: kartu orang, grup (empat kartu per grup), dan gaya kartu ikut di antara 500 kartu.
+    const peopleIds = ((await api.call("GET", "/whiteboard/people")).body?.people ?? []).map((p) => p.id);
+    const groupOf = new Map();
     const made = [];
     const jobs = [];
     for (let i = 1; i < 480; i++) {
       const x = (i % 25) * 280;
       const y = Math.floor(i / 25) * 180;
       // W5: 100 bentuk (sebagian diputar) di antara 500 kartu.
-      const kind = i <= 49 ? "image" : i <= 149 ? "shape" : ["note", "checklist", "heading"][i % 3];
+      const kind = i <= 49 ? "image" : i <= 149 ? "shape" : i <= 209 && peopleIds.length ? "person" : ["note", "checklist", "heading"][i % 3];
       const content =
         kind === "shape" ? { shape: ["process", "decision", "ellipse", "uml_class", "arrow_right"][i % 5], rotation: i % 4 === 0 ? 30 : 0, fill: "putih", stroke: "tinta", stroke_width: 2, stroke_style: "solid", text: `Langkah ${i}`, align: "center", font_size: 16, name: "Kelas", attributes: "+ id", methods: "+ simpan()" } :
         kind === "note" ? wbNote(`Catatan uji performa nomor ${i} dengan sedikit teks`) :
         kind === "checklist" ? { title: `Checklist ${i}`, items: [{ id: crypto.randomUUID(), text: "Butir", done: i % 2 === 0 }] } :
-        kind === "heading" ? { text: `Judul ${i}`, level: 2 } : { caption: `Gambar ${i}` };
-      jobs.push(() => api.call("POST", `/whiteboard/boards/${board}/cards`, { kind, x, y, w: 240, h: 120, content, ...(kind === "image" ? { file_id: fileId } : {}) }).then((r) => r.body?.card && made.push(r.body.card)));
+        kind === "heading" ? { text: `Judul ${i}`, level: 2 } :
+        kind === "person" ? { user_id: peopleIds[i % peopleIds.length], view: "lengkap", size: "sedang", layout: "samping" } : { caption: `Gambar ${i}` };
+      const g = i >= 150 ? Math.floor(i / 4) : null;
+      if (g !== null && !groupOf.has(g)) groupOf.set(g, crypto.randomUUID());
+      const extra = {
+        ...(kind === "image" ? { file_id: fileId } : {}),
+        ...(g !== null ? { group_ids: [groupOf.get(g)] } : {}),
+        ...(i % 2 === 0 && kind !== "shape" ? { style: { bg: "transparan", border: "tebal", border_color: "biru", shadow: "tegas", opacity: 80 } } : {}),
+      };
+      jobs.push(() => api.call("POST", `/whiteboard/boards/${board}/cards`, { kind, x, y, w: 240, h: 120, content, ...extra }).then((r) => r.body?.card && made.push(r.body.card)));
     }
     for (let i = 0; i < 20; i++)
       jobs.push(() =>
@@ -5741,6 +5762,10 @@ async function checkWbPerforma() {
     const ortho = full.connectors.filter((c) => c.geometry.route === "orthogonal").length;
     expect(total >= 500, "isi", `kartu di papan uji: ${total}`);
     expect(shapeCount === 100 && full.connectors.length >= 100 && ortho > 0, "isi W5", `bentuk ${shapeCount}, garis ${full.connectors.length}, siku ${ortho}`);
+    const persons = full.cards.filter((c) => c.kind === "person").length;
+    const grouped = full.cards.filter((c) => c.group_ids?.length).length;
+    const styled = full.cards.filter((c) => c.style && Object.keys(c.style).length).length;
+    expect(persons >= 50 && grouped >= 300 && styled >= 100, "isi r50 r51", `orang ${persons}, bergrup ${grouped}, bergaya ${styled}`);
 
     const ps = await cs.newPage();
     ps.on("console", (m) => m.type() === "error" && errors.push(m.text()));
@@ -5916,7 +5941,7 @@ async function checkWb5(width) {
     await panel.waitFor({ timeout: 5000 });
     await panel.getByLabel("Label tengah").fill("ya");
     await panel.getByLabel("Label tengah").press("Tab");
-    await panel.getByLabel("Ujung akhir").selectOption("triangle");
+    await wbPick(panel, ps, "Ujung akhir", "Segitiga kosong");
     await wbSaved(ps);
     await ps.keyboard.press("Escape");
     view = await wbBoardView(api, board);
@@ -5958,6 +5983,8 @@ async function checkWb5(width) {
       expect(await name.waitFor({ timeout: 5000 }).then(() => true, () => false), "kelas edit", "isian kelas tidak terbuka");
       await name.fill("Pesanan");
       await ps.getByRole("textbox", { name: "Atribut kelas, satu per baris" }).click();
+      // Editor field dipasang saat diklik; ketik setelah fokus berpindah ke editornya.
+      await ps.waitForFunction(() => document.activeElement?.getAttribute("aria-label") === "Atribut kelas, satu per baris" && document.activeElement.classList.contains("ProseMirror"), null, { timeout: 5000 }).catch(() => {});
       await ps.keyboard.type("+ id: int");
       await ps.keyboard.press("Enter");
       await ps.keyboard.type("+ total: int");
@@ -5969,7 +5996,7 @@ async function checkWb5(width) {
 
       // Putar lewat panel gaya (jalur keyboard).
       await wbSelect(ps, cls.id);
-      await ps.getByLabel("Aksi lain untuk kartu terpilih").selectOption("shapestyle");
+      await wbAction(ps, "Gaya bentuk");
       const style = ps.getByRole("dialog", { name: "Gaya bentuk" });
       await style.waitFor({ timeout: 5000 });
       await style.getByLabel("Putar (derajat)").fill("45");

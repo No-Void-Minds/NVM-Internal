@@ -51,6 +51,16 @@ const close = async (page) => {
   await page.waitForTimeout(150);
 };
 
+// Revisi 52: bar pilihan memakai tombol Aksi (menu yang sama dengan klik kanan) dan pemilih popover, bukan select.
+async function wbAction(page, name) {
+  await page.getByTestId("wb-selbar").getByRole("button", { name: "Aksi" }).click();
+  await page.getByRole("menuitem", { name }).first().click();
+}
+async function wbPick(scope, page, label, option) {
+  await scope.getByRole("button", { name: new RegExp(`^${label}:`) }).click();
+  await page.getByTestId("wb-picker").getByRole("button", { name: option, exact: true }).click();
+}
+
 try {
   for (const width of WIDTHS) {
     for (const [role, sess] of [["Staf", staf], ["Manajer", mgr]]) {
@@ -73,11 +83,11 @@ try {
       // Bentuk terpilih: pegangan, port, dan bar pilihan.
       await page.locator(`[data-card="${b.id}"]`).click();
       await check(page, at("bentuk terpilih"), errors, true);
-      await page.getByLabel("Aksi lain untuk kartu terpilih").selectOption("shapestyle");
+      await wbAction(page, "Gaya bentuk");
       await page.getByRole("dialog", { name: "Gaya bentuk" }).waitFor({ timeout: 5000 });
       await check(page, at("gaya bentuk"), errors);
       await close(page);
-      await page.getByLabel("Aksi lain untuk kartu terpilih").selectOption("lines");
+      await wbAction(page, /^Garis \(/);
       await page.getByRole("dialog", { name: "Garis penghubung" }).waitFor({ timeout: 5000 });
       await check(page, at("panel garis"), errors);
       await close(page);
