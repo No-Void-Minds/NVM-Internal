@@ -144,8 +144,12 @@ test('titik belok dilewati berurutan; lurus dan melengkung memakai titik apa ada
   const B = { x: 600, y: 0, w: 100, h: 100 }
   const bend = { x: 300, y: 400 }
   const ortho = routePoints(end(A, 'bottom'), end(B, 'bottom'), 'orthogonal', [bend])
+  // Dilewati: ada di salah satu ruas (revisi 55: titik di tengah ruas lurus tidak lagi jadi titik sudut).
+  const onSeg = (p: { x: number; y: number }, q: { x: number; y: number }) =>
+    (near(p.x, q.x) && near(p.x, bend.x) && bend.y >= Math.min(p.y, q.y) - 0.5 && bend.y <= Math.max(p.y, q.y) + 0.5) ||
+    (near(p.y, q.y) && near(p.y, bend.y) && bend.x >= Math.min(p.x, q.x) - 0.5 && bend.x <= Math.max(p.x, q.x) + 0.5)
   assert.ok(
-    ortho.some((p) => near(p.x, bend.x) && near(p.y, bend.y)),
+    ortho.some((p, i) => i > 0 && onSeg(ortho[i - 1]!, p)),
     'titik belok tidak dilewati',
   )
   assertClear(ortho, [A, B])

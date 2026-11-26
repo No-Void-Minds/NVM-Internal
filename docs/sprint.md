@@ -1874,6 +1874,37 @@ Keputusan teknis:
 - Palet, perbaikan aksesibilitas: label kelompok memakai id berindeks (sebelumnya nama kelompok berspasi seperti "Panah blok" memecah `aria-labelledby`), dan hover memakai `mousemove` supaya hasil cari yang bergeser ke bawah kursor diam tidak merebut opsi aktif pilihan keyboard.
 - Contoh proses BPMN di E2E 54a belum memakai pool dan lane; wadah dikerjakan di 54b dan E2E-nya memuat pool dua lane.
 
+## Sprint 12n: Undo garis dan jalur siku dengan titik belok (revisi 55)
+
+**Tujuan:** setiap perubahan garis bisa dibatalkan dan diulang sebagai satu langkah, dan jalur siku dengan titik belok tidak lagi memotong dirinya sendiri. Dikerjakan sebelum 54b.
+
+- [x] S12n-01 Langkah undo garis di `utils/wbHistory.ts`: `line` (gaya, label, jalur, titik sambung, titik belok; sebelum dan sesudah dari jawaban server), `linesGone` (garis dihapus sendiri; undo memulihkan batch Tempat sampah), dan garis dari port memakai langkah `connectors` yang sudah ada. `linePatch` melewati field yang sudah diubah orang lain, `lineBlocked` memeriksa kunci.
+- [x] S12n-02 Jalur siku dengan titik belok (`orthogonalThrough` di `utils/wbShapes.ts`) dibangun dengan pencarian beam, bukan per ruas.
+- [x] S12n-03 Garis yang kedua ujungnya ikut terseret tidak lagi digeser dua kali (`anchorBends` menggantikan `shiftBends`).
+- [x] S12n-04 Test: `tests/wbLineUndo.test.ts`, E2E `scripts/e2e/uji-r55.mjs` (1280 px); pengaman uji-r53, uji-r54a, wb5.
+
+Audit operasi garis (sebelum revisi 55):
+
+| Operasi | Sebelum | Sesudah |
+|---|---|---|
+| Buat garis dari port | tidak tercatat | satu langkah |
+| Hubungkan dengan garis (menu) | tercatat (revisi 50) | tetap |
+| Hapus garis (Delete, menu, bar garis, panel) | tidak tercatat | satu langkah, undo memulihkan titik belok dan label |
+| Ganti titik sambung (panel) | tidak tercatat | satu langkah |
+| Sambung ulang ke kartu lain atau lepas ke titik bebas | fitur belum ada | belum ada |
+| Geser, tambah, hapus titik belok | tidak tercatat | satu langkah per seret atau dobel klik |
+| Ubah jalur, label, gaya, preset, jenis ujung (panel) | tidak tercatat | satu langkah per pilihan atau isian |
+| Urutan tumpuk | tercatat (revisi 53) | tetap, kini juga cek kunci |
+| Garis ikut kartu yang digeser (elastis) | ikut undo kartu, kecuali kedua ujung digeser bersama: titik belok ikut ditulis ulang dan tidak ikut undo | ikut undo kartu dalam satu langkah |
+| Hapus kartu beserta garisnya | ikut undo kartu (batch sama) | tetap |
+
+**Keputusan:**
+- Laporan pengguna: Ctrl+Z sesudah menggeser titik belok membatalkan geser aktor sebelumnya, karena seret titik belok tidak pernah masuk riwayat. Sekarang semua operasi garis di tabel di atas satu langkah undo, disimpan ke server dan tersiar realtime seperti perubahan garis biasa.
+- Undo garis memakai aturan undo kartu: field yang sudah diubah orang lain sesudah aksi itu dilewati ("Sebagian langkah tidak dibatalkan karena sudah diubah orang lain."). Garis yang menempel di kartu terkunci tidak diubah lewat undo atau redo (pesan kartu terkunci yang sama dengan aksi kartu), juga garis yang kartu ujungnya sedang diedit orang lain (pesan langkah dilewati). Langkah yang ditolak karena kunci tetap di tumpukan, jadi bisa diulang sesudah kunci dibuka.
+- Tangkapan layar pengguna (tekukan tajam yang saling menyilang di dekat aktor) bukan hanya hasil seretan. Ada dua sebab di perhitungan: (1) jalur siku dirutekan per ruas dan ruas pertama selalu keluar lewat potongan port 20 px, jadi titik belok yang dekat atau di belakang potongan itu memaksa jalur maju lalu berbalik dan memotong dirinya; garis dari bentuk (termasuk aktor) memakai jalur siku secara bawaan. Pada 4.000 susunan acak tiga titik belok di sekitar aktor, jalur lama memotong dirinya di 66 kasus saat aktor diam dan 420 sesudah aktor digeser, padahal polyline titik yang sama tidak pernah menyilang. (2) Sejak revisi 53 titik belok beranchor sudah ikut elastis, tetapi kode W5 masih menggeser titik belok lagi saat kedua ujung diseret bersama, jadi garisnya bergeser dua kali.
+- Jalur siku baru: setiap ruas punya beberapa bentuk L (langsung, atau lewat potongan port untuk ruas pertama dan terakhir), dan pencarian beam (8 jalur) memilih yang tidak berbalik arah, keluar searah port, tiba di port tujuan dari luar, tidak memotong jalurnya sendiri, tidak menembus kotak ujung, lalu yang terpendek. Hasil pada data acak yang sama dengan titik belok di luar kotak ujung: 0 silang saat aktor diam, 33 sesudah aktor digeser (semuanya susunan yang tidak bisa dibuat siku tanpa silang, mis. dua titik berselisih beberapa px di kedua sisi ruas tegak); tekukan bolak-balik 0. Titik belok yang jatuh di tengah ruas lurus tidak lagi menjadi titik sudut; pegangannya tetap di posisi titik itu.
+- Garis yang kedua ujungnya ikut terseret: garis beranchor tidak ditulis ulang (pemetaan elastis sudah menggesernya dan undo geser kartu mengembalikannya). Garis lama tanpa anchor diberi anchor dari posisi ujung sebelum geser, tanpa langkah undo karena tampilannya tidak berubah.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -2082,10 +2113,11 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 52 | 2026-11-26 | Whiteboard: panel format menempel di bar pilihan (tidak lagi melayang di atas teks), bar pilihan tanpa select bawaan browser (palet warna dan tombol menu Aksi memakai menu klik kanan) | Sprint 12k |
 | 53 | 2026-11-26 | Whiteboard: garis ikut urutan tumpuk (otomatis di atas kartu ujung, urutan manual lewat menu), bentuk Batas sistem dan Use case, preset include dan extend, jalur Bebas, garis elastis saat kartu ujung digeser | Sprint 12l |
 | 54 | 2026-11-26 | Whiteboard: pustaka bentuk lengkap per kelompok (BPMN, wadah, activity dan state, sequence, ERD dan class, lainnya), bentuk sebagai data, palet dengan cari, lipat kelompok, Terakhir dipakai, dan pratinjau | Sprint 12m |
+| 55 | 2026-11-26 | Whiteboard (bug): setiap perubahan garis satu langkah undo dan redo, jalur siku dengan titik belok tidak memotong dirinya, garis tidak bergeser dua kali saat kedua ujung diseret | Sprint 12n |
 | 33b | 2026-11-20 | Poles tampilan kartu Aktivitas: tombol rantai pindah ke celah antar isian dan jadi ikon kecil tanpa bingkai, tombol mati tidak dirender, jam tersambung menyatu dengan jam kepalanya, status simpan punya baris tetap, Tambah berkas di sel tabel tanpa bingkai | Sprint 12c |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat kelima puluh empat revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat kelima puluh lima revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

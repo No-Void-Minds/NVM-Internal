@@ -49,6 +49,22 @@ export type GeoPatch = {
 
 export type ChecklistInverse = { undo: Record<string, unknown>; redo: Record<string, unknown> }
 
+// Garis (revisi 55): field yang diubah satu aksi garis, dalam bentuk yang dikembalikan server. Bentuknya sama dengan
+// Connector di utils/whiteboard.ts (dibuat ulang di sini dengan alasan yang sama dengan Card).
+type Line = {
+  id: string
+  from: string | null
+  to: string | null
+  style: unknown
+  geometry: unknown
+  label: string
+  label_start: string
+  label_end: string
+}
+export const LINE_FIELDS = ['style', 'geometry', 'label', 'label_start', 'label_end'] as const
+export type LineField = (typeof LINE_FIELDS)[number]
+export type LineSnap = Partial<Pick<Line, LineField>>
+
 export type Step =
   | { kind: 'layout'; cards: { id: string; before: Geo; after: Geo }[] }
   | { kind: 'content'; id: string; before: Card['content']; after: Card['content']; version: number }
@@ -59,6 +75,10 @@ export type Step =
   | { kind: 'connectors'; ids: string[]; batches: string[] }
   // Urutan tumpuk garis (revisi 53); null berarti otomatis.
   | { kind: 'lineZ'; id: string; before: number | null; after: number | null }
+  // Gaya, label, jalur, dan titik belok garis (revisi 55): satu langkah per aksi (satu seret, satu isian).
+  | { kind: 'line'; id: string; before: LineSnap; after: LineSnap }
+  // Garis yang dihapus sendiri (revisi 55); ends dicatat untuk cek kunci karena garisnya tidak ada di papan lagi.
+  | { kind: 'linesGone'; ids: string[]; batches: string[]; ends: (string | null)[] }
 
 export const MAX_STEPS = 100
 
@@ -125,4 +145,49 @@ export function push(stack: { undo: Step[]; redo: Step[] }, step: Step) {
   stack.undo.push(step)
   if (stack.undo.length > MAX_STEPS) stack.undo.shift()
   stack.redo.length = 0
+}
+
+// lineSnap mengambil field garis yang diubah satu aksi, sebelum atau sesudahnya.
+export function lineSnap(c: Line, keys: readonly string[]): LineSnap {
+  const out: LineSnap = {}
+  for (const k of LINE_FIELDS)
+    if (keys.includes(k)) (out as Record<string, unknown>)[k] = structuredClone(c[k])
+  return out
+}
+
+// Penghalang undo garis: kartu ujungnya terkunci posisinya, atau sedang diedit orang lain (kunci lunak).
+export type LineBlock = 'locked' | 'busy' | null
+export function lineBlocked(
+  ends: (string | null)[],
+  cards: Map<string, { locked?: boolean }>,
+  heldByOthers: (id: string) => boolean,
+): LineBlock {
+  const ids = ends.filter((x): x is string => !!x)
+  if (ids.some((id) => cards.get(id)?.locked)) return 'locked'
+  if (ids.some(heldByOthers)) return 'busy'
+  return null
+}
+
+// linePatch menyusun patch undo (kembali ke before) atau redo (kembali ke after) untuk satu langkah garis. Field yang
+// nilainya sekarang bukan lagi hasil aksi itu sudah diubah orang lain, jadi dilewati dan dihitung, sama dengan
+// layoutPatches untuk kartu.
+export function linePatch(
+  step: Extract<Step, { kind: 'line' }>,
+  current: Line | undefined,
+  dir: 'undo' | 'redo',
+): { patch: LineSnap | null; skipped: number } {
+  const expect = dir === 'undo' ? step.after : step.before
+  const target = dir === 'undo' ? step.before : step.after
+  const keys = Object.keys(target) as LineField[]
+  if (!current) return { patch: null, skipped: keys.length }
+  const patch: LineSnap = {}
+  let skipped = 0
+  for (const k of keys) {
+    if (!same(current[k], expect[k])) {
+      skipped++
+      continue
+    }
+    ;(patch as Record<string, unknown>)[k] = target[k]
+  }
+  return { patch: Object.keys(patch).length ? patch : null, skipped }
 }

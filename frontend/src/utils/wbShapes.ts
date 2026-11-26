@@ -779,13 +779,79 @@ export function orthogonalRoute(a: End, b: End): Pt[] {
 export function routePoints(a: End, b: End, route: Route, points: Pt[] = []): Pt[] {
   if (route !== 'orthogonal') return [a.p, ...points, b.p]
   if (!points.length) return orthogonalRoute(a, b)
-  const out: Pt[] = []
-  const stops: End[] = [a, ...points.map((p) => ({ p, dir: null, box: null })), b]
-  for (let i = 1; i < stops.length; i++) {
-    const seg = orthogonalRoute(stops[i - 1]!, stops[i]!)
-    out.push(...(i === 1 ? seg : seg.slice(1)))
+  return orthogonalThrough(a, b, points)
+}
+
+// Segmen ab dan cd saling memotong di bagian dalam keduanya (bersentuhan di ujung tidak dihitung).
+function crosses(a: Pt, b: Pt, c: Pt, d: Pt): boolean {
+  const o = (p: Pt, q: Pt, r: Pt) => Math.sign((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x))
+  return o(a, b, c) * o(a, b, d) < 0 && o(c, d, a) * o(c, d, b) < 0
+}
+
+// Jalur siku melewati titik belok berurutan (revisi 55). Sebelumnya setiap ruas dirutekan sendiri dan ruas pertama
+// selalu keluar lewat potongan port 20 px: bentuk L tiap ruas dipilih tanpa melihat ruas lain, dan titik belok yang
+// dekat atau di belakang potongan itu memaksa jalur maju lalu berbalik. Hasilnya tekukan tajam yang memotong jalurnya
+// sendiri, makin sering sesudah titik dipetakan elastis. Sekarang setiap ruas punya beberapa bentuk L (langsung, atau
+// lewat potongan port untuk ruas pertama dan terakhir) dan pencarian beam membawa BEAM jalur terbaik ke ruas
+// berikutnya. Skor: tidak berbalik arah, keluar searah port, tiba di port tujuan dari luar, tidak memotong jalur yang
+// sudah ada, tidak menembus kotak ujung, lalu yang terpendek.
+const BEAM = 8
+function orthogonalThrough(a: End, b: End, points: Pt[]): Pt[] {
+  const boxes = [a.box, b.box].filter((x): x is Box => !!x)
+  const out0 = a.dir ? axisDir(a.dir) : null
+  const into = b.dir ? { x: -axisDir(b.dir).x, y: -axisDir(b.dir).y } : null
+  const dot = (u: Pt, v: Pt) => u.x * v.x + u.y * v.y
+  const legDir = (p: Pt, q: Pt) => ({ x: q.x - p.x, y: q.y - p.y })
+  const ell = (cur: Pt, q: Pt): Pt[][] =>
+    [
+      { x: q.x, y: cur.y },
+      { x: cur.x, y: q.y },
+    ].map((mid) =>
+      [cur, mid, q].filter(
+        (p, k, arr) => k === 0 || Math.hypot(p.x - arr[k - 1]!.x, p.y - arr[k - 1]!.y) > 0.01,
+      ),
+    )
+  // Biaya menambah legs (diawali titik terakhir path) ke path.
+  const cost = (path: Pt[], legs: Pt[], first: boolean, last: boolean) => {
+    let sc = 0
+    if (legs.length < 2) return sc
+    const d0 = legDir(legs[0]!, legs[1]!)
+    if (first && out0) sc += dot(d0, out0) < -0.01 ? 1000 : dot(d0, out0) < 0.01 ? 5 : 0
+    else if (path.length > 1 && dot(d0, legDir(path[path.length - 2]!, path[path.length - 1]!)) < -0.01)
+      sc += 1000
+    if (last && into) {
+      const dl = legDir(legs[legs.length - 2]!, legs[legs.length - 1]!)
+      sc += dot(dl, into) < -0.01 ? 1000 : dot(dl, into) < 0.01 ? 200 : 0
+    }
+    for (let k = 1; k < legs.length; k++) {
+      if (k > 1 && dot(legDir(legs[k - 2]!, legs[k - 1]!), legDir(legs[k - 1]!, legs[k]!)) < -0.01) sc += 1000
+      for (let m = 1; m < path.length - 1; m++)
+        if (crosses(legs[k - 1]!, legs[k]!, path[m - 1]!, path[m]!)) sc += 100
+      for (let m = 1; m < k - 1; m++) if (crosses(legs[k - 1]!, legs[k]!, legs[m - 1]!, legs[m]!)) sc += 100
+      for (const r of boxes) if (segmentHitsBox(legs[k - 1]!, legs[k]!, r)) sc += 50
+    }
+    return sc + pathLength(legs) * 0.001
   }
-  return dedupe(out)
+  let beam: { path: Pt[]; score: number }[] = [{ path: [a.p], score: 0 }]
+  const stops = [...points, b.p]
+  stops.forEach((q, ti) => {
+    const first = ti === 0
+    const last = ti === stops.length - 1
+    const next: { path: Pt[]; score: number }[] = []
+    for (const st of beam) {
+      const cur = st.path.at(-1)!
+      let cands = ell(cur, q)
+      if (first && a.dir) cands = cands.concat(ell(stub(a), q).map((l) => [cur, ...l]))
+      if (last && b.dir) cands = cands.concat(ell(cur, stub(b)).map((l) => [...l, b.p]))
+      if (first && last && a.dir && b.dir)
+        cands = cands.concat(ell(stub(a), stub(b)).map((l) => [cur, ...l, b.p]))
+      for (const c of cands)
+        next.push({ path: [...st.path, ...c.slice(1)], score: st.score + cost(st.path, c, first, last) })
+    }
+    next.sort((x, y) => x.score - y.score)
+    beam = next.slice(0, BEAM)
+  })
+  return dedupe(beam[0]!.path)
 }
 
 // Path SVG. Jalur melengkung memakai Bezier kubik dari arah port; dengan titik belok, kurva halus melewati titiknya.

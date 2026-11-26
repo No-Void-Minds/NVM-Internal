@@ -133,7 +133,17 @@ import {
   type PMNode,
   type Viewport,
 } from '../utils/whiteboard'
-import { geo, layoutPatches, push, type Geo, type Step } from '../utils/wbHistory'
+import {
+  LINE_FIELDS,
+  geo,
+  layoutPatches,
+  lineBlocked,
+  linePatch,
+  lineSnap,
+  push,
+  type Geo,
+  type Step,
+} from '../utils/wbHistory'
 import { WbSocket, reconnectDelay, type SocketState } from '../utils/wbSocket'
 import {
   arrange,
@@ -1907,14 +1917,26 @@ function flip(axis: 'x' | 'y') {
   announce.value = axis === 'x' ? 'Bentuk dibalik mendatar.' : 'Bentuk dibalik tegak.'
 }
 
-// Garis yang kedua ujungnya ikut terseret bersama (grup) ikut bergeser titik beloknya.
-function shiftBends(moved: Set<string>, dx: number, dy: number) {
+// Titik belok garis yang ujungnya ikut terseret (revisi 55). Garis beranchor (revisi 53) tidak disentuh: pemetaan
+// elastis sudah memindahkannya, dan undo geser kartu mengembalikannya dalam langkah yang sama. Sebelumnya titik belok
+// juga digeser di sini, jadi garis beranchor bergeser dua kali dan geseran kedua tidak ikut undo. Garis lama tanpa
+// anchor diberi anchor dari posisi ujung sebelum geser, tanpa langkah undo karena tampilannya tidak berubah.
+function anchorBends(moved: Set<string>, dx: number, dy: number) {
+  const centerBefore = (id: string | null, e: { x?: number; y?: number }): [number, number] => {
+    // Posisi tersimpan sudah posisi baru (applyLayout); geomMap bisa masih memuat geser seret sementara.
+    const b = id ? byId.value.get(id) : undefined
+    if (!b) return [e.x ?? 0, e.y ?? 0]
+    const k = id && moved.has(id) ? 1 : 0
+    return [b.x + b.w / 2 - dx * k, b.y + b.h / 2 - dy * k]
+  }
   for (const c of connectors.value) {
-    if (!c.from || !c.to || !moved.has(c.from) || !moved.has(c.to) || !c.geometry.points.length) continue
-    const points = c.geometry.points.map(
-      ([x, y]) => [Math.round(x + dx), Math.round(y + dy)] as [number, number],
-    )
-    void onConnectorUpdate(c.id, { geometry: { ...c.geometry, points } })
+    if (!c.geometry.points.length || c.geometry.anchor) continue
+    if (!(c.from && moved.has(c.from)) && !(c.to && moved.has(c.to))) continue
+    const anchor: [[number, number], [number, number]] = [
+      centerBefore(c.from, c.geometry.from),
+      centerBefore(c.to, c.geometry.to),
+    ]
+    void onConnectorUpdate(c.id, { geometry: { ...c.geometry, anchor } }, false)
   }
 }
 
@@ -2501,6 +2523,23 @@ onBeforeUnmount(() => clearTimeout(pressTimer))
 // ---------------------------------------------------------------------------------------------------------------
 // Undo dan redo (hanya aksi sendiri)
 
+// Undo dan redo garis menghormati kunci (revisi 55): garis yang menempel di kartu terkunci atau kartu yang sedang
+// diedit orang lain tidak diubah. Pesannya sama dengan aksi kartu terkunci dan undo yang dilewati; langkahnya tetap
+// di tumpukan semula, jadi bisa diulang sesudah kunci dibuka.
+function lineAllowed(ends: (string | null)[]): boolean {
+  const block = lineBlocked(ends, byId.value, (id) => {
+    const l = remoteLocks.value[id]
+    return !!l && l.id !== myId.value
+  })
+  if (block === 'locked') lockedToast(ends.filter((id) => id && byId.value.get(id)?.locked).length)
+  else if (block === 'busy') showToast('Sebagian langkah tidak dibatalkan karena sudah diubah orang lain.')
+  return !block
+}
+function keep(stack: Step[], step: Step) {
+  stack.push(step)
+  historyVersion.value++
+}
+
 async function runStep(dir: 'undo' | 'redo') {
   const from = dir === 'undo' ? history.undo : history.redo
   const to = dir === 'undo' ? history.redo : history.undo
@@ -2575,10 +2614,47 @@ async function runStep(dir: 'undo' | 'redo') {
       case 'checklist':
         await onChecklist(step.id, (dir === 'undo' ? step.ops.undo : step.ops.redo) as ChecklistOp, false)
         break
-      case 'lineZ':
+      case 'lineZ': {
+        const c = connectors.value.find((x) => x.id === step.id)
+        if (!lineAllowed(c ? [c.from, c.to] : [])) return keep(from, step)
         await setLineZ(step.id, dir === 'undo' ? step.before : step.after, false)
         break
+      }
+      case 'line': {
+        const c = connectors.value.find((x) => x.id === step.id)
+        if (!lineAllowed(c ? [c.from, c.to] : [])) return keep(from, step)
+        const r = linePatch(step, c, dir)
+        skipped = r.skipped
+        if (r.patch) {
+          const res = await saving(() => updateConnector(bid.value, step.id, r.patch as ConnectorUpdate))
+          if (res) upsertConnectors([res.connector])
+        }
+        break
+      }
+      case 'linesGone':
+        if (!lineAllowed(step.ends)) return keep(from, step)
+        if (dir === 'undo') {
+          for (const b of step.batches) await saving(() => restoreBatch(b))
+          await load(true)
+        } else {
+          step.batches = []
+          for (const id of step.ids.filter((x) => connectors.value.some((c) => c.id === x))) {
+            const res = await saving(() => deleteConnector(bid.value, id))
+            if (res) step.batches.push(res.batch)
+          }
+          removeConnectors(step.ids)
+        }
+        break
       case 'connectors':
+        if (
+          !lineAllowed(
+            step.ids.flatMap((id) => {
+              const c = connectors.value.find((x) => x.id === id)
+              return c ? [c.from, c.to] : []
+            }),
+          )
+        )
+          return keep(from, step)
         if (dir === 'undo') {
           step.batches = []
           for (const id of step.ids) {
@@ -3484,6 +3560,7 @@ async function finishConnect(at: Pt) {
     )
     if (!res) return
     upsertConnectors([res.connector])
+    record({ kind: 'connectors', ids: [res.connector.id], batches: [] })
     select([])
     selectedConnector.value = res.connector.id
     announce.value = target ? 'Garis ditambahkan.' : 'Garis ditambahkan dengan ujung bebas.'
@@ -3633,19 +3710,29 @@ async function connectPair(from: string, to: string): Promise<string | null> {
   }
 }
 
-async function onConnectorUpdate(id: string, patch: ConnectorUpdate) {
+// Setiap perubahan garis satu langkah undo (revisi 55): satu seret titik belok, satu isian label, satu pilihan gaya
+// atau preset. Sesudah dicatat dari jawaban server, supaya undo membandingkan nilai yang sama dengan yang tersiar.
+async function onConnectorUpdate(id: string, patch: ConnectorUpdate, track = true) {
+  const before = connectors.value.find((c) => c.id === id)
   try {
     const res = await saving(() => updateConnector(bid.value, id, patch))
-    if (res) upsertConnectors([res.connector])
+    if (!res) return
+    upsertConnectors([res.connector])
+    const keys = Object.keys(patch)
+    if (track && before && LINE_FIELDS.some((k) => keys.includes(k)))
+      record({ kind: 'line', id, before: lineSnap(before, keys), after: lineSnap(res.connector, keys) })
   } catch {
     // Pesan galat sudah tampil di penanda simpan.
   }
 }
 
-async function onConnectorRemove(id: string) {
+async function onConnectorRemove(id: string, track = true) {
+  const gone = connectors.value.find((c) => c.id === id)
   try {
     const res = await saving(() => deleteConnector(bid.value, id))
     if (!res) return
+    if (track && gone)
+      record({ kind: 'linesGone', ids: [id], batches: [res.batch], ends: [gone.from, gone.to] })
     removeConnectors([id])
     connectorIds.value = (connectorIds.value ?? []).filter((x) => x !== id)
     if (connectorIds.value.length === 0) connectorIds.value = null
@@ -4169,7 +4256,7 @@ function onUp(e: PointerEvent) {
     })
     announce.value = `${changes.length} kartu dipindah.`
     applyLayout(changes)
-    shiftBends(new Set(g.ids), dx, dy)
+    anchorBends(new Set(g.ids), dx, dy)
   }
   if (g.kind === 'resize') {
     const { dx, dy, dw, dh } = resizeDelta.value
