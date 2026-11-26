@@ -150,7 +150,7 @@ const btn =
       </ul>
 
       <div class="flex flex-wrap items-center justify-end gap-2">
-        <span class="mr-auto text-sm text-ink-muted" aria-live="polite">{{ picked.size }} dipilih</span>
+        <span class="mr-auto text-sm text-ink-muted">{{ picked.size }} dipilih</span>
         <button type="button" :class="btn" @click="emit('close')">Batal</button>
         <button
           type="button"
