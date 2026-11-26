@@ -1834,6 +1834,7 @@ Keputusan teknis:
 - [x] S12l-04 Bentuk "Batas sistem" (`uml_system`) dan "Use case" (`uml_usecase`) di kelompok UML; preset Include dan Extend di panel garis.
 - [x] S12l-05 Jalur "Bebas", garis elastis lewat anchor, titik segaris dirapikan, Shift mengunci 45 derajat.
 - [x] S12l-06 Test DB `TestWbUrutanGaris`; unit test `tests/wbStack.test.ts`; E2E `scripts/e2e/uji-r53.mjs` (1280 dan 360 px); uji performa uji13 ditambah seret kartu ber-garis dan garis dengan urutan manual.
+- [x] S12l-07 Gerbang akhir revisi 53 (2026-11-26): regresi wb1 sampai wb5, uji-kursor, E2E revisi 48 sampai 53, uji-kunci (360 dan 1280 px), uji-lebar (768 dan 1024), uji-restart, uji-wss (Chrome, Edge, Firefox), dan uji performa 500 kartu dan 100 garis di build produksi, tiga lari saat server uji lain mati. Tidak ada bug aplikasi; dua perbaikan di skrip uji (lihat keputusan).
 
 **Keputusan:**
 - z garis NULL berarti otomatis: digambar tepat di atas kartu ujung yang z-nya paling tinggi, dihitung klien saat itu juga, jadi tetap benar sesudah ujungnya maju atau mundur tanpa menulis ulang baris garis. Pada z yang sama garis menang seri melawan kartu (pengganti "plus epsilon" yang tidak goyah oleh presisi angka). Garis tanpa z dan tanpa kartu ujung tetap di paling belakang seperti sebelumnya; garis yang kedua ujungnya bebas memakai z sendiri bila diberi saat dibuat.
@@ -1847,6 +1848,7 @@ Keputusan teknis:
 - Titik belok yang jarak tegak lurusnya ke ruas tetangga di bawah 2 px (dunia) dibuang saat seret selesai. Shift saat menyeret mengunci sudut ruas dari titik sebelumnya ke kelipatan 45 derajat (snap grid tidak berlaku selama Shift).
 - Pegangan sisip titik belok tetap hanya untuk garis terpilih, area sentuh 44 px di layar.
 - Kontras: tombol baru memakai gaya tombol panel yang sudah ada (tinta di surface); tombol Otomatis aktif memakai accent dengan teks on-accent. Tanpa warna baru dan tanpa animasi baru.
+- Gerbang akhir: garis yang ujungnya lebih depan dari kartu yang dilintasinya digambar di atas kartu itu dan menangkap klik di sepanjang garisnya (16 px). Ini akibat yang disengaja dari urutan tumpuk, bukan bug; uji seret di wbperforma sekarang menekan titik kartu yang tidak tertutup garis. Frame p95 bimodal (13,4 dan 26,5 ms) sebelumnya muncul juga di HEAD dan hilang setelah preview dan Vite uji sisa dimatikan; mode headed dan flag `--disable-renderer-backgrounding` memberi 13,4 ms yang sama, jadi bukan throttling headless. uji13 menerima `E2E_HEADED=1` dan `E2E_ARGS` untuk pemeriksaan seperti ini.
 
 ## Sprint 12: Persiapan deploy dan migrasi data
 

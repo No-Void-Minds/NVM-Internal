@@ -131,7 +131,13 @@ const info = [];
 let checks = 0;
 const fail = (where, what) => fails.push(`${where} :: ${what}`);
 
-const browser = await chromium.launch({ channel: "msedge", headless: true });
+// E2E_HEADED=1 membuka jendela browser dan E2E_ARGS menambah flag peluncuran (dipisah spasi), untuk memeriksa apakah
+// angka frame wbperforma dipengaruhi throttling mode headless.
+const browser = await chromium.launch({
+  channel: "msedge",
+  headless: process.env.E2E_HEADED !== "1",
+  args: (process.env.E2E_ARGS || "").split(" ").filter(Boolean),
+});
 
 // Sesi per akun disimpan di scripts/e2e/.auth (gitignore) dan dipakai ulang antar run, supaya run beruntun tidak
 // menghabiskan limiter login (10 percobaan per IP, satu kembali tiap 30 detik). Login sungguhan hanya bila sesi
@@ -5786,6 +5792,24 @@ async function checkWbPerforma() {
     const dragged = plain.find((c) => full.connectors.some((n) => n.from === c.id || n.to === c.id));
     const attached = new Set(full.connectors.filter((n) => n.from === dragged.id || n.to === dragged.id).map((n) => n.id));
     const db = await ps.locator(`[data-card="${dragged.id}"]`).boundingBox();
+    // Garis lain bisa melintas di atas kartu ini (revisi 53, garis di atas kartu yang z-nya lebih rendah dari ujungnya);
+    // tekan di titik kartu yang kartunya sendiri paling atas supaya yang terjadi seret kartu, bukan pilih garis.
+    const grip = await ps.evaluate(
+      ([id, b]) => {
+        for (const fy of [0.5, 0.3, 0.7, 0.15, 0.85])
+          for (const fx of [0.5, 0.25, 0.75, 0.1, 0.9]) {
+            const x = b.x + b.width * fx;
+            const y = b.y + b.height * fy;
+            const el = document.elementFromPoint(x, y);
+            if (el?.closest("[data-card]")?.getAttribute("data-card") === id && !el.closest("[data-connector]")) return { x, y };
+          }
+        return null;
+      },
+      [dragged.id, db],
+    );
+    expect(!!grip, "seret garis", "tidak ada titik kartu yang tidak tertutup garis");
+    const gx = grip?.x ?? db.x + db.width / 2;
+    const gy = grip?.y ?? db.y + db.height / 2;
     await ps.evaluate(() => {
       window.__mut = new Set();
       window.__ob = new MutationObserver((ms) => {
@@ -5804,13 +5828,13 @@ async function checkWbPerforma() {
       };
       window.__raf = requestAnimationFrame(tick);
     });
-    await ps.mouse.move(db.x + db.width / 2, db.y + db.height / 2);
+    await ps.mouse.move(gx, gy);
     await ps.mouse.down();
     const dragStart = Date.now();
     let dk = 0;
     while (Date.now() - dragStart < 2000) {
       dk++;
-      await ps.mouse.move(db.x + db.width / 2 + (dk % 60) * 3, db.y + db.height / 2 + (dk % 40) * 2);
+      await ps.mouse.move(gx + (dk % 60) * 3, gy + (dk % 40) * 2);
     }
     const dragOut = await ps.evaluate(() => {
       cancelAnimationFrame(window.__raf);
