@@ -123,7 +123,7 @@ import {
   type Viewport,
 } from '../utils/whiteboard'
 import { geo, layoutPatches, push, type Geo, type Step } from '../utils/wbHistory'
-import { WbSocket, type SocketState } from '../utils/wbSocket'
+import { WbSocket, reconnectDelay, type SocketState } from '../utils/wbSocket'
 
 // Whiteboard seperti Milanote (docs/whiteboard.md): semua adalah papan. /whiteboard membuka papan akar bersama,
 // /whiteboard/:id membuka papan lain di kanvas yang sama. Data dari server adalah sumber kebenaran: perubahan
@@ -628,6 +628,7 @@ async function saving<T>(work: () => Promise<T>): Promise<T | undefined> {
     if (isNetworkError(e)) {
       netDown.value = true
       offlineQueue.push(work)
+      scheduleFlush()
       return undefined
     }
     saveError.value = e instanceof ApiError ? e.message : 'Perubahan gagal disimpan. Periksa koneksi.'
@@ -637,6 +638,20 @@ async function saving<T>(work: () => Promise<T>): Promise<T | undefined> {
     pending.value--
   }
 }
+
+// Antrean dicoba ulang dengan jeda sendiri (1, 2, 4, sampai 30 detik). Event online dan WebSocket yang bergabung
+// ulang tetap mengirimnya lebih cepat, tetapi tidak selalu terjadi: galat jaringan sesaat yang tidak memutus
+// WebSocket, atau event online yang datang sebelum jaringan benar-benar pulih, membuat antrean menggantung.
+let flushTimer: ReturnType<typeof setTimeout> | undefined
+let flushAttempt = 0
+function scheduleFlush() {
+  if (flushTimer) return
+  flushTimer = setTimeout(() => {
+    flushTimer = undefined
+    flushQueue()
+  }, reconnectDelay(flushAttempt++))
+}
+onBeforeUnmount(() => clearTimeout(flushTimer))
 
 let flushing = false
 async function flushQueue() {
@@ -648,7 +663,10 @@ async function flushQueue() {
       try {
         await work()
       } catch (e) {
-        if (isNetworkError(e)) return
+        if (isNetworkError(e)) {
+          scheduleFlush()
+          return
+        }
         // Perubahan yang ditolak setelah tersambung (mis. isi sudah diubah orang lain) tidak diulang; papan
         // dimuat ulang supaya sama dengan server.
         saveError.value = e instanceof ApiError ? e.message : 'Sebagian perubahan gagal disimpan.'
@@ -657,6 +675,7 @@ async function flushQueue() {
       offlineQueue.shift()
     }
     netDown.value = false
+    flushAttempt = 0
   } finally {
     flushing = false
   }
