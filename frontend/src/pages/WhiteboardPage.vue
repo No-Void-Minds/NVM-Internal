@@ -28,7 +28,10 @@ import type { ConnectorUpdate } from '../components/whiteboard/WbConnectorDialog
 import {
   angleFrom,
   center as boxCenter,
+  isContainer,
+  laneOrient,
   newShapeContent,
+  rotatedBounds,
   portPoint,
   portsFor,
   resizeBox,
@@ -41,6 +44,7 @@ import {
   type ShapeContent,
   type PaletteEntry,
 } from '../utils/wbShapes'
+import { addLane, containerMembers, containersAt } from '../utils/wbContainers'
 import { inkColor, penColors } from '../components/whiteboard/wbColors'
 import { caretHint, type CaretHint } from '../components/whiteboard/caret'
 import { ApiError, notifyUnauthorized } from '../api/client'
@@ -140,6 +144,7 @@ import {
   lineBlocked,
   linePatch,
   lineSnap,
+  chainContentVersion,
   push,
   type Geo,
   type Step,
@@ -489,9 +494,33 @@ const rendered = computed(() => {
 })
 const ordered = computed(() => readingOrder(shownCards.value))
 
-// Kartu ikut bergeser saat diseret bila kartu itu sendiri atau kolomnya terpilih.
+// Kartu ikut bergeser saat diseret bila kartu itu sendiri atau kolomnya terpilih, atau ia anggota wadah yang
+// sedang diseret (revisi 54b).
+const carried = ref<Set<string>>(new Set())
 function dragged(c: Card) {
-  return selected.value.has(c.id) || (!!c.column_id && selected.value.has(c.column_id))
+  return (
+    selected.value.has(c.id) || carried.value.has(c.id) || (!!c.column_id && selected.value.has(c.column_id))
+  )
+}
+
+// Anggota wadah di antara ids beserta grupnya (grup selalu bergerak utuh), di luar ids itu sendiri.
+function containerCarry(ids: string[]): string[] {
+  const boxes = (id: string) => shownById.value.get(id)
+  const containers = ids.flatMap((id) => {
+    const c = boxes(id)
+    return c?.kind === 'shape' && isContainer((c.content as ShapeContent).shape) ? [c] : []
+  })
+  if (!containers.length) return []
+  const members = containerMembers(
+    containers,
+    shownCards.value,
+    (c) => rotatedBounds(c, rotations.value.get(c.id) ?? 0),
+    (id) => (rotations.value.get(id) ?? 0) !== 0,
+  )
+  const have = new Set(ids)
+  const out = new Set<string>()
+  for (const m of members) for (const u of unitIds(m)) if (!have.has(u)) out.add(u)
+  return [...out]
 }
 // Geometri tampil plus geser seret, untuk ujung garis penghubung.
 const geomMap = computed(() => {
@@ -1168,9 +1197,26 @@ function showToast(text: string, batch?: string, board?: string) {
 
 const history: { undo: Step[]; redo: Step[] } = { undo: [], redo: [] }
 const historyVersion = ref(0)
+// Beberapa perubahan sebagai satu langkah undo (revisi 54b, mis. tambah lane: isi pool dan tingginya).
+let batchBuf: Step[] | null = null
 function record(step: Step) {
+  if (batchBuf) {
+    batchBuf.push(step)
+    return
+  }
   push(history, step)
   historyVersion.value++
+}
+function asOneStep(work: () => void) {
+  batchBuf = []
+  try {
+    work()
+  } finally {
+    const steps = batchBuf
+    batchBuf = null
+    if (steps.length === 1) record(steps[0]!)
+    else if (steps.length) record({ kind: 'batch', steps })
+  }
 }
 const canUndo = computed(() => historyVersion.value >= 0 && history.undo.length > 0)
 const canRedo = computed(() => historyVersion.value >= 0 && history.redo.length > 0)
@@ -1917,6 +1963,31 @@ function flip(axis: 'x' | 'y') {
   announce.value = axis === 'x' ? 'Bentuk dibalik mendatar.' : 'Bentuk dibalik tegak.'
 }
 
+// Kartu yang dilepas seluruhnya di dalam wadah yang digambar di atasnya dinaikkan ke depan, supaya terlihat dan
+// menjadi anggota wadah itu (revisi 54b). Ikut langkah undo yang sama dengan geserannya.
+function raiseIntoContainers(
+  changes: { id: string; after: Geo }[],
+  moving: Set<string>,
+  wasCarried: Set<string>,
+) {
+  const containers = shownCards.value.filter(
+    (c) => c.kind === 'shape' && isContainer((c.content as ShapeContent).shape) && !moving.has(c.id),
+  )
+  if (!containers.length) return
+  let top = Math.max(...cards.value.map((c) => c.z))
+  for (const ch of changes) {
+    if (wasCarried.has(ch.id)) continue
+    const c = shownById.value.get(ch.id)
+    if (!c || c.column_id) continue
+    const box = rotatedBounds(
+      { x: ch.after.x ?? c.x, y: ch.after.y ?? c.y, w: c.w, h: c.h },
+      rotations.value.get(c.id) ?? 0,
+    )
+    const into = containersAt(box, containers, moving)[0]
+    if (into && c.z <= into.z) ch.after = { ...ch.after, z: ++top }
+  }
+}
+
 // Titik belok garis yang ujungnya ikut terseret (revisi 55). Garis beranchor (revisi 53) tidak disentuh: pemetaan
 // elastis sudah memindahkannya, dan undo geser kartu mengembalikannya dalam langkah yang sama. Sebelumnya titik belok
 // juga digeser di sini, jadi garis beranchor bergeser dua kali dan geseran kedua tidak ikut undo. Garis lama tanpa
@@ -2363,6 +2434,8 @@ function selectionMenu(): MenuItem[] {
     })
   if (one?.kind === 'shape' && w)
     out.push({ id: 'shapestyle', label: 'Gaya bentuk', run: () => (shapeStyleId.value = one.id) })
+  if (one?.kind === 'shape' && w && laneOrient((one.content as ShapeContent).shape))
+    out.push({ id: 'addLane', label: 'Tambah lane', run: () => addLaneTo(one.id) })
   if (one?.kind === 'image' && one.file) {
     if (w)
       out.push(
@@ -2540,6 +2613,144 @@ function keep(stack: Step[], step: Step) {
   historyVersion.value++
 }
 
+// Menjalankan satu langkah ke arah dir. Mengembalikan jumlah field yang dilewati, atau keep bila langkah ditolak
+// (kunci) dan harus tetap di tumpukan semula.
+async function applyStep(step: Step, dir: 'undo' | 'redo'): Promise<number | 'keep'> {
+  let skipped = 0
+  switch (step.kind) {
+    case 'layout': {
+      const r = layoutPatches(step, byId.value, dir)
+      skipped = r.skipped
+      for (const p of r.patches) {
+        const { id, ...rest } = p
+        patchLocal(id, {
+          ...rest,
+          color: rest.color === undefined ? byId.value.get(id)?.color : rest.color || null,
+        } as Partial<Card>)
+      }
+      await sendGeometry(r.patches)
+      break
+    }
+    case 'create':
+      if (dir === 'undo') {
+        const ids = step.ids.filter((id) => byId.value.has(id))
+        if (ids.length) {
+          const res = await deleteIds(ids)
+          if (res) {
+            removeLocal(ids)
+            step.batch = res.batch
+          }
+        }
+      } else if (step.batch) {
+        await saving(() => restoreBatch(step.batch!))
+        await load(true)
+      }
+      break
+    case 'delete':
+      if (dir === 'undo') {
+        await saving(() => restoreBatch(step.batch))
+        await load(true)
+      } else {
+        const ids = step.ids.filter((id) => byId.value.has(id))
+        const res = ids.length ? await deleteIds(ids) : undefined
+        if (res) {
+          removeLocal(ids)
+          step.batch = res.batch
+        }
+      }
+      break
+    case 'content': {
+      const cur = byId.value.get(step.id)
+      if (!cur || cur.content_version !== step.version) {
+        skipped = 1
+        break
+      }
+      const res = await saving(() =>
+        patchCards(bid.value, [
+          {
+            id: step.id,
+            content: (dir === 'undo' ? step.before : step.after) as Card['content'],
+            base_content_version: cur.content_version,
+          },
+        ]),
+      )
+      if (res) {
+        upsert(res.cards)
+        const old = step.version
+        step.version = res.cards[0]!.content_version
+        chainContentVersion(dir === 'undo' ? history.undo : history.redo, step.id, old, step.version)
+      }
+      break
+    }
+    case 'checklist':
+      await onChecklist(step.id, (dir === 'undo' ? step.ops.undo : step.ops.redo) as ChecklistOp, false)
+      break
+    case 'lineZ': {
+      const c = connectors.value.find((x) => x.id === step.id)
+      if (!lineAllowed(c ? [c.from, c.to] : [])) return 'keep'
+      await setLineZ(step.id, dir === 'undo' ? step.before : step.after, false)
+      break
+    }
+    case 'line': {
+      const c = connectors.value.find((x) => x.id === step.id)
+      if (!lineAllowed(c ? [c.from, c.to] : [])) return 'keep'
+      const r = linePatch(step, c, dir)
+      skipped = r.skipped
+      if (r.patch) {
+        const res = await saving(() => updateConnector(bid.value, step.id, r.patch as ConnectorUpdate))
+        if (res) upsertConnectors([res.connector])
+      }
+      break
+    }
+    case 'linesGone':
+      if (!lineAllowed(step.ends)) return 'keep'
+      if (dir === 'undo') {
+        for (const b of step.batches) await saving(() => restoreBatch(b))
+        await load(true)
+      } else {
+        step.batches = []
+        for (const id of step.ids.filter((x) => connectors.value.some((c) => c.id === x))) {
+          const res = await saving(() => deleteConnector(bid.value, id))
+          if (res) step.batches.push(res.batch)
+        }
+        removeConnectors(step.ids)
+      }
+      break
+    case 'connectors':
+      if (
+        !lineAllowed(
+          step.ids.flatMap((id) => {
+            const c = connectors.value.find((x) => x.id === id)
+            return c ? [c.from, c.to] : []
+          }),
+        )
+      )
+        return 'keep'
+      if (dir === 'undo') {
+        step.batches = []
+        for (const id of step.ids) {
+          const res = await saving(() => deleteConnector(bid.value, id))
+          if (res) step.batches.push(res.batch)
+        }
+        removeConnectors(step.ids)
+      } else {
+        for (const b of step.batches) await saving(() => restoreBatch(b))
+        await load(true)
+      }
+      break
+    case 'batch': {
+      const list = dir === 'undo' ? [...step.steps].reverse() : step.steps
+      for (const sub of list) {
+        const r = await applyStep(sub, dir)
+        if (r === 'keep') return 'keep'
+        skipped += r
+      }
+      break
+    }
+  }
+  return skipped
+}
+
 async function runStep(dir: 'undo' | 'redo') {
   const from = dir === 'undo' ? history.undo : history.redo
   const to = dir === 'undo' ? history.redo : history.undo
@@ -2548,126 +2759,9 @@ async function runStep(dir: 'undo' | 'redo') {
   if (!step) return
   let skipped = 0
   try {
-    switch (step.kind) {
-      case 'layout': {
-        const r = layoutPatches(step, byId.value, dir)
-        skipped = r.skipped
-        for (const p of r.patches) {
-          const { id, ...rest } = p
-          patchLocal(id, {
-            ...rest,
-            color: rest.color === undefined ? byId.value.get(id)?.color : rest.color || null,
-          } as Partial<Card>)
-        }
-        await sendGeometry(r.patches)
-        break
-      }
-      case 'create':
-        if (dir === 'undo') {
-          const ids = step.ids.filter((id) => byId.value.has(id))
-          if (ids.length) {
-            const res = await deleteIds(ids)
-            if (res) {
-              removeLocal(ids)
-              step.batch = res.batch
-            }
-          }
-        } else if (step.batch) {
-          await saving(() => restoreBatch(step.batch!))
-          await load(true)
-        }
-        break
-      case 'delete':
-        if (dir === 'undo') {
-          await saving(() => restoreBatch(step.batch))
-          await load(true)
-        } else {
-          const ids = step.ids.filter((id) => byId.value.has(id))
-          const res = ids.length ? await deleteIds(ids) : undefined
-          if (res) {
-            removeLocal(ids)
-            step.batch = res.batch
-          }
-        }
-        break
-      case 'content': {
-        const cur = byId.value.get(step.id)
-        if (!cur || cur.content_version !== step.version) {
-          skipped = 1
-          break
-        }
-        const res = await saving(() =>
-          patchCards(bid.value, [
-            {
-              id: step.id,
-              content: (dir === 'undo' ? step.before : step.after) as Card['content'],
-              base_content_version: cur.content_version,
-            },
-          ]),
-        )
-        if (res) {
-          upsert(res.cards)
-          step.version = res.cards[0]!.content_version
-        }
-        break
-      }
-      case 'checklist':
-        await onChecklist(step.id, (dir === 'undo' ? step.ops.undo : step.ops.redo) as ChecklistOp, false)
-        break
-      case 'lineZ': {
-        const c = connectors.value.find((x) => x.id === step.id)
-        if (!lineAllowed(c ? [c.from, c.to] : [])) return keep(from, step)
-        await setLineZ(step.id, dir === 'undo' ? step.before : step.after, false)
-        break
-      }
-      case 'line': {
-        const c = connectors.value.find((x) => x.id === step.id)
-        if (!lineAllowed(c ? [c.from, c.to] : [])) return keep(from, step)
-        const r = linePatch(step, c, dir)
-        skipped = r.skipped
-        if (r.patch) {
-          const res = await saving(() => updateConnector(bid.value, step.id, r.patch as ConnectorUpdate))
-          if (res) upsertConnectors([res.connector])
-        }
-        break
-      }
-      case 'linesGone':
-        if (!lineAllowed(step.ends)) return keep(from, step)
-        if (dir === 'undo') {
-          for (const b of step.batches) await saving(() => restoreBatch(b))
-          await load(true)
-        } else {
-          step.batches = []
-          for (const id of step.ids.filter((x) => connectors.value.some((c) => c.id === x))) {
-            const res = await saving(() => deleteConnector(bid.value, id))
-            if (res) step.batches.push(res.batch)
-          }
-          removeConnectors(step.ids)
-        }
-        break
-      case 'connectors':
-        if (
-          !lineAllowed(
-            step.ids.flatMap((id) => {
-              const c = connectors.value.find((x) => x.id === id)
-              return c ? [c.from, c.to] : []
-            }),
-          )
-        )
-          return keep(from, step)
-        if (dir === 'undo') {
-          step.batches = []
-          for (const id of step.ids) {
-            const res = await saving(() => deleteConnector(bid.value, id))
-            if (res) step.batches.push(res.batch)
-          }
-          removeConnectors(step.ids)
-        } else {
-          for (const b of step.batches) await saving(() => restoreBatch(b))
-          await load(true)
-        }
-        break
-    }
+    const r = await applyStep(step, dir)
+    if (r === 'keep') return keep(from, step)
+    skipped = r
   } catch {
     // Pesan galat sudah tampil di penanda simpan.
   }
@@ -3370,8 +3464,50 @@ const shapeStyleId = ref<string | null>(null)
 const shapeStyleCard = computed(() =>
   shapeStyleId.value ? (byId.value.get(shapeStyleId.value) ?? null) : null,
 )
+// Isi bentuk dari panel Gaya bentuk atau dari pembatas lane (di luar mode edit) satu langkah undo, seperti
+// shapeChange; ketikan di mode edit dicatat saat editor ditutup.
+function recordContent(id: string, after: Card['content']) {
+  const c = byId.value.get(id)
+  if (!c) return
+  record({ kind: 'content', id, before: c.content, after, version: c.content_version + 1 })
+  onContent(id, after)
+}
+function onCardContent(id: string, after: Card['content']) {
+  if (editingId.value === id) onContent(id, after)
+  else recordContent(id, after)
+}
 function onShapeStyle(c: ShapeContent) {
-  if (shapeStyleId.value) onContent(shapeStyleId.value, c)
+  if (shapeStyleId.value) recordContent(shapeStyleId.value, c)
+}
+// Tambah lane (revisi 54b): lane baru seukuran rata-rata dan pool atau swimlane bertambah sepanjang itu, supaya lane
+// lain tidak menyempit. Isi dan ukuran satu langkah undo.
+function addLaneTo(id: string) {
+  const c = byId.value.get(id)
+  const sc = c?.content as ShapeContent | undefined
+  const orient = sc ? laneOrient(sc.shape) : null
+  if (!c || !sc || !orient || !canWrite.value) return
+  if (c.locked) {
+    lockedToast(1)
+    return
+  }
+  const { lanes, grow } = addLane(sc.lanes ?? [], orient === 'rows' ? c.h : c.w)
+  if (!grow) {
+    showToast('Lane sudah 20, batasnya.')
+    return
+  }
+  asOneStep(() => {
+    applyLayout([
+      {
+        id,
+        after:
+          orient === 'rows'
+            ? { h: clamp(c.h + grow, MIN_SIZE, MAX_SIZE) }
+            : { w: clamp(c.w + grow, MIN_SIZE, MAX_SIZE) },
+      },
+    ])
+    recordContent(id, { ...sc, lanes })
+  })
+  announce.value = `Lane ${lanes.length} ditambahkan.`
 }
 function onShapeSize(sz: { w: number; h: number }) {
   const id = shapeStyleId.value
@@ -4112,16 +4248,24 @@ function onMove(e: PointerEvent) {
       if (!gesture.started && Math.hypot(p.x - gesture.startX, p.y - gesture.startY) < 4) return
       if (!gesture.started) {
         gesture.started = true
+        // Wadah membawa anggotanya; anggota terkunci membatalkan seret utuh, sama dengan grup.
+        const carry = containerCarry(gesture.ids)
+        if (carry.length) {
+          gesture.ids = [...gesture.ids, ...carry]
+          carried.value = new Set(carry)
+        }
         // Kartu terkunci tidak bisa digeser; seret yang memuatnya dibatalkan utuh supaya grup tidak terpecah.
         const locked = gesture.ids.filter((id) => byId.value.get(id)?.locked).length
         if (locked) {
           gesture.cancelled = true
           gesture.ids = []
+          carried.value = new Set()
           lockedToast(locked)
           return
         }
-        // Grup bergerak utuh: grab semua atau tidak sama sekali (server menolak bila satu anggota dipegang orang lain).
-        const all = gesture.ids.some((id) => byId.value.get(id)?.group_ids?.length)
+        // Grup dan isi wadah bergerak utuh: grab semua atau tidak sama sekali (server menolak bila satu anggota
+        // dipegang orang lain).
+        const all = !!carry.length || gesture.ids.some((id) => byId.value.get(id)?.group_ids?.length)
         if (gesture.ids.length) send({ t: 'grab', ids: gesture.ids, all })
       }
       if (gesture.ids.length === 0) return
@@ -4238,9 +4382,11 @@ function onUp(e: PointerEvent) {
       return
     }
     if (g.ids.length) send({ t: 'release', ids: g.ids })
+    const wasCarried = carried.value
+    carried.value = new Set()
     if (g.cancelled || (dx === 0 && dy === 0)) return
     if (dropOn(g.ids, toWorld(view.value, local(e).x, local(e).y), dx, dy)) return
-    const changes = g.ids.flatMap((id) => {
+    const changes: { id: string; after: Geo }[] = g.ids.flatMap((id) => {
       const c = shownById.value.get(id)
       return c
         ? [
@@ -4254,6 +4400,7 @@ function onUp(e: PointerEvent) {
           ]
         : []
     })
+    raiseIntoContainers(changes, new Set(g.ids), wasCarried)
     announce.value = `${changes.length} kartu dipindah.`
     applyLayout(changes)
     anchorBends(new Set(g.ids), dx, dy)
@@ -5182,7 +5329,7 @@ const toolBtn =
                 @rename="onRenameRef(c.id, $event)"
                 @checklist="onChecklist(c.id, $event)"
                 @table="onTable(c.id, $event)"
-                @content="onContent(c.id, $event)"
+                @content="onCardContent(c.id, $event)"
                 @comments="commentsFor = c.id"
               />
             </template>
@@ -5740,6 +5887,7 @@ const toolBtn =
       @close="shapeStyleId = null"
       @content="onShapeStyle"
       @size="onShapeSize"
+      @add-lane="shapeStyleId && addLaneTo(shapeStyleId)"
     />
     <WbTemplateDialog
       :open="templateOpen"

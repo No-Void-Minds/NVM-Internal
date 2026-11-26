@@ -9,14 +9,24 @@ import {
   shapeInset,
   shapeMarks,
   shapePath,
+  laneOrient,
   shapeValign,
   strokeScale,
   type ShapeContent,
 } from '../../utils/wbShapes'
+import { BAND, laneBoxes, resizeLane, type Lane } from '../../utils/wbContainers'
 
 // Isi kartu bentuk (W5): SVG dari angka (tanpa markup pengguna) dan teks lewat interpolasi Vue. Putaran diterapkan
 // WbCard ke seluruh kartu, jadi di sini bentuk digambar tegak di kotak w x h.
-const props = defineProps<{ content: ShapeContent; w: number; h: number; editing: boolean }>()
+const props = defineProps<{
+  content: ShapeContent
+  w: number
+  h: number
+  editing: boolean
+  selected?: boolean
+  canWrite?: boolean
+  zoom?: number
+}>()
 const emit = defineEmits<{ save: [c: ShapeContent]; live: [c: ShapeContent]; close: [] }>()
 
 const fillVar: Record<string, string> = {
@@ -51,6 +61,67 @@ const isClass = computed(() => props.content.shape === 'uml_class')
 
 // Area teks dan tanda di dalam bentuk dari definisi bentuk (utils/wbShapes.ts), sama dengan ekspor.
 const textInset = computed(() => shapeInset(props.content.shape))
+
+// Pool dan swimlane (revisi 54b): judul di pita kiri (ditulis tegak) atau atas, label tiap lane, dan pembatas lane
+// yang bisa diseret atau digeser dengan panah saat bentuk terpilih. Ukuran lane draf selama diseret.
+const orient = computed(() => laneOrient(props.content.shape))
+const laneDraft = ref<Lane[] | null>(null)
+const lanesShown = computed(() => laneDraft.value ?? props.content.lanes ?? [])
+const lanes = computed(() =>
+  orient.value ? laneBoxes(lanesShown.value, props.w, props.h, orient.value) : [],
+)
+const bandStyle = computed(() =>
+  orient.value === 'rows'
+    ? { top: '0px', bottom: '0px', left: '0px', width: `${BAND}px` }
+    : { top: '0px', left: '0px', right: '0px', height: `${BAND}px` },
+)
+const span = () => (orient.value === 'rows' ? props.h : props.w)
+function laneLabelStyle(b: { x: number; y: number; w: number; h: number }) {
+  return orient.value === 'rows'
+    ? { left: `${BAND}px`, top: `${b.y}px`, width: `${BAND}px`, height: `${b.h}px` }
+    : { left: `${b.x}px`, top: `${BAND}px`, width: `${b.w}px`, height: `${BAND}px` }
+}
+// Area pembatas 44 px di layar pada zoom berapa pun.
+function dividerStyle(i: number) {
+  const b = lanes.value[i + 1]!
+  const t = 44 / (props.zoom || 1)
+  return orient.value === 'rows'
+    ? { left: `${BAND}px`, right: '0px', top: `${b.y - t / 2}px`, height: `${t}px` }
+    : { top: `${BAND}px`, bottom: '0px', left: `${b.x - t / 2}px`, width: `${t}px` }
+}
+const canDivide = computed(() => !!orient.value && props.selected && props.canWrite && !props.editing)
+function commitLanes(next: Lane[]) {
+  laneDraft.value = null
+  if (JSON.stringify(next) !== JSON.stringify(props.content.lanes))
+    emit('save', { ...props.content, lanes: next })
+}
+function onDividerDown(i: number, e: PointerEvent) {
+  const start = props.content.lanes ?? []
+  const s0 = orient.value === 'rows' ? e.clientY : e.clientX
+  const z = props.zoom || 1
+  const move = (ev: PointerEvent) => {
+    const d = ((orient.value === 'rows' ? ev.clientY : ev.clientX) - s0) / z
+    laneDraft.value = resizeLane(start, i, d, span())
+  }
+  const up = () => {
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', up)
+    window.removeEventListener('pointercancel', up)
+    if (laneDraft.value) commitLanes(laneDraft.value)
+  }
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', up)
+  window.addEventListener('pointercancel', up)
+}
+function onDividerKey(i: number, e: KeyboardEvent) {
+  const back = orient.value === 'rows' ? 'ArrowUp' : 'ArrowLeft'
+  const fwd = orient.value === 'rows' ? 'ArrowDown' : 'ArrowRight'
+  if (e.key !== back && e.key !== fwd) return
+  e.preventDefault()
+  e.stopPropagation()
+  const step = e.shiftKey ? 40 : 8
+  commitLanes(resizeLane(props.content.lanes ?? [], i, e.key === fwd ? step : -step, span()))
+}
 const top = computed(() => shapeValign(props.content.shape) === 'top')
 const marks = computed(() =>
   shapeMarks(props.content, Math.max(1, props.w - sw.value), Math.max(1, props.h - sw.value)),
@@ -59,7 +130,7 @@ const markWidth = computed(() => props.content.stroke_width)
 const paint = (v: 'line' | 'surface' | 'none' | undefined, fallback: string) =>
   v === 'line' ? stroke.value : v === 'surface' ? 'var(--color-surface)' : v === 'none' ? 'none' : fallback
 const textStyle = computed(() => ({
-  ...textInset.value,
+  ...(orient.value ? bandStyle.value : textInset.value),
   fontSize: `${props.content.font_size}px`,
   textAlign: props.content.align,
   justifyContent:
@@ -195,7 +266,11 @@ const field = 'block w-full'
     <div
       v-else
       class="absolute flex text-ink"
-      :class="top ? 'items-start font-semibold' : 'items-center'"
+      :class="[
+        top ? 'items-start font-semibold' : 'items-center',
+        orient ? 'justify-center px-1 font-semibold' : '',
+        orient === 'rows' ? 'wb-vertical' : '',
+      ]"
       :style="textStyle"
     >
       <WbRichField
@@ -223,5 +298,33 @@ const field = 'block w-full'
         {{ content.text }}
       </p>
     </div>
+
+    <!-- Label lane (revisi 54b): diubah lewat Gaya bentuk; di sini hanya tampil. -->
+    <p
+      v-for="(b, i) in lanes"
+      :key="`lane-${i}`"
+      class="absolute flex items-center justify-center overflow-hidden px-1 text-center text-sm leading-tight break-words text-ink"
+      :class="orient === 'rows' ? 'wb-vertical' : ''"
+      :style="laneLabelStyle(b)"
+      data-lane
+    >
+      {{ b.label }}
+    </p>
+    <template v-if="canDivide">
+      <div
+        v-for="i in lanes.length - 1"
+        :key="`batas-${i}`"
+        role="separator"
+        tabindex="0"
+        :aria-orientation="orient === 'rows' ? 'horizontal' : 'vertical'"
+        :aria-label="`Batas ${lanes[i - 1]!.label || `lane ${i}`} dan ${lanes[i]!.label || `lane ${i + 1}`}, panah untuk mengubah ukuran`"
+        class="wb-lane-divider absolute"
+        :class="orient === 'rows' ? 'cursor-row-resize' : 'cursor-col-resize'"
+        :style="dividerStyle(i - 1)"
+        data-lane-divider
+        @pointerdown.stop.prevent="onDividerDown(i - 1, $event)"
+        @keydown="onDividerKey(i - 1, $event)"
+      />
+    </template>
   </div>
 </template>

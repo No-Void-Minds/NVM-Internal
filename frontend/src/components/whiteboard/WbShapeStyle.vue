@@ -3,7 +3,8 @@ import { computed, ref, useId, watch } from 'vue'
 import BaseDialog from '../BaseDialog.vue'
 import WbPicker from './WbPicker.vue'
 import { penColors } from './wbColors'
-import { FONT_SIZES, SHAPES, shapeInfo, type ShapeContent } from '../../utils/wbShapes'
+import { FONT_SIZES, SHAPES, laneOrient, shapeInfo, type ShapeContent } from '../../utils/wbShapes'
+import type { Lane } from '../../utils/wbContainers'
 
 // Panel gaya bentuk (W5). Juga jalur keyboard untuk putar dan ukuran, yang di kanvas hanya lewat pegangan.
 // Setiap perubahan langsung disimpan halaman (isi lewat content_version, ukuran lewat tata letak).
@@ -14,7 +15,12 @@ const props = defineProps<{
   h: number
   canWrite: boolean
 }>()
-const emit = defineEmits<{ close: []; content: [c: ShapeContent]; size: [s: { w: number; h: number }] }>()
+const emit = defineEmits<{
+  close: []
+  content: [c: ShapeContent]
+  size: [s: { w: number; h: number }]
+  addLane: []
+}>()
 
 const uid = useId()
 const fills = [
@@ -53,6 +59,25 @@ function setShape(shape: ShapeContent['shape']) {
   if (first) next.variant = first
   else delete next.variant
   emit('content', next)
+}
+// Lane pool dan swimlane (revisi 54b): label dan ukuran (bobot, px saat ukuran bentuk sekarang) per lane.
+const hasLanes = computed(() => !!props.content && !!laneOrient(props.content.shape))
+function setLane(i: number, patch: Partial<Lane>) {
+  if (!props.content?.lanes) return
+  const lanes = props.content.lanes.map((l, j) => (j === i ? { ...l, ...patch } : l))
+  emit('content', { ...props.content, lanes })
+}
+function setLaneLabel(i: number, e: Event) {
+  const v = (e.target as HTMLInputElement).value.trim()
+  if (v !== props.content?.lanes?.[i]?.label) setLane(i, { label: v })
+}
+function setLaneSize(i: number, e: Event) {
+  const v = Math.round(Number((e.target as HTMLInputElement).value))
+  if (Number.isFinite(v) && v >= 20 && v <= 4000) setLane(i, { size: v })
+}
+function removeLane(i: number) {
+  if (!props.content?.lanes || props.content.lanes.length < 2) return
+  emit('content', { ...props.content, lanes: props.content.lanes.filter((_, j) => j !== i) })
 }
 function setRotation() {
   const v = Math.round(Number(rot.value))
@@ -215,6 +240,58 @@ const lbl = 'text-sm font-semibold'
           @change="setSize"
         />
       </div>
+      <fieldset v-if="hasLanes && content.lanes" class="col-span-2 flex min-w-0 flex-col gap-2">
+        <legend :class="lbl">Lane</legend>
+        <div
+          v-for="(l, i) in content.lanes"
+          :key="i"
+          class="grid grid-cols-[minmax(0,1fr)_6rem_auto] items-end gap-2"
+          data-testid="wb-lane-row"
+        >
+          <div class="flex min-w-0 flex-col gap-1">
+            <label :for="`${uid}-lane-${i}`" class="text-sm">Label lane {{ i + 1 }}</label>
+            <input
+              :id="`${uid}-lane-${i}`"
+              :value="l.label"
+              maxlength="200"
+              :class="control"
+              :disabled="!canWrite"
+              @change="setLaneLabel(i, $event)"
+            />
+          </div>
+          <div class="flex flex-col gap-1">
+            <label :for="`${uid}-lane-size-${i}`" class="text-sm">Ukuran</label>
+            <input
+              :id="`${uid}-lane-size-${i}`"
+              :value="l.size"
+              type="number"
+              min="20"
+              max="4000"
+              inputmode="numeric"
+              :class="control"
+              :disabled="!canWrite"
+              @change="setLaneSize(i, $event)"
+            />
+          </div>
+          <button
+            type="button"
+            class="min-h-11 rounded-card border border-line bg-surface px-3 text-urgent hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark disabled:opacity-60"
+            :disabled="!canWrite || content.lanes.length < 2"
+            :aria-label="`Hapus lane ${i + 1}`"
+            @click="removeLane(i)"
+          >
+            Hapus
+          </button>
+        </div>
+        <button
+          type="button"
+          class="min-h-11 self-start rounded-card border border-line bg-surface px-3 font-medium hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark disabled:opacity-60"
+          :disabled="!canWrite || content.lanes.length >= 20"
+          @click="emit('addLane')"
+        >
+          Tambah lane
+        </button>
+      </fieldset>
     </form>
   </BaseDialog>
 </template>

@@ -14,9 +14,11 @@ import {
   shapeMarks,
   shapePath,
   strokeScale,
+  laneOrient,
   textBox,
   type ShapeContent,
 } from '../../utils/wbShapes'
+import { BAND, laneBoxes } from '../../utils/wbContainers'
 import { stackOrder } from '../../utils/wbStack'
 import {
   bounds,
@@ -569,14 +571,43 @@ function drawShape(ctx: CanvasRenderingContext2D, tok: Tok, c: ShapeContent, r: 
     // Area teks dari definisi bentuk (revisi 54), sama dengan layar: judul di atas untuk batas sistem, label di bawah
     // untuk event dan gateway.
     const t = textBox(c.shape, r.w, r.h)
-    const lines = lay(c.text, c.doc, Math.max(20, t.w), t.valign === 'top')
+    // Nama pool ditulis tegak (revisi 54b): kotak teks diputar -90 derajat di pita kirinya.
+    const tw = t.vertical ? t.h : t.w
+    const th = t.vertical ? t.w : t.h
+    ctx.save()
+    if (t.vertical) {
+      ctx.translate(t.x, t.y + t.h)
+      ctx.rotate(-Math.PI / 2)
+    } else ctx.translate(t.x, t.y)
+    const lines = lay(c.text, c.doc, Math.max(20, tw - 8), t.valign === 'top' || !!t.vertical)
     const total = lines.reduce((n, l) => n + lineHeight(l), 0)
-    let y = t.valign === 'top' || t.y >= r.h ? t.y : t.y + (t.h - total) / 2
+    let y = t.valign === 'top' || t.y >= r.h ? 0 : (th - total) / 2
     for (const l of lines) {
-      drawLine(ctx, tok, l, t.x, y, Math.max(20, t.w), ink0, c.align)
+      drawLine(ctx, tok, l, 4, y, Math.max(20, tw - 8), ink0, t.vertical ? 'center' : c.align)
       y += lineHeight(l)
     }
+    ctx.restore()
   }
+  // Label lane, sama dengan WbShape.vue: tegak di pita kedua pool, mendatar di pita kedua swimlane.
+  const orient = laneOrient(c.shape)
+  if (orient)
+    for (const b of laneBoxes(c.lanes ?? [], r.w, r.h, orient)) {
+      if (!b.label) continue
+      ctx.save()
+      const len = orient === 'rows' ? b.h : b.w
+      if (orient === 'rows') {
+        ctx.translate(BAND, b.y + b.h)
+        ctx.rotate(-Math.PI / 2)
+      } else ctx.translate(b.x, BAND)
+      const ls = lay(b.label, null, Math.max(20, len - 8))
+      const total = ls.reduce((n, l) => n + lineHeight(l), 0)
+      let y = (BAND - total) / 2
+      for (const l of ls.slice(0, 2)) {
+        drawLine(ctx, tok, l, 4, y, Math.max(20, len - 8), ink0, 'center')
+        y += lineHeight(l)
+      }
+      ctx.restore()
+    }
   ctx.restore()
 }
 

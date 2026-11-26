@@ -3,7 +3,7 @@
 //   cd frontend && npm run test:unit
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { lineBlocked, linePatch, lineSnap, push, type Step } from '../src/utils/wbHistory.ts'
+import { chainContentVersion, lineBlocked, linePatch, lineSnap, push, type Step } from '../src/utils/wbHistory.ts'
 import { routeConnector } from '../src/utils/wbShapes.ts'
 
 const line = (over: Record<string, unknown> = {}) => ({
@@ -126,4 +126,20 @@ test('jalur siku dengan titik belok dekat aktor tidak memotong dirinya dan tidak
     assert.ok(r.pts.every((q, i) => !i || Math.abs(q.x - r.pts[i - 1]!.x) < 0.01 || Math.abs(q.y - r.pts[i - 1]!.y) < 0.01))
   }
   assert.ok(checked > 500)
+})
+
+test('dua perubahan isi berturut-turut pada satu kartu bisa dibatalkan dua kali (revisi 54b)', () => {
+  // Langkah 1 menghasilkan versi 5, langkah 2 versi 6. Undo langkah 2 membuat kartu versi 7.
+  const s1: Step = { kind: 'content', id: 'k', before: 'a', after: 'b', version: 5 }
+  const s2: Step = { kind: 'content', id: 'k', before: 'b', after: 'c', version: 6 }
+  const other: Step = { kind: 'content', id: 'lain', before: 'x', after: 'y', version: 6 }
+  const undo: Step[] = [s1, other]
+  chainContentVersion(undo, 'k', 6, 7)
+  assert.equal((s1 as { version: number }).version, 7)
+  assert.equal((other as { version: number }).version, 6)
+  // Ada suntingan orang lain di antaranya (versi tidak bersambung): langkah lama tetap dilewati.
+  const s0: Step = { kind: 'content', id: 'k', before: 'z', after: 'a', version: 3 }
+  chainContentVersion([s0], 'k', 6, 7)
+  assert.equal((s0 as { version: number }).version, 3)
+  void s2
 })

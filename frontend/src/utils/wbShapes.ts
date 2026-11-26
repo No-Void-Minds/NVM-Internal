@@ -3,6 +3,7 @@
 
 import type { PMNode } from './whiteboard.ts'
 import catalog from './wbShapeCatalog.json' with { type: 'json' }
+import { BAND, laneBoxes, type Lane, type LaneOrient } from './wbContainers.ts'
 
 export type Pt = { x: number; y: number }
 export type Box = { x: number; y: number; w: number; h: number }
@@ -33,6 +34,8 @@ export type ShapeContent = {
   name_doc?: PMNode | null
   attributes_doc?: PMNode | null
   methods_doc?: PMNode | null
+  // Lane pool dan swimlane (revisi 54b): label dan ukuran sebagai bobot.
+  lanes?: Lane[]
 }
 
 export type ShapeVariant = { id: string; label: string }
@@ -89,6 +92,14 @@ export function newShapeContent(shape: ShapeType, variant?: string): ShapeConten
     align: g.align ?? 'center',
     font_size: 16,
     ...(shape === 'uml_class' ? { name: 'Kelas', attributes: '', methods: '' } : {}),
+    ...(g.lanes
+      ? {
+          lanes: [
+            { label: 'Lane 1', size: 150 },
+            { label: 'Lane 2', size: 150 },
+          ],
+        }
+      : {}),
   }
 }
 
@@ -258,7 +269,7 @@ export type Mark = {
 }
 type Geo = {
   path: (w: number, h: number) => string
-  marks?: (w: number, h: number, variant: string) => Mark[]
+  marks?: (w: number, h: number, variant: string, c?: Pick<ShapeContent, 'lanes'>) => Mark[]
   inset?: Inset
   valign?: 'top' | 'center'
   // Garis terbuka (tanpa isian), mis. aktor dan anotasi.
@@ -268,6 +279,10 @@ type Geo = {
   fill?: string
   text?: string
   align?: 'left' | 'center' | 'right'
+  // Wadah (revisi 54b): kartu di dalamnya ikut terseret (utils/wbContainers.ts).
+  container?: boolean
+  // Lane bertumpuk (rows, pool) atau berjajar (cols, swimlane); judul bentuk di pita kiri atau atas.
+  lanes?: LaneOrient
 }
 
 const DEFAULT_INSET: Inset = { top: '8px', bottom: '8px', left: '10px', right: '10px' }
@@ -434,6 +449,19 @@ function gatewayMarks(w: number, h: number, variant: string): Mark[] {
   }
 }
 
+// Garis pita judul, pita label lane, dan pembatas antar lane.
+function laneMarks(w: number, h: number, orient: LaneOrient, lanes: Lane[] = []): Mark[] {
+  const boxes = laneBoxes(lanes, w, h, orient)
+  if (orient === 'rows') {
+    let d = `M${BAND} 0V${f(h)}M${BAND * 2} 0V${f(h)}`
+    for (const b of boxes.slice(1)) d += `M${BAND} ${f(b.y)}H${f(w)}`
+    return [{ d }]
+  }
+  let d = `M0 ${BAND}H${f(w)}M0 ${BAND * 2}H${f(w)}`
+  for (const b of boxes.slice(1)) d += `M${f(b.x)} ${BAND}V${f(h)}`
+  return [{ d }]
+}
+
 const base = (id: string, rest: Omit<Geo, 'path'> = {}): Geo => ({
   path: (w, h) => basePath(id, w, h),
   ...rest,
@@ -462,12 +490,29 @@ const GEO = {
   uml_note: base('uml_note', { fill: 'kuning', align: 'left' }),
   uml_package: base('uml_package', { inset: { top: '22%', bottom: '8px', left: '8px', right: '8px' } }),
   uml_system: base('uml_system', {
+    container: true,
     fill: '',
     text: 'Sistem',
     valign: 'top',
     inset: { top: '8px', bottom: 'auto', left: '10px', right: '10px' },
   }),
   uml_usecase: base('uml_usecase', { text: 'Use case', inset: pct(16, 16, 14, 14) }),
+  uml_swimlane: {
+    path: (w, h) => basePath('rect', w, h),
+    marks: (w, h, _v, c) => laneMarks(w, h, 'cols', c?.lanes),
+    container: true,
+    lanes: 'cols',
+    fill: '',
+    text: 'Swimlane',
+  },
+  bpmn_pool: {
+    path: (w, h) => basePath('rect', w, h),
+    marks: (w, h, _v, c) => laneMarks(w, h, 'rows', c?.lanes),
+    container: true,
+    lanes: 'rows',
+    fill: '',
+    text: 'Pool',
+  },
   bpmn_start: {
     path: (w, h) => circ(w / 2, h / 2, Math.min(w, h) / 2),
     marks: (w, h, v) => eventMarks(w, h, v, false),
@@ -538,8 +583,13 @@ const GEO = {
 
 const geoOf = (s: string): Geo => (GEO as Record<string, Geo>)[s] ?? GEO.rect
 export const shapePath = (shape: string, w: number, h: number) => geoOf(shape).path(w, h)
-export const shapeMarks = (c: Pick<ShapeContent, 'shape' | 'variant'>, w: number, h: number): Mark[] =>
-  geoOf(c.shape).marks?.(w, h, c.variant || shapeInfo(c.shape)?.variants?.[0]?.id || '') ?? []
+export const shapeMarks = (
+  c: Pick<ShapeContent, 'shape' | 'variant' | 'lanes'>,
+  w: number,
+  h: number,
+): Mark[] => geoOf(c.shape).marks?.(w, h, c.variant || shapeInfo(c.shape)?.variants?.[0]?.id || '', c) ?? []
+export const isContainer = (s: string) => !!geoOf(s).container
+export const laneOrient = (s: string) => geoOf(s).lanes ?? null
 // Bentuk yang garisnya tidak tertutup (aktor, anotasi) digambar tanpa isian.
 export const openShape = (s: string) => !!geoOf(s).open
 export const strokeScale = (s: string) => geoOf(s).strokeScale ?? 1
@@ -548,7 +598,15 @@ export const shapeValign = (s: string) => geoOf(s).valign ?? 'center'
 export const hasGeometry = (s: string) => s in GEO
 
 // Kotak teks dalam angka (untuk ekspor), dari nilai CSS yang sama dengan layar.
-export function textBox(s: string, w: number, h: number): Box & { valign: 'top' | 'center' } {
+export function textBox(
+  s: string,
+  w: number,
+  h: number,
+): Box & { valign: 'top' | 'center'; vertical?: boolean } {
+  // Pool: nama di pita kiri, ditulis tegak; swimlane: judul di pita atas.
+  const lo = laneOrient(s)
+  if (lo === 'rows') return { x: 0, y: 0, w: BAND, h, valign: 'center', vertical: true }
+  if (lo === 'cols') return { x: 0, y: 0, w, h: BAND, valign: 'center' }
   const i = shapeInset(s)
   const v = (x: string, size: number) =>
     x === 'auto' ? null : x.endsWith('%') ? (parseFloat(x) / 100) * size : parseFloat(x)

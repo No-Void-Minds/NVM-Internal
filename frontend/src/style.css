@@ -662,3 +662,16 @@ img.ProseMirror-separator {
   outline: var(--wb-ring) dashed var(--color-mark);
   outline-offset: calc(var(--wb-ring) * 2);
 }
+
+/* Revisi 54b: nama pool dan label lane ditulis tegak, dibaca dari bawah ke atas seperti diagram BPMN. */
+.wb-vertical {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+}
+/* Pembatas lane: tak terlihat sampai disorot atau difokus keyboard, lalu bergaris tanda fokus. */
+.wb-lane-divider:hover,
+.wb-lane-divider:focus-visible {
+  background: color-mix(in srgb, var(--color-mark) 18%, transparent);
+  outline: 2px solid var(--color-mark);
+  outline-offset: -2px;
+}

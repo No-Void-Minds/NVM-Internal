@@ -32,6 +32,8 @@ var (
 		// BPMN (revisi 54a)
 		"bpmn_start": true, "bpmn_intermediate": true, "bpmn_end": true, "bpmn_task": true, "bpmn_subprocess": true,
 		"bpmn_gateway": true, "bpmn_data_object": true, "bpmn_data_store": true, "bpmn_annotation": true,
+		// Wadah ber-lane (revisi 54b)
+		"bpmn_pool": true, "uml_swimlane": true,
 		// Panah blok
 		"arrow_right": true, "arrow_left": true, "arrow_up": true, "arrow_down": true, "arrow_both": true,
 	}
@@ -44,6 +46,8 @@ var (
 		"bpmn_task":         {"none", "user", "service", "script", "manual", "send", "receive"},
 		"bpmn_gateway":      {"exclusive", "parallel", "inclusive", "event"},
 	}
+	// laneShapes: bentuk yang punya lane (revisi 54b); bentuk lain tidak boleh membawa lanes.
+	laneShapes = map[string]bool{"bpmn_pool": true, "uml_swimlane": true}
 	// Isian memakai nama warna kartu; "" berarti tanpa isian, "putih" latar surface.
 	shapeFills = map[string]bool{"": true, "putih": true, "abu": true, "hijau": true, "kuning": true, "biru": true, "krem": true, "merah": true}
 	// Garis tepi memakai warna pena (token tinta gelap, minimal 3:1 terhadap canvas).
@@ -71,11 +75,49 @@ type ShapeContent struct {
 	Name       string `json:"name,omitempty"`
 	Attributes string `json:"attributes,omitempty"`
 	Methods    string `json:"methods,omitempty"`
+	// Lanes: lane pool dan swimlane (revisi 54b); Size adalah bobot, jadi ubah ukuran kartu membagi ulang.
+	Lanes []ShapeLane `json:"lanes,omitempty"`
 	// Pasangan dokumen berformat (revisi 49); teks di atas tetap teks polosnya.
 	Doc           *Node `json:"doc,omitempty"`
 	NameDoc       *Node `json:"name_doc,omitempty"`
 	AttributesDoc *Node `json:"attributes_doc,omitempty"`
 	MethodsDoc    *Node `json:"methods_doc,omitempty"`
+}
+
+type ShapeLane struct {
+	Label string `json:"label"`
+	Size  int    `json:"size"`
+}
+
+const (
+	maxLanes     = 20
+	maxLaneLabel = 200
+)
+
+// cleanLanes: paling banyak 20 lane untuk bentuk ber-lane (tanpa lane berarti satu area), label satu baris, bobot
+// 20 sampai 4000.
+func cleanLanes(shape string, lanes []ShapeLane) ([]ShapeLane, error) {
+	if !laneShapes[shape] {
+		if len(lanes) > 0 {
+			return nil, apperr.Invalid("Lane hanya untuk pool dan swimlane.")
+		}
+		return nil, nil
+	}
+	if len(lanes) > maxLanes {
+		return nil, apperr.Invalid(fmt.Sprintf("Lane paling banyak %d.", maxLanes))
+	}
+	out := make([]ShapeLane, len(lanes))
+	for i, l := range lanes {
+		label, err := CleanText(l.Label, maxLaneLabel, "Label lane")
+		if err != nil {
+			return nil, err
+		}
+		if l.Size < 20 || l.Size > 4000 {
+			return nil, apperr.Invalid("Ukuran lane harus 20 sampai 4000.")
+		}
+		out[i] = ShapeLane{Label: label, Size: l.Size}
+	}
+	return out, nil
 }
 
 // cleanMultiline seperti CleanText tetapi mempertahankan baris baru (atribut dan metode UML satu per baris).
@@ -147,7 +189,17 @@ func CleanShape(raw json.RawMessage) (ShapeContent, string, error) {
 	if out.Text, out.Doc, err = cleanRich(in.Text, in.Doc, MaxShapeText, "Teks bentuk", cleanMultiline); err != nil {
 		return in, "", err
 	}
-	return out, out.Text, nil
+	if out.Lanes, err = cleanLanes(in.Shape, in.Lanes); err != nil {
+		return in, "", err
+	}
+	// Label lane ikut pencarian.
+	plain := out.Text
+	for _, l := range out.Lanes {
+		if l.Label != "" {
+			plain = strings.TrimSpace(plain + "\n" + l.Label)
+		}
+	}
+	return out, plain, nil
 }
 
 // defaultShape: isi awal bentuk baru dari palet. Jenis bentuk dikirim klien; ini hanya cadangan untuk kartu tanpa isi.

@@ -78,4 +78,34 @@ func TestKatalogBentuk(t *testing.T) {
 			t.Errorf("%v diterima", bad)
 		}
 	}
+
+	// Lane (revisi 54b): hanya pool dan swimlane, paling banyak 20, bobot 20 sampai 4000; label ikut teks pencarian.
+	lanes := func(s, l string) json.RawMessage {
+		return json.RawMessage(`{"shape":"` + s + `","rotation":0,"fill":"","stroke":"tinta","stroke_width":2,"stroke_style":"solid","text":"Pool","align":"center","font_size":16,"lanes":` + l + `}`)
+	}
+	out, plain, err := CleanShape(lanes("bpmn_pool", `[{"label":"  Penjual ","size":150},{"label":"Gudang","size":150}]`))
+	if err != nil || len(out.Lanes) != 2 || out.Lanes[0].Label != "Penjual" || !strings.Contains(plain, "Gudang") {
+		t.Fatalf("lane pool %+v %q %v", out.Lanes, plain, err)
+	}
+	if _, _, err := CleanShape(lanes("bpmn_pool", `[]`)); err != nil {
+		t.Errorf("pool tanpa lane ditolak: %v", err)
+	}
+	many := "["
+	for i := 0; i < 21; i++ {
+		if i > 0 {
+			many += ","
+		}
+		many += `{"label":"L","size":50}`
+	}
+	many += "]"
+	for _, bad := range [][2]string{
+		{"rect", `[{"label":"A","size":100}]`},
+		{"bpmn_pool", many},
+		{"uml_swimlane", `[{"label":"A","size":10}]`},
+		{"uml_swimlane", `[{"label":"A","size":5000}]`},
+	} {
+		if _, _, err := CleanShape(lanes(bad[0], bad[1])); err == nil {
+			t.Errorf("lane %v diterima", bad)
+		}
+	}
 }

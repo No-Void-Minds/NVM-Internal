@@ -79,6 +79,8 @@ export type Step =
   | { kind: 'line'; id: string; before: LineSnap; after: LineSnap }
   // Garis yang dihapus sendiri (revisi 55); ends dicatat untuk cek kunci karena garisnya tidak ada di papan lagi.
   | { kind: 'linesGone'; ids: string[]; batches: string[]; ends: (string | null)[] }
+  // Beberapa langkah sebagai satu (revisi 54b): undo menjalankannya terbalik, redo berurutan.
+  | { kind: 'batch'; steps: Step[] }
 
 export const MAX_STEPS = 100
 
@@ -190,4 +192,18 @@ export function linePatch(
     ;(patch as Record<string, unknown>)[k] = target[k]
   }
   return { patch: Object.keys(patch).length ? patch : null, skipped }
+}
+
+// Sesudah undo atau redo langkah isi kartu berhasil (versi old menjadi now), langkah isi berikutnya untuk kartu yang
+// sama di tumpukan yang sama ikut diperbarui versinya bila langkah itu tepat sebelumnya (versinya old - 1, jadi tidak
+// ada suntingan orang lain di antaranya). Tanpa ini dua perubahan isi berturut-turut pada satu kartu hanya bisa
+// dibatalkan sekali: versi kartu naik karena undo sendiri, dan langkah yang lebih lama dianggap diubah orang lain.
+export function chainContentVersion(stack: Step[], id: string, old: number, now: number) {
+  for (let i = stack.length - 1; i >= 0; i--) {
+    const s = stack[i]!
+    if (s.kind === 'content' && s.id === id) {
+      if (s.version === old - 1) s.version = now
+      return
+    }
+  }
 }
