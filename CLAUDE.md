@@ -24,7 +24,7 @@ Sumber kebenaran urutan kerja, aturan bisnis, keputusan, dan revisi: `docs/sprin
 
 ## Perintah
 
-- Pemeriksaan wajib sebelum melapor selesai: `./scripts/check.sh` dari root (gofmt, `go build`, `npm run check`). Jangan jalankan `--full` kecuali diminta: Sprint 13 (pengujian) belum selesai, jadi sebagian test masih merah.
+- Pemeriksaan wajib sebelum melapor selesai: `./scripts/check.sh` dari root (gofmt, `go build`, `npm run check`, cek token CSS di build). Nama token CSS (`--color-...`) tidak boleh dirakit dari template string; tulis nama lengkapnya atau pakai aturan CSS statis, karena Tailwind v4 tidak mengeluarkan variabel yang tidak dilihatnya. Jangan jalankan `--full` kecuali diminta: Sprint 13 (pengujian) belum selesai, jadi sebagian test masih merah.
 - Setelah mengubah query: `cd backend && sqlc generate`.
 - Merapikan: `cd backend && gofmt -w .` dan `cd frontend && npx prettier --write src`.
 - Migrasi dev, dari folder `backend`: `migrate -path migrations -database "$DATABASE_URL" up`. Rifky yang memuat `DATABASE_URL`. Kalau variabel itu kosong, minta Rifky menjalankannya, jangan membaca `.env`.

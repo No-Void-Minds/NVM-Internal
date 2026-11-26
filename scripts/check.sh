@@ -37,4 +37,9 @@ fi
 echo "frontend: tipe, lint, format"
 (cd frontend && npm run check)
 
+# Tailwind v4 hanya mengeluarkan variabel @theme yang dirujuknya; token yang namanya dirakit dinamis pernah hilang
+# dari build produksi (label kursor Whiteboard transparan di tema terang). Membangun CSS ke folder sementara.
+echo "frontend: token CSS ada di build"
+(cd frontend && node scripts/cek-token.mjs)
+
 echo "Semua pemeriksaan lolos."
