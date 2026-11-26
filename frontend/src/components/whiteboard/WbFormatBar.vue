@@ -195,7 +195,14 @@ const tools: Tool[] = [
 ]
 // Isi "Lainnya": format yang jarang dipakai.
 const moreTools = [
-  { id: 'code', label: 'Kode', key: 'Ctrl+E', active: isOn('code'), run: () => c().toggleCode().run() },
+  {
+    id: 'code',
+    label: 'Teks kode',
+    hint: 'Huruf monospace untuk kode voucher, SKU, atau nama file',
+    key: 'Ctrl+E',
+    active: isOn('code'),
+    run: () => c().toggleCode().run(),
+  },
   {
     id: 'sup',
     label: 'Superskrip',
@@ -647,7 +654,7 @@ const swatch =
           type="button"
           :class="opt"
           :aria-pressed="m.active() ? 'true' : 'false'"
-          :title="title(m)"
+          :title="'hint' in m && m.hint ? `${m.hint} (${m.key})` : title(m)"
           :aria-keyshortcuts="m.key.replace('Ctrl', 'Control')"
           @click="pick(m.run)"
         >
