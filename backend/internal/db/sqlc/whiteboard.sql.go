@@ -224,12 +224,17 @@ SELECT c.id, c.board_id, c.kind, c.ref_board_id, c.x, c.y, c.w, c.h, c.z, c.colo
        coalesce(lp.final_url, '')::text AS preview_final_url, coalesce(lp.status, '')::text AS preview_status,
        lp.image_file_id AS preview_image,
        (SELECT count(*) FROM wb_comments m WHERE m.card_id = c.id AND m.deleted_at IS NULL)::bigint AS comment_count,
-       coalesce(cu.name, '')::text AS created_by_name
+       coalesce(cu.name, '')::text AS created_by_name,
+       coalesce(pu.id, 0)::bigint AS person_id, coalesce(pu.name, '')::text AS person_name, pu.job_title AS person_title,
+       coalesce(pd.name, '')::text AS person_division, coalesce(pu.is_active, false)::bool AS person_active,
+       pu.avatar_id AS person_avatar
 FROM wb_cards c
 LEFT JOIN wb_boards rb ON rb.id = c.ref_board_id
 LEFT JOIN wb_files f ON f.id = c.file_id
 LEFT JOIN wb_link_previews lp ON c.kind = 'link' AND lp.id = nullif(c.content->>'preview_id', '')::uuid
 LEFT JOIN users cu ON cu.id = c.created_by
+LEFT JOIN users pu ON c.kind = 'person' AND pu.id = (c.content->>'user_id')::bigint
+LEFT JOIN divisions pd ON pd.id = pu.division_id
 WHERE c.id = $1 AND c.deleted_at IS NULL
 `
 
@@ -275,8 +280,15 @@ type GetWbCardRow struct {
 	PreviewImage       pgtype.UUID
 	CommentCount       int64
 	CreatedByName      string
+	PersonID           int64
+	PersonName         string
+	PersonTitle        pgtype.Text
+	PersonDivision     string
+	PersonActive       bool
+	PersonAvatar       pgtype.UUID
 }
 
+// Kartu orang (revisi 51): data profil dibaca saat papan dimuat, tidak disalin ke isi kartu.
 func (q *Queries) GetWbCard(ctx context.Context, id pgtype.UUID) (GetWbCardRow, error) {
 	row := q.db.QueryRow(ctx, getWbCard, id)
 	var i GetWbCardRow
@@ -322,6 +334,12 @@ func (q *Queries) GetWbCard(ctx context.Context, id pgtype.UUID) (GetWbCardRow, 
 		&i.PreviewImage,
 		&i.CommentCount,
 		&i.CreatedByName,
+		&i.PersonID,
+		&i.PersonName,
+		&i.PersonTitle,
+		&i.PersonDivision,
+		&i.PersonActive,
+		&i.PersonAvatar,
 	)
 	return i, err
 }
@@ -461,6 +479,38 @@ func (q *Queries) GetWbFile(ctx context.Context, id pgtype.UUID) (GetWbFileRow, 
 		&i.SizeBytes,
 		&i.HasThumb,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getWbPerson = `-- name: GetWbPerson :one
+SELECT u.id, u.name, u.job_title, u.division_id, d.name AS division_name, u.is_active, u.avatar_id
+FROM users u
+JOIN divisions d ON d.id = u.division_id
+WHERE u.id = $1
+`
+
+type GetWbPersonRow struct {
+	ID           int64
+	Name         string
+	JobTitle     pgtype.Text
+	DivisionID   int64
+	DivisionName string
+	IsActive     bool
+	AvatarID     pgtype.UUID
+}
+
+func (q *Queries) GetWbPerson(ctx context.Context, id int64) (GetWbPersonRow, error) {
+	row := q.db.QueryRow(ctx, getWbPerson, id)
+	var i GetWbPersonRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.JobTitle,
+		&i.DivisionID,
+		&i.DivisionName,
+		&i.IsActive,
+		&i.AvatarID,
 	)
 	return i, err
 }
@@ -1012,12 +1062,17 @@ SELECT c.id, c.board_id, c.kind, c.ref_board_id, c.x, c.y, c.w, c.h, c.z, c.colo
        coalesce(lp.final_url, '')::text AS preview_final_url, coalesce(lp.status, '')::text AS preview_status,
        lp.image_file_id AS preview_image,
        (SELECT count(*) FROM wb_comments m WHERE m.card_id = c.id AND m.deleted_at IS NULL)::bigint AS comment_count,
-       coalesce(cu.name, '')::text AS created_by_name
+       coalesce(cu.name, '')::text AS created_by_name,
+       coalesce(pu.id, 0)::bigint AS person_id, coalesce(pu.name, '')::text AS person_name, pu.job_title AS person_title,
+       coalesce(pd.name, '')::text AS person_division, coalesce(pu.is_active, false)::bool AS person_active,
+       pu.avatar_id AS person_avatar
 FROM wb_cards c
 LEFT JOIN wb_boards rb ON rb.id = c.ref_board_id
 LEFT JOIN wb_files f ON f.id = c.file_id
 LEFT JOIN wb_link_previews lp ON c.kind = 'link' AND lp.id = nullif(c.content->>'preview_id', '')::uuid
 LEFT JOIN users cu ON cu.id = c.created_by
+LEFT JOIN users pu ON c.kind = 'person' AND pu.id = (c.content->>'user_id')::bigint
+LEFT JOIN divisions pd ON pd.id = pu.division_id
 WHERE c.board_id = $1 AND c.deleted_at IS NULL
 ORDER BY c.z, c.created_at, c.id
 `
@@ -1064,9 +1119,16 @@ type ListWbCardsRow struct {
 	PreviewImage       pgtype.UUID
 	CommentCount       int64
 	CreatedByName      string
+	PersonID           int64
+	PersonName         string
+	PersonTitle        pgtype.Text
+	PersonDivision     string
+	PersonActive       bool
+	PersonAvatar       pgtype.UUID
 }
 
 // Kartu papan membawa judul papan anak dan ringkasan isinya ("3 papan, 12 kartu").
+// Kartu orang (revisi 51): data profil dibaca saat papan dimuat, tidak disalin ke isi kartu.
 func (q *Queries) ListWbCards(ctx context.Context, boardID pgtype.UUID) ([]ListWbCardsRow, error) {
 	rows, err := q.db.Query(ctx, listWbCards, boardID)
 	if err != nil {
@@ -1118,6 +1180,12 @@ func (q *Queries) ListWbCards(ctx context.Context, boardID pgtype.UUID) ([]ListW
 			&i.PreviewImage,
 			&i.CommentCount,
 			&i.CreatedByName,
+			&i.PersonID,
+			&i.PersonName,
+			&i.PersonTitle,
+			&i.PersonDivision,
+			&i.PersonActive,
+			&i.PersonAvatar,
 		); err != nil {
 			return nil, err
 		}
@@ -1213,12 +1281,17 @@ SELECT c.id, c.board_id, c.kind, c.ref_board_id, c.x, c.y, c.w, c.h, c.z, c.colo
        lp.image_file_id AS preview_image,
        (SELECT count(*) FROM wb_comments m WHERE m.card_id = c.id AND m.deleted_at IS NULL)::bigint AS comment_count,
        coalesce(cu.name, '')::text AS created_by_name,
+       coalesce(pu.id, 0)::bigint AS person_id, coalesce(pu.name, '')::text AS person_name, pu.job_title AS person_title,
+       coalesce(pd.name, '')::text AS person_division, coalesce(pu.is_active, false)::bool AS person_active,
+       pu.avatar_id AS person_avatar,
        (c.deleted_at IS NOT NULL)::bool AS deleted
 FROM wb_cards c
 LEFT JOIN wb_boards rb ON rb.id = c.ref_board_id
 LEFT JOIN wb_files f ON f.id = c.file_id
 LEFT JOIN wb_link_previews lp ON c.kind = 'link' AND lp.id = nullif(c.content->>'preview_id', '')::uuid
 LEFT JOIN users cu ON cu.id = c.created_by
+LEFT JOIN users pu ON c.kind = 'person' AND pu.id = (c.content->>'user_id')::bigint
+LEFT JOIN divisions pd ON pd.id = pu.division_id
 WHERE c.board_id = $1 AND c.seq > $2
 ORDER BY c.seq, c.id
 `
@@ -1270,11 +1343,18 @@ type ListWbCardsSinceRow struct {
 	PreviewImage       pgtype.UUID
 	CommentCount       int64
 	CreatedByName      string
+	PersonID           int64
+	PersonName         string
+	PersonTitle        pgtype.Text
+	PersonDivision     string
+	PersonActive       bool
+	PersonAvatar       pgtype.UUID
 	Deleted            bool
 }
 
 // Sinkron ulang setelah koneksi putus: semua kartu yang berubah sesudah seq itu, termasuk yang masuk Tempat sampah
 // (deleted true) supaya klien bisa membuangnya.
+// Kartu orang (revisi 51): data profil dibaca saat papan dimuat, tidak disalin ke isi kartu.
 func (q *Queries) ListWbCardsSince(ctx context.Context, arg ListWbCardsSinceParams) ([]ListWbCardsSinceRow, error) {
 	rows, err := q.db.Query(ctx, listWbCardsSince, arg.BoardID, arg.Seq)
 	if err != nil {
@@ -1326,6 +1406,12 @@ func (q *Queries) ListWbCardsSince(ctx context.Context, arg ListWbCardsSincePara
 			&i.PreviewImage,
 			&i.CommentCount,
 			&i.CreatedByName,
+			&i.PersonID,
+			&i.PersonName,
+			&i.PersonTitle,
+			&i.PersonDivision,
+			&i.PersonActive,
+			&i.PersonAvatar,
 			&i.Deleted,
 		); err != nil {
 			return nil, err
@@ -1642,6 +1728,53 @@ func (q *Queries) ListWbLockedCards(ctx context.Context, arg ListWbLockedCardsPa
 			return nil, err
 		}
 		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWbPeople = `-- name: ListWbPeople :many
+SELECT u.id, u.name, u.job_title, u.division_id, d.name AS division_name, u.is_active, u.avatar_id
+FROM users u
+JOIN divisions d ON d.id = u.division_id
+ORDER BY u.is_active DESC, lower(u.name), u.id
+`
+
+type ListWbPeopleRow struct {
+	ID           int64
+	Name         string
+	JobTitle     pgtype.Text
+	DivisionID   int64
+	DivisionName string
+	IsActive     bool
+	AvatarID     pgtype.UUID
+}
+
+// Daftar alat Tim (revisi 51): pengguna aktif dan nonaktif. Kolom dipilih satu per satu supaya username, peran,
+// email, dan data akun lain tidak pernah ikut terbaca.
+func (q *Queries) ListWbPeople(ctx context.Context) ([]ListWbPeopleRow, error) {
+	rows, err := q.db.Query(ctx, listWbPeople)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWbPeopleRow{}
+	for rows.Next() {
+		var i ListWbPeopleRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.JobTitle,
+			&i.DivisionID,
+			&i.DivisionName,
+			&i.IsActive,
+			&i.AvatarID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -2288,12 +2421,20 @@ WITH hits AS (
   SELECT c.id FROM wb_link_previews lp
   JOIN wb_cards c ON c.kind = 'link' AND c.deleted_at IS NULL AND c.content->>'preview_id' = lp.id::text
   WHERE lp.title ILIKE '%' || $1::text || '%'
+  UNION
+  -- Kartu orang dicari lewat nama terkini penggunanya (revisi 51), karena namanya tidak disalin ke kartu.
+  SELECT c.id FROM users u
+  JOIN wb_cards c ON c.kind = 'person' AND c.deleted_at IS NULL AND (c.content->>'user_id')::bigint = u.id
+  WHERE u.name ILIKE '%' || $1::text || '%'
 )
-SELECT c.id, c.board_id, c.kind, c.plain, coalesce(lp.title, '')::text AS preview_title
+SELECT c.id, c.board_id, c.kind,
+       (CASE WHEN c.kind = 'person' THEN coalesce(pu.name, '') ELSE c.plain END)::text AS plain,
+       coalesce(lp.title, '')::text AS preview_title
 FROM hits
 JOIN wb_cards c ON c.id = hits.id
 JOIN wb_boards b ON b.id = c.board_id AND b.deleted_at IS NULL
 LEFT JOIN wb_link_previews lp ON c.kind = 'link' AND lp.id = nullif(c.content->>'preview_id', '')::uuid
+LEFT JOIN users pu ON c.kind = 'person' AND pu.id = (c.content->>'user_id')::bigint
 ORDER BY c.updated_at DESC, c.id
 LIMIT 50
 `

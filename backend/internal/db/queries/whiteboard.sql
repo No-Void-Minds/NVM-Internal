@@ -85,12 +85,18 @@ SELECT c.id, c.board_id, c.kind, c.ref_board_id, c.x, c.y, c.w, c.h, c.z, c.colo
        coalesce(lp.final_url, '')::text AS preview_final_url, coalesce(lp.status, '')::text AS preview_status,
        lp.image_file_id AS preview_image,
        (SELECT count(*) FROM wb_comments m WHERE m.card_id = c.id AND m.deleted_at IS NULL)::bigint AS comment_count,
-       coalesce(cu.name, '')::text AS created_by_name
+       coalesce(cu.name, '')::text AS created_by_name,
+       coalesce(pu.id, 0)::bigint AS person_id, coalesce(pu.name, '')::text AS person_name, pu.job_title AS person_title,
+       coalesce(pd.name, '')::text AS person_division, coalesce(pu.is_active, false)::bool AS person_active,
+       pu.avatar_id AS person_avatar
 FROM wb_cards c
 LEFT JOIN wb_boards rb ON rb.id = c.ref_board_id
 LEFT JOIN wb_files f ON f.id = c.file_id
 LEFT JOIN wb_link_previews lp ON c.kind = 'link' AND lp.id = nullif(c.content->>'preview_id', '')::uuid
 LEFT JOIN users cu ON cu.id = c.created_by
+-- Kartu orang (revisi 51): data profil dibaca saat papan dimuat, tidak disalin ke isi kartu.
+LEFT JOIN users pu ON c.kind = 'person' AND pu.id = (c.content->>'user_id')::bigint
+LEFT JOIN divisions pd ON pd.id = pu.division_id
 WHERE c.board_id = @board_id AND c.deleted_at IS NULL
 ORDER BY c.z, c.created_at, c.id;
 
@@ -236,12 +242,18 @@ SELECT c.id, c.board_id, c.kind, c.ref_board_id, c.x, c.y, c.w, c.h, c.z, c.colo
        coalesce(lp.final_url, '')::text AS preview_final_url, coalesce(lp.status, '')::text AS preview_status,
        lp.image_file_id AS preview_image,
        (SELECT count(*) FROM wb_comments m WHERE m.card_id = c.id AND m.deleted_at IS NULL)::bigint AS comment_count,
-       coalesce(cu.name, '')::text AS created_by_name
+       coalesce(cu.name, '')::text AS created_by_name,
+       coalesce(pu.id, 0)::bigint AS person_id, coalesce(pu.name, '')::text AS person_name, pu.job_title AS person_title,
+       coalesce(pd.name, '')::text AS person_division, coalesce(pu.is_active, false)::bool AS person_active,
+       pu.avatar_id AS person_avatar
 FROM wb_cards c
 LEFT JOIN wb_boards rb ON rb.id = c.ref_board_id
 LEFT JOIN wb_files f ON f.id = c.file_id
 LEFT JOIN wb_link_previews lp ON c.kind = 'link' AND lp.id = nullif(c.content->>'preview_id', '')::uuid
 LEFT JOIN users cu ON cu.id = c.created_by
+-- Kartu orang (revisi 51): data profil dibaca saat papan dimuat, tidak disalin ke isi kartu.
+LEFT JOIN users pu ON c.kind = 'person' AND pu.id = (c.content->>'user_id')::bigint
+LEFT JOIN divisions pd ON pd.id = pu.division_id
 WHERE c.id = @id AND c.deleted_at IS NULL;
 
 -- name: GetWbCardKind :one
@@ -267,12 +279,18 @@ SELECT c.id, c.board_id, c.kind, c.ref_board_id, c.x, c.y, c.w, c.h, c.z, c.colo
        lp.image_file_id AS preview_image,
        (SELECT count(*) FROM wb_comments m WHERE m.card_id = c.id AND m.deleted_at IS NULL)::bigint AS comment_count,
        coalesce(cu.name, '')::text AS created_by_name,
+       coalesce(pu.id, 0)::bigint AS person_id, coalesce(pu.name, '')::text AS person_name, pu.job_title AS person_title,
+       coalesce(pd.name, '')::text AS person_division, coalesce(pu.is_active, false)::bool AS person_active,
+       pu.avatar_id AS person_avatar,
        (c.deleted_at IS NOT NULL)::bool AS deleted
 FROM wb_cards c
 LEFT JOIN wb_boards rb ON rb.id = c.ref_board_id
 LEFT JOIN wb_files f ON f.id = c.file_id
 LEFT JOIN wb_link_previews lp ON c.kind = 'link' AND lp.id = nullif(c.content->>'preview_id', '')::uuid
 LEFT JOIN users cu ON cu.id = c.created_by
+-- Kartu orang (revisi 51): data profil dibaca saat papan dimuat, tidak disalin ke isi kartu.
+LEFT JOIN users pu ON c.kind = 'person' AND pu.id = (c.content->>'user_id')::bigint
+LEFT JOIN divisions pd ON pd.id = pu.division_id
 WHERE c.board_id = @board_id AND c.seq > @seq
 ORDER BY c.seq, c.id;
 
@@ -522,11 +540,33 @@ WITH hits AS (
   SELECT c.id FROM wb_link_previews lp
   JOIN wb_cards c ON c.kind = 'link' AND c.deleted_at IS NULL AND c.content->>'preview_id' = lp.id::text
   WHERE lp.title ILIKE '%' || @q::text || '%'
+  UNION
+  -- Kartu orang dicari lewat nama terkini penggunanya (revisi 51), karena namanya tidak disalin ke kartu.
+  SELECT c.id FROM users u
+  JOIN wb_cards c ON c.kind = 'person' AND c.deleted_at IS NULL AND (c.content->>'user_id')::bigint = u.id
+  WHERE u.name ILIKE '%' || @q::text || '%'
 )
-SELECT c.id, c.board_id, c.kind, c.plain, coalesce(lp.title, '')::text AS preview_title
+SELECT c.id, c.board_id, c.kind,
+       (CASE WHEN c.kind = 'person' THEN coalesce(pu.name, '') ELSE c.plain END)::text AS plain,
+       coalesce(lp.title, '')::text AS preview_title
 FROM hits
 JOIN wb_cards c ON c.id = hits.id
 JOIN wb_boards b ON b.id = c.board_id AND b.deleted_at IS NULL
 LEFT JOIN wb_link_previews lp ON c.kind = 'link' AND lp.id = nullif(c.content->>'preview_id', '')::uuid
+LEFT JOIN users pu ON c.kind = 'person' AND pu.id = (c.content->>'user_id')::bigint
 ORDER BY c.updated_at DESC, c.id
 LIMIT 50;
+
+-- name: ListWbPeople :many
+-- Daftar alat Tim (revisi 51): pengguna aktif dan nonaktif. Kolom dipilih satu per satu supaya username, peran,
+-- email, dan data akun lain tidak pernah ikut terbaca.
+SELECT u.id, u.name, u.job_title, u.division_id, d.name AS division_name, u.is_active, u.avatar_id
+FROM users u
+JOIN divisions d ON d.id = u.division_id
+ORDER BY u.is_active DESC, lower(u.name), u.id;
+
+-- name: GetWbPerson :one
+SELECT u.id, u.name, u.job_title, u.division_id, d.name AS division_name, u.is_active, u.avatar_id
+FROM users u
+JOIN divisions d ON d.id = u.division_id
+WHERE u.id = @id;

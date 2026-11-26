@@ -245,3 +245,31 @@ func TestWbGantiGambar(t *testing.T) {
 		t.Fatal("berkas lama tetap ada setelah tidak dipakai")
 	}
 }
+
+// Keputusan Manajer (awal revisi 51): kartu terkunci, juga isi kolom yang terkunci, tidak boleh pindah papan.
+func TestWbKunciTidakPindahPapan(t *testing.T) {
+	f := setupWb(t)
+	ctx := context.Background()
+	b := f.board(t, f.root, "Asal").Ref.ID
+	tujuan := f.board(t, f.root, "Tujuan").Ref.ID
+	j := f.card(t, b, KindHeading, `{"text":"Terkunci","level":1}`)
+	bebas := f.card(t, b, KindHeading, `{"text":"Bebas","level":1}`)
+	col := f.card(t, b, KindColumn, `{"title":"Kolom"}`)
+	isi := f.card(t, b, KindHeading, `{"text":"Isi kolom","level":1}`)
+	if _, err := f.svc.PatchCards(ctx, f.rina, b, []CardPatch{{ID: j.ID, Locked: ptr(true)}, {ID: isi.ID, ColumnID: ptr(col.ID), ColOrder: ptr(1.0)}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.PatchCards(ctx, f.rina, b, []CardPatch{{ID: isi.ID, Locked: ptr(true)}}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := f.svc.MoveCards(ctx, f.rina, b, []string{bebas.ID, j.ID}, tujuan)
+	wantInvalid(t, err, "Buka kunci dulu")
+	_, err = f.svc.MoveCards(ctx, f.rina, b, []string{col.ID}, tujuan)
+	wantInvalid(t, err, "Buka kunci dulu")
+	if v, _ := f.svc.Board(ctx, f.rina, b); len(v.Cards) != 4 {
+		t.Fatalf("pindahan sebagian terjadi: %d kartu tersisa", len(v.Cards))
+	}
+	if _, err := f.svc.MoveCards(ctx, f.rina, b, []string{bebas.ID}, tujuan); err != nil {
+		t.Fatalf("kartu bebas tidak bisa dipindah: %v", err)
+	}
+}

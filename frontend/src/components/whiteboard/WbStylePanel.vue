@@ -3,16 +3,21 @@ import { computed, useId } from 'vue'
 import BaseDialog from '../BaseDialog.vue'
 import { penColors } from './wbColors'
 import { STYLE_OPTIONS, styleKeys, type CardStyle, type StyleKey } from '../../utils/wbStyle'
+import { PERSON_LAYOUTS, PERSON_SIZES, PERSON_VIEWS, type PersonContent } from '../../utils/wbPerson'
 
 // Panel gaya kartu (revisi 50) untuk semua kartu terpilih sekaligus. Hanya bagian yang berlaku untuk semua jenis
 // kartu terpilih yang ditampilkan (bentuk: bayangan dan transparansi; gambar: tanpa latar dan jarak dalam). Nilai
 // yang berbeda antar kartu tampil sebagai "Campuran". Setiap perubahan langsung disimpan halaman, dengan undo.
 const props = defineProps<{
   open: boolean
-  cards: { kind: string; style?: CardStyle }[]
+  cards: { kind: string; style?: CardStyle; content?: unknown }[]
   canWrite: boolean
 }>()
-const emit = defineEmits<{ close: []; apply: [patch: Partial<Record<StyleKey, string | number>>] }>()
+const emit = defineEmits<{
+  close: []
+  apply: [patch: Partial<Record<StyleKey, string | number>>]
+  person: [patch: Partial<Omit<PersonContent, 'user_id'>>]
+}>()
 
 const uid = useId()
 const keys = computed(() => {
@@ -68,6 +73,19 @@ function optionsFor(g: (typeof groups)[number]) {
       ]
     : g.options
 }
+// Tampilan kartu orang (revisi 51), untuk semua kartu orang terpilih sekaligus.
+const persons = computed(() =>
+  props.cards.filter((c) => c.kind === 'person').map((c) => c.content as PersonContent),
+)
+const personGroups = [
+  { key: 'view' as const, label: 'Tampilan kartu orang', options: PERSON_VIEWS },
+  { key: 'size' as const, label: 'Ukuran kartu orang', options: PERSON_SIZES },
+  { key: 'layout' as const, label: 'Susunan foto', options: PERSON_LAYOUTS },
+]
+const personOn = (k: 'view' | 'size' | 'layout', v: string) =>
+  persons.value.length > 0 && persons.value.every((p) => p[k] === v)
+const chip =
+  'inline-flex min-h-11 items-center rounded-card border border-line px-3 text-sm hover:bg-canvas aria-pressed:bg-accent aria-pressed:text-on-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark disabled:opacity-60'
 const control = 'min-h-11 w-full rounded-card border border-line bg-surface px-2 disabled:opacity-60'
 const lbl = 'text-sm font-semibold'
 </script>
@@ -111,6 +129,28 @@ const lbl = 'text-sm font-semibold'
           </select>
         </div>
       </template>
+      <div
+        v-for="g in persons.length ? personGroups : []"
+        :key="g.key"
+        role="group"
+        :aria-label="g.label"
+        class="col-span-full flex flex-col gap-1"
+      >
+        <span :class="lbl">{{ g.label }}</span>
+        <div class="flex flex-wrap gap-2">
+          <button
+            v-for="o in g.options"
+            :key="o.value"
+            type="button"
+            :class="chip"
+            :aria-pressed="personOn(g.key, o.value) ? 'true' : 'false'"
+            :disabled="!canWrite"
+            @click="emit('person', { [g.key]: o.value })"
+          >
+            {{ o.label }}
+          </button>
+        </div>
+      </div>
       <div v-if="keys.has('opacity')" class="col-span-full flex flex-col gap-1">
         <label :for="`${uid}-opacity`" :class="lbl">
           Transparansi: {{ valueOf('opacity') === MIXED ? 'campuran' : `${opacity}%` }}

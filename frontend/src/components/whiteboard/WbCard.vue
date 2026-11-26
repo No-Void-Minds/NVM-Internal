@@ -11,6 +11,8 @@ import type { CaretHint } from './caret'
 import { HANDLES, handleSign, type Handle, type ShapeContent } from '../../utils/wbShapes'
 import { styleClasses, styleOpacity } from '../../utils/wbStyle'
 import { cropBox } from '../../utils/wbCrop'
+import { AVATAR_PX, type PersonContent } from '../../utils/wbPerson'
+import { initials } from '../../utils/person'
 import {
   LOD_ZOOM,
   cardLabel,
@@ -117,6 +119,20 @@ const cardClasses = computed(() => [
 ])
 // Pegangan ubah ukuran dan putar tidak tampil untuk kartu terkunci (server juga menolaknya).
 const canResize = computed(() => props.selected && props.canWrite && !props.editing && !props.card.locked)
+// Kartu orang (revisi 51): data dari server (card.person). Foto gagal dimuat kembali ke inisial, bukan ikon rusak.
+const pc = computed(() => (props.card.kind === 'person' ? (props.card.content as PersonContent) : null))
+const avatarFailed = ref(false)
+watch(
+  () => props.card.person?.avatar_url,
+  () => (avatarFailed.value = false),
+)
+const avatarStyle = computed(() => {
+  const px = AVATAR_PX[pc.value?.size ?? 'sedang']
+  return { width: `${px}px`, height: `${px}px`, fontSize: `${Math.round(px * 0.36)}px` }
+})
+const nameClass = computed(() =>
+  pc.value?.size === 'kecil' ? 'text-sm' : pc.value?.size === 'besar' ? 'text-lg' : 'text-base',
+)
 const lockStyle = computed(() => ({ width: `${22 / props.zoom}px`, height: `${22 / props.zoom}px` }))
 const crop = computed(() =>
   props.card.kind === 'image' ? ((props.card.content as CaptionContent).crop ?? null) : null,
@@ -328,6 +344,52 @@ function onPointerDown(e: PointerEvent) {
       />
       <WbRichText v-else :doc="(card.content as NoteContent).doc" />
     </template>
+
+    <div
+      v-else-if="card.kind === 'person' && pc"
+      class="flex min-w-0 gap-3"
+      :class="pc.layout === 'atas' ? 'flex-col items-center text-center' : 'items-center'"
+      data-testid="wb-person"
+    >
+      <span
+        aria-hidden="true"
+        class="relative shrink-0 overflow-hidden rounded-full border border-line bg-canvas"
+        :style="avatarStyle"
+      >
+        <img
+          v-if="card.person?.avatar_url && !avatarFailed"
+          :src="card.person.avatar_url"
+          alt=""
+          draggable="false"
+          class="size-full object-cover"
+          @error="avatarFailed = true"
+        />
+        <span v-else class="flex size-full items-center justify-center font-semibold text-ink">
+          {{ initials(card.person?.name ?? '?') }}
+        </span>
+      </span>
+      <div class="min-w-0">
+        <p class="leading-snug font-bold break-words" :class="nameClass">
+          {{ card.person?.name ?? 'Pengguna tidak ditemukan' }}
+        </p>
+        <p
+          v-if="pc.view !== 'foto_nama' && card.person?.job_title"
+          class="text-sm break-words text-ink-muted"
+        >
+          {{ card.person.job_title }}
+        </p>
+        <p v-if="pc.view === 'lengkap' && card.person?.division" class="text-sm break-words text-ink-muted">
+          {{ card.person.division }}
+        </p>
+        <span
+          v-if="card.person && !card.person.active"
+          class="mt-1 inline-block rounded-chip border border-line px-1.5 text-xs font-semibold text-ink"
+          data-testid="wb-person-inactive"
+        >
+          Nonaktif
+        </span>
+      </div>
+    </div>
 
     <template v-else-if="card.kind === 'board'">
       <div class="flex min-w-0 items-start gap-3">

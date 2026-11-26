@@ -5,8 +5,9 @@
 import type { ShapeContent } from './wbShapes.ts'
 import { inlineRuns, type Run } from './wbRich.ts'
 import type { CardStyle } from './wbStyle.ts'
+import { DEFAULT_PERSON, personLabel, personLines, type PersonContent, type PersonInfo } from './wbPerson.ts'
 
-export type { CardStyle }
+export type { CardStyle, PersonContent, PersonInfo }
 
 export type CardKind =
   | 'note'
@@ -18,6 +19,7 @@ export type CardKind =
   | 'link'
   | 'column'
   | 'drawing'
+  | 'person'
   | 'table'
   | 'shape'
 export type CardColor = 'abu' | 'hijau' | 'kuning' | 'biru' | 'krem' | 'merah'
@@ -124,6 +126,7 @@ export type Card = {
     | DrawingContent
     | TableContent
     | ShapeContent
+    | PersonContent
   ref?: BoardRef
   file?: FileInfo
   preview?: PreviewInfo
@@ -136,6 +139,8 @@ export type Card = {
   style?: CardStyle
   locked?: boolean
   group_ids?: string[]
+  // Revisi 51: data profil terkini untuk kartu orang, dari server (tidak disimpan di isi kartu).
+  person?: PersonInfo
   version: number
   content_version: number
   seq: number
@@ -165,6 +170,7 @@ export const defaultSize: Record<CardKind, { w: number; h: number }> = {
   drawing: { w: 320, h: 320 },
   table: { w: 360, h: 120 },
   shape: { w: 160, h: 100 },
+  person: { w: 260, h: 82 },
 }
 
 export const kindLabel: Record<CardKind, string> = {
@@ -179,6 +185,7 @@ export const kindLabel: Record<CardKind, string> = {
   drawing: 'Gambar bebas',
   table: 'Tabel',
   shape: 'Bentuk',
+  person: 'Orang',
 }
 
 // Batas gambar bebas dan tabel, sama dengan content_w3.go. Klien menyederhanakan goresan sebelum mengirim.
@@ -381,6 +388,8 @@ function kindText(card: Card): string {
       const t = shapeText(card.content as ShapeContent)
       return t ? `Bentuk: ${excerpt(t)}` : 'Bentuk tanpa teks'
     }
+    case 'person':
+      return personLabel(card.content as PersonContent, card.person)
   }
   const c = card.content as ChecklistContent
   const done = c.items.filter((i) => i.done).length
@@ -412,6 +421,7 @@ export function emptyContent(kind: CardKind): Card['content'] {
       align: 'center',
       font_size: 16,
     }
+  if (kind === 'person') return { user_id: 0, ...DEFAULT_PERSON }
   if (kind === 'table')
     return {
       header: true,
@@ -683,6 +693,8 @@ export function cardTitle(card: Card): string {
       return (card.content as TableContent).title || 'Tabel'
     case 'shape':
       return excerpt(shapeText(card.content as ShapeContent).split('\n')[0] ?? '', 80) || 'Bentuk tanpa teks'
+    case 'person':
+      return card.person?.name ?? 'Pengguna tidak ditemukan'
   }
 }
 
@@ -821,5 +833,13 @@ export function cardLines(card: Card): TextLine[] {
     case 'shape':
       // Bentuk digambar penggambar ekspor sendiri (path dan teks di dalamnya).
       return []
+    case 'person':
+      // Foto digambar penggambar ekspor; baris teksnya di sini (nama tebal).
+      return personLines(card.content as PersonContent, card.person).map((text, i) => ({
+        text,
+        size: i === 0 ? 15 : 13,
+        bold: i === 0,
+        muted: i > 0,
+      }))
   }
 }

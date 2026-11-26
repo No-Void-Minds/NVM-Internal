@@ -9,6 +9,7 @@ import type {
   ConnectorStyle,
   PMNode,
   CardStyle,
+  PersonInfo,
   PreviewInfo,
 } from '../utils/whiteboard'
 
@@ -263,6 +264,11 @@ function postFile<T extends { card: Card }>(
     form.append('file', file)
     xhr.send(form)
   })
+}
+
+// Daftar alat Tim (revisi 51): pengguna aktif dan nonaktif, hanya nama, foto, jabatan, dan divisi.
+export function listPeople() {
+  return apiGet<{ people: PersonInfo[] }>('/whiteboard/people')
 }
 
 export type BoardOption = { id: string; title: string; parent_id: string | null; is_root: boolean }

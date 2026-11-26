@@ -230,6 +230,8 @@ type Card struct {
 	Style    json.RawMessage `json:"style"`
 	Locked   bool            `json:"locked"`
 	GroupIDs []string        `json:"group_ids"`
+	// Revisi 51: data profil terkini untuk kartu orang (tidak disimpan di isi kartu).
+	Person *PersonInfo `json:"person,omitempty"`
 }
 
 // FileInfo: berkas kartu gambar atau berkas. Thumb true berarti ada thumbnail JPEG untuk ditampilkan di kanvas.
@@ -288,6 +290,10 @@ func cardOf(r sqlc.ListWbCardsRow) Card {
 	}
 	c.Locked = r.Locked
 	c.GroupIDs = groupStrings(r.GroupIds)
+	if r.Kind == KindPerson && r.PersonID > 0 {
+		c.Person = &PersonInfo{ID: r.PersonID, Name: r.PersonName, JobTitle: textOrNil(r.PersonTitle), Division: r.PersonDivision,
+			Active: r.PersonActive, AvatarURL: avatarURL(r.PersonID, r.PersonAvatar)}
+	}
 	return c
 }
 
@@ -514,7 +520,7 @@ func (s *Service) CreateCard(ctx context.Context, actor Actor, boardText string,
 			return Card{}, err
 		}
 		content = []byte(`{}`)
-	case KindNote, KindHeading, KindChecklist, KindLink, KindColumn, KindDrawing, KindTable, KindImage, KindFile, KindShape:
+	case KindNote, KindHeading, KindChecklist, KindLink, KindColumn, KindDrawing, KindTable, KindImage, KindFile, KindShape, KindPerson:
 		raw := in.Content
 		if len(raw) == 0 || string(raw) == "null" {
 			raw = DefaultContent(in.Kind)
@@ -552,6 +558,9 @@ func (s *Service) CreateCard(ctx context.Context, actor Actor, boardText string,
 		}
 		if exists {
 			return apperr.Invalid("Id kartu sudah dipakai. Muat ulang papan, lalu coba lagi.")
+		}
+		if err := checkPersonUser(ctx, q, in.Kind, content); err != nil {
+			return err
 		}
 		if fileID.Valid {
 			// Salin tempel memakai berkas yang sama; jenis kartu harus cocok dengan jenis berkasnya.
@@ -775,6 +784,9 @@ func (s *Service) PatchCards(ctx context.Context, actor Actor, boardText string,
 				}
 				if cur.Kind == KindShape && cur.Locked && lockedAfter && rotation(content) != rotation(cur.Content) {
 					return ErrLocked
+				}
+				if err := checkPersonUser(ctx, q, cur.Kind, content); err != nil {
+					return err
 				}
 				params.Content = content
 				params.Plain = pgtype.Text{String: pl, Valid: true}
@@ -1486,6 +1498,8 @@ func (s *Service) Since(ctx context.Context, boardText string, seq int64) (Sync,
 			PreviewSite: r.PreviewSite, PreviewFinalUrl: r.PreviewFinalUrl, PreviewStatus: r.PreviewStatus,
 			PreviewImage: r.PreviewImage, CommentCount: r.CommentCount, CreatedByName: r.CreatedByName,
 			Style: r.Style, Locked: r.Locked, GroupIds: r.GroupIds,
+			PersonID: r.PersonID, PersonName: r.PersonName, PersonTitle: r.PersonTitle, PersonDivision: r.PersonDivision,
+			PersonActive: r.PersonActive, PersonAvatar: r.PersonAvatar,
 		}))
 	}
 	conns, err := q.ListWbConnectorsSince(ctx, sqlc.ListWbConnectorsSinceParams{BoardID: b, Seq: seq})

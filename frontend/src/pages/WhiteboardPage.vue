@@ -21,6 +21,7 @@ import WbDiagramHandles from '../components/whiteboard/WbDiagramHandles.vue'
 import WbContextMenu, { type MenuItem } from '../components/whiteboard/WbContextMenu.vue'
 import WbStylePanel from '../components/whiteboard/WbStylePanel.vue'
 import WbImageDialog from '../components/whiteboard/WbImageDialog.vue'
+import WbTeamDialog from '../components/whiteboard/WbTeamDialog.vue'
 import type { DrawnLine } from '../components/whiteboard/WbConnectorLayer.vue'
 import type { ConnectorUpdate } from '../components/whiteboard/WbConnectorDialog.vue'
 import {
@@ -145,6 +146,16 @@ import {
   type AlignKind,
 } from '../utils/wbGroups'
 import { normalize, pasteStyle, styleKeys, type StyleKey } from '../utils/wbStyle'
+import {
+  DEFAULT_PERSON,
+  PERSON_LAYOUTS,
+  PERSON_SIZES,
+  PERSON_VIEWS,
+  gridAt,
+  personSize,
+  type PersonContent,
+  type PersonInfo,
+} from '../utils/wbPerson'
 import { find as findShortcut, label as keyLabel, type ShortcutId } from '../utils/wbShortcuts'
 
 // Whiteboard seperti Milanote (docs/whiteboard.md): semua adalah papan. /whiteboard membuka papan akar bersama,
@@ -839,6 +850,15 @@ function onSocketMessage(m: Record<string, unknown>) {
     case 'presence':
       people.value = (m.people as Person[]) ?? []
       return
+    case 'person': {
+      // Profil berubah (revisi 51): kartu orang pengguna itu ikut berubah tanpa memuat ulang papan.
+      const p = m.person as PersonInfo
+      if (cards.value.some((c) => c.kind === 'person' && (c.content as PersonContent).user_id === p.id))
+        cards.value = cards.value.map((c) =>
+          c.kind === 'person' && (c.content as PersonContent).user_id === p.id ? { ...c, person: p } : c,
+        )
+      return
+    }
     case 'cursor': {
       const u = m.user as Who
       cursors.value = {
@@ -1833,6 +1853,12 @@ function shiftBends(moved: Set<string>, dx: number, dy: number) {
 // Jadikan papan baru: kartu papan baru di pojok kiri atas pilihan, lalu pilihan dipindah ke dalamnya.
 async function boardFromSelection() {
   if (!canWrite.value) return
+  if (anyLocked.value) {
+    showToast(
+      `Pilihan berisi kartu terkunci. Buka kunci dulu (${keyLabel('lock')}), lalu jadikan papan baru.`,
+    )
+    return
+  }
   const ids = [...selected.value]
   const b = bounds(selCards.value)
   if (!b || !ids.length) return
@@ -2001,6 +2027,67 @@ function downloadOriginal() {
   a.click()
 }
 
+// Kartu anggota tim (revisi 51).
+const teamOpen = ref(false)
+let teamAt: { x: number; y: number } | undefined
+function openTeam(at?: { x: number; y: number }) {
+  if (!canWrite.value) return
+  teamAt = at
+  teamOpen.value = true
+}
+
+// Semua orang yang dipilih ditaruh berjajar rapi (grid otomatis) di tengah layar atau di titik "tambah di sini".
+async function addPeople(list: PersonInfo[]) {
+  teamOpen.value = false
+  const dim = personSize(DEFAULT_PERSON)
+  const pos = gridAt(list.length, dim, teamAt ?? centerWorld())
+  const made: string[] = []
+  for (const [i, p] of list.entries()) {
+    const at = pos[i]!
+    try {
+      const res = await saving(() =>
+        createCard(bid.value, {
+          id: newId(),
+          kind: 'person',
+          x: clamp(at.x, -COORD_LIMIT, COORD_LIMIT),
+          y: clamp(at.y, -COORD_LIMIT, COORD_LIMIT),
+          w: dim.w,
+          h: dim.h,
+          color: '',
+          content: { user_id: p.id, ...DEFAULT_PERSON },
+        }),
+      )
+      if (res) {
+        upsert([res.card])
+        made.push(res.card.id)
+      }
+    } catch {
+      break
+    }
+  }
+  if (made.length) {
+    record({ kind: 'create', ids: made })
+    select(made)
+    announce.value = `${made.length} kartu orang ditambahkan.`
+  }
+}
+
+// Tampilan banyak kartu orang sekaligus: isi (dengan undo) dan ukuran kartu yang pas untuk tampilan itu. Kartu
+// terkunci hanya berganti tampilan, ukurannya tetap.
+function setPersonDisplay(patch: Partial<Omit<PersonContent, 'user_id'>>) {
+  if (!canWrite.value) return
+  const list = selCards.value.filter((c) => c.kind === 'person')
+  const sizes: { id: string; after: Geo }[] = []
+  for (const c of list) {
+    const after = { ...(c.content as PersonContent), ...patch }
+    record({ kind: 'content', id: c.id, before: c.content, after, version: c.content_version + 1 })
+    onContent(c.id, after)
+    if (!c.locked) sizes.push({ id: c.id, after: personSize(after) })
+  }
+  if (sizes.length) applyLayout(sizes)
+  announce.value = `Tampilan ${list.length} kartu orang diganti.`
+}
+
 // Satu tabel aksi untuk menu dan pintasan keyboard. Setiap aksi memeriksa sendiri apakah berlaku.
 const actions: Partial<Record<ShortcutId, () => void>> = {
   cut: cutSelection,
@@ -2037,6 +2124,10 @@ const actions: Partial<Record<ShortcutId, () => void>> = {
   newBoard: () => void boardFromSelection(),
   moveBoard: () => {
     if (!canWrite.value || !selected.value.size) return
+    if (anyLocked.value) {
+      showToast(`Pilihan berisi kartu terkunci. Buka kunci dulu (${keyLabel('lock')}), lalu pindahkan lagi.`)
+      return
+    }
     moveError.value = ''
     moveOpen.value = true
   },
@@ -2141,8 +2232,37 @@ function selectionMenu(): MenuItem[] {
     if (!list.some((c) => c.kind === 'shape' && c.locked)) out.push(mi('rotate90', 'Putar 90 derajat'))
     out.push(mi('flipH', 'Balik mendatar'), mi('flipV', 'Balik tegak'))
   }
+  const persons = list.filter((c) => c.kind === 'person')
+  if (w && persons.length) {
+    const cur = (k: keyof PersonContent, v: string) =>
+      persons.every((c) => (c.content as PersonContent)[k] === v)
+    out.push({
+      id: 'tampilanOrang',
+      label: 'Tampilan kartu orang',
+      children: [
+        ...PERSON_VIEWS.map((o) => ({
+          id: `v-${o.value}`,
+          label: o.label,
+          checked: cur('view', o.value),
+          run: () => setPersonDisplay({ view: o.value }),
+        })),
+        ...PERSON_SIZES.map((o) => ({
+          id: `s-${o.value}`,
+          label: `Ukuran ${o.label.toLowerCase()}`,
+          checked: cur('size', o.value),
+          run: () => setPersonDisplay({ size: o.value }),
+        })),
+        ...PERSON_LAYOUTS.map((o) => ({
+          id: `l-${o.value}`,
+          label: o.label,
+          checked: cur('layout', o.value),
+          run: () => setPersonDisplay({ layout: o.value }),
+        })),
+      ],
+    })
+  }
   if (w && n >= 2) out.push(mi('connect', 'Hubungkan dengan garis (urutan pilih)'))
-  if (w) out.push(mi('newBoard', 'Jadikan papan baru'), mi('moveBoard', 'Pindahkan ke papan lain'))
+  if (w && !locked) out.push(mi('newBoard', 'Jadikan papan baru'), mi('moveBoard', 'Pindahkan ke papan lain'))
   if (one) out.push(mi('comments', 'Komentar'), mi('copyLink', 'Salin tautan kartu'))
   if (one?.kind === 'image' && one.file) {
     if (w)
@@ -2179,6 +2299,7 @@ function emptyMenu(): MenuItem[] {
         mi('addChecklist', 'Checklist'),
         mi('addTable', 'Tabel'),
         mi('addShape', 'Bentuk'),
+        { id: 'addTeam', label: 'Anggota tim', run: () => openTeam(menuAt ?? undefined) },
       ],
     })
   }
@@ -2532,7 +2653,7 @@ onMounted(() => document.addEventListener('paste', onPaste))
 // ---------------------------------------------------------------------------------------------------------------
 // Alat: klik menaruh kartu di tengah layar, seret menaruhnya di titik lepas.
 
-type ToolKind = CardKind | 'upload' | 'template'
+type ToolKind = CardKind | 'upload' | 'template' | 'team'
 const tools: { kind: ToolKind; label: string; path: string }[] = [
   { kind: 'note', label: 'Catatan', path: 'M5 4h10l4 4v12H5zM15 4v4h4M8 12h8M8 16h5' },
   { kind: 'heading', label: 'Judul', path: 'M6 5v14M18 5v14M6 12h12' },
@@ -2548,6 +2669,11 @@ const tools: { kind: ToolKind; label: string; path: string }[] = [
   { kind: 'drawing', label: 'Gambar', path: 'M4 20l4-1 11-11-3-3L5 16zM14 7l3 3' },
   { kind: 'table', label: 'Tabel', path: 'M4 5h16v14H4zM4 10h16M4 15h16M10 5v14' },
   { kind: 'template', label: 'Template', path: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM16.5 13v7M13 16.5h7' },
+  {
+    kind: 'team',
+    label: 'Tim',
+    path: 'M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 4.5a3 3 0 0 1 0 6M18 14c2 .8 3 2.8 3 6',
+  },
   {
     kind: 'shape',
     label: 'Bentuk',
@@ -2571,6 +2697,7 @@ function useTool(kind: ToolKind, at?: { x: number; y: number }) {
     templateError.value = ''
     templateOpen.value = true
   } else if (kind === 'shape') shapePaletteOpen.value = true
+  else if (kind === 'team') openTeam(at)
   else if (kind === 'link') {
     linkError.value = ''
     linkOpen.value = true
@@ -3316,7 +3443,8 @@ async function connectInOrder() {
 
 async function connectPair(from: string, to: string): Promise<string | null> {
   try {
-    const shape = byId.value.get(from)?.kind === 'shape' || byId.value.get(to)?.kind === 'shape'
+    // Bentuk dan kartu orang (bagan organisasi) memakai garis siku dengan panah.
+    const shape = [from, to].some((id) => ['shape', 'person'].includes(byId.value.get(id)?.kind ?? ''))
     const res = await saving(() =>
       createConnector(bid.value, {
         from,
@@ -3380,6 +3508,13 @@ function topLevel(ids: string[]) {
 async function moveTo(ids: string[], to: string, title: string) {
   const list = topLevel(ids)
   if (!list.length) return false
+  // Kartu terkunci tidak boleh pindah papan (keputusan Manajer, revisi 51); server juga menolaknya.
+  const locked = ids.filter((id) => byId.value.get(id)?.locked).length
+  if (locked) {
+    moveOpen.value = false
+    showToast(`${locked} kartu terkunci. Buka kunci dulu (${keyLabel('lock')}), lalu pindahkan lagi.`)
+    return false
+  }
   moveBusy.value = true
   moveError.value = ''
   try {
@@ -4946,7 +5081,7 @@ const toolBtn =
               Garis ({{ connectorsOf([...selected][0]!).length }})
             </option>
             <option v-if="selected.size === 2" value="connect">Hubungkan dengan garis</option>
-            <option value="move">Pindahkan ke papan</option>
+            <option v-if="!anyLocked" value="move">Pindahkan ke papan</option>
             <option value="menu">Semua aksi (Shift+F10)</option>
           </select>
           <template v-if="selUnitCount >= 2">
@@ -5341,7 +5476,9 @@ const toolBtn =
       :can-write="canWrite"
       @close="stylePanelOpen = false"
       @apply="applyStyle"
+      @person="setPersonDisplay"
     />
+    <WbTeamDialog :open="teamOpen" @close="teamOpen = false" @add="addPeople" />
     <WbImageDialog
       :mode="imageDialog?.mode ?? null"
       :card="imageCard"

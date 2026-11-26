@@ -131,6 +131,7 @@ func (s *Server) updateUser(c *gin.Context) {
 		s.writeAccountError(c, err)
 		return
 	}
+	s.wbPersonChanged(c.Request.Context(), id)
 	c.Status(http.StatusNoContent)
 }
 
@@ -144,6 +145,7 @@ func (s *Server) setUserActive(active bool) gin.HandlerFunc {
 			s.writeAccountError(c, err)
 			return
 		}
+		s.wbPersonChanged(c.Request.Context(), id)
 		c.Status(http.StatusNoContent)
 	}
 }

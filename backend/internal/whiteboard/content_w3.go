@@ -341,6 +341,9 @@ func cleanW3(kind string, raw json.RawMessage) (any, string, bool, error) {
 	case KindShape:
 		v, p, err := CleanShape(raw)
 		return v, p, true, err
+	case KindPerson:
+		v, p, err := cleanPerson(raw)
+		return v, p, true, err
 	}
 	return nil, "", false, nil
 }

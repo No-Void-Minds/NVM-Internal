@@ -21,6 +21,8 @@ import {
   type TextLine,
 } from '../../utils/whiteboard'
 import { penColors } from './wbColors'
+import { AVATAR_PX, type PersonContent } from '../../utils/wbPerson'
+import { initials } from '../../utils/person'
 
 const PAD = 12
 const RADIUS = 4
@@ -248,7 +250,9 @@ export async function renderBoard(cards: Card[], connectors: Connector[]): Promi
     laid.map((l) =>
       l.card.kind === 'image' && l.card.file?.thumb
         ? loadImage(fileUrl(l.card.file.id, true))
-        : Promise.resolve(null),
+        : l.card.kind === 'person' && l.card.person?.avatar_url
+          ? loadImage(l.card.person.avatar_url)
+          : Promise.resolve(null),
     ),
   )
 
@@ -305,6 +309,10 @@ export async function renderBoard(cards: Card[], connectors: Connector[]): Promi
     }
 
     const PAD = look.pad
+    if (card.kind === 'person') {
+      drawPerson(ctx, tok, card, rect, text, images[i] ?? null, PAD)
+      return
+    }
     let y = rect.y + PAD
     const img = images[i]
     if (img) {
@@ -378,6 +386,66 @@ export async function renderBoard(cards: Card[], connectors: Connector[]): Promi
       })
     }
     ctx.restore()
+  }
+}
+
+// Kartu orang (revisi 51): foto bulat (atau inisial) dan baris nama, jabatan, divisi, dan status nonaktif, di samping
+// atau di bawah foto sesuai susunan kartu.
+function drawPerson(
+  ctx: CanvasRenderingContext2D,
+  tok: Tok,
+  card: Card,
+  rect: Rect,
+  text: Drawn[],
+  img: HTMLImageElement | null,
+  pad: number,
+) {
+  const c = card.content as PersonContent
+  const a = AVATAR_PX[c.size] ?? 56
+  const side = c.layout !== 'atas'
+  const ax = side ? rect.x + pad : rect.x + (rect.w - a) / 2
+  const ay = side ? rect.y + (rect.h - a) / 2 : rect.y + pad
+  ctx.save()
+  ctx.beginPath()
+  ctx.arc(ax + a / 2, ay + a / 2, a / 2, 0, Math.PI * 2)
+  ctx.clip()
+  if (img) {
+    // object-fit cover: sisi pendek mengisi lingkaran, tengah gambar dipakai.
+    const k = Math.max(a / img.width, a / img.height)
+    ctx.drawImage(
+      img,
+      ax + (a - img.width * k) / 2,
+      ay + (a - img.height * k) / 2,
+      img.width * k,
+      img.height * k,
+    )
+  } else {
+    ctx.fillStyle = tok('--color-canvas')
+    ctx.fillRect(ax, ay, a, a)
+    ctx.fillStyle = tok('--color-ink')
+    ctx.font = fontOf(tok, Math.round(a * 0.36), true)
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(initials(card.person?.name ?? '?'), ax + a / 2, ay + a / 2)
+    ctx.textAlign = 'left'
+  }
+  ctx.restore()
+  const tx = side ? ax + a + 12 : rect.x + pad
+  const tw = side ? rect.x + rect.w - pad - tx : rect.w - pad * 2
+  const total = text.reduce((n, l) => n + lineHeight(l), 0)
+  let y = side ? rect.y + (rect.h - total) / 2 : ay + a + 8
+  for (const l of text) {
+    drawLine(
+      ctx,
+      tok,
+      l,
+      tx,
+      y,
+      tw,
+      tok(l.muted ? '--color-ink-muted' : '--color-ink'),
+      side ? 'left' : 'center',
+    )
+    y += lineHeight(l)
   }
 }
 

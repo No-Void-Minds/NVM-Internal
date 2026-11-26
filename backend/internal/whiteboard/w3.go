@@ -1209,6 +1209,14 @@ func (s *Service) MoveCards(ctx context.Context, actor Actor, boardText string, 
 			return err
 		}
 		all := append(append([]pgtype.UUID{}, uuids...), children...)
+		// Kartu terkunci (termasuk isi kolom yang ikut pindah) tidak boleh pindah papan; keputusan Manajer revisi 51.
+		locked, err := q.ListWbLockedCards(ctx, sqlc.ListWbLockedCardsParams{BoardID: from, Ids: all})
+		if err != nil {
+			return err
+		}
+		if len(locked) > 0 {
+			return apperr.Invalid(fmt.Sprintf("%d kartu terkunci. Buka kunci dulu, lalu pindahkan lagi.", len(locked)))
+		}
 		crumbs, err := ancestors(ctx, q, to)
 		if err != nil {
 			return err

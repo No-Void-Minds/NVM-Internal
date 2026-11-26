@@ -31,6 +31,7 @@ func (s *Server) updateMyProfile(c *gin.Context) {
 		s.writeAccountError(c, err)
 		return
 	}
+	s.wbPersonChanged(c.Request.Context(), currentUser(c).ID)
 	c.Status(http.StatusNoContent)
 }
 
@@ -71,6 +72,7 @@ func (s *Server) uploadMyAvatar(c *gin.Context) {
 		s.writeAvatarError(c, err)
 		return
 	}
+	s.wbPersonChanged(c.Request.Context(), currentUser(c).ID)
 	c.JSON(http.StatusOK, gin.H{"avatar_id": id})
 }
 
@@ -79,6 +81,7 @@ func (s *Server) deleteMyAvatar(c *gin.Context) {
 		s.writeAvatarError(c, err)
 		return
 	}
+	s.wbPersonChanged(c.Request.Context(), currentUser(c).ID)
 	c.Status(http.StatusNoContent)
 }
 

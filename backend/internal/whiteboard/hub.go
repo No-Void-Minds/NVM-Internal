@@ -597,6 +597,16 @@ func (h *Hub) Renamed(board, title string, version int32) {
 	h.broadcast(board, nil, msg{"t": "renamed", "board": board, "title": title, "version": version})
 }
 
+// PersonChanged menyiarkan profil terkini ke semua papan (revisi 51): kartu orang membaca nama, foto, jabatan,
+// divisi, dan status aktif dari sini, bukan dari salinan di isi kartu. Tanpa email, username, atau peran.
+func (h *Hub) PersonChanged(p PersonInfo) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for board := range h.rooms {
+		h.broadcast(board, nil, msg{"t": "person", "person": p})
+	}
+}
+
 // Connectors menyiarkan garis yang dibuat atau diubah; ConnectorsGone garis yang masuk Tempat sampah.
 func (h *Hub) Connectors(board string, items []Connector) {
 	h.mu.Lock()

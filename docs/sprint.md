@@ -1773,7 +1773,7 @@ Keputusan teknis:
 - Grup tanpa tabel: setiap kartu menyimpan jalur grupnya dari terluar ke terdalam. Grup A berisi grup B berarti setiap anggota B punya jalur yang diawali A. Siklus berarti id yang sama dua kali di satu jalur, ditolak server ("Grup tidak boleh berisi dirinya sendiri."); lebih dari 8 tingkat ditolak. Grup ikut Tempat sampah dan pulihkan karena kolomnya di kartu. Salinan (tempel, duplikat, template) mendapat id grup baru supaya tidak bergabung ke grup aslinya. Kartu, bentuk, gambar, dan objek gambar bebas bisa satu grup, berdekatan maupun berjauhan.
 - Klik memilih seluruh grup terluar; dobel klik masuk satu tingkat dan memilih kartu (atau subgrup) itu, bukan membuka editor; dobel klik berikutnya baru mengedit. Escape keluar satu tingkat; klik area kosong keluar dari grup. Grup terpilih diberi bingkai putus-putus (token mark, 15,23:1 dan 15,54:1 terhadap kanvas).
 - Seret grup mengirim `grab` dengan `all: true`: satu anggota yang dipegang orang lain menolak seluruh seret dengan nama pemegangnya. Titik belok garis yang kedua ujungnya ikut terseret ikut bergeser. Rata, sebar, dan rapikan jadi grid memperlakukan grup sebagai satu unit (semua anggota bergeser sama jauh); samakan ukuran berlaku per kartu, terhadap kartu yang pertama dipilih.
-- Kunci posisi: kartu terkunci tidak bisa digeser (mouse, panah, rata, sebar, ukuran), diubah ukuran (pegangan disembunyikan), diputar, atau dihapus (juga Potong); isi, warna, gaya, dan urutan tumpuk tetap bisa diubah; balik bentuk tetap boleh. Server menegakkan geser, ukuran, putar, dan hapus. Siapa pun yang boleh menulis bisa membuka kunci; kunci dan buka kunci tercatat di riwayat papan. Pindah ke papan lain tetap boleh. Gembok tampil di kartu terkunci saat dipilih; label pembaca layar memuat "posisi terkunci" dan "dalam grup".
+- Kunci posisi: kartu terkunci tidak bisa digeser (mouse, panah, rata, sebar, ukuran), diubah ukuran (pegangan disembunyikan), diputar, atau dihapus (juga Potong); isi, warna, gaya, dan urutan tumpuk tetap bisa diubah; balik bentuk tetap boleh. Server menegakkan geser, ukuran, putar, dan hapus. Siapa pun yang boleh menulis bisa membuka kunci; kunci dan buka kunci tercatat di riwayat papan. Keputusan Manajer (2026-11-26, dikerjakan di awal revisi 51): kartu terkunci, termasuk isi kolom yang terkunci, tidak boleh pindah ke papan lain dan tidak ikut Jadikan papan baru; server menolak seluruh pindahan dengan pesan "Buka kunci dulu" (test `TestWbKunciTidakPindahPapan`), dan menu serta bar pilihan menyembunyikan kedua aksi itu untuk pilihan yang berisi kartu terkunci. Gembok tampil di kartu terkunci saat dipilih; label pembaca layar memuat "posisi terkunci" dan "dalam grup".
 - Gaya kartu hanya nama dari daftar putih, dirender sebagai kelas CSS statis `wb-st-*`; transparansi satu-satunya angka (25 sampai 100 persen, kelipatan 5) lewat CSSOM. Nilai bawaan tidak disimpan. Bagian yang berlaku: kartu teks (judul, catatan, checklist, tabel, kolom, papan, tautan, berkas) semua; bentuk bayangan dan transparansi (isian dan garisnya lewat Gaya bentuk); gambar garis tepi, sudut, bayangan, dan transparansi; gambar bebas transparansi. Bayangan bawaan halus (seperti sebelumnya); "tegas" dipakai hanya untuk hierarki, kartu yang perlu menonjol, bukan dekorasi. Di bentuk, bayangan mengikuti garis bentuknya (`drop-shadow`).
 - Kartu tanpa latar tidak memakai warna kartu dan tidak memaksa token terang kartu krem, jadi teksnya memakai token tema. Kontras terhadap kanvas (terang dan gelap): tinta 15,23 dan 16,66; abu 5,73 dan 6,20; merah 7,37 dan 9,92; oranye 5,60 dan 11,40; cokelat 5,67 dan 10,67; hijau 5,54 dan 13,12; biru 5,98 dan 9,54; ungu 6,34 dan 9,72; merah muda 6,02 dan 9,50. Semua lolos 4,5:1, jadi tidak ada kombinasi yang disembunyikan. E2E membaca warna terhitung judul tanpa latar di kedua tema.
 - Warna garis tepi memakai warna pena, terhadap kanvas: tinta 15,23 dan 16,66; abu 9,26 dan 12,22; hijau 9,39 dan 10,92; kuning 7,92 dan 11,85; biru 5,98 dan 9,54; krem 5,67 dan 10,67; merah 7,37 dan 9,92; garis bawaan (line) 3,45 dan 4,05. Semua di atas 3:1.
@@ -1783,7 +1783,26 @@ Keputusan teknis:
 - Potong dan posisi zoom memakai satu parameter `crop` (pecahan sisi berkas asli) di isi kartu, divalidasi server (di dalam gambar, minimal 2%). Potong bebas mengubah tinggi kartu mengikuti perbandingan potongan; posisi dan zoom memakai perbandingan bingkai kartu, zoom 100% sampai 500%. Gambar terpotong ditampilkan dari berkas asli supaya tajam. Lihat ukuran penuh dan Unduh berkas asli memakai rute berkas yang sama (`download=1` selalu mengunduh).
 - Jadikan papan baru: kartu papan baru di pojok kiri atas pilihan, lalu pilihan dipindah ke dalamnya lewat rute pindah papan yang sama.
 
-**Menunggu jawaban Manajer (pilihan paling aman dipakai):** pindah ke papan lain dan Jadikan papan baru tidak ikut undo, sama dengan keputusan W3 (pindah papan menampilkan tombol Buka papan); pembatalannya lewat Pindahkan ke papan lain dari papan tujuan.
+**Keputusan Manajer (2026-11-26):** pindah ke papan lain dan Jadikan papan baru tidak ikut undo, sama dengan keputusan W3 (pindah papan menampilkan tombol Buka papan); pembatalannya lewat Pindahkan ke papan lain dari papan tujuan.
+
+## Sprint 12j: Kartu anggota tim (revisi 51)
+
+**Tujuan:** kartu orang dari data pengguna, plus perbaikan kecil kunci posisi dari keputusan Manajer atas revisi 50. Revisi 52 (toolbar format dan bar pilihan menyatu) menyusul di Sprint 12k.
+
+- [x] S12j-01 Perbaikan kunci (keputusan Manajer revisi 50): kartu terkunci, termasuk isi kolom yang terkunci, tidak boleh pindah ke papan lain dan tidak ikut Jadikan papan baru. Server menolak seluruh pindahan ("Buka kunci dulu"); menu, bar pilihan, dan pintasan menyembunyikan atau menolak aksinya. Test `TestWbKunciTidakPindahPapan`.
+- [x] S12j-02 Migrasi `000027_whiteboard_person`: jenis kartu `person` di CHECK. Tanpa tabel baru, jadi `deploy/sql/10-grants.sql` tidak berubah. Down menghapus kartu orang dulu (pola `000025`).
+- [x] S12j-03 Server: `internal/whiteboard/person.go` (isi kartu, validasi user_id harus ada, `GET /api/whiteboard/people`), data profil lewat JOIN di `ListWbCards`, `GetWbCard`, dan `ListWbCardsSince`, pencarian lewat nama terkini, siaran `person` ke semua papan setelah profil, foto, divisi, atau status aktif berubah. Test `TestWbKartuOrang`.
+- [x] S12j-04 Klien: alat Tim (`WbTeamDialog.vue`), kartu orang di `WbCard.vue`, `utils/wbPerson.ts` dengan unit test, tampilan banyak kartu lewat Panel gaya dan menu klik kanan, ekspor menggambar foto.
+- [x] S12j-05 E2E `scripts/e2e/uji-r51.mjs` (1280 px dua klien, 360 px).
+
+**Keputusan:**
+- Isi kartu orang hanya `user_id`, `view` (foto_nama, foto_nama_jabatan, lengkap), `size` (kecil, sedang, besar), dan `layout` (atas, samping). Nama, foto, jabatan, dan divisi tidak disalin: dibaca dari `users` saat papan dimuat (JOIN) dan dikirim ulang lewat siaran `person` setelah ubah profil sendiri, foto, ubah pengguna oleh Admin atau Manajer, dan aktif atau nonaktif. Yang dikirim hanya data yang sudah terlihat di aplikasi (nama, foto, jabatan, divisi, status aktif); email, username, dan peran tidak pernah dikirim (diuji di test DB dan E2E). `plain` kartu orang kosong; pencarian memakai nama terkini lewat JOIN.
+- user_id harus ada (aktif maupun nonaktif) saat kartu dibuat atau isinya diubah; kalau tidak, 400 "Pengguna untuk kartu orang ini tidak ditemukan.". Pengguna nonaktif tetap tampil dengan penanda teks "Nonaktif" (bukan warna saja), di kartu dan di dialog Tim.
+- Alat Tim: daftar pengguna aktif dan nonaktif, cari nama, filter divisi berupa tombol (bukan select), pilih banyak dengan kotak centang, Pilih satu divisi (memilih semua orang di divisi yang sedang disaring), Tambahkan. Kartu ditaruh berjajar (kolom sebanyak akar jumlah dibulatkan ke atas, jarak 24 px) berpusat di tengah layar atau di titik klik kanan "Tambah kartu di sini, Anggota tim". Tampilan awal: foto, nama, jabatan; sedang; foto di samping.
+- Foto memakai avatar yang sudah ada (`/api/users/:id/avatar?v=`, same-origin), persegi bulat dengan object-fit cover; foto gagal atau kosong kembali ke inisial. Ukuran foto 40, 56, dan 80 px untuk kecil, sedang, besar.
+- Ganti tampilan banyak kartu sekaligus lewat Panel gaya (bagian Tampilan kartu orang, tombol dengan aria-pressed) dan menu klik kanan (submenu Tampilan kartu orang, item saklar). Ukuran kartu ikut menyesuaikan tampilan, kecuali kartu terkunci (hanya tampilannya). Isi berubah lewat langkah undo isi, ukuran lewat langkah tata letak.
+- Kartu orang mendukung semua fitur kartu lain lewat jalur yang sama: garis (garis baru antar kartu orang siku dengan panah, untuk bagan organisasi), grup, kunci, gaya kartu, salin tempel, template, dan ekspor (foto digambar bulat, atau inisial).
+- Kontras: nama tinta dan jabatan atau divisi ink-muted di atas kartu (minimum 5,01:1 terang dan 5,09:1 gelap, sama dengan tabel Sprint 12h); penanda Nonaktif tinta dengan garis line (3,45:1 terhadap kanvas). E2E mengukur kontras nama di halaman.
 
 ## Sprint 12: Persiapan deploy dan migrasi data
 
@@ -1989,11 +2008,12 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 48 | 2026-11-26 | Kolom kiri papan task (kartu profil dan To Do) bisa dijangkau dari posisi gulir mana pun | Sprint 12g |
 | 49 | 2026-11-26 | Whiteboard: toolbar format teks melayang untuk catatan, kartu judul, checklist, tabel, teks bentuk, dan judul kolom; ekspor ikut menggambar format | Sprint 12h |
 | 50 | 2026-11-26 | Whiteboard: gaya kartu, menu klik kanan, grup, kunci posisi; ganti, potong, lihat penuh, dan unduh gambar serta berkas | Sprint 12i |
-| 51 | 2026-11-26 | Whiteboard: kartu anggota tim (alat Tim, data orang diambil dari profil saat papan dimuat) | Sprint 12j (setelah revisi 50) |
+| 51 | 2026-11-26 | Whiteboard: kartu anggota tim (alat Tim, data orang diambil dari profil saat papan dimuat) | Sprint 12j |
+| 52 | 2026-11-26 | Whiteboard: panel format menempel di bar pilihan (tidak lagi melayang di atas teks), bar pilihan tanpa select bawaan browser (palet warna dan tombol menu Aksi memakai menu klik kanan) | Sprint 12k (setelah revisi 51) |
 | 33b | 2026-11-20 | Poles tampilan kartu Aktivitas: tombol rantai pindah ke celah antar isian dan jadi ikon kecil tanpa bingkai, tombol mati tidak dirender, jam tersambung menyatu dengan jam kepalanya, status simpan punya baris tetap, Tambah berkas di sel tabel tanpa bingkai | Sprint 12c |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat kelima puluh satu revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat kelima puluh dua revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 
@@ -2031,10 +2051,7 @@ SRS v1.0 belum memuat kelima puluh satu revisi (revisi 5 di S14-17). SRS diperba
   1. Warna isian bentuk memakai warna kartu yang sudah ada (tanpa palet warna bebas), garisnya memakai warna pena.
   2. Bentuk dan garis memakai jalur siku otomatis yang tidak menembus bentuk asal dan tujuan, tetapi bisa melewati bentuk lain di tengah jalan; titik belok dipakai untuk memutarinya.
   3. Ujung garis bebas (tidak menempel kartu) diatur dari titik yang ditarik; belum ada pegangan untuk menyeretnya setelah dibuat.
-- Revisi 50, bawaan dipakai, menunggu konfirmasi:
-  1. Pindah ke papan lain dan Jadikan papan baru tidak ikut undo (sama dengan W3); pembatalannya lewat Pindahkan ke papan lain dari papan tujuan.
-  2. Rata dan sebar pakai Alt+Shift+huruf (Figma memakai Alt+huruf, tetapi Alt+D dan Alt+F dipakai browser untuk bilah alamat dan menu).
-  3. Kunci posisi tetap mengizinkan pindah ke papan lain dan balik bentuk; yang ditolak hanya geser, ubah ukuran, putar, dan hapus.
+- Revisi 50, bawaan dipakai, menunggu konfirmasi: rata dan sebar pakai Alt+Shift+huruf (Figma memakai Alt+huruf, tetapi Alt+D dan Alt+F dipakai browser untuk bilah alamat dan menu). Dua pertanyaan lain revisi 50 sudah dijawab Manajer (Sprint 12i).
 - Revisi 47: event papan task (id task dan nama pelaku, tanpa isi) disiarkan ke semua yang login, karena semua peran boleh membaca semua task. Setuju, atau perlu dibatasi per divisi kalau aturan baca berubah?
 
 ## Setelah go-live (belum dijadwalkan)
