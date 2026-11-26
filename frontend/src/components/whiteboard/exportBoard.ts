@@ -451,9 +451,9 @@ function drawPerson(
 
 // Bayangan tegas: hanya untuk kartu yang perlu menonjol (hierarki), sama dengan .wb-st-sh2.
 function setShadow(ctx: CanvasRenderingContext2D) {
-  ctx.shadowColor = 'rgba(26, 28, 32, 0.22)'
-  ctx.shadowBlur = 20
-  ctx.shadowOffsetY = 8
+  ctx.shadowColor = 'rgba(26, 28, 32, 0.26)'
+  ctx.shadowBlur = 8
+  ctx.shadowOffsetY = 4
 }
 
 const shapeFill: Record<string, string> = { putih: '--color-surface', ...cardBg }

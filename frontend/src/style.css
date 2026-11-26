@@ -310,7 +310,8 @@ textarea:focus-visible:not([aria-invalid='true']) {
 }
 /* Gaya kartu revisi 50 (utils/wbStyle.ts). Di luar @layer supaya menang atas utilitas bawaan kartu (bg-*, border,
    shadow-sm, p-3), dan ditulis sebelum garis pilihan supaya garis pilihan dan bingkai kolaborasi tetap terlihat.
-   Bayangan hanya untuk hierarki: "tegas" menandai kartu yang perlu menonjol, bukan dekorasi. Warna garis tepi memakai
+   Bayangan hanya untuk hierarki: "tegas" menandai kartu yang perlu menonjol, bukan dekorasi. Blurnya kecil (8 px):
+   blur 20 px bersama transparansi membuat p95 frame 500 kartu 26 ms (gerbang akhir revisi 48 sampai 52). Warna garis tepi memakai
    token warna pena, minimal 3:1 terhadap kanvas di kedua tema. */
 .wb-st-clear {
   background-color: transparent;
@@ -364,12 +365,12 @@ textarea:focus-visible:not([aria-invalid='true']) {
   box-shadow: none;
 }
 .wb-st-sh2 {
-  box-shadow: 0 8px 20px color-mix(in srgb, var(--color-ink) 22%, transparent);
+  box-shadow: 0 4px 8px color-mix(in srgb, var(--color-ink) 26%, transparent);
 }
 /* Bentuk tidak berkotak: bayangan mengikuti garis bentuknya, bukan kotak kartunya. */
 .wb-card-shape.wb-st-sh2 {
   box-shadow: none;
-  filter: drop-shadow(0 6px 10px color-mix(in srgb, var(--color-ink) 28%, transparent));
+  filter: drop-shadow(0 3px 5px color-mix(in srgb, var(--color-ink) 30%, transparent));
 }
 .wb-st-p1 {
   padding: 0.375rem;
