@@ -2064,20 +2064,26 @@ SRS v1.0 belum memuat kelima puluh tiga revisi (revisi 5 di S14-17). SRS diperba
 
 ## Menunggu jawaban Manajer
 
-- Umur mutlak sesi 12 jam sejak login (revisi 5): setelah itu pengguna login ulang walaupun terus aktif. Idle timeout saat itu masih 30 menit. Keduanya diubah di revisi 8: umur sesi jadi 9 jam dan idle timeout dihapus.
-- Daftar label awal (nama dan warna) dan daftar pengguna awal (nama, username, peran, divisi).
-- Apakah tim masih memakai berkas .ppt lama. Kalau tidak, hapus dari daftar izin.
-- Konfirmasi kolom Completed di papan hanya 7 hari terakhir (AC-08 menyebut task Completed hilang dari papan aktif).
-- Jabatan diisi sendiri oleh tiap orang atau hanya pengelola.
-- Aturan centang: Manajer boleh mencentang sub task siapa pun kecuali yang dipegang Manajer lain. Sejak revisi 6 sub task tanpa pemilik (buatan Manajer) juga boleh dicentang PIC task mana pun. Setuju?
-- Revisi 6: apakah PIC boleh menandai task Ready tanpa membuat sub task sama sekali? Sekarang boleh, karena syarat Ready hanya "tidak ada sub task yang belum tercentang".
-- Revisi 32, mengurutkan sub task: belum ada pengurutan sub task di detail task, hanya di form Ubah task (Manajer dan pembuat selama Requested). Apakah PIC task perlu tombol naik dan turun di daftar sub task? Sementara tidak ditambah.
-- Revisi 33: rantai ditolak bila jam sebelumnya kosong ("Isi jam sebelumnya dulu untuk menyambung."), supaya jam kosong tidak terhitung terisi. Ini tambahan dari kami, tidak ada di permintaan. Setuju? Tombol rantai juga hanya ada di kartu papan task, belum di dialog sel halaman Aktivitas untuk Manajer.
+Belum ada. Semua pertanyaan sebelumnya sudah dikonfirmasi (lihat bagian berikut).
 
-- Revisi 41 Whiteboard, sepuluh pertanyaan di `docs/whiteboard.md` bagian 10. Bawaan dipakai, menunggu konfirmasi:
+## Keputusan yang dikonfirmasi Manajer
+
+2026-11-26, disetujui Manajer sesuai perilaku di produksi. Semua butir di bawah dulu ada di "Menunggu jawaban Manajer" dan fiturnya sudah di produksi (sampai revisi 50). Sprint 13 menguji aturan ini sebagai keputusan tetap.
+
+- Sesi: umur mutlak 9 jam sejak login, tanpa idle timeout (revisi 8, menggantikan 12 jam dan idle 30 menit dari revisi 5).
+- Label awal dan pengguna awal: sesuai data yang sudah ada di produksi.
+- Berkas .ppt lama tetap ada di daftar izin lampiran.
+- Kolom Completed di papan hanya menampilkan task 7 hari terakhir.
+- Jabatan diisi sendiri oleh tiap orang lewat Profil.
+- Aturan centang: Manajer boleh mencentang sub task siapa pun kecuali yang dipegang Manajer lain. Sub task tanpa pemilik (buatan Manajer) juga boleh dicentang PIC task mana pun (revisi 6).
+- PIC boleh menandai task Ready tanpa sub task sama sekali; syarat Ready hanya "tidak ada sub task yang belum tercentang" (revisi 6).
+- Pengurutan sub task hanya di form Ubah task (Manajer dan pembuat selama Requested); PIC task tidak mendapat tombol naik dan turun (revisi 32).
+- Rantai jam ditolak bila jam sebelumnya kosong ("Isi jam sebelumnya dulu untuk menyambung."), dan tombol rantai hanya ada di kartu papan task, tidak di dialog sel halaman Aktivitas (revisi 33).
+- Event papan task (id task dan nama pelaku, tanpa isi) disiarkan ke semua yang login, karena semua peran boleh membaca semua task (revisi 47).
+- Whiteboard revisi 41 (`docs/whiteboard.md` bagian 10):
   1. Komentar: penulis mengubah dan menghapus komentarnya sendiri, Manajer bisa menghapus komentar siapa pun.
   2. Berkas Whiteboard tidak ikut salinan Google Drive malam.
-  3. Riwayat aktivitas papan disimpan tanpa batas sampai diputuskan.
+  3. Riwayat aktivitas papan disimpan tanpa batas.
   4. Template boleh dibuat dan diubah semua Staf dan Manajer.
   5. Admin hanya baca, termasuk tidak bisa memulihkan dari Tempat sampah.
   6. Tidak ada papan pribadi atau per divisi; semua melihat semua.
@@ -2085,21 +2091,20 @@ SRS v1.0 belum memuat kelima puluh tiga revisi (revisi 5 di S14-17). SRS diperba
   8. Tempat sampah 30 hari, tanpa tombol hapus permanen.
   9. Tanpa sebutan (@nama) dan notifikasi di komentar.
   10. Kunci lunak (satu orang mengetik per kartu, yang lain melihat teksnya berubah langsung), bukan mengetik bersamaan seperti Google Docs.
-- Whiteboard W3, bawaan dipakai, menunggu konfirmasi:
+- Whiteboard W3:
   1. Pratinjau tautan paling banyak 30 kali per orang per jam; kartu tautan tetap dibuat tanpa pratinjau di atas batas itu.
   2. Jenis berkas Whiteboard: daftar lampiran task ditambah WebP dan GIF, tanpa SVG, ZIP, dan video.
-  3. Gambar bebas paling banyak 300 goresan dan 6.000 titik per kartu (rancangan menyebut 500 goresan).
+  3. Gambar bebas paling banyak 300 goresan dan 6.000 titik per kartu.
   4. Garis yang terputus karena salah satu kartunya dipindah ke papan lain masuk Tempat sampah, bukan ikut pindah.
-- Whiteboard W4, bawaan dipakai, menunggu konfirmasi:
-  1. Ekspor PNG dan PDF selalu memakai warna mode terang. (Teks tanpa format huruf diganti revisi 49: format sekarang ikut digambar.)
+- Whiteboard W4:
+  1. Ekspor PNG dan PDF selalu memakai warna mode terang (format teks ikut digambar sejak revisi 49).
   2. Salinan template memakai berkas gambar yang sama dengan templatenya, bukan salinan berkas; menghapus template tidak merusak salinannya.
   3. Di bawah zoom 40% kartu hanya menampilkan judul ringkas (level of detail).
-- Whiteboard W5, bawaan dipakai, menunggu konfirmasi:
+- Whiteboard W5:
   1. Warna isian bentuk memakai warna kartu yang sudah ada (tanpa palet warna bebas), garisnya memakai warna pena.
   2. Bentuk dan garis memakai jalur siku otomatis yang tidak menembus bentuk asal dan tujuan, tetapi bisa melewati bentuk lain di tengah jalan; titik belok dipakai untuk memutarinya.
-  3. Ujung garis bebas (tidak menempel kartu) diatur dari titik yang ditarik; belum ada pegangan untuk menyeretnya setelah dibuat.
-- Revisi 50, bawaan dipakai, menunggu konfirmasi: rata dan sebar pakai Alt+Shift+huruf (Figma memakai Alt+huruf, tetapi Alt+D dan Alt+F dipakai browser untuk bilah alamat dan menu). Dua pertanyaan lain revisi 50 sudah dijawab Manajer (Sprint 12i).
-- Revisi 47: event papan task (id task dan nama pelaku, tanpa isi) disiarkan ke semua yang login, karena semua peran boleh membaca semua task. Setuju, atau perlu dibatasi per divisi kalau aturan baca berubah?
+  3. Ujung garis bebas (tidak menempel kartu) diatur dari titik yang ditarik; tidak ada pegangan untuk menyeretnya setelah dibuat.
+- Revisi 50: rata dan sebar memakai Alt+Shift+huruf (Alt+D dan Alt+F dipakai browser untuk bilah alamat dan menu).
 
 ## Setelah go-live (belum dijadwalkan)
 
