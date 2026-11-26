@@ -3453,6 +3453,8 @@ async function connectInOrder() {
     announce.value =
       made.length === 1 ? 'Garis ditambahkan.' : `${made.length} garis ditambahkan sesuai urutan pilih.`
   }
+  // Dua kartu, satu garis: dialog Garis langsung terbuka untuk label dan gaya, seperti sejak W3.
+  if (ids.length === 2 && made.length === 1) connectorIds.value = made
 }
 
 async function connectPair(from: string, to: string): Promise<string | null> {

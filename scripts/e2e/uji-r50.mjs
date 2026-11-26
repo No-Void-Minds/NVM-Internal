@@ -396,6 +396,8 @@ try {
     await settle(ps);
     const bAfter = await cardsOf(board);
     expect(bAfter.connectors.length === k0 + 1 && bAfter.connectors.some((c) => c.from === n1.id && c.to === n3.id), "hubungkan", "garis tidak dibuat dari kartu pertama ke kedua");
+    expect(await ps.getByRole("dialog", { name: "Garis penghubung" }).isVisible().catch(() => false), "hubungkan", "dialog Garis tidak terbuka untuk dua kartu");
+    await ps.keyboard.press("Escape");
     await ps.locator(".wb-canvas").focus();
     await ps.keyboard.press("Control+z");
     await settle(ps);
