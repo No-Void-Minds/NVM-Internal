@@ -18,6 +18,9 @@ const props = defineProps<{
   singleLine?: boolean
   selectAll?: boolean
   editorClass?: string
+  // Aturan ketik Markdown ("+ " jadi daftar, "# " jadi judul). Mati di field kecil dan teks bentuk, karena "+ id"
+  // dan "- simpan()" adalah notasi UML dan teks biasa, bukan perintah format; catatan tetap memakainya.
+  markdown?: boolean
 }>()
 const emit = defineEmits<{ input: [doc: PMNode]; close: []; enter: [] }>()
 
@@ -62,12 +65,20 @@ onMounted(() => {
   editor.value = new Editor({
     element: host.value!,
     injectCSS: false,
+    enableInputRules: props.markdown !== false,
     content: props.doc,
     // Dobel klik menaruh kursor di titik klik (onCreate); tanpa itu (Enter) di akhir teks.
     autofocus: props.caret?.textIndex !== undefined ? false : props.selectAll ? 'all' : 'end',
     onCreate: ({ editor: e }) => {
       const want = props.caret?.textIndex
-      if (want === undefined) return
+      if (want === undefined) {
+        // Fokus dan kursor dipasang langsung, bukan menunggu satu frame seperti autofocus TipTap, supaya ketikan cepat
+        // sesudah klik pada field yang baru dibuka tidak hilang.
+        if (props.selectAll) e.commands.selectAll()
+        else e.commands.setTextSelection(e.state.doc.content.size)
+        e.view.focus()
+        return
+      }
       // Indeks karakter teks tampilan dipetakan ke posisi dokumen: jumlah karakter text node sebelumnya.
       let seen = 0
       let at: number | null = null

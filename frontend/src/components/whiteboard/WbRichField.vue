@@ -93,6 +93,7 @@ const empty = computed(
       :label="label"
       :caret="caret"
       :single-line="singleLine"
+      :markdown="false"
       :select-all="selectAll"
       :editor-class="editorClass"
       @input="onInput"
