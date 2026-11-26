@@ -24,6 +24,8 @@ export type ShapeType =
   | 'uml_actor'
   | 'uml_note'
   | 'uml_package'
+  | 'uml_system'
+  | 'uml_usecase'
   | 'arrow_right'
   | 'arrow_left'
   | 'arrow_up'
@@ -77,6 +79,9 @@ export const SHAPES: {
   { id: 'uml_actor', label: 'Aktor', group: 'UML', w: 80, h: 160 },
   { id: 'uml_note', label: 'Catatan UML', group: 'UML', w: 180, h: 100 },
   { id: 'uml_package', label: 'Paket', group: 'UML', w: 220, h: 160 },
+  // Diagram use case (revisi 53): batas sistem tanpa latar dengan judul di dalam atas, use case berupa elips.
+  { id: 'uml_system', label: 'Batas sistem', group: 'UML', w: 480, h: 360 },
+  { id: 'uml_usecase', label: 'Use case', group: 'UML', w: 180, h: 90 },
   { id: 'arrow_right', label: 'Panah kanan', group: 'Panah blok', w: 180, h: 100 },
   { id: 'arrow_left', label: 'Panah kiri', group: 'Panah blok', w: 180, h: 100 },
   { id: 'arrow_up', label: 'Panah atas', group: 'Panah blok', w: 100, h: 180 },
@@ -90,11 +95,11 @@ export function newShapeContent(shape: ShapeType): ShapeContent {
   return {
     shape,
     rotation: 0,
-    fill: shape === 'uml_actor' ? '' : shape === 'uml_note' ? 'kuning' : 'putih',
+    fill: shape === 'uml_actor' || shape === 'uml_system' ? '' : shape === 'uml_note' ? 'kuning' : 'putih',
     stroke: 'tinta',
     stroke_width: 2,
     stroke_style: 'solid',
-    text: '',
+    text: shape === 'uml_system' ? 'Sistem' : shape === 'uml_usecase' ? 'Use case' : '',
     align: shape === 'uml_note' ? 'left' : 'center',
     font_size: 16,
     ...(shape === 'uml_class' ? { name: 'Kelas', attributes: '', methods: '' } : {}),
@@ -110,6 +115,7 @@ export function shapePath(shape: ShapeType, w: number, h: number): string {
     case 'rect':
     case 'process':
     case 'uml_class':
+    case 'uml_system':
       return poly([
         [0, 0],
         [w, 0],
@@ -125,6 +131,7 @@ export function shapePath(shape: ShapeType, w: number, h: number): string {
       return `M${f(r)} 0H${f(w - r)}A${f(r)} ${f(h / 2)} 0 0 1 ${f(w - r)} ${f(h)}H${f(r)}A${f(r)} ${f(h / 2)} 0 0 1 ${f(r)} 0Z`
     }
     case 'ellipse':
+    case 'uml_usecase':
       return `M0 ${f(h / 2)}A${f(w / 2)} ${f(h / 2)} 0 1 0 ${f(w)} ${f(h / 2)}A${f(w / 2)} ${f(h / 2)} 0 1 0 0 ${f(h / 2)}Z`
     case 'triangle':
       return poly([
@@ -350,7 +357,8 @@ export function rotatedBounds(b: Box, rotation = 0): Box {
 // ---------------------------------------------------------------------------------------------------------------
 // Jalur garis
 
-export type Route = 'straight' | 'orthogonal' | 'curved'
+// bebas (revisi 53): ruas lurus antar titik belok dengan sudut apa pun.
+export type Route = 'straight' | 'orthogonal' | 'curved' | 'bebas'
 export type End = { p: Pt; dir: Pt | null; box: Box | null }
 export const STUB = 20
 
@@ -461,7 +469,7 @@ export function orthogonalRoute(a: End, b: End): Pt[] {
 // Titik jalur untuk garis lurus dan siku. Titik belok pengguna (points) dilewati berurutan; di jalur siku setiap
 // bagian antar titik dibuat siku.
 export function routePoints(a: End, b: End, route: Route, points: Pt[] = []): Pt[] {
-  if (route === 'straight' || route === 'curved') return [a.p, ...points, b.p]
+  if (route !== 'orthogonal') return [a.p, ...points, b.p]
   if (!points.length) return orthogonalRoute(a, b)
   const out: Pt[] = []
   const stops: End[] = [a, ...points.map((p) => ({ p, dir: null, box: null })), b]
@@ -625,7 +633,13 @@ export type ConnLike = {
   id: string
   from: string | null
   to: string | null
-  geometry: { from: ConnEnd; to: ConnEnd; route: Route; points: [number, number][] }
+  geometry: {
+    from: ConnEnd
+    to: ConnEnd
+    route: Route
+    points: [number, number][]
+    anchor?: [[number, number], [number, number]]
+  }
   style: { start: EndKind; end: EndKind }
 }
 export type Routed = {
@@ -673,7 +687,11 @@ export function routeConnector(
   const ca = centerOf(c.from, c.geometry.from, geom)
   const cb = centerOf(c.to, c.geometry.to, geom)
   if (!ca || !cb) return null
-  const pts = (points ?? c.geometry.points ?? []).map(([x, y]) => ({ x, y }))
+  // Titik belok tersimpan relatif terhadap pusat ujung saat disimpan (anchor); titik draf sudah di posisi tampil.
+  const an = c.geometry.anchor
+  const raw = (points ?? c.geometry.points ?? []).map(([x, y]) => ({ x, y }))
+  const pts =
+    !points && an ? elastic(raw, { x: an[0][0], y: an[0][1] }, { x: an[1][0], y: an[1][1] }, ca, cb) : raw
   const a = resolveEnd(c.from, c.geometry.from, geom, rot, pts[0] ?? cb)
   const b = resolveEnd(c.to, c.geometry.to, geom, rot, pts.at(-1) ?? ca)
   if (!a || !b) return null
@@ -700,4 +718,65 @@ export function routeConnector(
     near: { start: at(28), end: back(28) },
     stops: [a.p, ...pts, b.p],
   }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Garis elastis dan titik belok (revisi 53)
+
+// Memetakan titik belok dari pasangan ujung lama ke pasangan ujung baru dengan transformasi kemiripan (geser, putar,
+// skala seragam), satu-satunya pemetaan affine yang ditentukan dua pasang titik. Bentuk garis terjaga: titik dekat
+// ujung yang diam hampir tidak bergerak. Ujung lama yang berimpit hanya digeser rata-rata perpindahan kedua ujung.
+export function elastic(points: Pt[], a0: Pt, b0: Pt, a1: Pt, b1: Pt): Pt[] {
+  const vx = b0.x - a0.x
+  const vy = b0.y - a0.y
+  const len = vx * vx + vy * vy
+  if (len < 1) {
+    const dx = (a1.x - a0.x + b1.x - b0.x) / 2
+    const dy = (a1.y - a0.y + b1.y - b0.y) / 2
+    return points.map((p) => ({ x: p.x + dx, y: p.y + dy }))
+  }
+  const ux = b1.x - a1.x
+  const uy = b1.y - a1.y
+  // s = u / v sebagai bilangan kompleks.
+  const sr = (ux * vx + uy * vy) / len
+  const si = (uy * vx - ux * vy) / len
+  return points.map((p) => {
+    const qx = p.x - a0.x
+    const qy = p.y - a0.y
+    return { x: a1.x + sr * qx - si * qy, y: a1.y + si * qx + sr * qy }
+  })
+}
+
+// Titik belok yang segaris dengan tetangganya (jarak tegak lurus ke ruas tetangga di bawah tol) dibuang. stops:
+// ujung awal, titik belok, ujung akhir; yang dikembalikan hanya titik beloknya.
+export function simplifyBends(stops: Pt[], tol = 2): Pt[] {
+  const out = [...stops]
+  for (let i = 1; i < out.length - 1;) {
+    const a = out[i - 1]!
+    const p = out[i]!
+    const b = out[i + 1]!
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    const l = Math.hypot(dx, dy)
+    const dist =
+      l < 0.01 ? Math.hypot(p.x - a.x, p.y - a.y) : Math.abs(dx * (a.y - p.y) - dy * (a.x - p.x)) / l
+    const t = l < 0.01 ? 0 : ((p.x - a.x) * dx + (p.y - a.y) * dy) / (l * l)
+    if (dist < tol && t > 0 && t < 1) out.splice(i, 1)
+    else if (dist < tol && l < 0.01) out.splice(i, 1)
+    else i++
+  }
+  return out.slice(1, -1)
+}
+
+// Shift saat menyeret titik belok: sudut dari titik sebelumnya dikunci ke kelipatan 45 derajat, panjangnya tetap
+// proyeksi ke arah itu.
+export function snap45(from: Pt, p: Pt): Pt {
+  const dx = p.x - from.x
+  const dy = p.y - from.y
+  const step = Math.PI / 4
+  const ang = Math.round(Math.atan2(dy, dx) / step) * step
+  const ux = Math.round(Math.cos(ang) * 1e9) / 1e9
+  const uy = Math.round(Math.sin(ang) * 1e9) / 1e9
+  const k = (dx * ux + dy * uy) / (ux * ux + uy * uy)
+  return { x: from.x + ux * k, y: from.y + uy * k }
 }

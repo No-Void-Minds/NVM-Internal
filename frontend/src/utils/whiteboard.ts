@@ -88,8 +88,10 @@ export type ConnectorEnd = { port: string; x?: number; y?: number }
 export type ConnectorGeometry = {
   from: ConnectorEnd
   to: ConnectorEnd
-  route: 'straight' | 'orthogonal' | 'curved'
+  route: 'straight' | 'orthogonal' | 'curved' | 'bebas'
   points: [number, number][]
+  // Pusat ujung awal dan akhir saat titik belok disimpan (revisi 53, garis elastis).
+  anchor?: [[number, number], [number, number]]
 }
 export type Connector = {
   id: string
@@ -103,6 +105,8 @@ export type Connector = {
   label_end: string
   version: number
   seq: number
+  // Urutan tumpuk manual (revisi 53); null berarti otomatis di atas kartu ujung yang paling depan.
+  z: number | null
 }
 
 export type Card = {

@@ -677,6 +677,9 @@ type ConnectorGeometry struct {
 	To     ConnectorEnd `json:"to"`
 	Route  string       `json:"route"`
 	Points [][2]float64 `json:"points"`
+	// Anchor (revisi 53): pusat ujung awal dan akhir saat titik belok disimpan. Klien memetakan titik belok dari
+	// anchor ke pusat ujung sekarang, jadi garis ikut elastis saat kartunya digeser tanpa menulis ulang garis.
+	Anchor *[2][2]float64 `json:"anchor,omitempty"`
 }
 
 type Connector struct {
@@ -691,6 +694,8 @@ type Connector struct {
 	LabelEnd   string            `json:"label_end"`
 	Version    int32             `json:"version"`
 	Seq        int64             `json:"seq"`
+	// Z: urutan tumpuk manual (revisi 53); null berarti otomatis, tepat di atas kartu ujung yang paling depan.
+	Z *float64 `json:"z"`
 }
 
 const maxConnectorPoints = 50
@@ -698,8 +703,9 @@ const maxConnectorPoints = 50
 var (
 	connectorEnds = map[string]bool{"none": true, "arrow": true, "open_arrow": true, "triangle": true, "diamond": true,
 		"diamond_open": true, "circle": true}
-	connectorLine   = map[string]bool{"solid": true, "dashed": true, "dotted": true}
-	connectorRoutes = map[string]bool{"straight": true, "orthogonal": true, "curved": true}
+	connectorLine = map[string]bool{"solid": true, "dashed": true, "dotted": true}
+	// bebas (revisi 53): ruas lurus antar titik belok dengan sudut apa pun.
+	connectorRoutes = map[string]bool{"straight": true, "orthogonal": true, "curved": true, "bebas": true}
 	connectorPorts  = map[string]bool{"": true, "auto": true, "top": true, "right": true, "bottom": true, "left": true,
 		"top_left": true, "top_right": true, "bottom_left": true, "bottom_right": true}
 )
@@ -715,8 +721,24 @@ func connectorOf(r sqlc.InsertWbConnectorRow) Connector {
 	if g.Points == nil {
 		g.Points = [][2]float64{}
 	}
+	var z *float64
+	if r.Z.Valid {
+		z = &r.Z.Float64
+	}
 	return Connector{ID: idString(r.ID), BoardID: idString(r.BoardID), From: optID(r.FromCardID), To: optID(r.ToCardID),
-		Geometry: g, Style: st, Label: r.Label, LabelStart: r.LabelStart, LabelEnd: r.LabelEnd, Version: r.Version, Seq: r.Seq}
+		Geometry: g, Style: st, Label: r.Label, LabelStart: r.LabelStart, LabelEnd: r.LabelEnd, Version: r.Version, Seq: r.Seq,
+		Z: z}
+}
+
+// connectorZ: nil tetap otomatis; nilai diperiksa dengan batas yang sama dengan z kartu.
+func connectorZ(z *float64) (pgtype.Float8, error) {
+	if z == nil {
+		return pgtype.Float8{}, nil
+	}
+	if !finite(*z) || math.Abs(*z) > maxZ {
+		return pgtype.Float8{}, apperr.Invalid("Urutan tumpuk garis tidak sah.")
+	}
+	return pgtype.Float8{Float64: *z, Valid: true}, nil
 }
 
 func cleanStyle(st ConnectorStyle) (ConnectorStyle, error) {
@@ -757,6 +779,13 @@ func cleanGeometry(g ConnectorGeometry, attachedFrom, attachedTo bool) (Connecto
 	}
 	if g.Points == nil {
 		g.Points = [][2]float64{}
+	}
+	if g.Anchor != nil {
+		for _, p := range g.Anchor {
+			if !finite(p[0]) || !finite(p[1]) || math.Abs(p[0]) > maxCoord || math.Abs(p[1]) > maxCoord {
+				return g, apperr.Invalid("Titik acuan garis di luar papan.")
+			}
+		}
 	}
 	for _, e := range []struct {
 		end      *ConnectorEnd
@@ -809,6 +838,7 @@ type ConnectorInput struct {
 	Label      string            `json:"label"`
 	LabelStart string            `json:"label_start"`
 	LabelEnd   string            `json:"label_end"`
+	Z          *float64          `json:"z"`
 }
 
 func optCard(text string) (pgtype.UUID, error) {
@@ -850,6 +880,10 @@ func (s *Service) CreateConnector(ctx context.Context, actor Actor, boardText st
 	if err := cleanLabels(&in.Label, &in.LabelStart, &in.LabelEnd); err != nil {
 		return Connector{}, err
 	}
+	z, err := connectorZ(in.Z)
+	if err != nil {
+		return Connector{}, err
+	}
 	style, _ := json.Marshal(st)
 	geometry, _ := json.Marshal(geo)
 	var out Connector
@@ -869,7 +903,7 @@ func (s *Service) CreateConnector(ctx context.Context, actor Actor, boardText st
 		}
 		row, err := q.InsertWbConnector(ctx, sqlc.InsertWbConnectorParams{BoardID: boardID, FromCardID: from, ToCardID: to,
 			Geometry: geometry, Style: style, Label: in.Label, LabelStart: in.LabelStart, LabelEnd: in.LabelEnd, Seq: seq,
-			ActorID: actor.ID})
+			ActorID: actor.ID, Z: z})
 		if err != nil {
 			return err
 		}
@@ -885,6 +919,9 @@ type ConnectorPatch struct {
 	Label      *string            `json:"label"`
 	LabelStart *string            `json:"label_start"`
 	LabelEnd   *string            `json:"label_end"`
+	// Z mengatur urutan manual; ZAuto mengembalikannya ke otomatis (dipakai undo dari otomatis ke manual).
+	Z     *float64 `json:"z"`
+	ZAuto bool     `json:"z_auto"`
 }
 
 // UpdateConnector mengganti gaya, jalur, atau label; yang terakhir sampai menang, sama dengan tata letak kartu.
@@ -915,6 +952,15 @@ func (s *Service) UpdateConnector(ctx context.Context, actor Actor, boardText, i
 		return pgtype.Text{String: *v, Valid: true}
 	}
 	params.Label, params.LabelStart, params.LabelEnd = text(p.Label), text(p.LabelStart), text(p.LabelEnd)
+	if p.Z != nil && p.ZAuto {
+		return Connector{}, apperr.Invalid("Pilih urutan manual atau otomatis, bukan keduanya.")
+	}
+	if p.Z != nil || p.ZAuto {
+		params.SetZ = true
+		if params.Z, err = connectorZ(p.Z); err != nil {
+			return Connector{}, err
+		}
+	}
 	var out Connector
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := sqlc.New(tx)

@@ -1513,7 +1513,7 @@ func (s *Service) Since(ctx context.Context, boardText string, seq int64) (Sync,
 		}
 		out.Connectors = append(out.Connectors, connectorOf(sqlc.InsertWbConnectorRow{
 			ID: r.ID, BoardID: r.BoardID, FromCardID: r.FromCardID, ToCardID: r.ToCardID, Geometry: r.Geometry, Style: r.Style,
-			Label: r.Label, LabelStart: r.LabelStart, LabelEnd: r.LabelEnd, Version: r.Version, Seq: r.Seq,
+			Label: r.Label, LabelStart: r.LabelStart, LabelEnd: r.LabelEnd, Version: r.Version, Seq: r.Seq, Z: r.Z,
 		}))
 	}
 	return out, nil

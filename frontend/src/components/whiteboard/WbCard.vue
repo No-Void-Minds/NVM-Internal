@@ -52,6 +52,8 @@ const props = defineProps<{
   readonlyBy?: string | null
   // Sudut sementara selama pegangan putar diseret (W5); null memakai sudut tersimpan.
   rotation?: number | null
+  // Peringkat tumpuk di antara kartu dan garis (revisi 53); tanpa itu z tersimpan dibulatkan.
+  layer?: number
 }>()
 const emit = defineEmits<{
   grab: [e: PointerEvent]
@@ -103,7 +105,7 @@ const style = computed(() => ({
   height: isShape.value ? `${props.card.h + props.dh}px` : undefined,
   width: `${props.card.w + props.dw}px`,
   minHeight: `${props.card.h + props.dh}px`,
-  zIndex: props.editing ? 100000 : Math.round(props.card.z),
+  zIndex: props.editing ? 100000 : (props.layer ?? Math.round(props.card.z)),
   '--wb-ring': `${2 / props.zoom}px`,
   opacity: styleOpacity(props.card.style, props.card.kind),
 }))

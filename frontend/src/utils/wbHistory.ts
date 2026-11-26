@@ -57,6 +57,8 @@ export type Step =
   | { kind: 'checklist'; id: string; ops: ChecklistInverse }
   // Garis baru dari Hubungkan dengan garis (revisi 50); batches diisi saat undo untuk redo lewat pemulihan.
   | { kind: 'connectors'; ids: string[]; batches: string[] }
+  // Urutan tumpuk garis (revisi 53); null berarti otomatis.
+  | { kind: 'lineZ'; id: string; before: number | null; after: number | null }
 
 export const MAX_STEPS = 100
 

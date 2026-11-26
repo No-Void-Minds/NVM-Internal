@@ -229,7 +229,7 @@ func (s *Service) FromTemplate(ctx context.Context, actor Actor, boardText strin
 			}
 			if _, err := q.InsertWbConnector(ctx, sqlc.InsertWbConnectorParams{
 				BoardID: boardMap[n.BoardID.Bytes], FromCardID: from, ToCardID: to, Geometry: n.Geometry, Style: n.Style,
-				Label: n.Label, LabelStart: n.LabelStart, LabelEnd: n.LabelEnd, ActorID: actor.ID,
+				Label: n.Label, LabelStart: n.LabelStart, LabelEnd: n.LabelEnd, ActorID: actor.ID, Z: n.Z,
 			}); err != nil {
 				return err
 			}

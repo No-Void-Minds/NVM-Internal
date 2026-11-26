@@ -640,6 +640,7 @@ type WbConnector struct {
 	DeletedAt    pgtype.Timestamptz
 	DeletedBy    pgtype.Int8
 	DeletedBatch pgtype.UUID
+	Z            pgtype.Float8
 }
 
 type WbFile struct {

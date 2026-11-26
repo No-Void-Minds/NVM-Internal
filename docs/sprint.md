@@ -1824,6 +1824,30 @@ Keputusan teknis:
 - Label "Kode" di popover Lainnya menjadi "Teks kode" dengan tooltip "Huruf monospace untuk kode voucher, SKU, atau nama file (Ctrl+E)"; perilakunya tidak berubah.
 - Kontras: teks dan ikon tombol tinta di surface (13,31:1 terang, 13,67:1 gelap), tertekan on-accent di accent (lihat token), cincin pilihan dan fokus mark (15,23:1 terhadap surface terang), garis kotak warna line (3,45:1 terhadap kanvas). Tanpa animasi baru.
 
+## Sprint 12l: Garis ikut urutan tumpuk, diagram use case, dan garis elastis (revisi 53)
+
+**Tujuan:** garis tidak lagi tertutup kartu besar yang sudah dikirim ke belakang (batas sistem menutupi panah aktor ke use case), bentuk diagram use case tersedia di palet, dan titik belok garis bisa miring serta ikut bergeser bersama kartu ujungnya.
+
+- [x] S12l-01 Migrasi `000028_whiteboard_connector_z`: kolom `z` (double precision, boleh NULL, batas sama dengan `wb_cards.z`) di `wb_connectors`. Tanpa tabel baru, jadi `deploy/sql/10-grants.sql` tidak berubah. Service: `Connector.Z`, `ConnectorInput.Z`, `ConnectorPatch.Z` dan `ZAuto`; template menyalin z, pindah papan melepasnya. Jalur `bebas` dan `geometry.anchor` divalidasi di Go (jsonb, tanpa CHECK baru).
+- [x] S12l-02 Render: satu svg per garis (`WbConnector.vue`) dengan z-index peringkat tumpuk; kartu juga memakai peringkat (`utils/wbStack.ts`: `lineZ`, `stackOrder`, `stackRanks`, `restack`). Garis yang masukannya tidak berubah memakai objek lama, jadi menyeret kartu hanya me-render ulang garis yang menempel padanya. Ekspor PNG dan PDF menggambar kartu dan garis dalam urutan yang sama.
+- [x] S12l-03 Urutan garis manual: menu klik kanan garis, bar garis terpilih (Gaya garis, Aksi, Hapus garis), pintasan urutan yang sama dengan kartu, dan tombol Urutan di panel garis (jalur keyboard). Undo dan siaran realtime.
+- [x] S12l-04 Bentuk "Batas sistem" (`uml_system`) dan "Use case" (`uml_usecase`) di kelompok UML; preset Include dan Extend di panel garis.
+- [x] S12l-05 Jalur "Bebas", garis elastis lewat anchor, titik segaris dirapikan, Shift mengunci 45 derajat.
+- [x] S12l-06 Test DB `TestWbUrutanGaris`; unit test `tests/wbStack.test.ts`; E2E `scripts/e2e/uji-r53.mjs` (1280 dan 360 px); uji performa uji13 ditambah seret kartu ber-garis dan garis dengan urutan manual.
+
+**Keputusan:**
+- z garis NULL berarti otomatis: digambar tepat di atas kartu ujung yang z-nya paling tinggi, dihitung klien saat itu juga, jadi tetap benar sesudah ujungnya maju atau mundur tanpa menulis ulang baris garis. Pada z yang sama garis menang seri melawan kartu (pengganti "plus epsilon" yang tidak goyah oleh presisi angka). Garis tanpa z dan tanpa kartu ujung tetap di paling belakang seperti sebelumnya; garis yang kedua ujungnya bebas memakai z sendiri bila diberi saat dibuat.
+- Urutan manual disimpan sebagai z garis sendiri (skala sama dengan z kartu). "Otomatis, di atas kartu ujung" (menu) dan tombol Otomatis (panel) mengembalikannya ke NULL lewat `z_auto`; undo memakai jalur yang sama. Maju dan mundur melewati satu lapis di urutan gambar (kartu atau garis lain). Urutan kartu menghitung garis yang urutannya manual sebagai lapis, garis otomatis tidak (ia menempel di kartunya).
+- Kartu dan garis memakai z-index peringkat 1..n, bukan z yang dibulatkan, jadi z pecahan hasil maju dan mundur tidak lagi seri. Kartu yang sedang diedit tetap di atas semuanya.
+- Pindah ke papan lain melepas urutan manual garis yang ikut pindah (z kartu di papan tujuan berbeda skala). Template menyalin z apa adanya karena z kartunya juga tersalin.
+- Batas sistem: persegi tanpa latar, judul tebal di dalam atas (teks berformat seperti teks bentuk), lebar 480 x 360. Saat dibuat dari palet langsung diberi z di bawah semua kartu. Use case: elips 180 x 90 dengan teks "Use case"; bentuk sendiri supaya nama dan ukurannya muncul di palet, gambarnya sama dengan elips.
+- Preset Include dan Extend: garis putus-putus, ujung akhir panah terbuka, label tengah «include» atau «extend» yang tetap bisa diubah di isian Label tengah.
+- Jalur Bebas: ruas lurus antar titik belok dengan sudut apa pun. Garis lurus yang diberi titik belok lewat seret otomatis menjadi Bebas; siku dan melengkung tetap bisa dipilih. Melengkung memakai Catmull-Rom yang melewati semua titik belok (sudah begitu sejak W5). Ganti jalur tidak membuang titik belok.
+- Garis elastis: `geometry.anchor` menyimpan pusat kedua ujung saat titik belok disimpan. Saat menggambar, titik belok dipetakan dari anchor ke pusat ujung sekarang dengan transformasi kemiripan (geser, putar, skala seragam), satu-satunya pemetaan affine yang ditentukan dua pasang titik. Karena dihitung saat menggambar, garis ikut elastis selama seret, ubah ukuran, undo, di layar orang lain, dan di ekspor, tanpa menulis ulang garis setiap kartu bergeser. Jalur siku tetap ortogonal karena setiap ruas antar titik dirutekan siku ulang. Garis lama tanpa anchor tidak elastis sampai titik beloknya diubah sekali.
+- Titik belok yang jarak tegak lurusnya ke ruas tetangga di bawah 2 px (dunia) dibuang saat seret selesai. Shift saat menyeret mengunci sudut ruas dari titik sebelumnya ke kelipatan 45 derajat (snap grid tidak berlaku selama Shift).
+- Pegangan sisip titik belok tetap hanya untuk garis terpilih, area sentuh 44 px di layar.
+- Kontras: tombol baru memakai gaya tombol panel yang sudah ada (tinta di surface); tombol Otomatis aktif memakai accent dengan teks on-accent. Tanpa warna baru dan tanpa animasi baru.
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -2030,10 +2054,11 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 50 | 2026-11-26 | Whiteboard: gaya kartu, menu klik kanan, grup, kunci posisi; ganti, potong, lihat penuh, dan unduh gambar serta berkas | Sprint 12i |
 | 51 | 2026-11-26 | Whiteboard: kartu anggota tim (alat Tim, data orang diambil dari profil saat papan dimuat) | Sprint 12j |
 | 52 | 2026-11-26 | Whiteboard: panel format menempel di bar pilihan (tidak lagi melayang di atas teks), bar pilihan tanpa select bawaan browser (palet warna dan tombol menu Aksi memakai menu klik kanan) | Sprint 12k |
+| 53 | 2026-11-26 | Whiteboard: garis ikut urutan tumpuk (otomatis di atas kartu ujung, urutan manual lewat menu), bentuk Batas sistem dan Use case, preset include dan extend, jalur Bebas, garis elastis saat kartu ujung digeser | Sprint 12l |
 | 33b | 2026-11-20 | Poles tampilan kartu Aktivitas: tombol rantai pindah ke celah antar isian dan jadi ikon kecil tanpa bingkai, tombol mati tidak dirender, jam tersambung menyatu dengan jam kepalanya, status simpan punya baris tetap, Tambah berkas di sel tabel tanpa bingkai | Sprint 12c |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat kelima puluh dua revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat kelima puluh tiga revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

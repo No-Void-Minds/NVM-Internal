@@ -41,7 +41,8 @@ function assertClear(pts: Pt[], boxes: Box[]) {
 }
 
 test('semua bentuk punya path SVG yang sah', () => {
-  assert.equal(SHAPES.length, 22)
+  // 22 sejak W5, ditambah Batas sistem dan Use case (revisi 53).
+  assert.equal(SHAPES.length, 24)
   for (const s of SHAPES) {
     const d = shapePath(s.id, s.w, s.h)
     assert.ok(d.startsWith('M') && !d.includes('NaN') && !d.includes('Infinity'), `${s.id}: ${d}`)

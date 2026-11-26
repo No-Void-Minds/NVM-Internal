@@ -5,7 +5,7 @@ import BaseDialog from '../components/BaseDialog.vue'
 import UserAvatar from '../components/UserAvatar.vue'
 import WbCard from '../components/whiteboard/WbCard.vue'
 import WbTrashPanel from '../components/whiteboard/WbTrashPanel.vue'
-import WbConnectorLayer from '../components/whiteboard/WbConnectorLayer.vue'
+import WbConnector from '../components/whiteboard/WbConnector.vue'
 import WbConnectorDialog from '../components/whiteboard/WbConnectorDialog.vue'
 import WbCommentsPanel from '../components/whiteboard/WbCommentsPanel.vue'
 import WbMoveDialog from '../components/whiteboard/WbMoveDialog.vue'
@@ -23,7 +23,7 @@ import WbStylePanel from '../components/whiteboard/WbStylePanel.vue'
 import WbImageDialog from '../components/whiteboard/WbImageDialog.vue'
 import WbTeamDialog from '../components/whiteboard/WbTeamDialog.vue'
 import WbPicker from '../components/whiteboard/WbPicker.vue'
-import type { DrawnLine } from '../components/whiteboard/WbConnectorLayer.vue'
+import type { DrawnLine } from '../components/whiteboard/WbConnector.vue'
 import type { ConnectorUpdate } from '../components/whiteboard/WbConnectorDialog.vue'
 import {
   SHAPES,
@@ -34,6 +34,8 @@ import {
   portsFor,
   resizeBox,
   routeConnector,
+  simplifyBends,
+  snap45,
   type Handle,
   type Port,
   type Pt,
@@ -158,6 +160,7 @@ import {
   type PersonInfo,
 } from '../utils/wbPerson'
 import { find as findShortcut, label as keyLabel, type ShortcutId } from '../utils/wbShortcuts'
+import { restack, stackOrder, stackRanks, type StackKind } from '../utils/wbStack'
 
 // Whiteboard seperti Milanote (docs/whiteboard.md): semua adalah papan. /whiteboard membuka papan akar bersama,
 // /whiteboard/:id membuka papan lain di kanvas yang sama. Data dari server adalah sumber kebenaran: perubahan
@@ -1764,29 +1767,18 @@ function applyStyle(patch: Partial<Record<StyleKey, string | number>>) {
   )
 }
 
-// Urutan tumpuk: paling depan dan paling belakang melompati semua kartu; maju dan mundur melewati satu kartu lain.
-function reorder(kind: 'front' | 'forward' | 'backward' | 'back') {
-  if (!canWrite.value || !selCards.value.length) return
-  const sel = selected.value
-  const sorted = [...cards.value].sort((a, b) => a.z - b.z)
-  const others = sorted.filter((c) => !sel.has(c.id))
-  const list = sorted.filter((c) => sel.has(c.id))
-  const top = sorted.at(-1)?.z ?? 0
-  const bottom = sorted[0]?.z ?? 0
-  const out = list.map((c, i) => {
-    let z = c.z
-    if (kind === 'front') z = top + 1 + i
-    else if (kind === 'back') z = bottom - list.length + i
-    else if (kind === 'forward') {
-      const k = others.findIndex((o) => o.z > c.z)
-      if (k >= 0) z = others[k + 1] ? (others[k]!.z + others[k + 1]!.z) / 2 + i * 1e-3 : others[k]!.z + 1 + i
-    } else {
-      const k = others.map((o) => o.z < c.z).lastIndexOf(true)
-      if (k >= 0)
-        z = k > 0 ? (others[k]!.z + others[k - 1]!.z) / 2 + i * 1e-3 : others[k]!.z - list.length + i
-    }
-    return { id: c.id, after: { z } }
-  })
+// Urutan tumpuk: paling depan dan paling belakang melompati semuanya; maju dan mundur melewati satu lapis lain.
+// Kartu dihitung bersama garis yang urutannya manual (garis otomatis menempel di kartunya, bukan lapis sendiri).
+// Garis terpilih (tanpa kartu terpilih) memakai pintasan dan menu yang sama.
+function reorder(kind: StackKind) {
+  if (!canWrite.value) return
+  if (!selCards.value.length) {
+    if (selectedConnector.value) reorderLine(selectedConnector.value, kind)
+    return
+  }
+  const manual = new Set(connectors.value.filter((c) => c.z !== null).map((c) => c.id))
+  const order = layerOrder.value.filter((l) => !l.line || manual.has(l.id))
+  const out = restack(order, selected.value, kind).map((r) => ({ id: r.id, after: { z: r.z } }))
   applyLayout(out)
   announce.value =
     kind === 'front'
@@ -1796,6 +1788,72 @@ function reorder(kind: 'front' | 'forward' | 'backward' | 'back') {
         : kind === 'forward'
           ? 'Maju satu lapis.'
           : 'Mundur satu lapis.'
+}
+
+// Urutan garis (revisi 53): disimpan sebagai z manual; Otomatis mengembalikannya ke atas kartu ujung paling depan.
+function reorderLine(id: string, kind: StackKind) {
+  const r = restack(layerOrder.value, new Set([id]), kind)[0]
+  if (r) void setLineZ(id, r.z)
+  announce.value =
+    kind === 'front'
+      ? 'Garis dibawa ke paling depan.'
+      : kind === 'back'
+        ? 'Garis dikirim ke paling belakang.'
+        : kind === 'forward'
+          ? 'Garis maju satu lapis.'
+          : 'Garis mundur satu lapis.'
+}
+
+async function setLineZ(id: string, z: number | null, track = true) {
+  const c = connectors.value.find((x) => x.id === id)
+  if (!c || !canWrite.value || c.z === z) return
+  if (track) record({ kind: 'lineZ', id, before: c.z, after: z })
+  upsertConnectors([{ ...c, z }])
+  try {
+    const res = await saving(() => updateConnector(bid.value, id, z === null ? { z_auto: true } : { z }))
+    if (res) upsertConnectors([res.connector])
+  } catch {
+    // Pesan galat sudah tampil di penanda simpan.
+  }
+}
+
+function lineMenu(): MenuItem[] {
+  const id = selectedConnector.value
+  const c = id ? connectors.value.find((x) => x.id === id) : null
+  if (!id || !c) return []
+  const out: MenuItem[] = [
+    { id: 'lineStyle', label: 'Gaya garis', key: 'Enter', run: () => (connectorIds.value = [id]) },
+  ]
+  if (canWrite.value)
+    out.push(
+      {
+        id: 'urutan',
+        label: 'Urutan',
+        children: [
+          mi('front', 'Paling depan'),
+          mi('forward', 'Maju'),
+          mi('backward', 'Mundur'),
+          mi('back', 'Paling belakang'),
+          {
+            id: 'lineAuto',
+            label: 'Otomatis, di atas kartu ujung',
+            checked: c.z === null,
+            run: () => void setLineZ(id, null),
+          },
+        ],
+      },
+      {
+        id: 'lineRemove',
+        label: 'Hapus garis',
+        key: 'Delete',
+        danger: true,
+        run: () => {
+          void onConnectorRemove(id)
+          selectedConnector.value = null
+        },
+      },
+    )
+  return out
 }
 
 function matchSize(kind: 'w' | 'h' | 'wh') {
@@ -2345,9 +2403,12 @@ function emptyMenu(): MenuItem[] {
 }
 
 function openMenu(x: number, y: number, opener: HTMLElement | null, onCard: boolean) {
-  menu.value = onCard
-    ? { x, y, opener, items: selectionMenu(), label: `Aksi untuk ${selected.value.size} kartu terpilih` }
-    : { x, y, opener, items: emptyMenu(), label: 'Aksi kanvas' }
+  menu.value =
+    onCard && !selected.value.size && selectedConnector.value
+      ? { x, y, opener, items: lineMenu(), label: 'Aksi untuk garis terpilih' }
+      : onCard
+        ? { x, y, opener, items: selectionMenu(), label: `Aksi untuk ${selected.value.size} kartu terpilih` }
+        : { x, y, opener, items: emptyMenu(), label: 'Aksi kanvas' }
 }
 
 function closeMenu(refocus: boolean) {
@@ -2372,6 +2433,13 @@ function onContextMenu(e: MouseEvent) {
   // Tekan lama di layar sentuh sudah membuka menu sendiri; event contextmenu browser yang menyusul diabaikan.
   if (performance.now() - pressOpenedAt < 800) return
   if (penOn.value) return
+  const line = t.closest<HTMLElement>('[data-connector]')?.dataset.connector
+  if (!id && line) {
+    select([])
+    selectedConnector.value = line
+    openMenu(e.clientX, e.clientY, canvas.value, true)
+    return
+  }
   if (id && byId.value.has(id)) {
     if (!selected.value.has(id)) select(unitIds(id))
     focusedId.value = id
@@ -2383,6 +2451,11 @@ function onContextMenu(e: MouseEvent) {
 }
 
 function openMenuFromKeyboard() {
+  if (!selected.value.size && selectedConnector.value) {
+    const r = canvas.value!.getBoundingClientRect()
+    openMenu(r.left + r.width / 2, r.top + r.height / 2, canvas.value, true)
+    return
+  }
   const id = focusedId.value && selected.value.has(focusedId.value) ? focusedId.value : null
   const el = id ? canvas.value?.querySelector<HTMLElement>(`[data-card="${id}"]`) : null
   if (id && el) {
@@ -2502,6 +2575,9 @@ async function runStep(dir: 'undo' | 'redo') {
       }
       case 'checklist':
         await onChecklist(step.id, (dir === 'undo' ? step.ops.undo : step.ops.redo) as ChecklistOp, false)
+        break
+      case 'lineZ':
+        await setLineZ(step.id, dir === 'undo' ? step.before : step.after, false)
         break
       case 'connectors':
         if (dir === 'undo') {
@@ -3205,7 +3281,13 @@ const shapePaletteOpen = ref(false)
 async function addShape(t: ShapeType) {
   shapePaletteOpen.value = false
   const s = SHAPES.find((x) => x.id === t)!
-  await addCard('shape', toolAt, newShapeContent(t), { w: s.w, h: s.h })
+  const card = await addCard('shape', toolAt, newShapeContent(t), { w: s.w, h: s.h })
+  // Batas sistem (revisi 53) langsung ke paling belakang supaya aktor, use case, dan garisnya tetap di atasnya.
+  if (card && t === 'uml_system') {
+    const z = Math.min(...cards.value.filter((c) => c.id !== card.id).map((c) => c.z), card.z) - 1
+    patchLocal(card.id, { z })
+    void sendGeometry([{ id: card.id, z }])
+  }
 }
 
 // Panel gaya bentuk: juga jalur keyboard untuk putar dan ukuran.
@@ -3238,23 +3320,71 @@ watch(selected, (s) => {
 })
 // Titik belok sementara selama diseret, sebelum disimpan.
 const bendDraft = ref<{ id: string; points: [number, number][] } | null>(null)
-const lines = computed<DrawnLine[]>(() =>
-  visibleConnectors.value.flatMap((c) => {
-    const pts = bendDraft.value?.id === c.id ? bendDraft.value.points : undefined
-    const r = routeConnector(c, geomMap.value, rotations.value, pts)
-    if (!r) return []
-    return [
-      {
-        ...r,
-        color: inkColor(c.style.color || 'tinta'),
-        dash: c.style.line === 'dashed' ? '8 6' : c.style.line === 'dotted' ? '2 5' : undefined,
-        label: c.label,
-        label_start: c.label_start,
-        label_end: c.label_end,
-      },
-    ]
-  }),
-)
+// Urutan gambar kartu dan garis (revisi 53) dan z-index peringkatnya. Garis otomatis tepat di atas kartu ujung yang
+// paling depan; z pecahan tidak lagi seri karena dibulatkan.
+const layerOrder = computed(() => stackOrder(shownCards.value, visibleConnectors.value))
+const layers = computed(() => stackRanks(layerOrder.value))
+// Garis yang masukannya sama memakai objek lama, supaya menyeret kartu hanya me-render ulang garis yang menempel
+// padanya (komponen garis lain menerima prop yang sama persis).
+type LineKey = {
+  c: Connector
+  a?: Rect
+  b?: Rect
+  ra?: number
+  rb?: number
+  pts?: [number, number][]
+  layer?: number
+}
+const lineCache = new Map<string, { key: LineKey; line: DrawnLine }>()
+const sameBox = (p?: Rect, q?: Rect) =>
+  p === q || (!!p && !!q && p.x === q.x && p.y === q.y && p.w === q.w && p.h === q.h)
+const lines = computed<DrawnLine[]>(() => {
+  const g = geomMap.value
+  const rot = rotations.value
+  const seen = new Set<string>()
+  const out = visibleConnectors.value.flatMap((c) => {
+    seen.add(c.id)
+    const key: LineKey = {
+      c,
+      a: c.from ? g.get(c.from) : undefined,
+      b: c.to ? g.get(c.to) : undefined,
+      ra: c.from ? rot.get(c.from) : undefined,
+      rb: c.to ? rot.get(c.to) : undefined,
+      pts: bendDraft.value?.id === c.id ? bendDraft.value.points : undefined,
+      layer: layers.value.get(c.id),
+    }
+    const hit = lineCache.get(c.id)
+    if (
+      hit &&
+      hit.key.c === key.c &&
+      sameBox(hit.key.a, key.a) &&
+      sameBox(hit.key.b, key.b) &&
+      hit.key.ra === key.ra &&
+      hit.key.rb === key.rb &&
+      hit.key.pts === key.pts &&
+      hit.key.layer === key.layer
+    )
+      return [hit.line]
+    const r = routeConnector(c, g, rot, key.pts)
+    if (!r) {
+      lineCache.delete(c.id)
+      return []
+    }
+    const line: DrawnLine = {
+      ...r,
+      color: inkColor(c.style.color || 'tinta'),
+      dash: c.style.line === 'dashed' ? '8 6' : c.style.line === 'dotted' ? '2 5' : undefined,
+      label: c.label,
+      label_start: c.label_start,
+      label_end: c.label_end,
+      layer: key.layer ?? 0,
+    }
+    lineCache.set(c.id, { key, line })
+    return [line]
+  })
+  for (const id of lineCache.keys()) if (!seen.has(id)) lineCache.delete(id)
+  return out
+})
 const selectedStops = computed(() =>
   canWrite.value && selectedConnector.value
     ? (lines.value.find((l) => l.id === selectedConnector.value)?.stops ?? null)
@@ -3367,7 +3497,9 @@ function onBendDown(index: number, insert: boolean, e: PointerEvent) {
   const id = selectedConnector.value
   const c = id ? connectors.value.find((x) => x.id === id) : null
   if (!c || !canWrite.value) return
-  const pts = [...(c.geometry.points ?? [])] as [number, number][]
+  // Titik tampil (sudah dipetakan elastis dari anchor), bukan angka tersimpan, supaya titik tidak melompat.
+  const shown = lines.value.find((l) => l.id === c.id)?.stops.slice(1, -1) ?? []
+  const pts = shown.map((q) => [Math.round(q.x), Math.round(q.y)] as [number, number])
   const at = worldOf(e)
   if (insert) pts.splice(index, 0, [Math.round(at.x), Math.round(at.y)])
   gesture = { kind: 'bend', id: c.id, index }
@@ -3375,17 +3507,36 @@ function onBendDown(index: number, insert: boolean, e: PointerEvent) {
   begin(e)
 }
 
+// Titik belok disimpan bersama pusat ujung saat itu (anchor), supaya garis ikut elastis saat kartunya digeser
+// (utils/wbShapes.ts elastic). Titik yang segaris dibuang; garis lurus yang diberi titik belok menjadi Bebas.
 async function saveBends(id: string, points: [number, number][]) {
   const c = connectors.value.find((x) => x.id === id)
-  if (!c) return
-  await onConnectorUpdate(id, { geometry: { ...c.geometry, points } })
+  const l = lines.value.find((x) => x.id === id)
+  if (!c || !l) return
+  const kept = simplifyBends([l.start, ...points.map(([x, y]) => ({ x, y })), l.end]).map(
+    (q) => [q.x, q.y] as [number, number],
+  )
+  const end = (card: string | null, e: { x?: number; y?: number }): [number, number] => {
+    const b = card ? geomMap.value.get(card) : undefined
+    return b ? [b.x + b.w / 2, b.y + b.h / 2] : [e.x ?? 0, e.y ?? 0]
+  }
+  const route = c.geometry.route === 'straight' && kept.length ? 'bebas' : c.geometry.route
+  await onConnectorUpdate(id, {
+    geometry: {
+      ...c.geometry,
+      route,
+      points: kept,
+      anchor: [end(c.from, c.geometry.from), end(c.to, c.geometry.to)],
+    },
+  })
 }
 
 function onUnbend(index: number) {
   const id = selectedConnector.value
   const c = id ? connectors.value.find((x) => x.id === id) : null
   if (!c) return
-  const pts = [...(c.geometry.points ?? [])] as [number, number][]
+  const shown = lines.value.find((l) => l.id === c.id)?.stops.slice(1, -1) ?? []
+  const pts = shown.map((q) => [Math.round(q.x), Math.round(q.y)] as [number, number])
   pts.splice(index, 1)
   void saveBends(c.id, pts)
   announce.value = 'Titik belok dihapus.'
@@ -3405,7 +3556,8 @@ function onConnectorSelect(id: string) {
   select([])
   selectedConnector.value = id
   canvas.value?.focus()
-  announce.value = 'Garis terpilih. Enter membuka gaya garis, Delete menghapus.'
+  announce.value =
+    'Garis terpilih. Enter membuka gaya garis, Shift+F10 membuka menu urutan, Delete menghapus.'
 }
 
 function onConnectorKey(e: KeyboardEvent): boolean {
@@ -3949,9 +4101,15 @@ function onMove(e: PointerEvent) {
     case 'bend': {
       const b = bendDraft.value
       if (!b) return
-      const w = toWorld(view.value, p.x, p.y)
+      let w = toWorld(view.value, p.x, p.y)
       const pts = [...b.points]
-      pts[gesture.index] = [Math.round(snap(w.x, snapOn.value)), Math.round(snap(w.y, snapOn.value))]
+      // Shift mengunci sudut ruas dari titik sebelumnya ke kelipatan 45 derajat.
+      const before = pts[gesture.index - 1]
+      const prev = before ? { x: before[0], y: before[1] } : lines.value.find((l) => l.id === b.id)?.start
+      if (e.shiftKey && prev) w = snap45(prev, w)
+      pts[gesture.index] = e.shiftKey
+        ? [Math.round(w.x), Math.round(w.y)]
+        : [Math.round(snap(w.x, snapOn.value)), Math.round(snap(w.y, snapOn.value))]
       bendDraft.value = { id: b.id, points: pts }
       return
     }
@@ -4870,9 +5028,11 @@ const toolBtn =
           @drop="onDrop"
         >
           <div class="wb-world absolute top-0 left-0 origin-top-left" :style="worldStyle">
-            <WbConnectorLayer
-              :lines="lines"
-              :selected="selectedConnector"
+            <WbConnector
+              v-for="l in lines"
+              :key="l.id"
+              :line="l"
+              :selected="selectedConnector === l.id"
               :zoom="view.zoom"
               @select="onConnectorSelect"
               @open="connectorIds = [$event]"
@@ -4910,6 +5070,7 @@ const toolBtn =
                 v-else
                 :ref="(inst) => setCardRef(c.id, inst)"
                 :card="c"
+                :layer="layers.get(c.id)"
                 :selected="selected.has(c.id)"
                 :editing="editingId === c.id"
                 :can-write="canWrite"
@@ -5103,6 +5264,48 @@ const toolBtn =
             </button>
           </div>
           <div id="wb-format-slot" class="pointer-events-auto max-w-full empty:hidden" />
+        </div>
+        <!-- Bar garis terpilih (revisi 53): Aksi membuka menu yang sama dengan klik kanan pada garis (urutan, gaya). -->
+        <div
+          v-else-if="state === 'ok' && canWrite && selectedConnector && !penOn && !listMode"
+          class="pointer-events-none absolute top-2 right-2 left-2 z-20 flex flex-wrap items-start gap-2"
+        >
+          <div
+            class="pointer-events-auto flex max-w-full flex-wrap items-center gap-0.5 rounded-card border border-line bg-surface p-1 shadow-menu"
+            data-testid="wb-selbar"
+          >
+            <button type="button" :class="barBtn" @click="connectorIds = [selectedConnector]">
+              Gaya garis
+            </button>
+            <button
+              type="button"
+              :class="barBtn"
+              aria-haspopup="menu"
+              :aria-expanded="menu?.opener?.dataset.menuButton === 'bar' ? 'true' : 'false'"
+              data-menu-button="bar"
+              @click="openBarMenu"
+            >
+              Aksi
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                class="size-4"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.75"
+              >
+                <path d="M4 6l4 4 4-4" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              :class="barBtn"
+              class="text-urgent"
+              @click="(onConnectorRemove(selectedConnector), (selectedConnector = null))"
+            >
+              Hapus garis
+            </button>
+          </div>
         </div>
 
         <!-- Terputus (W2): penanda tetap, bukan toast; perubahan menunggu di antrean sampai tersambung lagi. -->
@@ -5527,6 +5730,9 @@ const toolBtn =
       @close="connectorIds = null"
       @update="onConnectorUpdate"
       @remove="onConnectorRemove"
+      @restack="
+        (id: string, k: StackKind | 'auto') => (k === 'auto' ? void setLineZ(id, null) : reorderLine(id, k))
+      "
     />
     <WbMoveDialog
       :open="moveOpen"

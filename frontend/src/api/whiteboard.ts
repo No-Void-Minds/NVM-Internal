@@ -296,6 +296,7 @@ export function createConnector(
     style?: Partial<ConnectorStyle>
     label?: string
     geometry?: ConnectorGeometry
+    z?: number
   },
 ) {
   return apiPost<{ connector: Connector }>(`/whiteboard/boards/${board}/connectors`, input)
@@ -310,6 +311,8 @@ export function updateConnector(
     label_start?: string
     label_end?: string
     geometry?: ConnectorGeometry
+    z?: number
+    z_auto?: boolean
   },
 ) {
   return apiPut<{ connector: Connector }>(`/whiteboard/boards/${board}/connectors/${id}`, patch)

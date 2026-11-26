@@ -787,10 +787,10 @@ func (q *Queries) InsertWbComment(ctx context.Context, arg InsertWbCommentParams
 
 const insertWbConnector = `-- name: InsertWbConnector :one
 INSERT INTO wb_connectors (board_id, from_card_id, to_card_id, geometry, style, label, label_start, label_end, seq,
-                           created_by, updated_by)
+                           created_by, updated_by, z)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
-        $9, $10, $10)
-RETURNING id, board_id, from_card_id, to_card_id, geometry, style, label, label_start, label_end, version, seq
+        $9, $10, $10, $11)
+RETURNING id, board_id, from_card_id, to_card_id, geometry, style, label, label_start, label_end, version, seq, z
 `
 
 type InsertWbConnectorParams struct {
@@ -804,6 +804,7 @@ type InsertWbConnectorParams struct {
 	LabelEnd   string
 	Seq        int64
 	ActorID    int64
+	Z          pgtype.Float8
 }
 
 type InsertWbConnectorRow struct {
@@ -818,6 +819,7 @@ type InsertWbConnectorRow struct {
 	LabelEnd   string
 	Version    int32
 	Seq        int64
+	Z          pgtype.Float8
 }
 
 func (q *Queries) InsertWbConnector(ctx context.Context, arg InsertWbConnectorParams) (InsertWbConnectorRow, error) {
@@ -832,6 +834,7 @@ func (q *Queries) InsertWbConnector(ctx context.Context, arg InsertWbConnectorPa
 		arg.LabelEnd,
 		arg.Seq,
 		arg.ActorID,
+		arg.Z,
 	)
 	var i InsertWbConnectorRow
 	err := row.Scan(
@@ -846,6 +849,7 @@ func (q *Queries) InsertWbConnector(ctx context.Context, arg InsertWbConnectorPa
 		&i.LabelEnd,
 		&i.Version,
 		&i.Seq,
+		&i.Z,
 	)
 	return i, err
 }
@@ -1498,7 +1502,7 @@ func (q *Queries) ListWbComments(ctx context.Context, cardID pgtype.UUID) ([]Lis
 
 const listWbConnectors = `-- name: ListWbConnectors :many
 SELECT n.id, n.board_id, n.from_card_id, n.to_card_id, n.geometry, n.style, n.label, n.label_start, n.label_end,
-       n.version, n.seq
+       n.version, n.seq, n.z
 FROM wb_connectors n
 LEFT JOIN wb_cards a ON a.id = n.from_card_id
 LEFT JOIN wb_cards b ON b.id = n.to_card_id
@@ -1519,6 +1523,7 @@ type ListWbConnectorsRow struct {
 	LabelEnd   string
 	Version    int32
 	Seq        int64
+	Z          pgtype.Float8
 }
 
 // Penghubung yang ujung menempelnya hidup (ujung bebas tidak punya kartu); ujung di Tempat sampah menyembunyikannya.
@@ -1543,6 +1548,7 @@ func (q *Queries) ListWbConnectors(ctx context.Context, boardID pgtype.UUID) ([]
 			&i.LabelEnd,
 			&i.Version,
 			&i.Seq,
+			&i.Z,
 		); err != nil {
 			return nil, err
 		}
@@ -1555,7 +1561,7 @@ func (q *Queries) ListWbConnectors(ctx context.Context, boardID pgtype.UUID) ([]
 }
 
 const listWbConnectorsForCopy = `-- name: ListWbConnectorsForCopy :many
-SELECT board_id, from_card_id, to_card_id, geometry, style, label, label_start, label_end
+SELECT board_id, from_card_id, to_card_id, geometry, style, label, label_start, label_end, z
 FROM wb_connectors
 WHERE board_id = ANY($1::uuid[]) AND deleted_at IS NULL
 ORDER BY created_at, id
@@ -1570,6 +1576,7 @@ type ListWbConnectorsForCopyRow struct {
 	Label      string
 	LabelStart string
 	LabelEnd   string
+	Z          pgtype.Float8
 }
 
 func (q *Queries) ListWbConnectorsForCopy(ctx context.Context, boardIds []pgtype.UUID) ([]ListWbConnectorsForCopyRow, error) {
@@ -1590,6 +1597,7 @@ func (q *Queries) ListWbConnectorsForCopy(ctx context.Context, boardIds []pgtype
 			&i.Label,
 			&i.LabelStart,
 			&i.LabelEnd,
+			&i.Z,
 		); err != nil {
 			return nil, err
 		}
@@ -1603,7 +1611,7 @@ func (q *Queries) ListWbConnectorsForCopy(ctx context.Context, boardIds []pgtype
 
 const listWbConnectorsSince = `-- name: ListWbConnectorsSince :many
 SELECT n.id, n.board_id, n.from_card_id, n.to_card_id, n.geometry, n.style, n.label, n.label_start, n.label_end,
-       n.version, n.seq,
+       n.version, n.seq, n.z,
        (n.deleted_at IS NOT NULL OR a.deleted_at IS NOT NULL OR b.deleted_at IS NOT NULL)::bool AS hidden
 FROM wb_connectors n
 LEFT JOIN wb_cards a ON a.id = n.from_card_id
@@ -1628,6 +1636,7 @@ type ListWbConnectorsSinceRow struct {
 	LabelEnd   string
 	Version    int32
 	Seq        int64
+	Z          pgtype.Float8
 	Hidden     bool
 }
 
@@ -1652,6 +1661,7 @@ func (q *Queries) ListWbConnectorsSince(ctx context.Context, arg ListWbConnector
 			&i.LabelEnd,
 			&i.Version,
 			&i.Seq,
+			&i.Z,
 			&i.Hidden,
 		); err != nil {
 			return nil, err
@@ -2105,7 +2115,7 @@ func (q *Queries) MoveWbCards(ctx context.Context, arg MoveWbCardsParams) ([]Mov
 }
 
 const moveWbConnectors = `-- name: MoveWbConnectors :many
-UPDATE wb_connectors SET board_id = $1, seq = $2, updated_by = $3
+UPDATE wb_connectors SET board_id = $1, seq = $2, updated_by = $3, z = NULL
 WHERE board_id = $4 AND deleted_at IS NULL
   AND from_card_id = ANY($5::uuid[]) AND to_card_id = ANY($5::uuid[])
 RETURNING id
@@ -2119,7 +2129,8 @@ type MoveWbConnectorsParams struct {
 	Ids       []pgtype.UUID
 }
 
-// Penghubung yang kedua ujungnya ikut pindah, pindah bersama kartunya.
+// Penghubung yang kedua ujungnya ikut pindah, pindah bersama kartunya. Urutan manualnya dilepas (kembali otomatis)
+// karena z kartu di papan tujuan berbeda skala.
 func (q *Queries) MoveWbConnectors(ctx context.Context, arg MoveWbConnectorsParams) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, moveWbConnectors,
 		arg.ToBoard,
@@ -2709,9 +2720,10 @@ UPDATE wb_connectors
 SET style = coalesce($1, style), geometry = coalesce($2, geometry),
     label = coalesce($3, label), label_start = coalesce($4, label_start),
     label_end = coalesce($5, label_end), version = version + 1,
-    seq = $6, updated_by = $7
-WHERE id = $8 AND board_id = $9 AND deleted_at IS NULL
-RETURNING id, board_id, from_card_id, to_card_id, geometry, style, label, label_start, label_end, version, seq
+    z = CASE WHEN $6::bool THEN $7 ELSE z END,
+    seq = $8, updated_by = $9
+WHERE id = $10 AND board_id = $11 AND deleted_at IS NULL
+RETURNING id, board_id, from_card_id, to_card_id, geometry, style, label, label_start, label_end, version, seq, z
 `
 
 type UpdateWbConnectorParams struct {
@@ -2720,6 +2732,8 @@ type UpdateWbConnectorParams struct {
 	Label      pgtype.Text
 	LabelStart pgtype.Text
 	LabelEnd   pgtype.Text
+	SetZ       bool
+	Z          pgtype.Float8
 	Seq        int64
 	ActorID    int64
 	ID         pgtype.UUID
@@ -2738,6 +2752,7 @@ type UpdateWbConnectorRow struct {
 	LabelEnd   string
 	Version    int32
 	Seq        int64
+	Z          pgtype.Float8
 }
 
 func (q *Queries) UpdateWbConnector(ctx context.Context, arg UpdateWbConnectorParams) (UpdateWbConnectorRow, error) {
@@ -2747,6 +2762,8 @@ func (q *Queries) UpdateWbConnector(ctx context.Context, arg UpdateWbConnectorPa
 		arg.Label,
 		arg.LabelStart,
 		arg.LabelEnd,
+		arg.SetZ,
+		arg.Z,
 		arg.Seq,
 		arg.ActorID,
 		arg.ID,
@@ -2765,6 +2782,7 @@ func (q *Queries) UpdateWbConnector(ctx context.Context, arg UpdateWbConnectorPa
 		&i.LabelEnd,
 		&i.Version,
 		&i.Seq,
+		&i.Z,
 	)
 	return i, err
 }

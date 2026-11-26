@@ -16,6 +16,8 @@ export type ConnectorUpdate = {
   label_start?: string
   label_end?: string
   geometry?: ConnectorGeometry
+  z?: number
+  z_auto?: boolean
 }
 const props = defineProps<{
   open: boolean
@@ -28,6 +30,7 @@ const emit = defineEmits<{
   close: []
   update: [id: string, patch: ConnectorUpdate]
   remove: [id: string]
+  restack: [id: string, kind: 'front' | 'forward' | 'backward' | 'back' | 'auto']
 }>()
 const uid = useId()
 const labels = useDrafts(() => Object.fromEntries(props.connectors.map((c) => [c.id, c.label])))
@@ -60,6 +63,17 @@ function setRoute(c: Connector, v: string) {
 function setPort(c: Connector, side: 'from' | 'to', port: string) {
   emit('update', c.id, { geometry: { ...c.geometry, [side]: { ...c.geometry[side], port } } })
 }
+// Preset diagram use case (revisi 53): putus-putus, panah terbuka, label tengah yang tetap bisa diubah.
+function preset(c: Connector, name: 'include' | 'extend') {
+  emit('update', c.id, { style: { ...c.style, line: 'dashed', end: 'open_arrow' }, label: `«${name}»` })
+}
+const ORDER = [
+  { kind: 'front', label: 'Paling depan' },
+  { kind: 'forward', label: 'Maju' },
+  { kind: 'backward', label: 'Mundur' },
+  { kind: 'back', label: 'Paling belakang' },
+] as const
+
 function clearBends(c: Connector) {
   emit('update', c.id, { geometry: { ...c.geometry, points: [] } })
 }
@@ -74,6 +88,7 @@ const ROUTES = [
   { value: 'straight', label: 'Lurus' },
   { value: 'orthogonal', label: 'Siku' },
   { value: 'curved', label: 'Melengkung' },
+  { value: 'bebas', label: 'Bebas (sudut apa pun)' },
 ]
 const endOpts = END_KINDS.map((k) => ({ value: k.id, label: k.label }))
 const colorOpts = penColors.map((p) => ({
@@ -219,6 +234,32 @@ const btn =
                 @update:model-value="setPort(c, 'to', $event)"
               />
             </div>
+          </div>
+          <div class="flex flex-wrap items-center gap-2" role="group" :aria-label="`Preset garis ${i + 1}`">
+            <span class="text-sm">Preset use case:</span>
+            <button type="button" :class="btn" @click="preset(c, 'include')">Include</button>
+            <button type="button" :class="btn" @click="preset(c, 'extend')">Extend</button>
+          </div>
+          <div class="flex flex-wrap items-center gap-2" role="group" :aria-label="`Urutan garis ${i + 1}`">
+            <span class="text-sm">Urutan:</span>
+            <button
+              v-for="o in ORDER"
+              :key="o.kind"
+              type="button"
+              :class="btn"
+              @click="emit('restack', c.id, o.kind)"
+            >
+              {{ o.label }}
+            </button>
+            <button
+              type="button"
+              :class="btn"
+              :aria-pressed="c.z === null ? 'true' : 'false'"
+              class="aria-pressed:border-accent aria-pressed:bg-accent aria-pressed:text-on-accent"
+              @click="emit('restack', c.id, 'auto')"
+            >
+              Otomatis
+            </button>
           </div>
           <div class="flex flex-wrap gap-2">
             <button v-if="c.geometry.points?.length" type="button" :class="btn" @click="clearBends(c)">

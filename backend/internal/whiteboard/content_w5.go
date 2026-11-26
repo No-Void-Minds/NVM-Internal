@@ -26,6 +26,8 @@ var (
 		"process": true, "decision": true, "terminator": true, "data": true, "database": true, "document": true,
 		// UML
 		"uml_class": true, "uml_actor": true, "uml_note": true, "uml_package": true,
+		// Diagram use case (revisi 53): batas sistem (judul di dalam atas) dan use case (elips).
+		"uml_system": true, "uml_usecase": true,
 		// Panah blok
 		"arrow_right": true, "arrow_left": true, "arrow_up": true, "arrow_down": true, "arrow_both": true,
 	}

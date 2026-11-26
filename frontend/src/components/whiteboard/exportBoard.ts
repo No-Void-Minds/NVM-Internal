@@ -8,6 +8,7 @@ import { fileUrl } from '../../api/whiteboard'
 import { EXPORT_PAD, EXPORT_SCALE, exportScale } from '../../utils/wbExport'
 import { HIGHLIGHTS, TEXT_COLORS, wrapRuns, type Run } from '../../utils/wbRich'
 import { openShape, rotatedBounds, routeConnector, shapePath, type ShapeContent } from '../../utils/wbShapes'
+import { stackOrder } from '../../utils/wbStack'
 import {
   bounds,
   cardLines,
@@ -211,10 +212,45 @@ export async function renderBoard(cards: Card[], connectors: Connector[]): Promi
   ctx.fillRect(box.x - EXPORT_PAD, box.y - EXPORT_PAD, w, h)
 
   const geom = new Map(laid.map((l) => [l.card.id, l.rect]))
-  // Jalur, ujung, dan posisi label sama dengan lapisan garis di layar (routeConnector).
-  for (const c of connectors) {
+  const images = await Promise.all(
+    laid.map((l) =>
+      l.card.kind === 'image' && l.card.file?.thumb
+        ? loadImage(fileUrl(l.card.file.id, true))
+        : l.card.kind === 'person' && l.card.person?.avatar_url
+          ? loadImage(l.card.person.avatar_url)
+          : Promise.resolve(null),
+    ),
+  )
+
+  // Urutan sama dengan kanvas (revisi 53): garis di antara kartu sesuai z-nya, bukan di bawah semuanya.
+  const index = new Map(laid.map((l, i) => [l.card.id, i]))
+  const lineOf = new Map(connectors.map((c) => [c.id, c]))
+  for (const layer of stackOrder(
+    laid.map((l) => l.card),
+    connectors,
+  )) {
+    if (layer.line) {
+      // save dan restore: gaya teks garis (baseline, font) tidak bocor ke kartu yang digambar sesudahnya.
+      ctx.save()
+      drawConnector(lineOf.get(layer.id)!)
+      ctx.restore()
+      continue
+    }
+    const i = index.get(layer.id)!
+    const { card, rect, text } = laid[i]!
+    const look = lookOf(card)
+    ctx.save()
+    ctx.globalAlpha = look.alpha
+    drawCard(i, card, rect, text, look)
+    ctx.restore()
+  }
+  return { canvas, scale, reduced: scale < EXPORT_SCALE }
+
+  // Jalur, ujung, dan posisi label sama dengan garis di layar (routeConnector).
+  function drawConnector(c: Connector) {
+    if (!ctx) return
     const r = routeConnector(c, geom, rot)
-    if (!r) continue
+    if (!r) return
     const color = ink(tok, c.style.color || 'tinta')
     ctx.strokeStyle = color
     ctx.lineWidth = 2
@@ -245,27 +281,6 @@ export async function renderBoard(cards: Card[], connectors: Connector[]): Promi
       ctx.fillText(text, at.x - tw / 2, at.y)
     }
   }
-
-  const images = await Promise.all(
-    laid.map((l) =>
-      l.card.kind === 'image' && l.card.file?.thumb
-        ? loadImage(fileUrl(l.card.file.id, true))
-        : l.card.kind === 'person' && l.card.person?.avatar_url
-          ? loadImage(l.card.person.avatar_url)
-          : Promise.resolve(null),
-    ),
-  )
-
-  const order = laid.map((_, i) => i).sort((i, j) => laid[i]!.card.z - laid[j]!.card.z)
-  for (const i of order) {
-    const { card, rect, text } = laid[i]!
-    const look = lookOf(card)
-    ctx.save()
-    ctx.globalAlpha = look.alpha
-    drawCard(i, card, rect, text, look)
-    ctx.restore()
-  }
-  return { canvas, scale, reduced: scale < EXPORT_SCALE }
 
   function drawCard(i: number, card: Card, rect: Rect, text: Drawn[], look: ReturnType<typeof lookOf>) {
     if (!ctx) return
@@ -517,8 +532,9 @@ function drawShape(ctx: CanvasRenderingContext2D, tok: Tok, c: ShapeContent, r: 
       }
     }
   } else if (c.text) {
-    const lines = lay(c.text, c.doc, r.w * 0.7)
-    let y = (r.h - lines.reduce((n, l) => n + lineHeight(l), 0)) / 2
+    const lines = lay(c.text, c.doc, r.w * 0.7, c.shape === 'uml_system')
+    // Batas sistem (revisi 53): judul di dalam atas, bukan di tengah.
+    let y = c.shape === 'uml_system' ? 8 : (r.h - lines.reduce((n, l) => n + lineHeight(l), 0)) / 2
     for (const l of lines) {
       drawLine(ctx, tok, l, r.w * 0.15, y, r.w * 0.7, ink0, c.align)
       y += lineHeight(l)

@@ -50,7 +50,10 @@ const textInset = computed(() => {
     case 'triangle':
       return { top: '45%', bottom: '8%', left: '24%', right: '24%' }
     case 'ellipse':
+    case 'uml_usecase':
       return { top: '16%', bottom: '16%', left: '14%', right: '14%' }
+    case 'uml_system':
+      return { top: '8px', bottom: 'auto', left: '10px', right: '10px' }
     case 'uml_actor':
       return { top: '102%', bottom: '-30%', left: '-40%', right: '-40%' }
     case 'uml_package':
@@ -188,7 +191,12 @@ const field = 'block w-full'
       </template>
     </div>
 
-    <div v-else class="absolute flex items-center text-ink" :style="textStyle">
+    <div
+      v-else
+      class="absolute flex items-center text-ink"
+      :class="content.shape === 'uml_system' ? 'font-semibold' : ''"
+      :style="textStyle"
+    >
       <WbRichField
         v-if="editing"
         :field-key="key('text')"

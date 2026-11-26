@@ -331,7 +331,7 @@ SELECT coalesce(max(col_order), 0)::double precision FROM wb_cards WHERE column_
 -- name: ListWbConnectors :many
 -- Penghubung yang ujung menempelnya hidup (ujung bebas tidak punya kartu); ujung di Tempat sampah menyembunyikannya.
 SELECT n.id, n.board_id, n.from_card_id, n.to_card_id, n.geometry, n.style, n.label, n.label_start, n.label_end,
-       n.version, n.seq
+       n.version, n.seq, n.z
 FROM wb_connectors n
 LEFT JOIN wb_cards a ON a.id = n.from_card_id
 LEFT JOIN wb_cards b ON b.id = n.to_card_id
@@ -341,7 +341,7 @@ ORDER BY n.created_at, n.id;
 
 -- name: ListWbConnectorsSince :many
 SELECT n.id, n.board_id, n.from_card_id, n.to_card_id, n.geometry, n.style, n.label, n.label_start, n.label_end,
-       n.version, n.seq,
+       n.version, n.seq, n.z,
        (n.deleted_at IS NOT NULL OR a.deleted_at IS NOT NULL OR b.deleted_at IS NOT NULL)::bool AS hidden
 FROM wb_connectors n
 LEFT JOIN wb_cards a ON a.id = n.from_card_id
@@ -350,19 +350,20 @@ WHERE n.board_id = @board_id AND n.seq > @seq;
 
 -- name: InsertWbConnector :one
 INSERT INTO wb_connectors (board_id, from_card_id, to_card_id, geometry, style, label, label_start, label_end, seq,
-                           created_by, updated_by)
+                           created_by, updated_by, z)
 VALUES (@board_id, sqlc.narg(from_card_id), sqlc.narg(to_card_id), @geometry, @style, @label, @label_start, @label_end,
-        @seq, @actor_id, @actor_id)
-RETURNING id, board_id, from_card_id, to_card_id, geometry, style, label, label_start, label_end, version, seq;
+        @seq, @actor_id, @actor_id, sqlc.narg(z))
+RETURNING id, board_id, from_card_id, to_card_id, geometry, style, label, label_start, label_end, version, seq, z;
 
 -- name: UpdateWbConnector :one
 UPDATE wb_connectors
 SET style = coalesce(sqlc.narg(style), style), geometry = coalesce(sqlc.narg(geometry), geometry),
     label = coalesce(sqlc.narg(label), label), label_start = coalesce(sqlc.narg(label_start), label_start),
     label_end = coalesce(sqlc.narg(label_end), label_end), version = version + 1,
+    z = CASE WHEN @set_z::bool THEN sqlc.narg(z) ELSE z END,
     seq = @seq, updated_by = @actor_id
 WHERE id = @id AND board_id = @board_id AND deleted_at IS NULL
-RETURNING id, board_id, from_card_id, to_card_id, geometry, style, label, label_start, label_end, version, seq;
+RETURNING id, board_id, from_card_id, to_card_id, geometry, style, label, label_start, label_end, version, seq, z;
 
 -- name: TrashWbConnectors :many
 -- Penghubung yang dipilih atau yang menempel di kartu yang dihapus atau dipindah, ke batch yang sama.
@@ -457,8 +458,9 @@ WITH RECURSIVE down AS (
 SELECT max(depth)::int FROM down;
 
 -- name: MoveWbConnectors :many
--- Penghubung yang kedua ujungnya ikut pindah, pindah bersama kartunya.
-UPDATE wb_connectors SET board_id = @to_board, seq = @seq, updated_by = @actor_id
+-- Penghubung yang kedua ujungnya ikut pindah, pindah bersama kartunya. Urutan manualnya dilepas (kembali otomatis)
+-- karena z kartu di papan tujuan berbeda skala.
+UPDATE wb_connectors SET board_id = @to_board, seq = @seq, updated_by = @actor_id, z = NULL
 WHERE board_id = @from_board AND deleted_at IS NULL
   AND from_card_id = ANY(@ids::uuid[]) AND to_card_id = ANY(@ids::uuid[])
 RETURNING id;
@@ -525,7 +527,7 @@ VALUES (@id, @board_id, @kind, sqlc.narg(ref_board_id), sqlc.narg(file_id), sqlc
         @x, @y, @w, @h, @z, sqlc.narg(color), @content, @plain, @actor_id, @actor_id, @style, @locked, @group_ids::uuid[]);
 
 -- name: ListWbConnectorsForCopy :many
-SELECT board_id, from_card_id, to_card_id, geometry, style, label, label_start, label_end
+SELECT board_id, from_card_id, to_card_id, geometry, style, label, label_start, label_end, z
 FROM wb_connectors
 WHERE board_id = ANY(@board_ids::uuid[]) AND deleted_at IS NULL
 ORDER BY created_at, id;

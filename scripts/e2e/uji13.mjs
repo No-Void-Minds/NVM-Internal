@@ -5753,6 +5753,8 @@ async function checkWbPerforma() {
       await api.call("POST", `/whiteboard/boards/${board}/connectors`, {
         from: plain[i].id,
         to: plain[i + 1].id,
+        // Revisi 53: sebagian garis dengan urutan manual, jadi z-index peringkat ikut teruji.
+        ...(i % 10 === 0 ? { z: -50 + i } : {}),
         ...(shapeLine ? { geometry: { from: { port: "auto" }, to: { port: "auto" }, route: "orthogonal", points: [] }, style: { start: "none", end: "triangle", line: "solid", color: "" } } : {}),
       });
     }
@@ -5778,6 +5780,52 @@ async function checkWbPerforma() {
     const loadMs = Date.now() - t0;
     expect(loadMs < 2000, "muat", `papan 500 kartu dimuat ${loadMs} ms`);
     await wbSaved(ps);
+
+    // Revisi 53: seret kartu yang punya garis 2 detik. Garis lain tidak berubah di DOM (memakai objek garis lama) dan
+    // p95 frame tetap di bawah 20 ms di build produksi.
+    const dragged = plain.find((c) => full.connectors.some((n) => n.from === c.id || n.to === c.id));
+    const attached = new Set(full.connectors.filter((n) => n.from === dragged.id || n.to === dragged.id).map((n) => n.id));
+    const db = await ps.locator(`[data-card="${dragged.id}"]`).boundingBox();
+    await ps.evaluate(() => {
+      window.__mut = new Set();
+      window.__ob = new MutationObserver((ms) => {
+        for (const m of ms) {
+          const svg = m.target.closest?.("[data-connector]");
+          if (svg) window.__mut.add(svg.getAttribute("data-connector"));
+        }
+      });
+      window.__ob.observe(document.querySelector(".wb-world"), { attributes: true, subtree: true, childList: true, characterData: true });
+      window.__frames = [];
+      let last = performance.now();
+      const tick = (t) => {
+        window.__frames.push(t - last);
+        last = t;
+        if (window.__frames.length < 1000) window.__raf = requestAnimationFrame(tick);
+      };
+      window.__raf = requestAnimationFrame(tick);
+    });
+    await ps.mouse.move(db.x + db.width / 2, db.y + db.height / 2);
+    await ps.mouse.down();
+    const dragStart = Date.now();
+    let dk = 0;
+    while (Date.now() - dragStart < 2000) {
+      dk++;
+      await ps.mouse.move(db.x + db.width / 2 + (dk % 60) * 3, db.y + db.height / 2 + (dk % 40) * 2);
+    }
+    const dragOut = await ps.evaluate(() => {
+      cancelAnimationFrame(window.__raf);
+      window.__ob.disconnect();
+      return { frames: window.__frames.slice(2), mut: [...window.__mut] };
+    });
+    await ps.mouse.up();
+    await wbSaved(ps);
+    const stray = dragOut.mut.filter((id) => !attached.has(id));
+    expect(dragOut.mut.length > 0 && stray.length === 0, "seret garis", `garis berubah ${dragOut.mut.length}, bukan milik kartu yang diseret ${stray.length}`);
+    dragOut.frames.sort((x, y) => x - y);
+    const dragP95 = dragOut.frames[Math.floor(dragOut.frames.length * 0.95)] ?? 999;
+    const devBuild = await ps.evaluate(() => !!document.querySelector('script[src*="/@vite/client"]'));
+    if (!devBuild) expect(dragP95 < 20, "frame seret", `p95 frame seret ${dragP95.toFixed(1)} ms dari ${dragOut.frames.length} frame`);
+    console.log(`catatan: wbperforma seret kartu ber-garis p95 ${dragP95.toFixed(1)} ms, garis berubah ${dragOut.mut.length} dari ${full.connectors.length}`);
 
     // Pan 3 detik dengan mouse tengah tidak tersedia; seret area kosong dengan Spasi ditahan, sambil mencatat frame.
     const canvas = ps.locator(".wb-canvas");
