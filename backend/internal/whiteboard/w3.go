@@ -705,7 +705,9 @@ var (
 		"diamond_open": true, "circle": true}
 	connectorLine = map[string]bool{"solid": true, "dashed": true, "dotted": true}
 	// bebas (revisi 53): ruas lurus antar titik belok dengan sudut apa pun.
-	connectorRoutes = map[string]bool{"straight": true, "orthogonal": true, "curved": true, "bebas": true}
+	// message (revisi 54d): pesan sequence, mendatar di antara garis tengah dua lifeline (digambar klien); satu-satunya
+	// jalur yang boleh menghubungkan kartu ke dirinya sendiri (pesan ke diri sendiri, CHECK di migrasi 000029).
+	connectorRoutes = map[string]bool{"straight": true, "orthogonal": true, "curved": true, "bebas": true, "message": true}
 	connectorPorts  = map[string]bool{"": true, "auto": true, "top": true, "right": true, "bottom": true, "left": true,
 		"top_left": true, "top_right": true, "bottom_left": true, "bottom_right": true}
 )
@@ -866,7 +868,7 @@ func (s *Service) CreateConnector(ctx context.Context, actor Actor, boardText st
 	if err != nil {
 		return Connector{}, err
 	}
-	if from.Valid && from == to {
+	if from.Valid && from == to && in.Geometry.Route != "message" {
 		return Connector{}, apperr.Invalid("Garis harus menghubungkan dua kartu yang berbeda.")
 	}
 	st, err := cleanStyle(in.Style)
@@ -975,6 +977,9 @@ func (s *Service) UpdateConnector(ctx context.Context, actor Actor, boardText, i
 			geo, err := cleanGeometry(*p.Geometry, ends.FromCardID.Valid, ends.ToCardID.Valid)
 			if err != nil {
 				return err
+			}
+			if ends.FromCardID.Valid && ends.FromCardID == ends.ToCardID && geo.Route != "message" {
+				return apperr.Invalid("Pesan ke diri sendiri harus tetap memakai jalur pesan.")
 			}
 			params.Geometry, _ = json.Marshal(geo)
 		}

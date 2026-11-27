@@ -50,11 +50,13 @@ export function containersAt(b: Box, containers: Boxy[], exclude: Set<string>): 
 // Kotak tiap lane di dalam bentuk w x h. rows: pool (pita nama di kiri, lane bertumpuk ke bawah); cols: swimlane
 // (pita judul di atas, lane berjajar ke kanan). Ukuran lane adalah bobot, jadi ubah ukuran kartu membagi ulang
 // tinggi atau lebar secara proporsional.
+// band: lebar pita sebelum lane (0 untuk operand fragmen sequence, yang tidak punya pita).
 export function laneBoxes(
   lanes: Lane[],
   w: number,
   h: number,
   orient: LaneOrient,
+  band = BAND,
 ): (Box & { label: string })[] {
   const total = lanes.reduce((n, l) => n + l.size, 0) || 1
   const span = orient === 'rows' ? h : w
@@ -63,8 +65,8 @@ export function laneBoxes(
     const len = (l.size / total) * span
     const b =
       orient === 'rows'
-        ? { x: BAND, y: at, w: Math.max(0, w - BAND), h: len }
-        : { x: at, y: BAND, w: len, h: Math.max(0, h - BAND) }
+        ? { x: band, y: at, w: Math.max(0, w - band), h: len }
+        : { x: at, y: band, w: len, h: Math.max(0, h - band) }
     at += len
     return { ...b, label: l.label }
   })

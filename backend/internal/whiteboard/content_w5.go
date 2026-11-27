@@ -38,20 +38,25 @@ var (
 		"uml_initial": true, "uml_final": true, "uml_flow_final": true, "uml_action": true, "uml_decision": true,
 		"uml_fork": true, "uml_object": true, "uml_send_signal": true, "uml_receive_signal": true, "uml_state": true,
 		"uml_choice": true, "uml_state_composite": true,
+		// Sequence diagram (revisi 54d)
+		"uml_lifeline": true, "uml_lifeline_actor": true, "uml_activation": true, "uml_fragment": true,
 		// Panah blok
 		"arrow_right": true, "arrow_left": true, "arrow_up": true, "arrow_down": true, "arrow_both": true,
 	}
 	// ShapeVariants: varian per jenis bentuk (revisi 54), urutan sama dengan katalog klien; yang pertama bawaan.
 	// Daftar ini dan ShapeTypes dicek sama dengan frontend/src/utils/wbShapeCatalog.json oleh TestKatalogBentuk.
 	ShapeVariants = map[string][]string{
-		"bpmn_start":        {"none", "message", "timer", "signal", "error"},
-		"bpmn_intermediate": {"none", "message", "timer", "error", "signal", "cancel"},
-		"bpmn_end":          {"none", "message", "error", "signal", "cancel"},
-		"bpmn_task":         {"none", "user", "service", "script", "manual", "send", "receive"},
-		"bpmn_gateway":      {"exclusive", "parallel", "inclusive", "event"},
+		"bpmn_start":         {"none", "message", "timer", "signal", "error"},
+		"bpmn_intermediate":  {"none", "message", "timer", "error", "signal", "cancel"},
+		"bpmn_end":           {"none", "message", "error", "signal", "cancel"},
+		"bpmn_task":          {"none", "user", "service", "script", "manual", "send", "receive"},
+		"bpmn_gateway":       {"exclusive", "parallel", "inclusive", "event"},
+		"uml_lifeline":       {"none", "destroyed"},
+		"uml_lifeline_actor": {"none", "destroyed"},
+		"uml_fragment":       {"alt", "opt", "loop", "par"},
 	}
 	// laneShapes: bentuk yang punya lane (revisi 54b); bentuk lain tidak boleh membawa lanes.
-	laneShapes = map[string]bool{"bpmn_pool": true, "uml_swimlane": true}
+	laneShapes = map[string]bool{"bpmn_pool": true, "uml_swimlane": true, "uml_fragment": true}
 	// Isian memakai nama warna kartu; "" berarti tanpa isian, "putih" latar surface.
 	shapeFills = map[string]bool{"": true, "putih": true, "abu": true, "hijau": true, "kuning": true, "biru": true, "krem": true, "merah": true}
 	// Garis tepi memakai warna pena (token tinta gelap, minimal 3:1 terhadap canvas).
@@ -103,7 +108,7 @@ const (
 func cleanLanes(shape string, lanes []ShapeLane) ([]ShapeLane, error) {
 	if !laneShapes[shape] {
 		if len(lanes) > 0 {
-			return nil, apperr.Invalid("Lane hanya untuk pool dan swimlane.")
+			return nil, apperr.Invalid("Lane hanya untuk pool, swimlane, dan fragmen.")
 		}
 		return nil, nil
 	}

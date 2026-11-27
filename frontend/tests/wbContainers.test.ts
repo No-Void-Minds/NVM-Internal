@@ -201,3 +201,94 @@ test('kotak port: garis menempel di tepi batang fork dan lingkaran, juga sesudah
     near(r.end, { x: 180, y: 115 })
   }
 })
+
+test('sequence (54d): pesan mendatar ikut lifeline asal, ke diri sendiri, tepi activation bar', async () => {
+  const {
+    routeConnector,
+    shapeHandles,
+    newShapeContent: nsc,
+    LINE_PRESETS,
+  } = await import('../src/utils/wbShapes.ts')
+  const geom = new Map([
+    ['A', { x: 0, y: 0, w: 140, h: 400 }],
+    ['B', { x: 300, y: 40, w: 140, h: 400 }],
+    ['bar', { x: 350, y: 100, w: 40, h: 120 }],
+  ])
+  const shapes = new Map([
+    ['A', 'uml_lifeline'],
+    ['B', 'uml_lifeline'],
+    ['bar', 'uml_activation'],
+  ])
+  const msg = (from: string, to: string, y: number) => ({
+    id: 'm',
+    from,
+    to,
+    geometry: {
+      from: { port: 'auto' },
+      to: { port: 'auto' },
+      route: 'message' as const,
+      points: [[0, y]] as [number, number][],
+    },
+    style: { start: 'none' as const, end: 'arrow' as const },
+  })
+  const r = routeConnector(msg('A', 'B', 120), geom, new Map(), undefined, shapes)!
+  assert.deepEqual(
+    [r.start, r.end],
+    [
+      { x: 70, y: 120 },
+      { x: 370, y: 120 },
+    ],
+  )
+  // Lifeline asal digeser: pesan ikut, tetap mendatar.
+  geom.set('A', { x: 0, y: 50, w: 140, h: 400 })
+  const r2 = routeConnector(msg('A', 'B', 120), geom, new Map(), undefined, shapes)!
+  assert.equal(r2.start.y, 170)
+  assert.equal(r2.end.y, 170)
+  // Draf seret: y dunia, tetap mendatar.
+  const r3 = routeConnector(msg('A', 'B', 120), geom, new Map(), [[999, 260]], shapes)!
+  assert.equal(r3.start.y, 260)
+  assert.equal(r3.end.y, 260)
+  // Ke activation bar: berhenti di tepi bar yang menghadap pengirim (7 px dari tengah).
+  const r4 = routeConnector(msg('A', 'bar', 120), geom, new Map(), undefined, shapes)!
+  assert.equal(r4.end.x, 363)
+  // Ke diri sendiri: putaran ke kanan, pegangan di tinggi pesan.
+  const self = routeConnector(msg('A', 'A', 120), geom, new Map(), undefined, shapes)!
+  assert.equal(self.pts.length, 4)
+  assert.deepEqual(self.start, { x: 70, y: 170 })
+  assert.deepEqual(self.end, { x: 70, y: 194 })
+  assert.equal(self.stops[1]!.y, 170)
+  // Lifeline hanya diperpanjang ke bawah; activation bar ke atas atau bawah.
+  assert.deepEqual(shapeHandles('uml_lifeline'), ['s'])
+  assert.deepEqual(shapeHandles('uml_activation'), ['n', 's'])
+  assert.equal(shapeHandles('rect').length, 8)
+  // Fragmen: alt dua operand, opt satu; preset destroy mengakhiri lifeline.
+  assert.equal(nsc('uml_fragment', 'alt').lanes?.length, 2)
+  assert.equal(nsc('uml_fragment', 'opt').lanes?.length, 1)
+  assert.ok(LINE_PRESETS.find((p) => p.id === 'msg_destroy')?.destroy)
+  assert.equal(shapeMarks({ shape: 'uml_lifeline', variant: 'destroyed' }, 140, 400).length, 2)
+  assert.ok(shapeMarks({ shape: 'uml_lifeline', variant: 'none' }, 140, 400)[0]!.dash)
+})
+
+test('aktor dan lifeline aktor: port kiri dan kanan di ujung tangan, juga sesudah putar dan ubah ukuran', async () => {
+  const { portInset, portPoint } = await import('../src/utils/wbShapes.ts')
+  const near = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    assert.ok(Math.hypot(a.x - b.x, a.y - b.y) < 1e-6, `${JSON.stringify(a)} != ${JSON.stringify(b)}`)
+  const b = { x: 0, y: 0, w: 80, h: 160 }
+  const ins = portInset('uml_actor', 80, 160)
+  near(portPoint(b, 'left', 0, ins).p, { x: 8, y: 56 })
+  near(portPoint(b, 'right', 0, ins).p, { x: 72, y: 56 })
+  near(portPoint(b, 'top', 0, ins).p, { x: 40, y: 0 })
+  near(portPoint(b, 'bottom', 0, ins).p, { x: 40, y: 160 })
+  // Diputar 90 derajat terhadap pusat (40, 80): tangan kanan (72, 56) pindah ke (64, 112).
+  near(portPoint(b, 'right', 90, ins).p, { x: 64, y: 112 })
+  // Diubah ukurannya: tetap di ujung tangan.
+  near(portPoint({ x: 0, y: 0, w: 120, h: 200 }, 'left', 0, portInset('uml_actor', 120, 200)).p, {
+    x: 12,
+    y: 70,
+  })
+  // Lifeline aktor: tangan di kepala setinggi 70 px.
+  near(portPoint({ x: 0, y: 0, w: 100, h: 400 }, 'right', 0, portInset('uml_lifeline_actor', 100, 400)).p, {
+    x: 90,
+    y: 24.5,
+  })
+})

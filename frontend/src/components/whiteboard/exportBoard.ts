@@ -15,6 +15,8 @@ import {
   shapePath,
   solidShape,
   strokeScale,
+  FRAGMENT_TAB,
+  guardLanes,
   laneOrient,
   textBox,
   type ShapeContent,
@@ -545,7 +547,9 @@ function drawShape(ctx: CanvasRenderingContext2D, tok: Tok, c: ShapeContent, r: 
     if (strokeWith) {
       ctx.strokeStyle = strokeWith
       ctx.lineWidth = c.stroke_width * (m.width ?? 1)
+      ctx.setLineDash(m.dash ? [c.stroke_width * 3, c.stroke_width * 3] : [])
       ctx.stroke(mp)
+      ctx.setLineDash([])
     }
   }
   ctx.restore()
@@ -600,7 +604,17 @@ function drawShape(ctx: CanvasRenderingContext2D, tok: Tok, c: ShapeContent, r: 
   }
   // Label lane, sama dengan WbShape.vue: tegak di pita kedua pool, mendatar di pita kedua swimlane.
   const orient = laneOrient(c.shape)
-  if (orient)
+  // Fragmen sequence (revisi 54d): operator di tab dan [syarat] di kiri atas tiap operand, sama dengan WbShape.vue.
+  if (guardLanes(c.shape)) {
+    const op = lay(c.variant || 'alt', null, FRAGMENT_TAB.w - 12, true)[0]
+    if (op) drawLine(ctx, tok, op, 8, 3, FRAGMENT_TAB.w - 12, ink0, 'left')
+    laneBoxes(c.lanes ?? [], r.w, r.h, 'rows', 0).forEach((b, i) => {
+      if (!b.label) return
+      const g = lay(`[${b.label}]`, null, Math.max(20, b.w - 16))[0]
+      if (g)
+        drawLine(ctx, tok, g, 8, b.y + (i ? 4 : FRAGMENT_TAB.h + 4), Math.max(20, b.w - 16), ink0, 'left')
+    })
+  } else if (orient)
     for (const b of laneBoxes(c.lanes ?? [], r.w, r.h, orient)) {
       if (!b.label) continue
       ctx.save()

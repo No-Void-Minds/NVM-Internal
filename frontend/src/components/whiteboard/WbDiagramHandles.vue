@@ -11,6 +11,8 @@ const props = defineProps<{
   ports: { card: string; port: Port; p: Pt; h: Pt }[]
   stops: Pt[] | null
   temp: { a: Pt; b: Pt } | null
+  // Pesan sequence: satu pegangan tinggi pesan, tanpa titik sisip.
+  noInsert?: boolean
 }>()
 const emit = defineEmits<{
   port: [card: string, port: Port, e: PointerEvent]
@@ -25,6 +27,7 @@ const ring = computed(() => 2 / props.zoom)
 // Titik belok adalah stops tanpa ujung awal dan akhir; titik sisip di tengah setiap pasangan stops berurutan.
 const bends = computed(() => (props.stops ?? []).slice(1, -1))
 const inserts = computed(() => {
+  if (props.noInsert) return []
   const s = props.stops ?? []
   return s.slice(1).map((p, i) => ({ x: (p.x + s[i]!.x) / 2, y: (p.y + s[i]!.y) / 2 }))
 })

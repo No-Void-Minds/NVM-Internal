@@ -1,5 +1,5 @@
 {
-  "groups": ["Dasar", "Flowchart", "UML", "Activity dan state", "BPMN", "Panah blok"],
+  "groups": ["Dasar", "Flowchart", "UML", "Activity dan state", "Sequence", "BPMN", "Panah blok"],
   "shapes": [
     {
       "id": "rect",
@@ -224,6 +224,72 @@
       "group": "Activity dan state",
       "w": 420,
       "h": 280
+    },
+    {
+      "id": "uml_lifeline",
+      "label": "Lifeline",
+      "group": "Sequence",
+      "w": 140,
+      "h": 400,
+      "variants": [
+        {
+          "id": "none",
+          "label": "Lifeline"
+        },
+        {
+          "id": "destroyed",
+          "label": "Lifeline berakhir (X)"
+        }
+      ]
+    },
+    {
+      "id": "uml_lifeline_actor",
+      "label": "Lifeline aktor",
+      "group": "Sequence",
+      "w": 100,
+      "h": 400,
+      "variants": [
+        {
+          "id": "none",
+          "label": "Lifeline aktor"
+        },
+        {
+          "id": "destroyed",
+          "label": "Lifeline aktor berakhir (X)"
+        }
+      ]
+    },
+    {
+      "id": "uml_activation",
+      "label": "Activation bar",
+      "group": "Sequence",
+      "w": 40,
+      "h": 120
+    },
+    {
+      "id": "uml_fragment",
+      "label": "Fragmen",
+      "group": "Sequence",
+      "w": 420,
+      "h": 260,
+      "variants": [
+        {
+          "id": "alt",
+          "label": "Fragmen alt"
+        },
+        {
+          "id": "opt",
+          "label": "Fragmen opt"
+        },
+        {
+          "id": "loop",
+          "label": "Fragmen loop"
+        },
+        {
+          "id": "par",
+          "label": "Fragmen par"
+        }
+      ]
     },
     {
       "id": "bpmn_pool",

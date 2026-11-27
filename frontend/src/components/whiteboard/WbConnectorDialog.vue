@@ -31,6 +31,7 @@ const emit = defineEmits<{
   update: [id: string, patch: ConnectorUpdate]
   remove: [id: string]
   restack: [id: string, kind: 'front' | 'forward' | 'backward' | 'back' | 'auto']
+  preset: [id: string, preset: string]
 }>()
 const uid = useId()
 const labels = useDrafts(() => Object.fromEntries(props.connectors.map((c) => [c.id, c.label])))
@@ -66,13 +67,9 @@ function setPort(c: Connector, side: 'from' | 'to', port: string) {
 // Preset garis per jenis diagram (LINE_PRESETS di utils/wbShapes.ts): gaya garis dan ujung, plus label tengah
 // bila presetnya punya (include, extend); label tetap bisa diubah sesudahnya.
 const presetOpts = LINE_PRESETS.map((p) => ({ value: p.id, label: `${p.group}: ${p.label}` }))
+// Halaman yang menerapkan preset (applyPreset), karena preset destroy juga mengubah lifeline tujuan.
 function preset(c: Connector, id: string) {
-  const p = LINE_PRESETS.find((x) => x.id === id)
-  if (!p) return
-  emit('update', c.id, {
-    style: { ...c.style, line: p.line, start: p.start, end: p.end },
-    ...(p.text !== undefined ? { label: p.text } : {}),
-  })
+  emit('preset', c.id, id)
 }
 const ORDER = [
   { kind: 'front', label: 'Paling depan' },
@@ -97,6 +94,9 @@ const ROUTES = [
   { value: 'curved', label: 'Melengkung' },
   { value: 'bebas', label: 'Bebas (sudut apa pun)' },
 ]
+// Pesan sequence (revisi 54d) hanya menawarkan jalurnya sendiri sebagai pilihan tambahan.
+const routeOpts = (c: Connector) =>
+  c.geometry.route === 'message' ? [...ROUTES, { value: 'message', label: 'Pesan (mendatar)' }] : ROUTES
 const endOpts = END_KINDS.map((k) => ({ value: k.id, label: k.label }))
 const colorOpts = penColors.map((p) => ({
   value: p.value === 'tinta' ? '' : p.value,
@@ -211,7 +211,7 @@ const btn =
                 :id="`${uid}-${i}-route`"
                 label="Jalur"
                 class="w-full"
-                :options="ROUTES"
+                :options="routeOpts(c)"
                 :model-value="c.geometry.route || 'straight'"
                 :disabled="!canWrite"
                 @update:model-value="setRoute(c, $event)"

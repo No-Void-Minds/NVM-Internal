@@ -8,7 +8,7 @@ import WbRichField, { activateField } from './WbRichField.vue'
 import { fileUrl, type ChecklistOp, type TableOp } from '../../api/whiteboard'
 import { formatBytes } from '../../utils/attachment'
 import type { CaretHint } from './caret'
-import { HANDLES, handleSign, type Handle, type ShapeContent } from '../../utils/wbShapes'
+import { handleSign, shapeHandles, type Handle, type ShapeContent } from '../../utils/wbShapes'
 import { styleClasses, styleOpacity } from '../../utils/wbStyle'
 import { cropBox } from '../../utils/wbCrop'
 import { AVATAR_PX, type PersonContent } from '../../utils/wbPerson'
@@ -674,7 +674,7 @@ function onPointerDown(e: PointerEvent) {
          Jalur keyboard untuk keduanya ada di panel gaya bentuk. -->
     <template v-if="isShape && canResize">
       <div
-        v-for="h in HANDLES"
+        v-for="h in shapeHandles(shape.shape)"
         :key="h"
         aria-hidden="true"
         class="absolute flex items-center justify-center touch-none"

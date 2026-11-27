@@ -88,7 +88,7 @@ export type ConnectorEnd = { port: string; x?: number; y?: number }
 export type ConnectorGeometry = {
   from: ConnectorEnd
   to: ConnectorEnd
-  route: 'straight' | 'orthogonal' | 'curved' | 'bebas'
+  route: 'straight' | 'orthogonal' | 'curved' | 'bebas' | 'message'
   points: [number, number][]
   // Pusat ujung awal dan akhir saat titik belok disimpan (revisi 53, garis elastis).
   anchor?: [[number, number], [number, number]]

@@ -9,6 +9,9 @@ import {
   shapeInset,
   shapeMarks,
   shapePath,
+  FRAGMENT_TAB,
+  guardLanes,
+  laneBandOf,
   laneOrient,
   shapeValign,
   solidShape,
@@ -72,16 +75,22 @@ const textInset = computed(() => shapeInset(props.content.shape))
 const orient = computed(() => laneOrient(props.content.shape))
 const laneDraft = ref<Lane[] | null>(null)
 const lanesShown = computed(() => laneDraft.value ?? props.content.lanes ?? [])
+// Fragmen sequence (revisi 54d): operand tanpa pita, syaratnya [kondisi] di kiri atas tiap operand, operator di tab.
+const guards = computed(() => guardLanes(props.content.shape))
+const band = computed(() => laneBandOf(props.content.shape))
 const lanes = computed(() =>
-  orient.value ? laneBoxes(lanesShown.value, props.w, props.h, orient.value) : [],
+  orient.value ? laneBoxes(lanesShown.value, props.w, props.h, orient.value, band.value) : [],
 )
+const pool = computed(() => orient.value === 'rows' && !guards.value)
 const bandStyle = computed(() =>
   orient.value === 'rows'
     ? { top: '0px', bottom: '0px', left: '0px', width: `${BAND}px` }
     : { top: '0px', left: '0px', right: '0px', height: `${BAND}px` },
 )
 const span = () => (orient.value === 'rows' ? props.h : props.w)
-function laneLabelStyle(b: { x: number; y: number; w: number; h: number }) {
+function laneLabelStyle(b: { x: number; y: number; w: number; h: number }, i: number) {
+  if (guards.value)
+    return { left: '8px', top: `${b.y + (i ? 4 : FRAGMENT_TAB.h + 4)}px`, maxWidth: `${b.w - 16}px` }
   return orient.value === 'rows'
     ? { left: `${BAND}px`, top: `${b.y}px`, width: `${BAND}px`, height: `${b.h}px` }
     : { left: `${b.x}px`, top: `${BAND}px`, width: `${b.w}px`, height: `${BAND}px` }
@@ -91,8 +100,8 @@ function dividerStyle(i: number) {
   const b = lanes.value[i + 1]!
   const t = 44 / (props.zoom || 1)
   return orient.value === 'rows'
-    ? { left: `${BAND}px`, right: '0px', top: `${b.y - t / 2}px`, height: `${t}px` }
-    : { top: `${BAND}px`, bottom: '0px', left: `${b.x - t / 2}px`, width: `${t}px` }
+    ? { left: `${band.value}px`, right: '0px', top: `${b.y - t / 2}px`, height: `${t}px` }
+    : { top: `${band.value}px`, bottom: '0px', left: `${b.x - t / 2}px`, width: `${t}px` }
 }
 const canDivide = computed(() => !!orient.value && props.selected && props.canWrite && !props.editing)
 function commitLanes(next: Lane[]) {
@@ -135,7 +144,7 @@ const markWidth = computed(() => props.content.stroke_width)
 const paint = (v: 'line' | 'surface' | 'none' | undefined, fallback: string) =>
   v === 'line' ? stroke.value : v === 'surface' ? 'var(--color-surface)' : v === 'none' ? 'none' : fallback
 const textStyle = computed(() => ({
-  ...(orient.value ? bandStyle.value : textInset.value),
+  ...(orient.value && !guards.value ? bandStyle.value : textInset.value),
   fontSize: `${props.content.font_size}px`,
   textAlign: props.content.align,
   justifyContent:
@@ -199,6 +208,7 @@ const field = 'block w-full'
         :transform="pathTransform"
         :style="{ fill: paint(m.fill, 'none'), stroke: paint(m.stroke, stroke) }"
         :stroke-width="markWidth * (m.width ?? 1)"
+        :stroke-dasharray="m.dash ? `${markWidth * 3} ${markWidth * 3}` : undefined"
         stroke-linejoin="round"
         stroke-linecap="round"
         data-mark
@@ -273,8 +283,8 @@ const field = 'block w-full'
       class="absolute flex text-ink"
       :class="[
         top ? 'items-start font-semibold' : 'items-center',
-        orient ? 'justify-center px-1 font-semibold' : '',
-        orient === 'rows' ? 'wb-vertical' : '',
+        orient && !guards ? 'justify-center px-1 font-semibold' : '',
+        pool ? 'wb-vertical' : '',
       ]"
       :style="textStyle"
     >
@@ -304,16 +314,29 @@ const field = 'block w-full'
       </p>
     </div>
 
-    <!-- Label lane (revisi 54b): diubah lewat Gaya bentuk; di sini hanya tampil. -->
+    <!-- Operator fragmen di tabnya (alt, opt, loop, par). -->
+    <p
+      v-if="guards"
+      class="absolute top-0 left-0 flex items-center px-2 text-sm font-semibold text-ink"
+      :style="{ width: `${FRAGMENT_TAB.w}px`, height: `${FRAGMENT_TAB.h}px` }"
+      data-fragment-op
+    >
+      {{ content.variant || 'alt' }}
+    </p>
+    <!-- Label lane (revisi 54b) atau syarat operand fragmen: diubah lewat Gaya bentuk; di sini hanya tampil. -->
     <p
       v-for="(b, i) in lanes"
       :key="`lane-${i}`"
-      class="absolute flex items-center justify-center overflow-hidden px-1 text-center text-sm leading-tight break-words text-ink"
-      :class="orient === 'rows' ? 'wb-vertical' : ''"
-      :style="laneLabelStyle(b)"
+      class="absolute overflow-hidden text-sm leading-tight break-words text-ink"
+      :class="
+        guards
+          ? 'px-1'
+          : ['flex items-center justify-center px-1 text-center', orient === 'rows' ? 'wb-vertical' : '']
+      "
+      :style="laneLabelStyle(b, i)"
       data-lane
     >
-      {{ b.label }}
+      {{ guards ? (b.label ? `[${b.label}]` : '') : b.label }}
     </p>
     <template v-if="canDivide">
       <div

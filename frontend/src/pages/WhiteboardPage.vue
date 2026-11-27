@@ -32,6 +32,9 @@ import {
   laneOrient,
   newShapeContent,
   rotatedBounds,
+  LINE_PRESETS,
+  MESSAGE_DEFAULT_Y,
+  isLifeline,
   portInset,
   portPoint,
   portsFor,
@@ -1219,6 +1222,18 @@ function asOneStep(work: () => void) {
     else if (steps.length) record({ kind: 'batch', steps })
   }
 }
+// Sama, untuk kerja yang menunggu server (langkah garis dicatat sesudah jawaban server).
+async function asOneStepAsync(work: () => Promise<void>) {
+  batchBuf = []
+  try {
+    await work()
+  } finally {
+    const steps = batchBuf
+    batchBuf = null
+    if (steps.length === 1) record(steps[0]!)
+    else if (steps.length) record({ kind: 'batch', steps })
+  }
+}
 const canUndo = computed(() => historyVersion.value >= 0 && history.undo.length > 0)
 const canRedo = computed(() => historyVersion.value >= 0 && history.redo.length > 0)
 
@@ -1964,6 +1979,30 @@ function flip(axis: 'x' | 'y') {
   announce.value = axis === 'x' ? 'Bentuk dibalik mendatar.' : 'Bentuk dibalik tegak.'
 }
 
+// Activation bar yang dilepas di atas lifeline menempel di garis tengahnya (revisi 54d); ikut langkah undo geserannya.
+function snapActivations(
+  changes: { id: string; after: Geo }[],
+  moving: Set<string>,
+  wasCarried: Set<string>,
+) {
+  const lifes = shownCards.value.filter(
+    (c) =>
+      !moving.has(c.id) && ['uml_lifeline', 'uml_lifeline_actor'].includes(shapeKinds.value.get(c.id) ?? ''),
+  )
+  if (!lifes.length) return
+  for (const ch of changes) {
+    if (wasCarried.has(ch.id) || shapeKinds.value.get(ch.id) !== 'uml_activation') continue
+    const c = shownById.value.get(ch.id)
+    if (!c) continue
+    const cx = (ch.after.x ?? c.x) + c.w / 2
+    const cy = (ch.after.y ?? c.y) + c.h / 2
+    const l = lifes.find(
+      (x) => Math.abs(x.x + x.w / 2 - cx) <= Math.max(40, x.w / 2) && cy >= x.y && cy <= x.y + x.h,
+    )
+    if (l) ch.after = { ...ch.after, x: Math.round(l.x + l.w / 2 - c.w / 2) }
+  }
+}
+
 // Kartu yang dilepas seluruhnya di dalam wadah yang digambar di atasnya dinaikkan ke depan, supaya terlihat dan
 // menjadi anggota wadah itu (revisi 54b). Ikut langkah undo yang sama dengan geserannya.
 function raiseIntoContainers(
@@ -2436,7 +2475,17 @@ function selectionMenu(): MenuItem[] {
   if (one?.kind === 'shape' && w)
     out.push({ id: 'shapestyle', label: 'Gaya bentuk', run: () => (shapeStyleId.value = one.id) })
   if (one?.kind === 'shape' && w && laneOrient((one.content as ShapeContent).shape))
-    out.push({ id: 'addLane', label: 'Tambah lane', run: () => addLaneTo(one.id) })
+    out.push({
+      id: 'addLane',
+      label: (one.content as ShapeContent).shape === 'uml_fragment' ? 'Tambah operand' : 'Tambah lane',
+      run: () => addLaneTo(one.id),
+    })
+  if (one?.kind === 'shape' && w && isLifeline((one.content as ShapeContent).shape))
+    out.push({
+      id: 'selfMessage',
+      label: 'Tambah pesan ke diri sendiri',
+      run: () => void addSelfMessage(one.id),
+    })
   if (one?.kind === 'image' && one.file) {
     if (w)
       out.push(
@@ -3611,6 +3660,9 @@ const lines = computed<DrawnLine[]>(() => {
   for (const id of lineCache.keys()) if (!seen.has(id)) lineCache.delete(id)
   return out
 })
+const selectedIsMessage = computed(
+  () => connectors.value.find((c) => c.id === selectedConnector.value)?.geometry.route === 'message',
+)
 const selectedStops = computed(() =>
   canWrite.value && selectedConnector.value
     ? (lines.value.find((l) => l.id === selectedConnector.value)?.stops ?? null)
@@ -3660,9 +3712,10 @@ function onPortDown(card: string, port: Port, e: PointerEvent) {
 
 // Kartu paling atas di titik dunia (selain yang dikecualikan), beserta port terdekatnya bila cukup dekat.
 function cardAt(at: Pt, except: string): { id: string; port: Port } | null {
-  const hit = [...rendered.value]
-    .reverse()
-    .find(
+  // Yang paling depan menurut urutan tumpuk (revisi 54d): sebelumnya yang terakhir di urutan baca, jadi wadah besar
+  // di belakang (fragmen, pool) bisa menang dari kartu yang terlihat di atasnya.
+  const hit = rendered.value
+    .filter(
       (c) =>
         c.id !== except &&
         c.kind !== 'drawing' &&
@@ -3671,6 +3724,7 @@ function cardAt(at: Pt, except: string): { id: string; port: Port } | null {
         at.y >= c.y &&
         at.y <= c.y + c.h,
     )
+    .sort((p, q) => (layers.value.get(q.id) ?? 0) - (layers.value.get(p.id) ?? 0))[0]
   if (!hit) return null
   const b = geomMap.value.get(hit.id) ?? hit
   const rot = rotations.value.get(hit.id) ?? 0
@@ -3697,7 +3751,10 @@ async function finishConnect(at: Pt) {
   if (near && near.card === d.card) return
   const target = cardAt(at, d.card)
   const toShape = target ? byId.value.get(target.id)?.kind === 'shape' : false
-  const route = from.kind === 'shape' || toShape ? 'orthogonal' : 'straight'
+  // Lifeline ke lifeline: pesan sequence mendatar di tinggi titik lepas (revisi 54d).
+  const message =
+    !!target && isLifeline(shapeKinds.value.get(d.card)) && isLifeline(shapeKinds.value.get(target.id))
+  const route = message ? 'message' : from.kind === 'shape' || toShape ? 'orthogonal' : 'straight'
   try {
     const res = await saving(() =>
       createConnector(bid.value, {
@@ -3708,7 +3765,7 @@ async function finishConnect(at: Pt) {
           from: { port: d.port },
           to: target ? { port: target.port } : { port: '', x: Math.round(at.x), y: Math.round(at.y) },
           route,
-          points: [],
+          points: message ? [[0, messageOffset(from.id, at.y)]] : [],
         },
       }),
     )
@@ -3743,6 +3800,13 @@ async function saveBends(id: string, points: [number, number][]) {
   const c = connectors.value.find((x) => x.id === id)
   const l = lines.value.find((x) => x.id === id)
   if (!c || !l) return
+  // Pesan sequence: hanya tingginya, sebagai jarak dari atas lifeline asal; tanpa anchor dan tanpa rapikan titik.
+  if (c.geometry.route === 'message' && c.from) {
+    const y = points[0]?.[1]
+    if (y === undefined) return
+    await onConnectorUpdate(id, { geometry: { ...c.geometry, points: [[0, messageOffset(c.from, y)]] } })
+    return
+  }
   const kept = simplifyBends([l.start, ...points.map(([x, y]) => ({ x, y })), l.end]).map(
     (q) => [q.x, q.y] as [number, number],
   )
@@ -3758,6 +3822,60 @@ async function saveBends(id: string, points: [number, number][]) {
       points: kept,
       anchor: [end(c.from, c.geometry.from), end(c.to, c.geometry.to)],
     },
+  })
+}
+
+// Tinggi pesan sebagai jarak dari atas kartu asal, paling atas tepat di bawah kepala lifeline.
+function messageOffset(from: string, y: number): number {
+  const b = byId.value.get(from)
+  if (!b) return MESSAGE_DEFAULT_Y
+  const head =
+    shapeKinds.value.get(from) === 'uml_lifeline_actor'
+      ? 110
+      : shapeKinds.value.get(from) === 'uml_lifeline'
+        ? 64
+        : 0
+  return Math.round(clamp(y - b.y, head, Math.max(head, b.h)))
+}
+
+// Pesan ke diri sendiri dari lifeline atau activation bar terpilih (menu Aksi dan klik kanan).
+async function addSelfMessage(id: string) {
+  try {
+    const res = await saving(() =>
+      createConnector(bid.value, {
+        from: id,
+        to: id,
+        style: { start: 'none', end: 'arrow', line: 'solid', color: '' },
+        geometry: { from: { port: 'auto' }, to: { port: 'auto' }, route: 'message', points: [[0, 120]] },
+      }),
+    )
+    if (!res) return
+    upsertConnectors([res.connector])
+    record({ kind: 'connectors', ids: [res.connector.id], batches: [] })
+    select([])
+    selectedConnector.value = res.connector.id
+    announce.value = 'Pesan ke diri sendiri ditambahkan. Seret pegangannya untuk mengatur tinggi.'
+  } catch {
+    // Pesan galat sudah tampil di penanda simpan.
+  }
+}
+
+// Preset garis dari panel garis. Destroy juga mengakhiri lifeline tujuan dengan X; keduanya satu langkah undo.
+async function applyPreset(id: string, presetId: string) {
+  const p = LINE_PRESETS.find((x) => x.id === presetId)
+  const c = connectors.value.find((x) => x.id === id)
+  if (!p || !c) return
+  const patch: ConnectorUpdate = {
+    style: { ...c.style, line: p.line, start: p.start, end: p.end },
+    ...(p.text !== undefined ? { label: p.text } : {}),
+  }
+  const target = c.to ? byId.value.get(c.to) : undefined
+  const life = target?.kind === 'shape' ? (target.content as ShapeContent) : null
+  const kill = p.destroy && life && (life.shape === 'uml_lifeline' || life.shape === 'uml_lifeline_actor')
+  await asOneStepAsync(async () => {
+    await onConnectorUpdate(id, patch)
+    if (kill && target && life.variant !== 'destroyed')
+      recordContent(target.id, { ...life, variant: 'destroyed' })
   })
 }
 
@@ -3841,18 +3959,29 @@ async function connectInOrder() {
 
 async function connectPair(from: string, to: string): Promise<string | null> {
   try {
-    // Bentuk dan kartu orang (bagan organisasi) memakai garis siku dengan panah.
+    // Bentuk dan kartu orang (bagan organisasi) memakai garis siku dengan panah; lifeline memakai pesan sequence.
     const shape = [from, to].some((id) => ['shape', 'person'].includes(byId.value.get(id)?.kind ?? ''))
+    const message = isLifeline(shapeKinds.value.get(from)) && isLifeline(shapeKinds.value.get(to))
     const res = await saving(() =>
       createConnector(bid.value, {
         from,
         to,
-        ...(shape
+        ...(message
           ? {
               style: { start: 'none', end: 'arrow', line: 'solid', color: '' },
-              geometry: { from: { port: 'auto' }, to: { port: 'auto' }, route: 'orthogonal', points: [] },
+              geometry: {
+                from: { port: 'auto' },
+                to: { port: 'auto' },
+                route: 'message',
+                points: [[0, MESSAGE_DEFAULT_Y]],
+              },
             }
-          : {}),
+          : shape
+            ? {
+                style: { start: 'none', end: 'arrow', line: 'solid', color: '' },
+                geometry: { from: { port: 'auto' }, to: { port: 'auto' }, route: 'orthogonal', points: [] },
+              }
+            : {}),
       }),
     )
     if (!res) return null
@@ -4418,6 +4547,7 @@ function onUp(e: PointerEvent) {
           ]
         : []
     })
+    snapActivations(changes, new Set(g.ids), wasCarried)
     raiseIntoContainers(changes, new Set(g.ids), wasCarried)
     announce.value = `${changes.length} kartu dipindah.`
     applyLayout(changes)
@@ -5356,6 +5486,7 @@ const toolBtn =
               :zoom="view.zoom"
               :ports="portHandles"
               :stops="selectedStops"
+              :no-insert="selectedIsMessage"
               :temp="tempLine"
               @port="onPortDown"
               @bend="(i: number, e: PointerEvent) => onBendDown(i, false, e)"
@@ -5981,6 +6112,7 @@ const toolBtn =
       :can-write="canWrite"
       @close="connectorIds = null"
       @update="onConnectorUpdate"
+      @preset="applyPreset"
       @remove="onConnectorRemove"
       @restack="
         (id: string, k: StackKind | 'auto') => (k === 'auto' ? void setLineZ(id, null) : reorderLine(id, k))

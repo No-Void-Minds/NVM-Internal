@@ -94,7 +94,7 @@ export function newShapeContent(shape: ShapeType, variant?: string): ShapeConten
     ...(shape === 'uml_class' ? { name: 'Kelas', attributes: '', methods: '' } : {}),
     ...(g.lanes
       ? {
-          lanes: [
+          lanes: g.initLanes?.(variant ?? INFO.get(shape)?.variants?.[0]?.id ?? '') ?? [
             { label: 'Lane 1', size: 150 },
             { label: 'Lane 2', size: 150 },
           ],
@@ -266,7 +266,11 @@ export type Mark = {
   fill?: 'line' | 'surface' | 'none'
   stroke?: 'line' | 'surface' | 'none'
   width?: number
+  // Garis putus-putus (garis hidup lifeline, pemisah operand fragmen).
+  dash?: boolean
 }
+// Port sisi yang tidak di tengah sisi kotak port, mis. tangan aktor (sepertiga atas, bukan tengah tinggi).
+export type PortBox = Box & { side?: Partial<Record<'top' | 'right' | 'bottom' | 'left', Pt>> }
 type Geo = {
   path: (w: number, h: number) => string
   marks?: (w: number, h: number, variant: string, c?: Pick<ShapeContent, 'lanes'>) => Mark[]
@@ -280,7 +284,14 @@ type Geo = {
   solid?: boolean
   // Kotak tempat port garis menempel, di koordinat lokal bentuk, bila gambarnya lebih kecil dari kotak kartu (batang
   // fork, lingkaran di kotak yang tidak persegi). Tanpa ini garis berhenti di tepi kotak, terlihat putus.
-  ports?: (w: number, h: number) => Box
+  ports?: (w: number, h: number) => PortBox
+  // Pegangan ubah ukuran yang tersedia (lifeline hanya bisa diperpanjang ke bawah); tanpa ini delapan pegangan.
+  handles?: Handle[]
+  // Lane awal per varian (operand fragmen) dan lebar pita sebelum lane (0 untuk fragmen).
+  initLanes?: (variant: string) => Lane[]
+  laneBand?: number
+  // Label lane sebagai syarat operand fragmen ([kondisi] di kiri atas), bukan label pita pool.
+  guards?: boolean
   fill?: string
   text?: string
   align?: 'left' | 'center' | 'right'
@@ -467,6 +478,46 @@ function laneMarks(w: number, h: number, orient: LaneOrient, lanes: Lane[] = [])
   return [{ d }]
 }
 
+// Aktor (W5 dan lifeline aktor): tangan di sepertiga atas sejauh 10% dari tepi kiri dan kanan (lihat basePath), kaki di
+// tepi bawah. Port kiri dan kanan menempel di ujung tangan, atas di kepala, bawah di antara kaki.
+function actorPorts(w: number, h: number): PortBox {
+  return { x: 0, y: 0, w, h, side: { left: { x: w * 0.1, y: h * 0.35 }, right: { x: w * 0.9, y: h * 0.35 } } }
+}
+// Sequence (revisi 54d): kepala lifeline setinggi HEAD, aktor lifeline setinggi ACTOR_HEAD; garis hidup putus-putus
+// dari bawah kepala sampai ujung kartu, dengan X bila lifeline diakhiri (destroy).
+export const LIFE_HEAD = 50
+export const ACTOR_HEAD = 70
+function lifeMarks(w: number, h: number, v: string, top: number): Mark[] {
+  const cx = w / 2
+  const out: Mark[] = [{ d: `M${f(cx)} ${f(top)}V${f(h)}`, dash: true }]
+  if (v === 'destroyed') {
+    const s = Math.min(14, w / 4)
+    out.push({
+      d: `M${f(cx - s)} ${f(h - 2 * s)}L${f(cx + s)} ${f(h)}M${f(cx + s)} ${f(h - 2 * s)}L${f(cx - s)} ${f(h)}`,
+      width: 1.5,
+    })
+  }
+  return out
+}
+// Fragmen: tab operator di kiri atas dan pemisah operand putus-putus.
+const TAB_W = 56
+const TAB_H = 22
+function fragmentMarks(w: number, h: number, lanes: Lane[] = []): Mark[] {
+  const tab = `M0 ${TAB_H}H${TAB_W - 8}L${TAB_W} ${TAB_H - 8}V0`
+  const out: Mark[] = [{ d: tab }]
+  const boxes = laneBoxes(lanes, w, h, 'rows', 0)
+  if (boxes.length > 1)
+    out.push({
+      d: boxes
+        .slice(1)
+        .map((b) => `M0 ${f(b.y)}H${f(w)}`)
+        .join(''),
+      dash: true,
+    })
+  return out
+}
+export const FRAGMENT_TAB = { w: TAB_W, h: TAB_H }
+
 // Lingkaran digambar di persegi terbesar di tengah kotak; port menempel di persegi itu.
 const squarePorts = (w: number, h: number): Box => {
   const s = Math.min(w, h)
@@ -496,6 +547,7 @@ const GEO = {
   uml_actor: base('uml_actor', {
     open: true,
     fill: '',
+    ports: actorPorts,
     inset: { top: '102%', bottom: '-30%', left: '-40%', right: '-40%' },
   }),
   uml_note: base('uml_note', { fill: 'kuning', align: 'left' }),
@@ -592,6 +644,61 @@ const GEO = {
     text: 'State komposit',
     valign: 'top',
     inset: { top: '6px', bottom: 'auto', left: '12px', right: '12px' },
+  },
+  uml_lifeline: {
+    path: (w) => roundRect(0, 0, w, LIFE_HEAD, 4),
+    marks: (w, h, v) => lifeMarks(w, h, v, LIFE_HEAD),
+    container: true,
+    handles: ['s'],
+    text: 'Partisipan',
+    inset: { top: '14px', bottom: 'auto', left: '8px', right: '8px' },
+    ports: (w) => ({ x: 0, y: 0, w, h: LIFE_HEAD }),
+  },
+  uml_lifeline_actor: {
+    path: (w) => basePath('uml_actor', w, ACTOR_HEAD),
+    marks: (w, h, v) => lifeMarks(w, h, v, ACTOR_HEAD + 26),
+    open: true,
+    fill: '',
+    container: true,
+    handles: ['s'],
+    text: 'Aktor',
+    inset: { top: `${ACTOR_HEAD + 2}px`, bottom: 'auto', left: '-20%', right: '-20%' },
+    ports: (w) => actorPorts(w, ACTOR_HEAD),
+  },
+  // Activation bar 14 px di tengah kotak minimal 40 px; hanya diperpanjang ke atas atau ke bawah.
+  uml_activation: {
+    path: (w, h) => {
+      const t = Math.min(14, w)
+      return poly([
+        [(w - t) / 2, 0],
+        [(w + t) / 2, 0],
+        [(w + t) / 2, h],
+        [(w - t) / 2, h],
+      ])
+    },
+    handles: ['n', 's'],
+    ports: (w, h) => {
+      const t = Math.min(14, w)
+      return { x: (w - t) / 2, y: 0, w: t, h }
+    },
+  },
+  uml_fragment: {
+    path: (w, h) => basePath('rect', w, h),
+    marks: (w, h, _v, c) => fragmentMarks(w, h, c?.lanes),
+    container: true,
+    lanes: 'rows',
+    laneBand: 0,
+    guards: true,
+    fill: '',
+    valign: 'top',
+    inset: { top: '3px', bottom: 'auto', left: `${TAB_W + 8}px`, right: '8px' },
+    initLanes: (v) =>
+      v === 'alt'
+        ? [
+            { label: 'ya', size: 120 },
+            { label: 'tidak', size: 120 },
+          ]
+        : [{ label: 'kondisi', size: 240 }],
   },
   uml_swimlane: {
     path: (w, h) => basePath('rect', w, h),
@@ -694,8 +801,14 @@ export const openShape = (s: string) => !!geoOf(s).open
 export const strokeScale = (s: string) => geoOf(s).strokeScale ?? 1
 export const solidShape = (s: string) => !!geoOf(s).solid
 // Kotak port lokal bentuk berukuran w x h, atau null bila port di tepi kotak kartu.
-export const portInset = (s: string | undefined, w: number, h: number): Box | null =>
+export const portInset = (s: string | undefined, w: number, h: number): PortBox | null =>
   s ? (geoOf(s).ports?.(w, h) ?? null) : null
+export const shapeHandles = (s: string): Handle[] => geoOf(s).handles ?? HANDLES
+export const laneBandOf = (s: string) => geoOf(s).laneBand ?? BAND
+export const guardLanes = (s: string) => !!geoOf(s).guards
+// Ujung pesan sequence: lifeline, lifeline aktor, dan activation bar.
+export const isLifeline = (s: string | undefined) =>
+  s === 'uml_lifeline' || s === 'uml_lifeline_actor' || s === 'uml_activation'
 export const shapeInset = (s: string): Inset => geoOf(s).inset ?? DEFAULT_INSET
 export const shapeValign = (s: string) => geoOf(s).valign ?? 'center'
 export const hasGeometry = (s: string) => s in GEO
@@ -707,7 +820,7 @@ export function textBox(
   h: number,
 ): Box & { valign: 'top' | 'center'; vertical?: boolean } {
   // Pool: nama di pita kiri, ditulis tegak; swimlane: judul di pita atas.
-  const lo = laneOrient(s)
+  const lo = guardLanes(s) ? null : laneOrient(s)
   if (lo === 'rows') return { x: 0, y: 0, w: BAND, h, valign: 'center', vertical: true }
   if (lo === 'cols') return { x: 0, y: 0, w, h: BAND, valign: 'center' }
   const i = shapeInset(s)
@@ -768,12 +881,13 @@ export function portPoint(
   b: Box,
   port: Exclude<Port, 'auto'>,
   rotation = 0,
-  inset: Box | null = null,
+  inset: PortBox | null = null,
 ): { p: Pt; dir: Pt } {
   const [u, v] = PORT_UNIT[port]
   const c = center(b)
   const q = inset ? { x: b.x + inset.x, y: b.y + inset.y, w: inset.w, h: inset.h } : b
-  const raw = { x: q.x + u * q.w, y: q.y + v * q.h }
+  const at = inset?.side?.[port as 'top' | 'right' | 'bottom' | 'left']
+  const raw = at ? { x: b.x + at.x, y: b.y + at.y } : { x: q.x + u * q.w, y: q.y + v * q.h }
   const p = rotatePoint(raw, c, rotation)
   const len = Math.hypot(raw.x - c.x, raw.y - c.y) || 1
   const d0 = { x: (raw.x - c.x) / len, y: (raw.y - c.y) / len }
@@ -834,7 +948,8 @@ export function rotatedBounds(b: Box, rotation = 0): Box {
 // Jalur garis
 
 // bebas (revisi 53): ruas lurus antar titik belok dengan sudut apa pun.
-export type Route = 'straight' | 'orthogonal' | 'curved' | 'bebas'
+// message (revisi 54d): pesan sequence, mendatar di antara garis tengah dua lifeline (routeConnector).
+export type Route = 'straight' | 'orthogonal' | 'curved' | 'bebas' | 'message'
 export type End = { p: Pt; dir: Pt | null; box: Box | null }
 export const STUB = 20
 
@@ -1251,6 +1366,7 @@ export function routeConnector(
   // Jenis bentuk per id kartu, untuk kotak port bentuk yang gambarnya lebih kecil dari kotaknya.
   shapes?: Map<string, string>,
 ): Routed | null {
+  if (c.geometry.route === 'message' && c.from && c.to) return routeMessage(c, geom, points, shapes)
   const ca = centerOf(c.from, c.geometry.from, geom)
   const cb = centerOf(c.to, c.geometry.to, geom)
   if (!ca || !cb) return null
@@ -1284,6 +1400,69 @@ export function routeConnector(
     mid: pointAlong(poly, 0.5),
     near: { start: at(28), end: back(28) },
     stops: [a.p, ...pts, b.p],
+  }
+}
+
+// Pesan sequence (revisi 54d): selalu mendatar. Tingginya disimpan di points[0][1] sebagai jarak dari atas kartu asal,
+// jadi pesan ikut bila lifeline-nya digeser; titik draf (sedang diseret) berupa y dunia. Ujungnya di garis tengah
+// lifeline, atau di tepi activation bar yang menghadap ujung lain. Pesan ke diri sendiri: putaran ke kanan 40 px dan
+// turun 24 px. Pegangan tengah (stops[1]) menggeser pesan ke atas dan bawah.
+export const MESSAGE_DEFAULT_Y = 90
+function routeMessage(
+  c: ConnLike,
+  geom: Map<string, Box>,
+  points?: [number, number][],
+  shapes?: Map<string, string>,
+): Routed | null {
+  const A = geom.get(c.from!)
+  const B = geom.get(c.to!)
+  if (!A || !B) return null
+  const y = points?.[0] ? points[0][1] : A.y + (c.geometry.points?.[0]?.[1] ?? MESSAGE_DEFAULT_Y)
+  const attach = (box: Box, id: string, towardX: number) => {
+    const cx = box.x + box.w / 2
+    if (shapes?.get(id) !== 'uml_activation') return cx
+    const half = Math.min(14, box.w) / 2
+    return towardX >= cx ? cx + half : cx - half
+  }
+  let line: Pt[]
+  if (c.from === c.to) {
+    const x0 = attach(A, c.from!, Infinity)
+    line = [
+      { x: x0, y },
+      { x: x0 + 40, y },
+      { x: x0 + 40, y: y + 24 },
+      { x: x0, y: y + 24 },
+    ]
+  } else {
+    const bx = B.x + B.w / 2
+    const ax = attach(A, c.from!, bx)
+    line = [
+      { x: ax, y },
+      { x: attach(B, c.to!, ax), y },
+    ]
+  }
+  const start = line[0]!
+  const end = line.at(-1)!
+  const d = 'M' + line.map((p) => `${f(p.x)} ${f(p.y)}`).join('L')
+  const heads = [endMarker(c.style.end, end, line.at(-2)!), endMarker(c.style.start, start, line[1]!)].filter(
+    (h): h is NonNullable<typeof h> => !!h,
+  )
+  const total = pathLength(line) || 1
+  const mid = pointAlong(line, 0.5)
+  return {
+    id: c.id,
+    d,
+    pts: line,
+    start,
+    end,
+    heads,
+    mid: c.from === c.to ? { x: start.x + 40 + 6 + 30, y: y + 12 } : { x: mid.x, y: mid.y - 10 },
+    near: {
+      start: pointAlong(line, Math.min(0.45, 28 / total)),
+      end: pointAlong(line, Math.max(0.55, 1 - 28 / total)),
+    },
+    // Pegangan di tinggi pesan itu sendiri, jadi y seretan langsung menjadi y pesan.
+    stops: [start, c.from === c.to ? { x: start.x + 40, y } : mid, end],
   }
 }
 
@@ -1362,6 +1541,8 @@ export type LinePreset = {
   start: EndKind
   end: EndKind
   text?: string
+  // Pesan destroy: lifeline tujuan diakhiri dengan X (varian destroyed) dalam langkah undo yang sama.
+  destroy?: boolean
 }
 export const LINE_PRESETS: LinePreset[] = [
   {
@@ -1381,6 +1562,35 @@ export const LINE_PRESETS: LinePreset[] = [
     start: 'none',
     end: 'open_arrow',
     text: '«extend»',
+  },
+  { id: 'msg_sync', label: 'Pesan sinkron', group: 'Sequence', line: 'solid', start: 'none', end: 'arrow' },
+  {
+    id: 'msg_async',
+    label: 'Pesan asinkron',
+    group: 'Sequence',
+    line: 'solid',
+    start: 'none',
+    end: 'open_arrow',
+  },
+  { id: 'msg_reply', label: 'Balasan', group: 'Sequence', line: 'dashed', start: 'none', end: 'open_arrow' },
+  {
+    id: 'msg_create',
+    label: 'Create',
+    group: 'Sequence',
+    line: 'dashed',
+    start: 'none',
+    end: 'open_arrow',
+    text: '\u00abcreate\u00bb',
+  },
+  {
+    id: 'msg_destroy',
+    label: 'Destroy',
+    group: 'Sequence',
+    line: 'solid',
+    start: 'none',
+    end: 'arrow',
+    text: '\u00abdestroy\u00bb',
+    destroy: true,
   },
   { id: 'sequence_flow', label: 'Sequence flow', group: 'BPMN', line: 'solid', start: 'none', end: 'arrow' },
   {
