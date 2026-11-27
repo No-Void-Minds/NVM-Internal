@@ -1850,6 +1850,8 @@ Keputusan teknis:
 - Kontras: tombol baru memakai gaya tombol panel yang sudah ada (tinta di surface); tombol Otomatis aktif memakai accent dengan teks on-accent. Tanpa warna baru dan tanpa animasi baru.
 - Gerbang akhir: garis yang ujungnya lebih depan dari kartu yang dilintasinya digambar di atas kartu itu dan menangkap klik di sepanjang garisnya (16 px). Ini akibat yang disengaja dari urutan tumpuk, bukan bug; uji seret di wbperforma sekarang menekan titik kartu yang tidak tertutup garis. Frame p95 bimodal (13,4 dan 26,5 ms) sebelumnya muncul juga di HEAD dan hilang setelah preview dan Vite uji sisa dimatikan; mode headed dan flag `--disable-renderer-backgrounding` memberi 13,4 ms yang sama, jadi bukan throttling headless. uji13 menerima `E2E_HEADED=1` dan `E2E_ARGS` untuk pemeriksaan seperti ini.
 
+**Hasil:** revisi 53 selesai, dirilis ke produksi 2026-11-27 dalam satu rilis revisi 53 sampai 56 (termasuk 54a sampai 54f dan perbaikan pegangan pita nama), commit `1abd6c9`; migrasi produksi di versi 29 (`000028_whiteboard_connector_z` dan `000029_whiteboard_self_message`), grants tidak berubah.
+
 ## Sprint 12m: Pustaka bentuk lengkap (revisi 54)
 
 **Tujuan:** pustaka bentuk diagram yang lengkap (BPMN, wadah, activity dan state, sequence, ERD dan class, serta bentuk lain), didefinisikan sebagai data dan dirender satu renderer. Dikerjakan per kelompok, satu commit per kelompok.
@@ -1890,6 +1892,8 @@ Keputusan teknis:
 - Perbaikan yang ketemu di 54d: kartu tujuan saat melepas garis baru dipilih dari yang paling depan di urutan tumpuk. Sebelumnya dipilih yang terakhir di urutan baca, jadi wadah besar di belakang (fragmen, pool) bisa menang dari kartu yang terlihat di atasnya.
 - Riwayat, perbaikan yang ketemu di 54b: (1) isi bentuk yang diubah di luar mode edit (pembatas lane) dan dari panel Gaya bentuk sebelumnya tidak tercatat di undo; sekarang satu langkah per perubahan. (2) Dua perubahan isi berturut-turut pada satu kartu hanya bisa dibatalkan sekali, karena versi kartu yang naik akibat undo sendiri membuat langkah yang lebih lama dianggap diubah orang lain; `chainContentVersion` meneruskan versi ke langkah sebelumnya bila tidak ada suntingan orang lain di antaranya.
 
+**Hasil:** revisi 54 selesai, dirilis ke produksi 2026-11-27 dalam satu rilis revisi 53 sampai 56 (termasuk 54a sampai 54f dan perbaikan pegangan pita nama), commit `1abd6c9`; migrasi produksi di versi 29 (`000028_whiteboard_connector_z` dan `000029_whiteboard_self_message`), grants tidak berubah.
+
 ## Sprint 12n: Undo garis dan jalur siku dengan titik belok (revisi 55)
 
 **Tujuan:** setiap perubahan garis bisa dibatalkan dan diulang sebagai satu langkah, dan jalur siku dengan titik belok tidak lagi memotong dirinya sendiri. Dikerjakan sebelum 54b.
@@ -1921,6 +1925,8 @@ Audit operasi garis (sebelum revisi 55):
 - Jalur siku baru: setiap ruas punya beberapa bentuk L (langsung, atau lewat potongan port untuk ruas pertama dan terakhir), dan pencarian beam (8 jalur) memilih yang tidak berbalik arah, keluar searah port, tiba di port tujuan dari luar, tidak memotong jalurnya sendiri, tidak menembus kotak ujung, lalu yang terpendek. Hasil pada data acak yang sama dengan titik belok di luar kotak ujung: 0 silang saat aktor diam, 33 sesudah aktor digeser (semuanya susunan yang tidak bisa dibuat siku tanpa silang, mis. dua titik berselisih beberapa px di kedua sisi ruas tegak); tekukan bolak-balik 0. Titik belok yang jatuh di tengah ruas lurus tidak lagi menjadi titik sudut; pegangannya tetap di posisi titik itu.
 - Garis yang kedua ujungnya ikut terseret: garis beranchor tidak ditulis ulang (pemetaan elastis sudah menggesernya dan undo geser kartu mengembalikannya). Garis lama tanpa anchor diberi anchor dari posisi ujung sebelum geser, tanpa langkah undo karena tampilannya tidak berubah.
 
+**Hasil:** revisi 55 selesai, dirilis ke produksi 2026-11-27 dalam satu rilis revisi 53 sampai 56 (termasuk 54a sampai 54f dan perbaikan pegangan pita nama), commit `1abd6c9`; migrasi produksi di versi 29 (`000028_whiteboard_connector_z` dan `000029_whiteboard_self_message`), grants tidak berubah.
+
 ## Sprint 12o: Lane langsung di kanvas (revisi 56)
 
 **Tujuan:** pengguna bisa mengganti nama, menambah, menghapus, dan mengurutkan lane tanpa mencari Gaya bentuk atau menu Aksi.
@@ -1940,6 +1946,32 @@ Audit operasi garis (sebelum revisi 55):
 - Riwayat, perbaikan yang ketemu: langkah isi di dalam langkah gabungan (tambah lane) tidak ikut diteruskan versinya, jadi tambah lane lalu ganti nama hanya bisa dibatalkan setengah (tinggi pool kembali, lane tetap). `chainContentVersion` sekarang mencari ke dalam langkah gabungan.
 - Tombol tambah lane menahan Enter dan Spasi supaya tidak ditangkap pintasan kanvas (Enter membuka editor kartu terfokus).
 - Perbaikan sesudah revisi 56: pegangan ubah ukuran tengah sisi berpita nama (kiri pool, atas swimlane) menutupi tengah pita nama, tempat orang paling sering dobel klik. Pegangan itu dipindah ke tiga perempat panjang sisi, tetap di tepi dan tetap 44 px area sentuh; tidak digeser ke luar tepi karena area sentuhnya akan bertumpuk dengan pegangan port (48 px di luar tepi). Fungsinya tidak berubah (tetap mengubah sisi itu). Fragmen tidak berpita, jadi tidak diubah.
+
+**Hasil:** revisi 56 selesai, dirilis ke produksi 2026-11-27 dalam satu rilis revisi 53 sampai 56 (termasuk 54a sampai 54f dan perbaikan pegangan pita nama), commit `1abd6c9`; migrasi produksi di versi 29 (`000028_whiteboard_connector_z` dan `000029_whiteboard_self_message`), grants tidak berubah.
+
+## Sprint 12p: Bentuk yang berfungsi (revisi 57)
+
+**Tujuan:** bentuk revisi 54 yang sering dipakai tim punya fungsi semestinya, bukan hanya gambar. Audit per bentuk di `docs/audit-bentuk.md`; dikerjakan per kelompok, satu commit per kelompok.
+
+- [x] S12p-01 Audit fungsi semua bentuk (`docs/audit-bentuk.md`): fungsi yang diharapkan, kondisi sekarang, kekurangan, usulan, prioritas; usulan 57d menunggu persetujuan.
+- [x] S12p-02 (57a) Tabel ERD (`erd_table`, kelompok ERD): nama tabel dan kolom (nama, tipe data, PK, FK, UK, nullable) di `content.name` dan `content.rows`, divalidasi Go (`cleanRows`: paling banyak 60 kolom, nama tabel dan kolom 100 karakter, tipe 60, id kolom huruf kecil dan angka). Editor di tempat lewat dobel klik (`WbErdTable.vue`), PK dengan ikon kunci dan teks, tinggi tabel mengikuti jumlah kolom. Ujung garis ke kolom (`geometry.from.row` dan `to.row`, port kiri atau kanan), dari port kolom di editor, dengan melepas garis di kolom, dan dari panel garis. Ekspor menggambar tabel dan garis ke kolom.
+- [x] S12p-03 (57a) Test: `TestTabelERD`, `TestUjungGarisKeBaris`, `TestKatalogBentuk`; unit test `tests/wbErd.test.ts` dan rantai undo tiga langkah di `tests/wbLineUndo.test.ts`; E2E `scripts/e2e/uji-r57a.mjs` (1280 px, editor juga di 360 px); pengaman uji-r54b, uji-r55, uji-r56, wb1 sampai wb5, uji-kunci.
+- [ ] S12p-04 (57b) Gambar di bingkai ponsel, jendela browser, dan placeholder gambar.
+- [ ] S12p-05 (57c) Mind map, garis waktu, corong, chevron.
+- [ ] S12p-06 (57d) Sisa audit prioritas sedang, setelah usulan disetujui.
+
+**Keputusan:**
+- Tabel ERD bentuk baru, notasi Chen tetap. Nama tabel di `name` (seperti nama kelas), kolom di `rows`; `text` dan `doc` dikosongkan server. Kolom hanya diterima di bentuk tabel, dan jenis tabel tidak bisa diganti lewat Gaya bentuk (isinya tidak punya padanan di bentuk lain), begitu juga bentuk lain tidak bisa diganti menjadi tabel. Ukuran huruf dan perataan tidak ditawarkan untuk tabel.
+- Tinggi tabel selalu kepala 36 px ditambah 28 px per kolom (minimal satu baris untuk teks "Belum ada kolom"); hanya pegangan kiri dan kanan yang tersedia, dan isian Tinggi di Gaya bentuk dikunci. Port kolom dihitung dari indeks kolom dengan angka yang sama di layar, ekspor, dan jalur garis, jadi garis selalu tepat di tengah kolomnya.
+- Editor di tempat menutupi tabel dengan ukuran layar tetap (skala 1/zoom), karena tombol PK, FK, UK, NULL, pindah, dan hapus per kolom harus 44 px dan baris tabel hanya 28 px. Enter di kolom terakhir menambah kolom, Enter di kolom lain pindah ke kolom berikutnya, Tab dan Shift+Tab pindah isian dan tombol, Alt dan panah atas atau bawah memindah kolom, pegangan kolom bisa diseret atau digeser dengan panah, Escape menyimpan lalu keluar. Mengaktifkan PK mematikan nullable dan sebaliknya. Lebar editor paling sedikit 600 px tetapi tidak melebihi layar (isi baris turun ke baris kedua di layar sempit), dan saat dibuka editor digeser supaya seluruhnya di dalam layar; editor yang lebih tinggi dari layar dijangkau dengan menggeser kanvas. Di layar sempit pegangan port kolom bisa jatuh di luar layar; jalurnya tetap ada lewat melepas garis di kolom dan panel garis.
+- Setiap aksi di editor (satu isian selesai diketik, tambah, hapus, pindah, kunci, nullable) satu langkah undo, juga selama mode edit; tambah dan hapus kolom mengubah tinggi dalam langkah yang sama. Kunci lunak tetap: orang lain membuka tabel yang sedang diedit hanya baca.
+- Tabel yang posisinya dikunci tetap bisa diubah isi kolomnya, tetapi menambah atau menghapus kolom ditolak dengan pesan kunci, karena keduanya mengubah tinggi kartu dan server menolak perubahan ukuran kartu terkunci.
+- Garis ke kolom: `row` hanya bersama port `left` atau `right` dan ujung yang menempel ke kartu (Go menolak selain itu). Id kolom stabil, jadi garis tetap di kolomnya saat kolom diurutkan ulang, tabel digeser, atau diubah lebarnya. Kolom yang dihapus tidak menghapus garis dan tidak menulis ulang garis: ujungnya digambar di port otomatis kotak tabel, dan kembali ke kolomnya bila penghapusan dibatalkan. Panel garis menampilkan "Kolom yang sudah dihapus (menempel di kotak tabel)" untuk ujung seperti itu.
+- Menarik garis ke kolom: lepas garis di atas kolom tabel lain (sisi yang lebih dekat), tarik dari pegangan port kolom di editor (editor ditutup lalu garis ditarik), atau pilih kolom di "Menempel di awal" dan "Menempel di akhir" panel garis (jalur keyboard). Pegangan port kolom hanya ada di editor karena di tabel biasa baris 28 px terlalu rapat untuk pegangan 44 px.
+- Garis baru antar dua tabel langsung memakai crow's foot: sisi PK "tepat satu", sisi lain "banyak"; tanpa PK di kedua ujung dianggap kolom asal FK ke PK tujuan. Preset ERD tetap bisa mengganti.
+- Perbaikan yang ketemu, riwayat undo (kode bersama, juga lane dan bentuk lain): (1) `chainContentVersion` membandingkan dengan versi langkah dikurangi satu, yang hanya benar untuk dua perubahan isi beruntun pada satu kartu; langkah ketiga ke belakang dilewati sebagai "diubah orang lain". Sekarang tiap langkah isi menyimpan `base` (versi isi sebelum langkah itu diterapkan). (2) Versi langkah isi ditebak dari versi kartu saat dicatat; aksi yang lebih cepat dari jawaban server, dan siaran realtime perubahan sendiri yang tiba sebelum jawaban HTTP, membuat tebakan meleset. Sekarang versinya diambil dari jawaban simpan.
+- Perbaikan yang ketemu, simpan: jawaban perubahan ukuran yang dikirim bersamaan dengan simpan isi (tambah kolom, tambah lane) membawa isi lama dan sempat menimpa isi lokal, jadi baris atau lane baru hilang sesaat dan fokus editor lepas. `upsert` sekarang mempertahankan isi lokal selama simpan isi kartu itu masih berjalan dan jawaban yang datang belum membawa `content_version` yang lebih baru.
+- Kontras: teks tipe data dan "null" memakai ink-muted (minimal 5,01:1 di semua isian, terang dan gelap), tombol kunci aktif accent dengan teks on-accent (13,31:1), border tombol line (3,86:1 terang, 3,91:1 gelap). Ikon kunci dan pegangan digambar sendiri. Tanpa migrasi: kolom dan ujung garis ke kolom disimpan di jsonb yang sudah ada.
 
 ## Sprint 12: Persiapan deploy dan migrasi data
 
@@ -2151,10 +2183,11 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 54 | 2026-11-26 | Whiteboard: pustaka bentuk lengkap per kelompok (BPMN, wadah, activity dan state, sequence, ERD dan class, lainnya), bentuk sebagai data, palet dengan cari, lipat kelompok, Terakhir dipakai, dan pratinjau | Sprint 12m |
 | 55 | 2026-11-26 | Whiteboard (bug): setiap perubahan garis satu langkah undo dan redo, jalur siku dengan titik belok tidak memotong dirinya, garis tidak bergeser dua kali saat kedua ujung diseret | Sprint 12n |
 | 56 | 2026-11-27 | Whiteboard: lane langsung di kanvas (ganti nama di tempat, tombol tambah lane, klik kanan untuk urutan dan hapus) untuk pool, swimlane, dan operand fragmen | Sprint 12o |
+| 57 | 2026-11-27 | Whiteboard: bentuk yang berfungsi. Audit semua bentuk, tabel ERD dengan kolom dan garis ke kolom (57a), gambar di bingkai (57b), mind map, garis waktu, corong, dan chevron (57c), sisa audit (57d) | Sprint 12p |
 | 33b | 2026-11-20 | Poles tampilan kartu Aktivitas: tombol rantai pindah ke celah antar isian dan jadi ikon kecil tanpa bingkai, tombol mati tidak dirender, jam tersambung menyatu dengan jam kepalanya, status simpan punya baris tetap, Tambah berkas di sel tabel tanpa bingkai | Sprint 12c |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat kelima puluh enam revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat kelima puluh tujuh revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

@@ -3,7 +3,14 @@
 //   cd frontend && npm run test:unit
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chainContentVersion, lineBlocked, linePatch, lineSnap, push, type Step } from '../src/utils/wbHistory.ts'
+import {
+  chainContentVersion,
+  lineBlocked,
+  linePatch,
+  lineSnap,
+  push,
+  type Step,
+} from '../src/utils/wbHistory.ts'
 import { routeConnector } from '../src/utils/wbShapes.ts'
 
 const line = (over: Record<string, unknown> = {}) => ({
@@ -54,9 +61,18 @@ test('lineBlocked: kartu ujung terkunci atau sedang diedit orang lain', () => {
     ['b', { locked: true }],
     ['c', {}],
   ])
-  assert.equal(lineBlocked(['a', 'b'], cards, () => false), 'locked')
-  assert.equal(lineBlocked(['a', 'c'], cards, (id) => id === 'c'), 'busy')
-  assert.equal(lineBlocked(['a', null], cards, () => false), null)
+  assert.equal(
+    lineBlocked(['a', 'b'], cards, () => false),
+    'locked',
+  )
+  assert.equal(
+    lineBlocked(['a', 'c'], cards, (id) => id === 'c'),
+    'busy',
+  )
+  assert.equal(
+    lineBlocked(['a', null], cards, () => false),
+    null,
+  )
 })
 
 test('riwayat garis memakai tumpukan yang sama dengan kartu', () => {
@@ -79,7 +95,9 @@ function selfCross(p: { x: number; y: number }[]) {
 const spike = (p: { x: number; y: number }[]) =>
   p.some(
     (q, i) =>
-      i > 1 && (p[i - 1]!.x - p[i - 2]!.x) * (q.x - p[i - 1]!.x) + (p[i - 1]!.y - p[i - 2]!.y) * (q.y - p[i - 1]!.y) < -0.01,
+      i > 1 &&
+      (p[i - 1]!.x - p[i - 2]!.x) * (q.x - p[i - 1]!.x) + (p[i - 1]!.y - p[i - 2]!.y) * (q.y - p[i - 1]!.y) <
+        -0.01,
   )
 const route = (points: [number, number][], aktor = { x: 0, y: 0, w: 80, h: 160 }) =>
   routeConnector(
@@ -87,7 +105,16 @@ const route = (points: [number, number][], aktor = { x: 0, y: 0, w: 80, h: 160 }
       id: 'L',
       from: 'aktor',
       to: 'uc',
-      geometry: { from: { port: 'auto' }, to: { port: 'auto' }, route: 'orthogonal', points, anchor: [[40, 80], [490, 85]] },
+      geometry: {
+        from: { port: 'auto' },
+        to: { port: 'auto' },
+        route: 'orthogonal',
+        points,
+        anchor: [
+          [40, 80],
+          [490, 85],
+        ],
+      },
       style: { start: 'none', end: 'arrow' },
     },
     new Map([
@@ -118,12 +145,20 @@ test('jalur siku dengan titik belok dekat aktor tidak memotong dirinya dan tidak
     for (let i = 0; i < k; i++)
       pts.push([Math.round(-60 + (i + 1) * (460 / (k + 1)) + rnd() * 60 - 30), Math.round(-40 + rnd() * 260)])
     const r = route(pts)
-    if (r.stops.slice(1, -1).some((q) => inside(q, { x: 0, y: 0, w: 80, h: 160 }) || inside(q, { x: 400, y: 40, w: 180, h: 90 })))
+    if (
+      r.stops
+        .slice(1, -1)
+        .some((q) => inside(q, { x: 0, y: 0, w: 80, h: 160 }) || inside(q, { x: 400, y: 40, w: 180, h: 90 }))
+    )
       continue
     checked++
     assert.ok(!selfCross(r.pts), `silang ${JSON.stringify(pts)}`)
     assert.ok(!spike(r.pts), `bolak-balik ${JSON.stringify(pts)}`)
-    assert.ok(r.pts.every((q, i) => !i || Math.abs(q.x - r.pts[i - 1]!.x) < 0.01 || Math.abs(q.y - r.pts[i - 1]!.y) < 0.01))
+    assert.ok(
+      r.pts.every(
+        (q, i) => !i || Math.abs(q.x - r.pts[i - 1]!.x) < 0.01 || Math.abs(q.y - r.pts[i - 1]!.y) < 0.01,
+      ),
+    )
   }
   assert.ok(checked > 500)
 })
@@ -134,20 +169,48 @@ test('dua perubahan isi berturut-turut pada satu kartu bisa dibatalkan dua kali 
   const s2: Step = { kind: 'content', id: 'k', before: 'b', after: 'c', version: 6 }
   const other: Step = { kind: 'content', id: 'lain', before: 'x', after: 'y', version: 6 }
   const undo: Step[] = [s1, other]
-  chainContentVersion(undo, 'k', 6, 7)
+  chainContentVersion(undo, 'k', 5, 7)
   assert.equal((s1 as { version: number }).version, 7)
   assert.equal((other as { version: number }).version, 6)
   // Ada suntingan orang lain di antaranya (versi tidak bersambung): langkah lama tetap dilewati.
   const s0: Step = { kind: 'content', id: 'k', before: 'z', after: 'a', version: 3 }
-  chainContentVersion([s0], 'k', 6, 7)
+  chainContentVersion([s0], 'k', 5, 7)
   assert.equal((s0 as { version: number }).version, 3)
   void s2
+})
+
+test('tiga perubahan isi berturut-turut, undo semua lalu redo semua (revisi 57a)', () => {
+  // Meniru halaman: langkah diterapkan bila versinya sama dengan versi kartu, lalu base dan versinya diperbarui.
+  let cv = 3
+  const undo: Step[] = [4, 5, 6].map((v) => ({
+    kind: 'content',
+    id: 'k',
+    before: v - 1,
+    after: v,
+    version: v,
+  }))
+  const redo: Step[] = []
+  const apply = (from: Step[], to: Step[]) => {
+    const step = from.pop() as Extract<Step, { kind: 'content' }>
+    assert.equal(step.version, cv, 'langkah dianggap diubah orang lain')
+    const base = step.base ?? step.version - 1
+    step.base = cv
+    cv += 1
+    step.version = cv
+    chainContentVersion(from, 'k', base, cv)
+    to.push(step)
+  }
+  cv = 6
+  for (let i = 0; i < 3; i++) apply(undo, redo)
+  for (let i = 0; i < 3; i++) apply(redo, undo)
+  for (let i = 0; i < 3; i++) apply(undo, redo)
+  assert.equal(cv, 15)
 })
 
 test('rantai versi isi juga masuk ke langkah gabungan (revisi 56)', () => {
   // Tambah lane: batch ukuran dan isi (versi 5); ganti nama lane baru: isi versi 6; undo ganti nama: kartu versi 7.
   const inner: Step = { kind: 'content', id: 'pool', before: 'a', after: 'b', version: 5 }
   const batch: Step = { kind: 'batch', steps: [{ kind: 'layout', cards: [] }, inner] }
-  chainContentVersion([batch], 'pool', 6, 7)
+  chainContentVersion([batch], 'pool', 5, 7)
   assert.equal((inner as { version: number }).version, 7)
 })

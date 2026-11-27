@@ -587,6 +587,7 @@ Masuk ke "Menunggu jawaban Manajer" di `docs/sprint.md` saat W1 dimulai. Pilihan
 - 2026-11-25, gerbang akhir: `uji-wss.mjs` juga menguji WebSocket papan task (revisi 47); audit luapan 768 dan 1024 px menjadi skrip tetap `scripts/e2e/uji-lebar.mjs`.
 - 2026-11-26, revisi 49: keputusan W4 "ekspor tanpa format huruf" diganti. Ekspor PNG dan PDF menggambar tebal, miring, garis bawah, coret, kode, superskrip, subskrip, warna, stabilo, ukuran, perataan, dan garis pemisah dari data kartu (`utils/wbRich.ts`, `wrapRuns`), dengan warna token mode terang seperti sebelumnya.
 - 2026-11-26, revisi 49: format teks memakai ekstensi TipTap sendiri yang merender kelas, bukan paket TipTap Color, Highlight, TextStyle, TextAlign, Subscript, dan Superscript, karena paket itu merender atribut `style` yang diblokir CSP. Toolbar diposisikan sendiri, tanpa BubbleMenu dan floating-ui. Tidak ada dependensi baru dan CSP tidak berubah.
+- 2026-11-27, revisi 57a: tabel ERD dengan kolom (tipe, PK, FK, UK, nullable) dan garis yang menempel ke kolom; audit fungsi bentuk di `docs/audit-bentuk.md`.
 - 2026-11-27, revisi 56: lane langsung di kanvas (ganti nama di tempat, tombol tambah, urutan dan hapus lewat klik kanan) untuk pool, swimlane, dan operand fragmen.
 - 2026-11-27, revisi 54f: flowchart lanjutan, arsitektur, wireframe, mind map (garis otomatis melengkung), callout, chevron, corong, dan garis waktu; revisi 54 selesai.
 - 2026-11-27, revisi 54e: bentuk ERD, ujung crow's foot, dan varian kelas UML (abstrak, interface, enum).

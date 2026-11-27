@@ -665,9 +665,12 @@ type ConnectorStyle struct {
 // ConnectorEnd: Port tempat garis menempel di kartu atau bentuk ("" atau auto berarti sisi terdekat). X dan Y hanya
 // untuk ujung bebas (tidak menempel ke kartu), dalam koordinat dunia.
 type ConnectorEnd struct {
-	Port string   `json:"port"`
-	X    *float64 `json:"x,omitempty"`
-	Y    *float64 `json:"y,omitempty"`
+	Port string `json:"port"`
+	// Row (revisi 57a): id baris tabel ERD tempat ujung menempel, dengan Port left atau right. Baris yang sudah dihapus
+	// tidak membuat garis tidak sah; klien lalu menempelkan ujungnya ke kotak tabel.
+	Row string   `json:"row,omitempty"`
+	X   *float64 `json:"x,omitempty"`
+	Y   *float64 `json:"y,omitempty"`
 }
 
 // ConnectorGeometry: jalur straight (lurus), orthogonal (siku), atau curved (melengkung), dan titik belok yang
@@ -797,6 +800,9 @@ func cleanGeometry(g ConnectorGeometry, attachedFrom, attachedTo bool) (Connecto
 	}{{&g.From, attachedFrom}, {&g.To, attachedTo}} {
 		if !connectorPorts[e.end.Port] {
 			return g, apperr.Invalid("Titik sambung garis tidak dikenal.")
+		}
+		if e.end.Row != "" && (!e.attached || !ValidRowID(e.end.Row) || (e.end.Port != "left" && e.end.Port != "right")) {
+			return g, apperr.Invalid("Ujung garis ke kolom tabel harus di sisi kiri atau kanan kolom itu.")
 		}
 		if e.attached {
 			e.end.X, e.end.Y = nil, nil

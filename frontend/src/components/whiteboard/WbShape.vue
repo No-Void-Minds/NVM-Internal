@@ -3,6 +3,7 @@ import { computed, nextTick, ref, useId, watch } from 'vue'
 import type { PMNode } from '../../utils/whiteboard'
 import WbRichField, { activateField } from './WbRichField.vue'
 import WbRichText from './WbRichText'
+import WbErdTable from './WbErdTable.vue'
 import { inkColor } from './wbColors'
 import {
   openShape,
@@ -43,6 +44,7 @@ const emit = defineEmits<{
   close: []
   addLane: []
   notice: [msg: string]
+  rowPort: [row: string, side: 'left' | 'right', e: PointerEvent]
 }>()
 
 const fillVar: Record<string, string> = {
@@ -78,6 +80,7 @@ const pathTransform = computed(() => {
   return `translate(${inset.value} ${inset.value})${flip}`
 })
 const isClass = computed(() => props.content.shape === 'uml_class')
+const isTable = computed(() => props.content.shape === 'erd_table')
 // Varian kelas (revisi 54e): stereotip di atas nama, nama miring untuk kelas abstrak, enum tanpa bagian metode.
 const stereo = computed(() => classStereotype(props.content.variant))
 const abstract = computed(() => props.content.variant === 'abstract')
@@ -293,7 +296,7 @@ const draft = ref<ShapeContent>({ ...props.content })
 watch(
   () => props.editing,
   (on) => {
-    if (!on) return
+    if (!on || isTable.value) return
     draft.value = { ...props.content }
     activateField(key(isClass.value ? 'name' : 'text'))
   },
@@ -420,6 +423,20 @@ const field = 'block w-full'
         </div>
       </template>
     </div>
+
+    <!-- Tabel ERD (revisi 57a): kepala nama tabel dan baris kolom, editor di tempat saat mode edit. -->
+    <WbErdTable
+      v-else-if="isTable"
+      :content="content"
+      :w="w"
+      :editing="editing"
+      :zoom="zoom"
+      @save="emit('save', $event)"
+      @live="emit('live', $event)"
+      @close="emit('close')"
+      @notice="emit('notice', $event)"
+      @row-port="(r, s, e) => emit('rowPort', r, s, e)"
+    />
 
     <div
       v-else

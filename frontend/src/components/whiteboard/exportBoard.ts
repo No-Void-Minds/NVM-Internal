@@ -22,6 +22,9 @@ import {
   laneOrient,
   textBox,
   type ShapeContent,
+  ERD_HEAD,
+  ERD_ROW,
+  keyLabel,
 } from '../../utils/wbShapes'
 import { BAND, laneBoxes } from '../../utils/wbContainers'
 import { stackOrder } from '../../utils/wbStack'
@@ -242,6 +245,14 @@ export async function renderBoard(cards: Card[], connectors: Connector[]): Promi
       l.card.kind === 'shape' ? [[l.card.id, (l.card.content as ShapeContent).shape]] : [],
     ) as [string, string][],
   )
+  // Id baris tabel ERD (revisi 57a): garis yang menempel ke baris tertentu, sama dengan layar.
+  const tableRows = new Map(
+    laid.flatMap((l) =>
+      l.card.kind === 'shape' && (l.card.content as ShapeContent).shape === 'erd_table'
+        ? [[l.card.id, ((l.card.content as ShapeContent).rows ?? []).map((r) => r.id)]]
+        : [],
+    ) as [string, string[]][],
+  )
   const images = await Promise.all(
     laid.map((l) =>
       l.card.kind === 'image' && l.card.file?.thumb
@@ -279,7 +290,7 @@ export async function renderBoard(cards: Card[], connectors: Connector[]): Promi
   // Jalur, ujung, dan posisi label sama dengan garis di layar (routeConnector).
   function drawConnector(c: Connector) {
     if (!ctx) return
-    const r = routeConnector(c, geom, rot, undefined, shapeKinds)
+    const r = routeConnector(c, geom, rot, undefined, shapeKinds, tableRows)
     if (!r) return
     const color = ink(tok, c.style.color || 'tinta')
     ctx.strokeStyle = color
@@ -590,6 +601,54 @@ function drawShape(ctx: CanvasRenderingContext2D, tok: Tok, c: ShapeContent, r: 
         y += lineHeight(l)
       }
     }
+  } else if (c.shape === 'erd_table') {
+    // Tabel ERD (revisi 57a), sama dengan WbErdTable.vue: nama di kepala, lalu kunci (ikon kunci untuk PK), nama
+    // kolom, dan tipe per baris. Teks yang terlalu panjang dipotong di baris pertamanya.
+    const first = (text: string, size: number, maxW: number, bold?: boolean) =>
+      wrapLine(ctx, tok, { text, size, bold }, Math.max(10, maxW))[0]
+    const muted = tok('--color-ink-muted')
+    const head = first(c.name || 'tabel', 14, r.w - 16, true)
+    if (head) drawLine(ctx, tok, head, 8, (ERD_HEAD - lineHeight(head)) / 2, r.w - 16, ink0, 'center')
+    const rows = c.rows ?? []
+    if (!rows.length) {
+      const l = first('Belum ada kolom', 14, r.w - 16)
+      if (l) drawLine(ctx, tok, l, 8, ERD_HEAD + (ERD_ROW - lineHeight(l)) / 2, r.w - 16, muted)
+    }
+    rows.forEach((row, i) => {
+      const y = ERD_HEAD + ERD_ROW * i
+      const pk = row.keys.includes('pk')
+      if (pk) {
+        ctx.save()
+        ctx.translate(8, y + ERD_ROW / 2 - 7)
+        ctx.scale(14 / 16, 14 / 16)
+        ctx.strokeStyle = ink0
+        ctx.lineWidth = 1.75
+        ctx.lineCap = 'round'
+        ctx.beginPath()
+        ctx.arc(5, 8, 3, 0, Math.PI * 2)
+        ctx.moveTo(8, 8)
+        ctx.lineTo(14.5, 8)
+        ctx.moveTo(12, 8)
+        ctx.lineTo(12, 11)
+        ctx.moveTo(14.5, 8)
+        ctx.lineTo(14.5, 10)
+        ctx.stroke()
+        ctx.restore()
+      }
+      const keys = first(keyLabel(row.keys), 12, 44, true)
+      if (keys && row.keys.length)
+        drawLine(ctx, tok, keys, pk ? 26 : 8, y + (ERD_ROW - lineHeight(keys)) / 2, 44, ink0)
+      const typeText = row.type + (row.nullable ? ' null' : '')
+      ctx.font = runFont(tok, 12, { text: typeText })
+      const typeW = Math.min(r.w * 0.45, typeText ? ctx.measureText(typeText).width + 24 : 0)
+      const type = typeText ? first(typeText, 12, typeW) : null
+      if (type)
+        drawLine(ctx, tok, type, r.w - 8 - typeW, y + (ERD_ROW - lineHeight(type)) / 2, typeW, muted, 'right')
+      const nameX = 8 + 64 + 6
+      const name = first(row.name, 14, r.w - nameX - typeW - 14, pk)
+      if (name)
+        drawLine(ctx, tok, name, nameX, y + (ERD_ROW - lineHeight(name)) / 2, r.w - nameX - typeW - 14, ink0)
+    })
   } else if (c.text) {
     // Area teks dari definisi bentuk (revisi 54), sama dengan layar: judul di atas untuk batas sistem, label di bawah
     // untuk event dan gateway.

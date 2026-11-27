@@ -61,6 +61,7 @@ function setShape(shape: ShapeContent['shape']) {
   emit('content', next)
 }
 // Lane pool dan swimlane (revisi 54b): label dan ukuran (bobot, px saat ukuran bentuk sekarang) per lane.
+const isTable = computed(() => props.content?.shape === 'erd_table')
 const hasLanes = computed(() => !!props.content && !!laneOrient(props.content.shape))
 function setLane(i: number, patch: Partial<Lane>) {
   if (!props.content?.lanes) return
@@ -100,11 +101,21 @@ const lbl = 'text-sm font-semibold'
         :id="`${uid}-shape`"
         label="Jenis bentuk"
         class="col-span-2 w-full"
-        :options="SHAPES.map((s) => ({ value: s.id, label: `${s.group}: ${s.label}` }))"
+        :options="
+          SHAPES.filter((s) => isTable || s.id !== 'erd_table').map((s) => ({
+            value: s.id,
+            label: `${s.group}: ${s.label}`,
+          }))
+        "
         :model-value="content.shape"
-        :disabled="!canWrite"
+        :disabled="!canWrite || isTable"
         @update:model-value="setShape($event as ShapeContent['shape'])"
       />
+      <!-- Revisi 57a: isi tabel (nama dan kolom) tidak punya padanan di bentuk lain, jadi jenisnya tetap. -->
+      <p v-if="isTable" class="col-span-2 text-sm text-ink-muted">
+        Jenis tabel tidak bisa diganti. Tinggi tabel mengikuti jumlah kolom; kolom diedit dengan dobel klik
+        tabel.
+      </p>
       <template v-if="variants.length">
         <label :for="`${uid}-variant`" :class="lbl" class="col-span-2">Varian</label>
         <WbPicker
@@ -178,7 +189,7 @@ const lbl = 'text-sm font-semibold'
           @update:model-value="set('stroke_style', $event as 'solid' | 'dashed')"
         />
       </div>
-      <div>
+      <div v-if="!isTable">
         <label :for="`${uid}-fs`" :class="lbl">Ukuran huruf</label>
         <WbPicker
           :id="`${uid}-fs`"
@@ -190,7 +201,7 @@ const lbl = 'text-sm font-semibold'
           @update:model-value="set('font_size', Number($event))"
         />
       </div>
-      <div>
+      <div v-if="!isTable">
         <label :for="`${uid}-al`" :class="lbl">Perataan teks</label>
         <WbPicker
           :id="`${uid}-al`"
@@ -246,7 +257,7 @@ const lbl = 'text-sm font-semibold'
           max="4000"
           inputmode="numeric"
           :class="control"
-          :disabled="!canWrite"
+          :disabled="!canWrite || isTable"
           @change="setSize"
         />
       </div>

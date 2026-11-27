@@ -36,7 +36,53 @@ export type ShapeContent = {
   methods_doc?: PMNode | null
   // Lane pool dan swimlane (revisi 54b): label dan ukuran sebagai bobot.
   lanes?: Lane[]
+  // Kolom tabel ERD (revisi 57a); nama tabel di name.
+  rows?: ErdRow[]
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Tabel ERD (revisi 57a): kepala berisi nama tabel, lalu satu baris per kolom. Tinggi tabel mengikuti jumlah baris
+// (erdHeight), jadi port per baris bisa dihitung dari indeks baris tanpa mengukur DOM; layar, ekspor, dan jalur
+// garis memakai angka yang sama.
+
+export type ErdKey = 'pk' | 'fk' | 'uk'
+export type ErdRow = { id: string; name: string; type: string; keys: ErdKey[]; nullable: boolean }
+export const ERD_KEYS: ErdKey[] = ['pk', 'fk', 'uk']
+export const ERD_HEAD = 36
+export const ERD_ROW = 28
+// Sama dengan batas server (MaxErdRows); tabel tanpa kolom tetap setinggi satu baris untuk teks kosongnya.
+export const ERD_MAX_ROWS = 60
+export const erdHeight = (n: number) => ERD_HEAD + ERD_ROW * Math.max(1, n)
+// Id baris acak huruf kecil dan angka (ValidRowID di server), unik di tabelnya.
+export function newRowId(taken: Iterable<string>): string {
+  const used = new Set(taken)
+  for (;;) {
+    const id = Math.random().toString(36).slice(2, 10)
+    if (id && !used.has(id)) return id
+  }
+}
+// Indeks baris di y lokal kartu (melepas garis ke baris), atau null di kepala tabel dan di luar baris.
+export function rowAt(n: number, y: number): number | null {
+  const i = Math.floor((y - ERD_HEAD) / ERD_ROW)
+  return y < ERD_HEAD || i < 0 || i >= n ? null : i
+}
+// Titik port baris di sisi kiri atau kanan, sesudah kartu diputar terhadap pusatnya; null bila baris sudah tidak ada.
+export function rowPortPoint(
+  b: Box,
+  rows: string[],
+  row: string,
+  side: 'left' | 'right',
+  rotation = 0,
+): { p: Pt; dir: Pt } | null {
+  const i = rows.indexOf(row)
+  if (i < 0) return null
+  const raw = { x: side === 'left' ? b.x : b.x + b.w, y: b.y + ERD_HEAD + ERD_ROW * (i + 0.5) }
+  return {
+    p: rotatePoint(raw, center(b), rotation),
+    dir: rotatePoint({ x: side === 'left' ? -1 : 1, y: 0 }, { x: 0, y: 0 }, rotation),
+  }
+}
+export const keyLabel = (keys: ErdKey[]) => keys.map((k) => k.toUpperCase()).join(' ')
 
 export type ShapeVariant = { id: string; label: string }
 export type ShapeInfo = {
@@ -92,6 +138,15 @@ export function newShapeContent(shape: ShapeType, variant?: string): ShapeConten
     align: g.align ?? 'center',
     font_size: g.fontSize ?? 16,
     ...(shape === 'uml_class' ? { name: 'Kelas', attributes: '', methods: '' } : {}),
+    ...(shape === 'erd_table'
+      ? {
+          name: 'tabel',
+          rows: [
+            { id: newRowId([]), name: 'id', type: 'bigint', keys: ['pk'], nullable: false },
+            { id: newRowId([]), name: 'nama', type: 'text', keys: [], nullable: false },
+          ] as ErdRow[],
+        }
+      : {}),
     ...(g.lanes
       ? {
           lanes: g.initLanes?.(variant ?? INFO.get(shape)?.variants?.[0]?.id ?? '') ?? [
@@ -729,6 +784,13 @@ const GEO = {
     inset: pct(16, 16, 14, 14),
   },
   erd_relationship: { path: (w, h) => basePath('diamond', w, h), text: 'relasi', inset: pct(28, 28, 24, 24) },
+  // Tabel ERD (revisi 57a): tinggi mengikuti jumlah baris, jadi hanya lebarnya yang bisa diubah dengan pegangan.
+  erd_table: {
+    path: (w, h) => basePath('rect', w, h),
+    marks: (w) => [{ d: `M0 ${ERD_HEAD}H${f(w)}` }],
+    handles: ['e', 'w'],
+    fontSize: 14,
+  },
   // Flowchart lanjutan (revisi 54f)
   fc_manual_input: {
     path: (w, h) =>
@@ -1606,7 +1668,8 @@ export function angleFrom(c: Pt, p: Pt, snap: boolean): number {
 // ---------------------------------------------------------------------------------------------------------------
 // Satu garis penghubung lengkap, dipakai lapisan garis, pegangan diagram, dan ekspor supaya jalurnya selalu sama.
 
-export type ConnEnd = { port: string; x?: number; y?: number }
+// row: id baris tabel ERD (revisi 57a) dengan port left atau right.
+export type ConnEnd = { port: string; x?: number; y?: number; row?: string }
 export type ConnLike = {
   id: string
   from: string | null
@@ -1640,12 +1703,19 @@ function resolveEnd(
   rot: Map<string, number>,
   toward: Pt,
   shapes?: Map<string, string>,
+  rows?: Map<string, string[]>,
 ): End | null {
   if (!card)
     return e.x !== undefined && e.y !== undefined ? { p: { x: e.x, y: e.y }, dir: null, box: null } : null
   const b = geom.get(card)
   if (!b) return null
   const r = rot.get(card) ?? 0
+  // Ujung di baris tabel; baris yang sudah dihapus jatuh ke port otomatis di kotak tabel, jadi garisnya tetap ada
+  // dan kembali ke barisnya bila penghapusan dibatalkan.
+  const list = e.row ? rows?.get(card) : undefined
+  const atRow = list && rowPortPoint(b, list, e.row!, e.port === 'left' ? 'left' : 'right', r)
+  if (atRow) return { ...atRow, box: rotatedBounds(b, r) }
+  if (e.row) return resolveEnd(card, { port: 'auto' }, geom, rot, toward, shapes)
   const inset = portInset(shapes?.get(card), b.w, b.h)
   const port =
     !e.port || e.port === 'auto' ? autoPort(b, toward, r, inset) : (e.port as Exclude<Port, 'auto'>)
@@ -1686,6 +1756,8 @@ export function routeConnector(
   points?: [number, number][],
   // Jenis bentuk per id kartu, untuk kotak port bentuk yang gambarnya lebih kecil dari kotaknya.
   shapes?: Map<string, string>,
+  // Id baris per tabel ERD, urut dari atas (revisi 57a).
+  rows?: Map<string, string[]>,
 ): Routed | null {
   if (c.geometry.route === 'message' && c.from && c.to) return routeMessage(c, geom, points, shapes)
   const ca = centerOf(c.from, c.geometry.from, geom)
@@ -1696,8 +1768,8 @@ export function routeConnector(
   const raw = (points ?? c.geometry.points ?? []).map(([x, y]) => ({ x, y }))
   const pts =
     !points && an ? elastic(raw, { x: an[0][0], y: an[0][1] }, { x: an[1][0], y: an[1][1] }, ca, cb) : raw
-  const a = resolveEnd(c.from, c.geometry.from, geom, rot, pts[0] ?? cb, shapes)
-  const b = resolveEnd(c.to, c.geometry.to, geom, rot, pts.at(-1) ?? ca, shapes)
+  const a = resolveEnd(c.from, c.geometry.from, geom, rot, pts[0] ?? cb, shapes, rows)
+  const b = resolveEnd(c.to, c.geometry.to, geom, rot, pts.at(-1) ?? ca, shapes, rows)
   if (!a || !b) return null
   const route = c.geometry.route || 'straight'
   const { d, pts: line } = routePath(a, b, route, pts)

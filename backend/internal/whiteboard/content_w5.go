@@ -43,6 +43,8 @@ var (
 		// ERD (revisi 54e)
 		"erd_entity": true, "erd_weak_entity": true, "erd_attribute": true, "erd_key_attribute": true,
 		"erd_relationship": true,
+		// Tabel ERD (revisi 57a): nama tabel dan baris kolom dengan tipe, kunci, dan nullable.
+		"erd_table": true,
 		// Lainnya (revisi 54f): flowchart lanjutan, arsitektur, wireframe, mind map, dan bentuk presentasi
 		"fc_manual_input": true, "fc_predefined": true, "fc_offpage": true, "fc_delay": true, "fc_preparation": true,
 		"fc_merge": true, "fc_sort": true,
@@ -101,6 +103,8 @@ type ShapeContent struct {
 	Methods    string `json:"methods,omitempty"`
 	// Lanes: lane pool dan swimlane (revisi 54b); Size adalah bobot, jadi ubah ukuran kartu membagi ulang.
 	Lanes []ShapeLane `json:"lanes,omitempty"`
+	// Rows: kolom tabel ERD (revisi 57a); nama tabel di Name.
+	Rows []ShapeRow `json:"rows,omitempty"`
 	// Pasangan dokumen berformat (revisi 49); teks di atas tetap teks polosnya.
 	Doc           *Node `json:"doc,omitempty"`
 	NameDoc       *Node `json:"name_doc,omitempty"`
@@ -117,6 +121,74 @@ const (
 	maxLanes     = 20
 	maxLaneLabel = 200
 )
+
+// ShapeRow: satu kolom tabel ERD (revisi 57a). ID stabil dibuat klien, supaya garis yang menempel ke baris tetap di
+// baris itu saat baris diurutkan ulang.
+type ShapeRow struct {
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Type     string   `json:"type"`
+	Keys     []string `json:"keys"`
+	Nullable bool     `json:"nullable"`
+}
+
+const (
+	MaxErdRows    = 60
+	maxTableName  = 100
+	maxColumnName = 100
+	maxColumnType = 60
+)
+
+// tableKeys: urutan kunci tetap (PK, FK, UK), jadi isi yang sama selalu tersimpan sama.
+var tableKeys = []string{"pk", "fk", "uk"}
+
+// ValidRowID: id baris dan rujukan baris di ujung garis, huruf kecil dan angka saja.
+func ValidRowID(id string) bool {
+	if id == "" || len(id) > 16 {
+		return false
+	}
+	for _, r := range id {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func cleanRows(rows []ShapeRow) ([]ShapeRow, error) {
+	if len(rows) > MaxErdRows {
+		return nil, apperr.Invalid(fmt.Sprintf("Tabel paling banyak %d kolom.", MaxErdRows))
+	}
+	out := make([]ShapeRow, len(rows))
+	seen := map[string]bool{}
+	for i, r := range rows {
+		if !ValidRowID(r.ID) || seen[r.ID] {
+			return nil, apperr.Invalid("Id kolom tabel tidak sah atau ganda.")
+		}
+		seen[r.ID] = true
+		name, err := CleanText(r.Name, maxColumnName, "Nama kolom")
+		if err != nil {
+			return nil, err
+		}
+		typ, err := CleanText(r.Type, maxColumnType, "Tipe data kolom")
+		if err != nil {
+			return nil, err
+		}
+		keys := []string{}
+		for _, k := range r.Keys {
+			if !slices.Contains(tableKeys, k) {
+				return nil, apperr.Invalid("Kunci kolom harus PK, FK, atau UK.")
+			}
+		}
+		for _, k := range tableKeys {
+			if slices.Contains(r.Keys, k) {
+				keys = append(keys, k)
+			}
+		}
+		out[i] = ShapeRow{ID: r.ID, Name: name, Type: typ, Keys: keys, Nullable: r.Nullable}
+	}
+	return out, nil
+}
 
 // cleanLanes: paling banyak 20 lane untuk bentuk ber-lane (tanpa lane berarti satu area), label satu baris, bobot
 // 20 sampai 4000.
@@ -208,6 +280,25 @@ func CleanShape(raw json.RawMessage) (ShapeContent, string, error) {
 		plain := strings.TrimSpace(strings.Join([]string{out.Name, out.Attributes, out.Methods}, "\n"))
 		return out, plain, nil
 	}
+	if in.Shape == "erd_table" {
+		out.Text, out.Doc, out.Lanes = "", nil, nil
+		out.Attributes, out.Methods, out.NameDoc, out.AttributesDoc, out.MethodsDoc = "", "", nil, nil, nil
+		if out.Name, err = CleanText(in.Name, maxTableName, "Nama tabel"); err != nil {
+			return in, "", err
+		}
+		if out.Rows, err = cleanRows(in.Rows); err != nil {
+			return in, "", err
+		}
+		parts := []string{out.Name}
+		for _, r := range out.Rows {
+			parts = append(parts, strings.TrimSpace(r.Name+" "+r.Type))
+		}
+		return out, strings.TrimSpace(strings.Join(parts, "\n")), nil
+	}
+	if len(in.Rows) > 0 {
+		return in, "", apperr.Invalid("Kolom hanya untuk bentuk tabel.")
+	}
+	out.Rows = nil
 	out.Name, out.Attributes, out.Methods = "", "", ""
 	out.NameDoc, out.AttributesDoc, out.MethodsDoc = nil, nil, nil
 	if out.Text, out.Doc, err = cleanRich(in.Text, in.Doc, MaxShapeText, "Teks bentuk", cleanMultiline); err != nil {

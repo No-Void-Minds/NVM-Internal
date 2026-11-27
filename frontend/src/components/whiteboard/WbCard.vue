@@ -81,6 +81,7 @@ const emit = defineEmits<{
   comments: []
   addLane: []
   notice: [msg: string]
+  rowPort: [row: string, side: 'left' | 'right', e: PointerEvent]
 }>()
 
 const root = ref<HTMLElement | null>(null)
@@ -358,6 +359,7 @@ function onPointerDown(e: PointerEvent) {
       :locked-by="lockedBy"
       :lane-edit="laneEdit"
       @add-lane="emit('addLane')"
+      @row-port="(r, s, e) => emit('rowPort', r, s, e)"
       @notice="emit('notice', $event)"
       @save="emit('content', $event)"
       @live="emit('live', $event)"

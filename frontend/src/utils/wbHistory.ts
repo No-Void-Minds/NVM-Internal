@@ -67,7 +67,16 @@ export type LineSnap = Partial<Pick<Line, LineField>>
 
 export type Step =
   | { kind: 'layout'; cards: { id: string; before: Geo; after: Geo }[] }
-  | { kind: 'content'; id: string; before: Card['content']; after: Card['content']; version: number }
+  // version: content_version kartu sesudah langkah ini diterapkan terakhir kali (yang diharapkan saat langkah ini
+  // dibalik); base: content_version sebelum penerapan itu (tanpa base berarti version - 1, saat baru dicatat).
+  | {
+      kind: 'content'
+      id: string
+      before: Card['content']
+      after: Card['content']
+      version: number
+      base?: number
+    }
   | { kind: 'create'; ids: string[]; batch?: string }
   | { kind: 'delete'; ids: string[]; batch: string }
   | { kind: 'checklist'; id: string; ops: ChecklistInverse }
@@ -194,11 +203,13 @@ export function linePatch(
   return { patch: Object.keys(patch).length ? patch : null, skipped }
 }
 
-// Sesudah undo atau redo langkah isi kartu berhasil (versi old menjadi now), langkah isi berikutnya untuk kartu yang
-// sama di tumpukan yang sama ikut diperbarui versinya bila langkah itu tepat sebelumnya (versinya old - 1, jadi tidak
-// ada suntingan orang lain di antaranya). Tanpa ini dua perubahan isi berturut-turut pada satu kartu hanya bisa
-// dibatalkan sekali: versi kartu naik karena undo sendiri, dan langkah yang lebih lama dianggap diubah orang lain.
-export function chainContentVersion(stack: Step[], id: string, old: number, now: number) {
+// Sesudah undo atau redo langkah isi kartu berhasil (kartu menjadi versi now), langkah isi berikutnya untuk kartu
+// yang sama di tumpukan yang sama ikut diperbarui versinya bila langkah itu tepat sebelumnya: versinya sama dengan
+// base, versi kartu sebelum langkah yang baru dibalik dulu diterapkan, jadi tidak ada suntingan orang lain di
+// antaranya. Tanpa ini perubahan isi berturut-turut pada satu kartu hanya bisa dibatalkan sekali: versi kartu naik
+// karena undo sendiri, dan langkah yang lebih lama dianggap diubah orang lain. Revisi 57a: dulu dibandingkan dengan
+// versi langkah dikurangi satu, yang hanya benar untuk dua langkah; langkah ketiga ke belakang dilewati.
+export function chainContentVersion(stack: Step[], id: string, base: number, now: number) {
   // Langkah gabungan (mis. Tambah lane: ukuran dan isi) dicari ke dalam juga, dari langkah terakhirnya (revisi 56).
   const last = (list: Step[]): Extract<Step, { kind: 'content' }> | null => {
     for (let i = list.length - 1; i >= 0; i--) {
@@ -212,5 +223,9 @@ export function chainContentVersion(stack: Step[], id: string, old: number, now:
     return null
   }
   const s = last(stack)
-  if (s && s.version === old - 1) s.version = now
+  if (s && s.version === base) {
+    // base langkah itu tetap versi sebelum ia diterapkan, walau versinya sendiri ditulis ulang.
+    s.base ??= s.version - 1
+    s.version = now
+  }
 }

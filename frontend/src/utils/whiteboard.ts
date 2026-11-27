@@ -95,7 +95,8 @@ export type ConnectorStyle = {
   line: 'solid' | 'dashed' | 'dotted'
   color: CardColor | ''
 }
-export type ConnectorEnd = { port: string; x?: number; y?: number }
+// row: id baris tabel ERD (revisi 57a), dengan port left atau right.
+export type ConnectorEnd = { port: string; x?: number; y?: number; row?: string }
 export type ConnectorGeometry = {
   from: ConnectorEnd
   to: ConnectorEnd
@@ -716,6 +717,8 @@ export function cardTitle(card: Card): string {
 // Teks bentuk; kelas UML memakai nama, atribut, dan metodenya.
 export function shapeText(c: ShapeContent): string {
   if (c.shape === 'uml_class') return [c.name, c.attributes, c.methods].filter(Boolean).join('\n')
+  if (c.shape === 'erd_table')
+    return [c.name, ...(c.rows ?? []).map((r) => `${r.name} ${r.type}`.trim())].filter(Boolean).join('\n')
   return c.text
 }
 

@@ -24,6 +24,8 @@ const props = defineProps<{
   connectors: Connector[]
   nameOf: (id: string) => string
   isShape: (id: string) => boolean
+  // Kolom tabel ERD per kartu (revisi 57a), atau null bila kartunya bukan tabel.
+  rowsOf?: (id: string) => { id: string; name: string }[] | null
   canWrite: boolean
 }>()
 const emit = defineEmits<{
@@ -61,9 +63,16 @@ function setRoute(c: Connector, v: string) {
   const route = v as ConnectorGeometry['route']
   emit('update', c.id, { geometry: { ...c.geometry, route } })
 }
-function setPort(c: Connector, side: 'from' | 'to', port: string) {
-  emit('update', c.id, { geometry: { ...c.geometry, [side]: { ...c.geometry[side], port } } })
+// Nilai pilihan baris tabel: "row:<id>:left" atau "row:<id>:right"; pilihan lain melepas ujung dari baris.
+function setPort(c: Connector, side: 'from' | 'to', value: string) {
+  const m = /^row:([a-z0-9]+):(left|right)$/.exec(value)
+  const { row: _row, ...rest } = c.geometry[side]
+  void _row
+  const end = m ? { ...rest, port: m[2]!, row: m[1]! } : { ...rest, port: value }
+  emit('update', c.id, { geometry: { ...c.geometry, [side]: end } })
 }
+const portValue = (e: Connector['geometry']['from']) =>
+  e.row ? `row:${e.row}:${e.port === 'left' ? 'left' : 'right'}` : e.port || 'auto'
 // Preset garis per jenis diagram (LINE_PRESETS di utils/wbShapes.ts): gaya garis dan ujung, plus label tengah
 // bila presetnya punya (include, extend); label tetap bisa diubah sesudahnya.
 const presetOpts = LINE_PRESETS.map((p) => ({ value: p.id, label: `${p.group}: ${p.label}` }))
@@ -103,8 +112,24 @@ const colorOpts = penColors.map((p) => ({
   label: p.label,
   swatch: p.css,
 }))
-const portOpts = (shape: boolean) =>
-  ['auto', ...portsFor(shape)].map((p) => ({ value: p, label: portLabel[p] ?? p }))
+const portOpts = (card: string, end: Connector['geometry']['from']) => {
+  const base = ['auto', ...portsFor(props.isShape(card))].map((p) => ({ value: p, label: portLabel[p] ?? p }))
+  const rows = props.rowsOf?.(card)
+  if (!rows) return base
+  const opts = [
+    ...base,
+    ...rows.flatMap((r, i) =>
+      (['left', 'right'] as const).map((s) => ({
+        value: `row:${r.id}:${s}`,
+        label: `Kolom ${r.name || i + 1}, ${s === 'left' ? 'kiri' : 'kanan'}`,
+      })),
+    ),
+  ]
+  // Baris yang sudah dihapus: ujungnya digambar di kotak tabel; pilihan ini menjelaskan kenapa.
+  if (end.row && !rows.some((r) => r.id === end.row))
+    opts.push({ value: portValue(end), label: 'Kolom yang sudah dihapus (menempel di kotak tabel)' })
+  return opts
+}
 const cell = 'flex min-w-0 flex-col gap-1 text-sm'
 const btn =
   'inline-flex min-h-11 items-center justify-center rounded-card border border-line bg-surface px-3 font-medium hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark'
@@ -223,8 +248,8 @@ const btn =
                 :id="`${uid}-${i}-pf`"
                 label="Menempel di awal"
                 class="w-full"
-                :options="portOpts(isShape(c.from))"
-                :model-value="c.geometry.from.port || 'auto'"
+                :options="portOpts(c.from, c.geometry.from)"
+                :model-value="portValue(c.geometry.from)"
                 :disabled="!canWrite"
                 @update:model-value="setPort(c, 'from', $event)"
               />
@@ -235,8 +260,8 @@ const btn =
                 :id="`${uid}-${i}-pt`"
                 label="Menempel di akhir"
                 class="w-full"
-                :options="portOpts(isShape(c.to))"
-                :model-value="c.geometry.to.port || 'auto'"
+                :options="portOpts(c.to, c.geometry.to)"
+                :model-value="portValue(c.geometry.to)"
                 :disabled="!canWrite"
                 @update:model-value="setPort(c, 'to', $event)"
               />

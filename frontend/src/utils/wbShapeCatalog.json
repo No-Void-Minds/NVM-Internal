@@ -407,6 +407,13 @@
       "h": 90
     },
     {
+      "id": "erd_table",
+      "label": "Tabel",
+      "group": "ERD",
+      "w": 260,
+      "h": 92
+    },
+    {
       "id": "bpmn_pool",
       "label": "Pool dan lane",
       "group": "BPMN",

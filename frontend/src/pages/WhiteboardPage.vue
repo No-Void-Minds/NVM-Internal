@@ -40,8 +40,12 @@ import {
   portInset,
   portPoint,
   portsFor,
+  erdHeight,
   resizeBox,
+  rotatePoint,
   routeConnector,
+  rowAt,
+  rowPortPoint,
   simplifyBends,
   snap45,
   type Handle,
@@ -251,11 +255,17 @@ function upsert(updated: Card[]) {
     // Versi yang tidak lebih baru dari yang dipegang diabaikan, jadi urutan sampai yang acak tidak mengembalikan
     // keadaan lama.
     if (cur && cur.version > c.version) continue
-    map.set(c.id, c)
+    // Isi lokal yang simpanannya masih berjalan tidak ditimpa jawaban yang isinya belum memuatnya (mis. jawaban ubah
+    // tinggi tabel atau tambah lane yang dikirim bersamaan), supaya baris baru tidak hilang sesaat dan fokus editor
+    // tidak lepas. Jawaban simpan isi itu sendiri membawa content_version yang lebih tinggi.
+    const keep = cur && pendingContent.get(c.id) && c.content_version <= cur.content_version
+    map.set(c.id, keep ? { ...c, content: cur.content } : c)
     lastSeq = Math.max(lastSeq, c.seq)
   }
   cards.value = [...map.values()]
 }
+// Jumlah simpan isi yang masih berjalan per kartu (queueContent).
+const pendingContent = new Map<string, number>()
 function patchLocal(id: string, fields: Partial<Card>) {
   cards.value = cards.value.map((c) => (c.id === id ? { ...c, ...fields } : c))
 }
@@ -1294,12 +1304,21 @@ let noteTimer: ReturnType<typeof setTimeout> | undefined
 
 function queueContent(id: string, content: Card['content']) {
   const prev = chains.get(id) ?? Promise.resolve()
-  const next = prev.catch(() => undefined).then(() => saveContent(id, content))
+  pendingContent.set(id, (pendingContent.get(id) ?? 0) + 1)
+  const next = prev
+    .catch(() => undefined)
+    .then(() => saveContent(id, content))
+    .finally(() => {
+      const n = (pendingContent.get(id) ?? 1) - 1
+      if (n > 0) pendingContent.set(id, n)
+      else pendingContent.delete(id)
+    })
   chains.set(id, next)
   return next
 }
 
-async function saveContent(id: string, content: Card['content']) {
+// Mengembalikan content_version hasil simpan, untuk langkah undo yang menunggu versinya (recordContent).
+async function saveContent(id: string, content: Card['content']): Promise<number | undefined> {
   const card = byId.value.get(id)
   if (!card) return
   try {
@@ -1308,6 +1327,7 @@ async function saveContent(id: string, content: Card['content']) {
       return patchCards(bid.value, [{ id, content, base_content_version: cur.content_version }])
     })
     if (res) upsert(res.cards)
+    return res?.cards.find((c) => c.id === id)?.content_version
   } catch (e) {
     if (e instanceof ApiError && e.status === 409) await keepAsCopy(card, content)
   }
@@ -1385,7 +1405,7 @@ function onHeadingDraft(id: string, v: { text: string; doc: PMNode | null }) {
 // dikirim sebagai draf supaya orang lain melihat gambarnya bertambah langsung.
 function onContent(id: string, content: Card['content']) {
   patchLocal(id, { content })
-  queueContent(id, content)
+  return queueContent(id, content)
 }
 
 async function onTable(id: string, op: TableOp) {
@@ -1520,7 +1540,8 @@ async function finishEdit(id: string) {
     after &&
     after.content_version !== before.version &&
     after.kind !== 'checklist' &&
-    after.kind !== 'board'
+    after.kind !== 'board' &&
+    (after.content as ShapeContent).shape !== 'erd_table'
   ) {
     record({
       kind: 'content',
@@ -2777,9 +2798,10 @@ async function applyStep(step: Step, dir: 'undo' | 'redo'): Promise<number | 'ke
       )
       if (res) {
         upsert(res.cards)
-        const old = step.version
+        const base = step.base ?? step.version - 1
+        step.base = cur.content_version
         step.version = res.cards[0]!.content_version
-        chainContentVersion(dir === 'undo' ? history.undo : history.redo, step.id, old, step.version)
+        chainContentVersion(dir === 'undo' ? history.undo : history.redo, step.id, base, step.version)
       }
       break
     }
@@ -3570,12 +3592,44 @@ const shapeStyleCard = computed(() =>
 function recordContent(id: string, after: Card['content']) {
   const c = byId.value.get(id)
   if (!c) return
-  record({ kind: 'content', id, before: c.content, after, version: c.content_version + 1 })
-  onContent(id, after)
+  // Versi langkah diambil dari jawaban simpan, bukan ditebak dari versi kartu saat ini: aksi beruntun yang lebih
+  // cepat dari jawaban server (revisi 57a: ketik, Tab, ketik di editor tabel) dan siaran realtime perubahan sendiri
+  // yang tiba lebih dulu membuat tebakan itu meleset, dan rantai undo putus. Tebakan hanya dipakai sampai jawaban
+  // datang.
+  const step: Extract<Step, { kind: 'content' }> = {
+    kind: 'content',
+    id,
+    before: c.content,
+    after,
+    version: c.content_version + 1 + (pendingContent.get(id) ?? 0),
+  }
+  record(step)
+  void onContent(id, after).then((v) => {
+    if (v === undefined || step.base !== undefined) return
+    step.base = v - 1
+    step.version = v
+  })
 }
 function onCardContent(id: string, after: Card['content']) {
-  if (editingId.value === id) onContent(id, after)
+  if ((after as ShapeContent).shape === 'erd_table') saveTable(id, after as ShapeContent)
+  else if (editingId.value === id) onContent(id, after)
   else recordContent(id, after)
+}
+// Tabel ERD (revisi 57a): setiap aksi di editor (ketikan satu isian, tambah, hapus, urutan, kunci) satu langkah
+// undo, juga selama mode edit; tinggi kartu mengikuti jumlah baris dalam langkah yang sama. Kartu terkunci tidak bisa
+// berubah ukuran, jadi menambah atau menghapus kolomnya ditolak; isi kolomnya tetap bisa diubah.
+function saveTable(id: string, after: ShapeContent) {
+  const c = byId.value.get(id)
+  if (!c || !canWrite.value) return
+  const h = erdHeight(after.rows?.length ?? 0)
+  if (c.h !== h && c.locked) {
+    showToast(`Tabel terkunci. Buka kunci dulu (${keyLabel('lock')}) untuk menambah atau menghapus kolom.`)
+    return
+  }
+  asOneStep(() => {
+    if (c.h !== h) applyLayout([{ id, after: { h } }])
+    recordContent(id, after)
+  })
 }
 function onShapeStyle(c: ShapeContent) {
   if (shapeStyleId.value) recordContent(shapeStyleId.value, c)
@@ -3705,6 +3759,18 @@ const shapeKinds = computed(() => {
   return m
 })
 const insetOf = (id: string, b: Rect) => portInset(shapeKinds.value.get(id), b.w, b.h)
+// Id baris per tabel ERD, urut dari atas (revisi 57a), untuk garis yang menempel ke baris tertentu.
+const tableRows = computed(() => {
+  const m = new Map<string, string[]>()
+  for (const c of shownCards.value)
+    if (c.kind === 'shape' && (c.content as ShapeContent).shape === 'erd_table')
+      m.set(
+        c.id,
+        ((c.content as ShapeContent).rows ?? []).map((r) => r.id),
+      )
+  return m
+})
+const rowKey = (id: string | null) => (id ? tableRows.value.get(id)?.join(',') : undefined)
 
 // Sudut sementara selama pegangan putar diseret.
 const rotateDraft = ref<{ id: string; deg: number } | null>(null)
@@ -3737,6 +3803,8 @@ type LineKey = {
   rb?: number
   sa?: string
   sb?: string
+  ka?: string
+  kb?: string
   pts?: [number, number][]
   layer?: number
 }
@@ -3757,6 +3825,8 @@ const lines = computed<DrawnLine[]>(() => {
       rb: c.to ? rot.get(c.to) : undefined,
       sa: c.from ? shapeKinds.value.get(c.from) : undefined,
       sb: c.to ? shapeKinds.value.get(c.to) : undefined,
+      ka: rowKey(c.from),
+      kb: rowKey(c.to),
       pts: bendDraft.value?.id === c.id ? bendDraft.value.points : undefined,
       layer: layers.value.get(c.id),
     }
@@ -3770,11 +3840,13 @@ const lines = computed<DrawnLine[]>(() => {
       hit.key.rb === key.rb &&
       hit.key.sa === key.sa &&
       hit.key.sb === key.sb &&
+      hit.key.ka === key.ka &&
+      hit.key.kb === key.kb &&
       hit.key.pts === key.pts &&
       hit.key.layer === key.layer
     )
       return [hit.line]
-    const r = routeConnector(c, g, rot, key.pts, shapeKinds.value)
+    const r = routeConnector(c, g, rot, key.pts, shapeKinds.value, tableRows.value)
     if (!r) {
       lineCache.delete(c.id)
       return []
@@ -3804,7 +3876,7 @@ const selectedStops = computed(() =>
 )
 
 // Port kartu terpilih untuk menarik garis baru: hanya satu kartu, bisa ditulis, tidak sedang diedit atau mode pena.
-const connectDraft = ref<{ card: string; port: Port; at: Pt } | null>(null)
+const connectDraft = ref<{ card: string; port: Port; at: Pt; row?: string } | null>(null)
 const PORT_OFFSET = 48
 const portHandles = computed(() => {
   if (!canWrite.value || penOn.value || editingId.value || selected.value.size !== 1) return []
@@ -3826,8 +3898,12 @@ const tempLine = computed(() => {
   if (!d) return null
   const b = geomMap.value.get(d.card)
   if (!b) return null
+  const rot = rotations.value.get(d.card) ?? 0
+  const atRow = d.row
+    ? rowPortPoint(b, tableRows.value.get(d.card) ?? [], d.row, d.port === 'left' ? 'left' : 'right', rot)
+    : null
   return {
-    a: portPoint(b, d.port as Exclude<Port, 'auto'>, rotations.value.get(d.card) ?? 0, insetOf(d.card, b)).p,
+    a: atRow?.p ?? portPoint(b, d.port as Exclude<Port, 'auto'>, rot, insetOf(d.card, b)).p,
     b: d.at,
   }
 })
@@ -3837,15 +3913,21 @@ function worldOf(e: PointerEvent): Pt {
   return toWorld(view.value, p.x, p.y)
 }
 
-function onPortDown(card: string, port: Port, e: PointerEvent) {
+function onPortDown(card: string, port: Port, e: PointerEvent, row?: string) {
   if (!canWrite.value) return
   gesture = { kind: 'connect', card, port }
-  connectDraft.value = { card, port, at: worldOf(e) }
+  connectDraft.value = { card, port, at: worldOf(e), row }
   begin(e)
+}
+// Pegangan port baris di editor tabel ERD (revisi 57a): editor ditutup (isinya sudah tersimpan per aksi), lalu garis
+// ditarik dari baris itu.
+function onRowPort(card: string, row: string, side: 'left' | 'right', e: PointerEvent) {
+  if (editingId.value === card) void stopEdit()
+  onPortDown(card, side, e, row)
 }
 
 // Kartu paling atas di titik dunia (selain yang dikecualikan), beserta port terdekatnya bila cukup dekat.
-function cardAt(at: Pt, except: string): { id: string; port: Port } | null {
+function cardAt(at: Pt, except: string): { id: string; port: Port; row?: string } | null {
   // Yang paling depan menurut urutan tumpuk (revisi 54d): sebelumnya yang terakhir di urutan baca, jadi wadah besar
   // di belakang (fragmen, pool) bisa menang dari kartu yang terlihat di atasnya.
   const hit = rendered.value
@@ -3862,6 +3944,13 @@ function cardAt(at: Pt, except: string): { id: string; port: Port } | null {
   if (!hit) return null
   const b = geomMap.value.get(hit.id) ?? hit
   const rot = rotations.value.get(hit.id) ?? 0
+  // Dilepas di baris tabel ERD (revisi 57a): ujung menempel ke baris itu, di sisi yang lebih dekat.
+  const sc = hit.kind === 'shape' ? (hit.content as ShapeContent) : null
+  if (sc?.shape === 'erd_table') {
+    const q = rotatePoint(at, boxCenter(b), -rot)
+    const i = rowAt(sc.rows?.length ?? 0, q.y - b.y)
+    if (i !== null) return { id: hit.id, port: q.x < b.x + b.w / 2 ? 'left' : 'right', row: sc.rows![i]!.id }
+  }
   let port: Port = 'auto'
   let best = 28 / view.value.zoom
   for (const pt of portsFor(hit.kind === 'shape')) {
@@ -3898,15 +3987,23 @@ async function finishConnect(at: Pt) {
       : from.kind === 'shape' || toShape
         ? 'orthogonal'
         : 'straight'
+  const erd =
+    !!target &&
+    shapeKinds.value.get(d.card) === 'erd_table' &&
+    shapeKinds.value.get(target.id) === 'erd_table'
   try {
     const res = await saving(() =>
       createConnector(bid.value, {
         from: d.card,
         to: target?.id ?? '',
-        style: { start: 'none', end: mind ? 'none' : 'arrow', line: 'solid', color: '' },
+        style: erd
+          ? { ...erdEnds(d.card, d.row, target!.id, target!.row), line: 'solid', color: '' }
+          : { start: 'none', end: mind ? 'none' : 'arrow', line: 'solid', color: '' },
         geometry: {
-          from: { port: d.port },
-          to: target ? { port: target.port } : { port: '', x: Math.round(at.x), y: Math.round(at.y) },
+          from: { port: d.port, ...(d.row ? { row: d.row } : {}) },
+          to: target
+            ? { port: target.port, ...(target.row ? { row: target.row } : {}) }
+            : { port: '', x: Math.round(at.x), y: Math.round(at.y) },
           route,
           points: message ? [[0, messageOffset(from.id, at.y)]] : [],
         },
@@ -3935,6 +4032,19 @@ function onBendDown(index: number, insert: boolean, e: PointerEvent) {
   gesture = { kind: 'bend', id: c.id, index }
   bendDraft.value = { id: c.id, points: pts }
   begin(e)
+}
+
+// Ujung crow's foot awal garis antar tabel ERD (revisi 57a): sisi kunci primer "tepat satu", sisi lain "banyak".
+// Garis dari baris PK ke baris yang bukan PK dibalik; tanpa PK dianggap FK ke PK (arah tarik yang paling umum).
+function erdEnds(from: string, fromRow: string | undefined, to: string, toRow: string | undefined) {
+  const keys = (card: string, row?: string) =>
+    ((byId.value.get(card)?.content as ShapeContent | undefined)?.rows ?? []).find((r) => r.id === row)
+      ?.keys ?? []
+  const pkFrom = keys(from, fromRow).includes('pk')
+  const pkTo = keys(to, toRow).includes('pk')
+  return pkFrom && !pkTo
+    ? { start: 'cf_one' as const, end: 'cf_many' as const }
+    : { start: 'cf_many' as const, end: 'cf_one' as const }
 }
 
 // Titik belok disimpan bersama pusat ujung saat itu (anchor), supaya garis ikut elastis saat kartunya digeser
@@ -5650,6 +5760,7 @@ const toolBtn =
                 @comments="commentsFor = c.id"
                 @add-lane="addLaneTo(c.id)"
                 @notice="showToast($event)"
+                @row-port="(r: string, s: 'left' | 'right', e: PointerEvent) => onRowPort(c.id, r, s, e)"
               />
             </template>
             <WbDiagramHandles
@@ -6301,6 +6412,12 @@ const toolBtn =
       :connectors="dialogConnectors"
       :name-of="cardName"
       :is-shape="(id: string) => byId.get(id)?.kind === 'shape'"
+      :rows-of="
+        (id: string) =>
+          (byId.get(id)?.content as ShapeContent | undefined)?.shape === 'erd_table'
+            ? ((byId.get(id)!.content as ShapeContent).rows ?? [])
+            : null
+      "
       :can-write="canWrite"
       @close="connectorIds = null"
       @update="onConnectorUpdate"
