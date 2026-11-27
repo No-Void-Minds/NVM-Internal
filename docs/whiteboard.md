@@ -587,6 +587,7 @@ Masuk ke "Menunggu jawaban Manajer" di `docs/sprint.md` saat W1 dimulai. Pilihan
 - 2026-11-25, gerbang akhir: `uji-wss.mjs` juga menguji WebSocket papan task (revisi 47); audit luapan 768 dan 1024 px menjadi skrip tetap `scripts/e2e/uji-lebar.mjs`.
 - 2026-11-26, revisi 49: keputusan W4 "ekspor tanpa format huruf" diganti. Ekspor PNG dan PDF menggambar tebal, miring, garis bawah, coret, kode, superskrip, subskrip, warna, stabilo, ukuran, perataan, dan garis pemisah dari data kartu (`utils/wbRich.ts`, `wrapRuns`), dengan warna token mode terang seperti sebelumnya.
 - 2026-11-26, revisi 49: format teks memakai ekstensi TipTap sendiri yang merender kelas, bukan paket TipTap Color, Highlight, TextStyle, TextAlign, Subscript, dan Superscript, karena paket itu merender atribut `style` yang diblokir CSP. Toolbar diposisikan sendiri, tanpa BubbleMenu dan floating-ui. Tidak ada dependensi baru dan CSP tidak berubah.
+- 2026-11-27, kotak port per bentuk: garis menempel di tepi batang fork dan lingkaran, bukan di tepi kotak kartu.
 - 2026-11-27, revisi 54c: bentuk activity diagram dan state machine, termasuk state komposit sebagai wadah.
 - 2026-11-26, revisi 54b: wadah (batas sistem, pool dan lane, swimlane) dengan keanggotaan dari geometri, tanpa data tambahan; lane di `content.lanes`.
 - 2026-11-26, revisi 55: undo dan redo untuk semua perubahan garis (langkah `line` dan `linesGone`), jalur siku dengan titik belok lewat pencarian beam, dan garis beranchor tidak digeser dua kali saat kedua ujung diseret.

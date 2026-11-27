@@ -32,6 +32,7 @@ import {
   laneOrient,
   newShapeContent,
   rotatedBounds,
+  portInset,
   portPoint,
   portsFor,
   resizeBox,
@@ -3514,6 +3515,14 @@ function onShapeSize(sz: { w: number; h: number }) {
   if (id) applyLayout([{ id, after: sz }])
 }
 
+// Jenis bentuk per kartu, untuk kotak port bentuk yang gambarnya lebih kecil dari kotaknya (batang fork, lingkaran).
+const shapeKinds = computed(() => {
+  const m = new Map<string, string>()
+  for (const c of shownCards.value) if (c.kind === 'shape') m.set(c.id, (c.content as ShapeContent).shape)
+  return m
+})
+const insetOf = (id: string, b: Rect) => portInset(shapeKinds.value.get(id), b.w, b.h)
+
 // Sudut sementara selama pegangan putar diseret.
 const rotateDraft = ref<{ id: string; deg: number } | null>(null)
 const rotations = computed(() => {
@@ -3543,6 +3552,8 @@ type LineKey = {
   b?: Rect
   ra?: number
   rb?: number
+  sa?: string
+  sb?: string
   pts?: [number, number][]
   layer?: number
 }
@@ -3561,6 +3572,8 @@ const lines = computed<DrawnLine[]>(() => {
       b: c.to ? g.get(c.to) : undefined,
       ra: c.from ? rot.get(c.from) : undefined,
       rb: c.to ? rot.get(c.to) : undefined,
+      sa: c.from ? shapeKinds.value.get(c.from) : undefined,
+      sb: c.to ? shapeKinds.value.get(c.to) : undefined,
       pts: bendDraft.value?.id === c.id ? bendDraft.value.points : undefined,
       layer: layers.value.get(c.id),
     }
@@ -3572,11 +3585,13 @@ const lines = computed<DrawnLine[]>(() => {
       sameBox(hit.key.b, key.b) &&
       hit.key.ra === key.ra &&
       hit.key.rb === key.rb &&
+      hit.key.sa === key.sa &&
+      hit.key.sb === key.sb &&
       hit.key.pts === key.pts &&
       hit.key.layer === key.layer
     )
       return [hit.line]
-    const r = routeConnector(c, g, rot, key.pts)
+    const r = routeConnector(c, g, rot, key.pts, shapeKinds.value)
     if (!r) {
       lineCache.delete(c.id)
       return []
@@ -3616,7 +3631,7 @@ const portHandles = computed(() => {
   // letaknya, dan klik di sana harus mengubah ukuran, bukan menarik garis. Garis tetap menempel di port aslinya.
   const out = PORT_OFFSET / view.value.zoom
   return portsFor(card.kind === 'shape').map((port) => {
-    const { p, dir } = portPoint(b, port as Exclude<Port, 'auto'>, rot)
+    const { p, dir } = portPoint(b, port as Exclude<Port, 'auto'>, rot, insetOf(id, b))
     return { card: id, port, p, h: { x: p.x + dir.x * out, y: p.y + dir.y * out } }
   })
 })
@@ -3625,7 +3640,10 @@ const tempLine = computed(() => {
   if (!d) return null
   const b = geomMap.value.get(d.card)
   if (!b) return null
-  return { a: portPoint(b, d.port as Exclude<Port, 'auto'>, rotations.value.get(d.card) ?? 0).p, b: d.at }
+  return {
+    a: portPoint(b, d.port as Exclude<Port, 'auto'>, rotations.value.get(d.card) ?? 0, insetOf(d.card, b)).p,
+    b: d.at,
+  }
 })
 
 function worldOf(e: PointerEvent): Pt {
@@ -3659,7 +3677,7 @@ function cardAt(at: Pt, except: string): { id: string; port: Port } | null {
   let port: Port = 'auto'
   let best = 28 / view.value.zoom
   for (const pt of portsFor(hit.kind === 'shape')) {
-    const p = portPoint(b, pt as Exclude<Port, 'auto'>, rot).p
+    const p = portPoint(b, pt as Exclude<Port, 'auto'>, rot, insetOf(hit.id, b)).p
     const dist = Math.hypot(p.x - at.x, p.y - at.y)
     if (dist < best) {
       best = dist

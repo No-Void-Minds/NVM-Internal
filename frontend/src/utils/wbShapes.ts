@@ -278,6 +278,9 @@ type Geo = {
   strokeScale?: number
   // Diisi warna garis (node awal, batang fork), bukan warna isian.
   solid?: boolean
+  // Kotak tempat port garis menempel, di koordinat lokal bentuk, bila gambarnya lebih kecil dari kotak kartu (batang
+  // fork, lingkaran di kotak yang tidak persegi). Tanpa ini garis berhenti di tepi kotak, terlihat putus.
+  ports?: (w: number, h: number) => Box
   fill?: string
   text?: string
   align?: 'left' | 'center' | 'right'
@@ -464,6 +467,12 @@ function laneMarks(w: number, h: number, orient: LaneOrient, lanes: Lane[] = [])
   return [{ d }]
 }
 
+// Lingkaran digambar di persegi terbesar di tengah kotak; port menempel di persegi itu.
+const squarePorts = (w: number, h: number): Box => {
+  const s = Math.min(w, h)
+  return { x: (w - s) / 2, y: (h - s) / 2, w: s, h: s }
+}
+
 const base = (id: string, rest: Omit<Geo, 'path'> = {}): Geo => ({
   path: (w, h) => basePath(id, w, h),
   ...rest,
@@ -500,14 +509,21 @@ const GEO = {
   }),
   uml_usecase: base('uml_usecase', { text: 'Use case', inset: pct(16, 16, 14, 14) }),
   // Activity dan state machine (revisi 54c). Batang fork dan join 10 px di tengah kotak minimal 40 px.
-  uml_initial: { path: (w, h) => circ(w / 2, h / 2, Math.min(w, h) / 2), solid: true, inset: BELOW },
+  uml_initial: {
+    path: (w, h) => circ(w / 2, h / 2, Math.min(w, h) / 2),
+    solid: true,
+    inset: BELOW,
+    ports: squarePorts,
+  },
   uml_final: {
     path: (w, h) => circ(w / 2, h / 2, Math.min(w, h) / 2),
+    ports: squarePorts,
     marks: (w, h) => [{ d: circ(w / 2, h / 2, Math.min(w, h) / 2 - 6), fill: 'line' }],
     inset: BELOW,
   },
   uml_flow_final: {
     path: (w, h) => circ(w / 2, h / 2, Math.min(w, h) / 2),
+    ports: squarePorts,
     marks: (w, h) => {
       const r = (Math.min(w, h) / 2) * 0.7071
       const [cx, cy] = [w / 2, h / 2]
@@ -533,6 +549,10 @@ const GEO = {
     },
     solid: true,
     inset: BELOW,
+    ports: (w, h) => {
+      const t = Math.min(10, h)
+      return { x: 0, y: (h - t) / 2, w, h: t }
+    },
   },
   uml_object: base('rect'),
   uml_send_signal: {
@@ -593,6 +613,7 @@ const GEO = {
     path: (w, h) => circ(w / 2, h / 2, Math.min(w, h) / 2),
     marks: (w, h, v) => eventMarks(w, h, v, false),
     inset: BELOW,
+    ports: squarePorts,
   },
   bpmn_intermediate: {
     path: (w, h) => circ(w / 2, h / 2, Math.min(w, h) / 2),
@@ -601,12 +622,14 @@ const GEO = {
       ...eventMarks(w, h, v, v === 'error' || v === 'cancel'),
     ],
     inset: BELOW,
+    ports: squarePorts,
   },
   bpmn_end: {
     path: (w, h) => circ(w / 2, h / 2, Math.min(w, h) / 2),
     marks: (w, h, v) => eventMarks(w, h, v, true),
     strokeScale: 2,
     inset: BELOW,
+    ports: squarePorts,
   },
   bpmn_task: {
     path: (w, h) => roundRect(0, 0, w, h, 10),
@@ -670,6 +693,9 @@ export const laneOrient = (s: string) => geoOf(s).lanes ?? null
 export const openShape = (s: string) => !!geoOf(s).open
 export const strokeScale = (s: string) => geoOf(s).strokeScale ?? 1
 export const solidShape = (s: string) => !!geoOf(s).solid
+// Kotak port lokal bentuk berukuran w x h, atau null bila port di tepi kotak kartu.
+export const portInset = (s: string | undefined, w: number, h: number): Box | null =>
+  s ? (geoOf(s).ports?.(w, h) ?? null) : null
 export const shapeInset = (s: string): Inset => geoOf(s).inset ?? DEFAULT_INSET
 export const shapeValign = (s: string) => geoOf(s).valign ?? 'center'
 export const hasGeometry = (s: string) => s in GEO
@@ -737,10 +763,17 @@ export function center(b: Box): Pt {
 }
 
 // Titik port di dunia setelah bentuk diputar terhadap pusatnya, beserta arah keluarnya (vektor satuan).
-export function portPoint(b: Box, port: Exclude<Port, 'auto'>, rotation = 0): { p: Pt; dir: Pt } {
+// inset: kotak port lokal (portInset); putaran tetap terhadap pusat kartu, jadi benar juga sesudah Putar 90.
+export function portPoint(
+  b: Box,
+  port: Exclude<Port, 'auto'>,
+  rotation = 0,
+  inset: Box | null = null,
+): { p: Pt; dir: Pt } {
   const [u, v] = PORT_UNIT[port]
   const c = center(b)
-  const raw = { x: b.x + u * b.w, y: b.y + v * b.h }
+  const q = inset ? { x: b.x + inset.x, y: b.y + inset.y, w: inset.w, h: inset.h } : b
+  const raw = { x: q.x + u * q.w, y: q.y + v * q.h }
   const p = rotatePoint(raw, c, rotation)
   const len = Math.hypot(raw.x - c.x, raw.y - c.y) || 1
   const d0 = { x: (raw.x - c.x) / len, y: (raw.y - c.y) / len }
@@ -760,14 +793,14 @@ export function portPoint(b: Box, port: Exclude<Port, 'auto'>, rotation = 0): { 
 }
 
 // Port "auto": sisi yang paling menghadap titik lain.
-export function autoPort(b: Box, toward: Pt, rotation = 0): Exclude<Port, 'auto'> {
+export function autoPort(b: Box, toward: Pt, rotation = 0, inset: Box | null = null): Exclude<Port, 'auto'> {
   let best: Exclude<Port, 'auto'> = 'right'
   let score = -Infinity
   const c = center(b)
   const len = Math.hypot(toward.x - c.x, toward.y - c.y) || 1
   const to = { x: (toward.x - c.x) / len, y: (toward.y - c.y) / len }
   for (const port of SIDE_PORTS as Exclude<Port, 'auto'>[]) {
-    const { dir } = portPoint(b, port, rotation)
+    const { dir } = portPoint(b, port, rotation, inset)
     const s = dir.x * to.x + dir.y * to.y
     if (s > score) {
       score = s
@@ -1170,15 +1203,38 @@ function resolveEnd(
   geom: Map<string, Box>,
   rot: Map<string, number>,
   toward: Pt,
+  shapes?: Map<string, string>,
 ): End | null {
   if (!card)
     return e.x !== undefined && e.y !== undefined ? { p: { x: e.x, y: e.y }, dir: null, box: null } : null
   const b = geom.get(card)
   if (!b) return null
   const r = rot.get(card) ?? 0
-  const port = !e.port || e.port === 'auto' ? autoPort(b, toward, r) : (e.port as Exclude<Port, 'auto'>)
-  const { p, dir } = portPoint(b, port, r)
-  return { p, dir, box: rotatedBounds(b, r) }
+  const inset = portInset(shapes?.get(card), b.w, b.h)
+  const port =
+    !e.port || e.port === 'auto' ? autoPort(b, toward, r, inset) : (e.port as Exclude<Port, 'auto'>)
+  const { p, dir } = portPoint(b, port, r, inset)
+  return { p, dir, box: inset ? insetBounds(b, inset, r) : rotatedBounds(b, r) }
+}
+
+// Kotak batas kotak port sesudah diputar terhadap pusat kartu, untuk jarak bebas jalur siku.
+export function insetBounds(b: Box, inset: Box, rotation = 0): Box {
+  const c = center(b)
+  const q = { x: b.x + inset.x, y: b.y + inset.y }
+  const pts = [
+    { x: q.x, y: q.y },
+    { x: q.x + inset.w, y: q.y },
+    { x: q.x + inset.w, y: q.y + inset.h },
+    { x: q.x, y: q.y + inset.h },
+  ].map((p) => rotatePoint(p, c, rotation))
+  const xs = pts.map((p) => p.x)
+  const ys = pts.map((p) => p.y)
+  return {
+    x: Math.min(...xs),
+    y: Math.min(...ys),
+    w: Math.max(...xs) - Math.min(...xs),
+    h: Math.max(...ys) - Math.min(...ys),
+  }
 }
 
 function centerOf(card: string | null, e: ConnEnd, geom: Map<string, Box>): Pt | null {
@@ -1192,6 +1248,8 @@ export function routeConnector(
   geom: Map<string, Box>,
   rot: Map<string, number>,
   points?: [number, number][],
+  // Jenis bentuk per id kartu, untuk kotak port bentuk yang gambarnya lebih kecil dari kotaknya.
+  shapes?: Map<string, string>,
 ): Routed | null {
   const ca = centerOf(c.from, c.geometry.from, geom)
   const cb = centerOf(c.to, c.geometry.to, geom)
@@ -1201,8 +1259,8 @@ export function routeConnector(
   const raw = (points ?? c.geometry.points ?? []).map(([x, y]) => ({ x, y }))
   const pts =
     !points && an ? elastic(raw, { x: an[0][0], y: an[0][1] }, { x: an[1][0], y: an[1][1] }, ca, cb) : raw
-  const a = resolveEnd(c.from, c.geometry.from, geom, rot, pts[0] ?? cb)
-  const b = resolveEnd(c.to, c.geometry.to, geom, rot, pts.at(-1) ?? ca)
+  const a = resolveEnd(c.from, c.geometry.from, geom, rot, pts[0] ?? cb, shapes)
+  const b = resolveEnd(c.to, c.geometry.to, geom, rot, pts.at(-1) ?? ca, shapes)
   if (!a || !b) return null
   const route = c.geometry.route || 'straight'
   const { d, pts: line } = routePath(a, b, route, pts)

@@ -232,6 +232,12 @@ export async function renderBoard(cards: Card[], connectors: Connector[]): Promi
   ctx.fillRect(box.x - EXPORT_PAD, box.y - EXPORT_PAD, w, h)
 
   const geom = new Map(laid.map((l) => [l.card.id, l.rect]))
+  // Jenis bentuk per kartu: kotak port sama dengan layar (batang fork, lingkaran di kotak tidak persegi).
+  const shapeKinds = new Map(
+    laid.flatMap((l) =>
+      l.card.kind === 'shape' ? [[l.card.id, (l.card.content as ShapeContent).shape]] : [],
+    ) as [string, string][],
+  )
   const images = await Promise.all(
     laid.map((l) =>
       l.card.kind === 'image' && l.card.file?.thumb
@@ -269,7 +275,7 @@ export async function renderBoard(cards: Card[], connectors: Connector[]): Promi
   // Jalur, ujung, dan posisi label sama dengan garis di layar (routeConnector).
   function drawConnector(c: Connector) {
     if (!ctx) return
-    const r = routeConnector(c, geom, rot)
+    const r = routeConnector(c, geom, rot, undefined, shapeKinds)
     if (!r) return
     const color = ink(tok, c.style.color || 'tinta')
     ctx.strokeStyle = color

@@ -72,7 +72,7 @@ try {
   await add(480, 390, 140, 50, shape("uml_object", "Faktur"));
   await link(init.id, act.id);
   await link(act.id, dec.id);
-  await link(dec.id, fork.id);
+  const toFork = (await link(dec.id, fork.id)).body.connector;
   await link(fork.id, a1.id);
   await link(fork.id, a2.id);
   await link(dec.id, ff.id);
@@ -106,12 +106,32 @@ try {
   expect((await ps.locator(`[data-card="${final.id}"] [data-mark]`).count()) === 1, "node akhir", "lingkaran dalam tidak ada");
   expect((await ps.locator(`[data-card="${ff.id}"] [data-mark]`).count()) === 1, "flow final", "silang tidak ada");
 
+  // Ujung garis ke fork menempel di tepi batang 10 px, bukan di tepi kotak 40 px; juga sesudah diputar 90 derajat.
+  const endAt = async () => {
+    const d = await ps.locator(`[data-connector="${toFork.id}"] path`).first().getAttribute("d");
+    const n = (d.match(/-?\d+(\.\d+)?/g) ?? []).map(Number);
+    return { x: n.at(-2), y: n.at(-1) };
+  };
+  const onBar = (p, rotated) => {
+    const cx = fork.x + fork.w / 2;
+    const cy = fork.y + fork.h / 2;
+    const [hw, hh] = rotated ? [5, fork.w / 2] : [fork.w / 2, 5];
+    const inX = p.x >= cx - hw - 1 && p.x <= cx + hw + 1;
+    const inY = p.y >= cy - hh - 1 && p.y <= cy + hh + 1;
+    const edge = Math.abs(Math.abs(p.x - cx) - hw) < 1 || Math.abs(Math.abs(p.y - cy) - hh) < 1;
+    return inX && inY && edge;
+  };
+  const e0 = await endAt();
+  expect(onBar(e0, false), "port fork", `ujung garis ${JSON.stringify(e0)} tidak di tepi batang`);
+
   // Putar fork 90 derajat lewat menu Aksi; Manajer melihat putarannya.
   await ps.locator(`[data-card="${fork.id}"]`).click();
   await ps.getByTestId("wb-selbar").getByRole("button", { name: "Aksi" }).click();
   await ps.getByTestId("wb-menu").getByRole("menuitem", { name: /^Putar 90 derajat/ }).click();
   await saved(ps);
   expect((await cards()).get(fork.id).content.rotation === 90, "putar fork", "rotasi fork tidak 90");
+  const e1 = await endAt();
+  expect(onBar(e1, true), "port fork diputar", `ujung garis ${JSON.stringify(e1)} tidak di tepi batang tegak`);
   await pm.waitForFunction((id) => getComputedStyle(document.querySelector(`[data-card="${id}"]`)).transform !== "none" && document.querySelector(`[data-card="${id}"]`).style.transform.includes("rotate(90deg)"), fork.id, { timeout: 10000 }).catch(() => {});
   expect(await pm.locator(`[data-card="${fork.id}"]`).evaluate((el) => el.style.transform.includes("rotate(90deg)")), "putar fork klien kedua", "Manajer tidak melihat fork diputar");
 
