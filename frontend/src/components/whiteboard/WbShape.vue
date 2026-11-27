@@ -11,6 +11,7 @@ import {
   shapePath,
   laneOrient,
   shapeValign,
+  solidShape,
   strokeScale,
   type ShapeContent,
 } from '../../utils/wbShapes'
@@ -47,7 +48,11 @@ const d = computed(() =>
   shapePath(props.content.shape, Math.max(1, props.w - sw.value), Math.max(1, props.h - sw.value)),
 )
 const fill = computed(() =>
-  openShape(props.content.shape) ? 'none' : (fillVar[props.content.fill] ?? 'none'),
+  openShape(props.content.shape)
+    ? 'none'
+    : solidShape(props.content.shape)
+      ? inkColor(props.content.stroke)
+      : (fillVar[props.content.fill] ?? 'none'),
 )
 const stroke = computed(() => inkColor(props.content.stroke))
 // Balik mendatar dan tegak (revisi 50) hanya membalik gambar bentuk di kotaknya; teks tetap terbaca.

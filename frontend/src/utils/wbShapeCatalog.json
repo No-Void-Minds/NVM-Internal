@@ -142,6 +142,90 @@
       "h": 400
     },
     {
+      "id": "uml_initial",
+      "label": "Node awal atau state awal",
+      "group": "Activity dan state",
+      "w": 40,
+      "h": 40
+    },
+    {
+      "id": "uml_final",
+      "label": "Node akhir atau state akhir",
+      "group": "Activity dan state",
+      "w": 40,
+      "h": 40
+    },
+    {
+      "id": "uml_flow_final",
+      "label": "Flow final",
+      "group": "Activity dan state",
+      "w": 40,
+      "h": 40
+    },
+    {
+      "id": "uml_action",
+      "label": "Aksi",
+      "group": "Activity dan state",
+      "w": 160,
+      "h": 70
+    },
+    {
+      "id": "uml_decision",
+      "label": "Keputusan atau merge",
+      "group": "Activity dan state",
+      "w": 48,
+      "h": 48
+    },
+    {
+      "id": "uml_fork",
+      "label": "Fork atau join",
+      "group": "Activity dan state",
+      "w": 160,
+      "h": 40
+    },
+    {
+      "id": "uml_object",
+      "label": "Object node",
+      "group": "Activity dan state",
+      "w": 140,
+      "h": 60
+    },
+    {
+      "id": "uml_send_signal",
+      "label": "Kirim sinyal",
+      "group": "Activity dan state",
+      "w": 160,
+      "h": 60
+    },
+    {
+      "id": "uml_receive_signal",
+      "label": "Terima sinyal",
+      "group": "Activity dan state",
+      "w": 160,
+      "h": 60
+    },
+    {
+      "id": "uml_state",
+      "label": "State",
+      "group": "Activity dan state",
+      "w": 150,
+      "h": 70
+    },
+    {
+      "id": "uml_choice",
+      "label": "Choice",
+      "group": "Activity dan state",
+      "w": 40,
+      "h": 40
+    },
+    {
+      "id": "uml_state_composite",
+      "label": "State komposit",
+      "group": "Activity dan state",
+      "w": 420,
+      "h": 280
+    },
+    {
       "id": "bpmn_pool",
       "label": "Pool dan lane",
       "group": "BPMN",

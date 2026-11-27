@@ -13,6 +13,7 @@ import {
   routeConnector,
   shapeMarks,
   shapePath,
+  solidShape,
   strokeScale,
   laneOrient,
   textBox,
@@ -510,7 +511,10 @@ function drawShape(ctx: CanvasRenderingContext2D, tok: Tok, c: ShapeContent, r: 
     ctx.translate(c.flip_x ? pw : 0, c.flip_y ? ph : 0)
     ctx.scale(c.flip_x ? -1 : 1, c.flip_y ? -1 : 1)
   }
-  if (!openShape(c.shape) && c.fill) {
+  if (solidShape(c.shape)) {
+    ctx.fillStyle = ink(tok, c.stroke)
+    ctx.fill(path)
+  } else if (!openShape(c.shape) && c.fill) {
     ctx.fillStyle = tok(shapeFill[c.fill] ?? '--color-surface')
     ctx.fill(path)
   }

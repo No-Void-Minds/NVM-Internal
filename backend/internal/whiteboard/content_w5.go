@@ -34,6 +34,10 @@ var (
 		"bpmn_gateway": true, "bpmn_data_object": true, "bpmn_data_store": true, "bpmn_annotation": true,
 		// Wadah ber-lane (revisi 54b)
 		"bpmn_pool": true, "uml_swimlane": true,
+		// Activity dan state machine (revisi 54c)
+		"uml_initial": true, "uml_final": true, "uml_flow_final": true, "uml_action": true, "uml_decision": true,
+		"uml_fork": true, "uml_object": true, "uml_send_signal": true, "uml_receive_signal": true, "uml_state": true,
+		"uml_choice": true, "uml_state_composite": true,
 		// Panah blok
 		"arrow_right": true, "arrow_left": true, "arrow_up": true, "arrow_down": true, "arrow_both": true,
 	}

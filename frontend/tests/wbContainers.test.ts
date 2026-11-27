@@ -93,3 +93,13 @@ test('pool dan swimlane: wadah, lane bawaan, pembatas digambar, judul di pita', 
   assert.ok(d.includes(`M${BAND} 150H600`), d)
   assert.deepEqual(textBox('bpmn_pool', 600, 300), { x: 0, y: 0, w: BAND, h: 300, valign: 'center', vertical: true })
 })
+
+test('activity dan state (54c): node awal dan fork pekat, node akhir bertanda, state komposit wadah', async () => {
+  const { solidShape, shapePath, isContainer: wadah } = await import('../src/utils/wbShapes.ts')
+  assert.ok(solidShape('uml_initial') && solidShape('uml_fork') && !solidShape('uml_action'))
+  assert.equal(shapeMarks({ shape: 'uml_final' }, 40, 40).length, 1)
+  assert.equal(shapeMarks({ shape: 'uml_final' }, 40, 40)[0]!.fill, 'line')
+  assert.ok(wadah('uml_state_composite') && !wadah('uml_state'))
+  // Batang fork 10 px di tengah kotak 40 px.
+  assert.ok(shapePath('uml_fork', 160, 40).startsWith('M0 15L160 15L160 25L0 25'), shapePath('uml_fork', 160, 40))
+})

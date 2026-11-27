@@ -9,6 +9,7 @@ import {
   pushRecent,
   shapeMarks,
   shapePath,
+  solidShape,
   type PaletteEntry,
 } from '../../utils/wbShapes'
 
@@ -128,6 +129,7 @@ function preview(e: PaletteEntry, size: number) {
     marks: shapeMarks({ shape: e.shape, variant: e.variant }, e.w, e.h),
     t: `translate(${(size - e.w * k) / 2} ${(size - e.h * k) / 2}) scale(${k})`,
     open: openShape(e.shape),
+    solid: solidShape(e.shape),
   }
 }
 </script>
@@ -165,7 +167,13 @@ function preview(e: PaletteEntry, size: number) {
           <g :transform="preview(current.e, 88).t">
             <path
               :d="preview(current.e, 88).d"
-              :fill="preview(current.e, 88).open ? 'none' : 'var(--color-surface)'"
+              :fill="
+                preview(current.e, 88).open
+                  ? 'none'
+                  : preview(current.e, 88).solid
+                    ? 'currentColor'
+                    : 'var(--color-surface)'
+              "
               stroke="currentColor"
               stroke-width="2"
               stroke-linejoin="round"
@@ -236,7 +244,13 @@ function preview(e: PaletteEntry, size: number) {
                 <g :transform="preview(e, 36).t">
                   <path
                     :d="preview(e, 36).d"
-                    :fill="preview(e, 36).open ? 'none' : 'var(--color-surface)'"
+                    :fill="
+                      preview(e, 36).open
+                        ? 'none'
+                        : preview(e, 36).solid
+                          ? 'currentColor'
+                          : 'var(--color-surface)'
+                    "
                     stroke="currentColor"
                     stroke-width="1.75"
                     stroke-linejoin="round"

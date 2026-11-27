@@ -276,6 +276,8 @@ type Geo = {
   open?: boolean
   // Pengali tebal garis tepi, mis. event selesai BPMN yang bergaris tebal.
   strokeScale?: number
+  // Diisi warna garis (node awal, batang fork), bukan warna isian.
+  solid?: boolean
   fill?: string
   text?: string
   align?: 'left' | 'center' | 'right'
@@ -497,6 +499,80 @@ const GEO = {
     inset: { top: '8px', bottom: 'auto', left: '10px', right: '10px' },
   }),
   uml_usecase: base('uml_usecase', { text: 'Use case', inset: pct(16, 16, 14, 14) }),
+  // Activity dan state machine (revisi 54c). Batang fork dan join 10 px di tengah kotak minimal 40 px.
+  uml_initial: { path: (w, h) => circ(w / 2, h / 2, Math.min(w, h) / 2), solid: true, inset: BELOW },
+  uml_final: {
+    path: (w, h) => circ(w / 2, h / 2, Math.min(w, h) / 2),
+    marks: (w, h) => [{ d: circ(w / 2, h / 2, Math.min(w, h) / 2 - 6), fill: 'line' }],
+    inset: BELOW,
+  },
+  uml_flow_final: {
+    path: (w, h) => circ(w / 2, h / 2, Math.min(w, h) / 2),
+    marks: (w, h) => {
+      const r = (Math.min(w, h) / 2) * 0.7071
+      const [cx, cy] = [w / 2, h / 2]
+      return [
+        {
+          d: `M${f(cx - r)} ${f(cy - r)}L${f(cx + r)} ${f(cy + r)}M${f(cx + r)} ${f(cy - r)}L${f(cx - r)} ${f(cy + r)}`,
+        },
+      ]
+    },
+    inset: BELOW,
+  },
+  uml_action: { path: (w, h) => roundRect(0, 0, w, h, Math.min(18, h / 2)) },
+  uml_decision: { path: (w, h) => basePath('diamond', w, h), inset: BELOW },
+  uml_fork: {
+    path: (w, h) => {
+      const t = Math.min(10, h)
+      return poly([
+        [0, (h - t) / 2],
+        [w, (h - t) / 2],
+        [w, (h + t) / 2],
+        [0, (h + t) / 2],
+      ])
+    },
+    solid: true,
+    inset: BELOW,
+  },
+  uml_object: base('rect'),
+  uml_send_signal: {
+    path: (w, h) => {
+      const k = Math.min(h * 0.4, w / 3)
+      return poly([
+        [0, 0],
+        [w - k, 0],
+        [w, h / 2],
+        [w - k, h],
+        [0, h],
+      ])
+    },
+    inset: { top: '8px', bottom: '8px', left: '10px', right: '24%' },
+  },
+  uml_receive_signal: {
+    path: (w, h) => {
+      const k = Math.min(h * 0.4, w / 3)
+      return poly([
+        [0, 0],
+        [w, 0],
+        [w, h],
+        [0, h],
+        [k, h / 2],
+      ])
+    },
+    inset: { top: '8px', bottom: '8px', left: '24%', right: '10px' },
+  },
+  uml_state: { path: (w, h) => roundRect(0, 0, w, h, 14), text: 'State' },
+  uml_choice: { path: (w, h) => basePath('diamond', w, h), inset: BELOW },
+  // State komposit: wadah dengan nama di bagian atas yang dipisah garis.
+  uml_state_composite: {
+    path: (w, h) => roundRect(0, 0, w, h, 14),
+    marks: (w) => [{ d: `M0 ${BAND}H${f(w)}` }],
+    container: true,
+    fill: '',
+    text: 'State komposit',
+    valign: 'top',
+    inset: { top: '6px', bottom: 'auto', left: '12px', right: '12px' },
+  },
   uml_swimlane: {
     path: (w, h) => basePath('rect', w, h),
     marks: (w, h, _v, c) => laneMarks(w, h, 'cols', c?.lanes),
@@ -593,6 +669,7 @@ export const laneOrient = (s: string) => geoOf(s).lanes ?? null
 // Bentuk yang garisnya tidak tertutup (aktor, anotasi) digambar tanpa isian.
 export const openShape = (s: string) => !!geoOf(s).open
 export const strokeScale = (s: string) => geoOf(s).strokeScale ?? 1
+export const solidShape = (s: string) => !!geoOf(s).solid
 export const shapeInset = (s: string): Inset => geoOf(s).inset ?? DEFAULT_INSET
 export const shapeValign = (s: string) => geoOf(s).valign ?? 'center'
 export const hasGeometry = (s: string) => s in GEO
