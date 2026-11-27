@@ -172,8 +172,11 @@ function onKey(e: KeyboardEvent) {
       if (dirty) commit(trimmed())
       if (draft.value.rows.length) focusField(draft.value.rows[0]!.id, 'name')
       else addRow(0)
-    } else if (i === draft.value.rows.length - 1) addRow(i + 1)
-    else {
+    } else if (i === draft.value.rows.length - 1) {
+      // Ketikan yang belum tersimpan satu langkah undo sendiri, terpisah dari tambah baris.
+      if (dirty) commit(trimmed())
+      addRow(i + 1)
+    } else {
       if (dirty) commit(trimmed())
       focusField(draft.value.rows[i + 1]!.id, 'name')
     }
@@ -181,6 +184,7 @@ function onKey(e: KeyboardEvent) {
     e.preventDefault()
     const field = (t.dataset.field as 'name' | 'type') ?? 'name'
     const id = rowId!
+    if (dirty) commit(trimmed())
     moveRow(i, i + (e.key === 'ArrowUp' ? -1 : 1))
     pendingFocus = { row: id, field }
   }

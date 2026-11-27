@@ -41,6 +41,7 @@ import {
   portPoint,
   portsFor,
   erdHeight,
+  actionEdited,
   frameBox,
   frameImage,
   isFrame,
@@ -66,6 +67,16 @@ import {
   removeLane,
   swapLanes,
 } from '../utils/wbContainers'
+import {
+  GAP_X,
+  descendants,
+  hiddenByFold,
+  layoutMind,
+  mindTree,
+  newChildSide,
+  sideOf,
+  type MindNode,
+} from '../utils/wbMindmap'
 import { inkColor, penColors } from '../components/whiteboard/wbColors'
 import { caretHint, type CaretHint } from '../components/whiteboard/caret'
 import { ApiError, notifyUnauthorized } from '../api/client'
@@ -517,9 +528,10 @@ const rendered = computed(() => {
     const m = moves.get(c.id)
     return m ? { ...c, x: m.x, y: m.y, w: m.w, h: m.h } : c
   })
-  return readingOrder(list.filter((c) => keep.has(c.id) || intersects(area, c)))
+  const hidden = mind.value.hidden
+  return readingOrder(list.filter((c) => !hidden.has(c.id) && (keep.has(c.id) || intersects(area, c))))
 })
-const ordered = computed(() => readingOrder(shownCards.value))
+const ordered = computed(() => readingOrder(shownCards.value.filter((c) => !mind.value.hidden.has(c.id))))
 
 // Kartu ikut bergeser saat diseret bila kartu itu sendiri atau kolomnya terpilih, atau ia anggota wadah yang
 // sedang diseret (revisi 54b).
@@ -1544,7 +1556,7 @@ async function finishEdit(id: string) {
     after.content_version !== before.version &&
     after.kind !== 'checklist' &&
     after.kind !== 'board' &&
-    (after.content as ShapeContent).shape !== 'erd_table'
+    !actionEdited((after.content as ShapeContent).shape)
   ) {
     record({
       kind: 'content',
@@ -2617,6 +2629,18 @@ function selectionMenu(): MenuItem[] {
       label: 'Tambah pesan ke diri sendiri',
       run: () => void addSelfMessage(one.id),
     })
+  if (isMindCard(one) && one && w) {
+    if (mindKidsOf(one.id))
+      out.push({
+        id: 'mindFold',
+        label: (one.content as ShapeContent).folded ? 'Buka cabang' : 'Lipat cabang',
+        run: () => toggleFold(one.id),
+      })
+    out.push(
+      { id: 'mindChild', label: 'Tambah cabang anak', key: 'Tab', run: () => void addMind(one, 'child') },
+      { id: 'mindTidy', label: 'Rapikan mind map', run: () => asOneStep(() => relayoutMind(one.id)) },
+    )
+  }
   if (one?.kind === 'shape' && isFrame((one.content as ShapeContent).shape) && w) {
     if (!one.file) out.push(mi('replaceFile', 'Isi gambar...'))
     else {
@@ -3704,7 +3728,7 @@ function recordContent(id: string, after: Card['content']) {
   })
 }
 function onCardContent(id: string, after: Card['content']) {
-  if ((after as ShapeContent).shape === 'erd_table') saveTable(id, after as ShapeContent)
+  if (actionEdited((after as ShapeContent).shape)) saveTable(id, after as ShapeContent)
   else if (editingId.value === id) onContent(id, after)
   else recordContent(id, after)
 }
@@ -3714,6 +3738,8 @@ function onCardContent(id: string, after: Card['content']) {
 function saveTable(id: string, after: ShapeContent) {
   const c = byId.value.get(id)
   if (!c || !canWrite.value) return
+  // Garis waktu, corong, dan chevron (revisi 57c) juga satu langkah per aksi, tanpa perubahan tinggi.
+  if (after.shape !== 'erd_table') return recordContent(id, after)
   const h = erdHeight(after.rows?.length ?? 0)
   if (c.h !== h && c.locked) {
     showToast(`Tabel terkunci. Buka kunci dulu (${keyLabel('lock')}) untuk menambah atau menghapus kolom.`)
@@ -4274,9 +4300,216 @@ const connectorIds = ref<string[] | null>(null)
 const dialogConnectors = computed(() =>
   (connectorIds.value ?? []).flatMap((id) => connectors.value.find((c) => c.id === id) ?? []),
 )
-const visibleConnectors = computed(() =>
+const liveConnectors = computed(() =>
   connectors.value.filter((c) => (!c.from || byId.value.has(c.from)) && (!c.to || byId.value.has(c.to))),
 )
+const visibleConnectors = computed(() => {
+  const hidden = mind.value.hidden
+  return hidden.size
+    ? liveConnectors.value.filter((c) => !(c.from && hidden.has(c.from)) && !(c.to && hidden.has(c.to)))
+    : liveConnectors.value
+})
+
+// ---------------------------------------------------------------------------------------------------------------
+// Mind map (revisi 57c): pohon dari garis antar bentuk mind map (utils/wbMindmap.ts), cabang terlipat disembunyikan,
+// Tab menambah anak, Enter menambah cabang sejajar, F2 mengedit, Delete menghapus cabang (tanya bila punya anak).
+// Tata letak otomatis kiri dan kanan topik pusat sesudah tambah, hapus, lipat, dan buka; satu langkah undo bersama.
+const mind = computed(() => {
+  const nodes: MindNode[] = []
+  for (const c of shownCards.value) {
+    const sc = c.kind === 'shape' ? (c.content as ShapeContent) : null
+    if (sc && isMindmap(sc.shape))
+      nodes.push({
+        id: c.id,
+        x: c.x,
+        y: c.y,
+        w: c.w,
+        h: c.h,
+        central: sc.shape === 'mm_central',
+        folded: !!sc.folded,
+      })
+  }
+  const ids = new Set(nodes.map((n) => n.id))
+  const links = liveConnectors.value.flatMap((c) =>
+    c.from && c.to && ids.has(c.from) && ids.has(c.to) ? [{ from: c.from, to: c.to }] : [],
+  )
+  const tree = mindTree(nodes, links)
+  return { nodes, tree, hidden: hiddenByFold(nodes, tree), byId: new Map(nodes.map((n) => [n.id, n])) }
+})
+const mindKidsOf = (id: string) => mind.value.tree.children.get(id)?.length ?? 0
+const mindSideOf = (id: string) =>
+  mind.value.byId.has(id) ? sideOf(mind.value.tree, mind.value.byId, id) : 'right'
+// Tombol lipat di titik keluar garis anak (tengah sisi luar) untuk cabang beranak yang terlihat. Saat cabang terpilih
+// atau diedit tempat itu milik pegangan port dan ubah ukuran, dan saat cabang di layar lebih pendek dari 44 px tombol
+// akan menutupi cabangnya; di kedua keadaan itu lipat lewat menu klik kanan.
+const mindFolds = computed(() => {
+  if (!canWrite.value) return []
+  const s = 44 / view.value.zoom
+  return rendered.value.flatMap((c) => {
+    const kids = mind.value.byId.has(c.id) ? mindKidsOf(c.id) : 0
+    if (!kids || selected.value.has(c.id) || editingId.value === c.id || c.h * view.value.zoom < 44) return []
+    const sc = c.content as ShapeContent
+    const x = mindSideOf(c.id) === 'left' ? c.x : c.x + c.w
+    return [
+      {
+        id: c.id,
+        kids,
+        folded: !!sc.folded,
+        label: sc.text || 'tanpa teks',
+        style: {
+          left: `${x - s / 2}px`,
+          top: `${c.y + c.h / 2 - s / 2}px`,
+          width: `${s}px`,
+          height: `${s}px`,
+        },
+      },
+    ]
+  })
+})
+const isMindCard = (c: Card | undefined) =>
+  c?.kind === 'shape' && isMindmap((c.content as ShapeContent).shape)
+function relayoutMind(anyId: string) {
+  const { nodes, tree } = mind.value
+  const rootId = tree.root.get(anyId)
+  if (!rootId) return
+  const locked = new Set(nodes.filter((n) => byId.value.get(n.id)?.locked).map((n) => n.id))
+  const changes: { id: string; after: Geo }[] = []
+  for (const [id, p] of layoutMind(nodes, tree, rootId, locked)) {
+    const c = byId.value.get(id)
+    if (c && (c.x !== p.x || c.y !== p.y)) changes.push({ id, after: { x: p.x, y: p.y } })
+  }
+  if (changes.length) applyLayout(changes)
+}
+async function addMind(node: Card, kind: 'child' | 'sibling') {
+  if (!canWrite.value) return
+  const { tree, nodes } = mind.value
+  const up = tree.parent.get(node.id)
+  const parentId = kind === 'child' || !up ? node.id : up
+  const parent = byId.value.get(parentId)
+  if (!parent) return
+  const pc = parent.content as ShapeContent
+  // Cabang sejajar meniru gaya cabang itu; anak topik pusat memakai gaya cabang bawaan.
+  const src = (kind === 'sibling' && up ? node : parent).content as ShapeContent
+  const base = newShapeContent('mm_topic')
+  const content: ShapeContent =
+    src.shape === 'mm_topic'
+      ? {
+          ...base,
+          fill: src.fill,
+          stroke: src.stroke,
+          stroke_width: src.stroke_width,
+          stroke_style: src.stroke_style,
+          font_size: src.font_size,
+          text: '',
+        }
+      : { ...base, text: '' }
+  const side = kind === 'sibling' && up ? mindSideOf(node.id) : newChildSide(tree, nodes, parentId)
+  const kids = tree.children.get(parentId) ?? []
+  // Letak awal menentukan urutan di antara saudaranya (diurutkan menurut y): tepat sesudah cabang ini, atau paling
+  // bawah untuk anak baru. Tata letak sesudahnya memindahkan ke tempat akhirnya.
+  const after = kind === 'sibling' && up ? node : kids.length ? byId.value.get(kids.at(-1)!) : null
+  const w = 160
+  const h = 60
+  const x = side === 'right' ? parent.x + parent.w + GAP_X : parent.x - GAP_X - w
+  const y = after ? after.y + 0.5 : parent.y
+  let made: string | null = null
+  await asOneStepAsync(async () => {
+    if (pc.folded) recordContent(parentId, { ...pc, folded: false })
+    const res = await saving(() =>
+      createCard(bid.value, { id: newId(), kind: 'shape', x, y, w, h, color: '', content }),
+    ).catch(() => undefined)
+    if (!res) return
+    upsert([res.card])
+    record({ kind: 'create', ids: [res.card.id] })
+    made = res.card.id
+    const line = await saving(() =>
+      createConnector(bid.value, {
+        from: parentId,
+        to: res.card.id,
+        style: { start: 'none', end: 'none', line: 'solid', color: '' },
+        geometry: { from: { port: 'auto' }, to: { port: 'auto' }, route: 'curved', points: [] },
+      }),
+    ).catch(() => undefined)
+    if (line) {
+      upsertConnectors([line.connector])
+      record({ kind: 'connectors', ids: [line.connector.id], batches: [] })
+    }
+    relayoutMind(parentId)
+  })
+  if (!made) return
+  select([made])
+  announce.value = kind === 'child' ? 'Cabang anak ditambahkan.' : 'Cabang sejajar ditambahkan.'
+  startEdit(made)
+}
+const mindConfirm = ref<{ id: string; count: number; label: string } | null>(null)
+async function deleteMind(node: Card, confirmed = false) {
+  const tree = mind.value.tree
+  const desc = descendants(tree, node.id)
+  const ids = [node.id, ...desc].filter((id) => byId.value.has(id))
+  const locked = ids.filter((id) => byId.value.get(id)?.locked).length
+  if (locked) {
+    lockedToast(locked)
+    return
+  }
+  if (desc.length && !confirmed) {
+    mindConfirm.value = {
+      id: node.id,
+      count: desc.length,
+      label: (node.content as ShapeContent).text || 'cabang ini',
+    }
+    return
+  }
+  const up = tree.parent.get(node.id)
+  await asOneStepAsync(async () => {
+    const res = await deleteIds(ids).catch(() => undefined)
+    if (!res) return
+    removeLocal(ids)
+    record({ kind: 'delete', ids, batch: res.batch })
+    if (up) relayoutMind(up)
+  })
+  if (up) select([up])
+  announce.value = desc.length ? `Cabang dan ${desc.length} cabang di bawahnya dihapus.` : 'Cabang dihapus.'
+}
+function toggleFold(id: string) {
+  const c = byId.value.get(id)
+  if (!c || !canWrite.value) return
+  const sc = c.content as ShapeContent
+  const folded = !sc.folded
+  asOneStep(() => {
+    recordContent(id, { ...sc, folded })
+    relayoutMind(id)
+  })
+  announce.value = folded ? `Cabang dilipat, ${mindKidsOf(id)} anak disembunyikan.` : 'Cabang dibuka.'
+}
+// Pintasan mind map: hanya saat satu bentuk mind map terpilih dan fokus di kanvas atau kartunya (bukan di tombol atau
+// isian di dalamnya). Escape melepas pilihan, jadi Tab kembali berpindah keluar kanvas.
+function onMindKey(e: KeyboardEvent): boolean {
+  if (!canWrite.value || selected.value.size !== 1 || e.ctrlKey || e.metaKey || e.altKey) return false
+  if ((e.target as HTMLElement).closest('button, [role="slider"]')) return false
+  const node = byId.value.get([...selected.value][0]!)
+  if (!isMindCard(node) || !node) return false
+  if (e.key === 'Tab' && !e.shiftKey) {
+    e.preventDefault()
+    void addMind(node, 'child')
+    return true
+  }
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault()
+    void addMind(node, 'sibling')
+    return true
+  }
+  if (e.key === 'F2') {
+    e.preventDefault()
+    startEdit(node.id)
+    return true
+  }
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    e.preventDefault()
+    void deleteMind(node)
+    return true
+  }
+  return false
+}
 function connectorsOf(id: string) {
   return visibleConnectors.value.filter((c) => c.from === id || c.to === id)
 }
@@ -5253,6 +5486,7 @@ function onKeydown(e: KeyboardEvent) {
     // Ctrl+V ditangani event paste, supaya isi clipboard sistem bisa dibaca.
     return
   }
+  if (onMindKey(e)) return
   if (e.altKey) return
   switch (e.key) {
     case 'Enter': {
@@ -5844,6 +6078,7 @@ const toolBtn =
                 :remote="remoteFor(c.id)"
                 :caret="editHint?.id === c.id ? editHint : null"
                 :readonly-by="readonlyFor?.id === c.id ? readonlyFor.name : null"
+                :panning="imagePan === c.id"
                 @focus="focusedId = c.id"
                 @grab="onCardGrab(c, $event)"
                 @resize="(e: PointerEvent, h?: Handle) => onResizeStart(c, e, h)"
@@ -5861,10 +6096,48 @@ const toolBtn =
                 @add-lane="addLaneTo(c.id)"
                 @notice="showToast($event)"
                 @row-port="(r: string, s: 'left' | 'right', e: PointerEvent) => onRowPort(c.id, r, s, e)"
-                :panning="imagePan === c.id"
                 @pan-done="imagePan = null"
               />
             </template>
+            <!-- Tombol lipat cabang mind map (revisi 57c): lapisan sendiri di atas garis, karena tombolnya di titik keluar
+                 garis anak dan garis otomatis digambar di atas kartu ujungnya. -->
+            <button
+              v-for="f in mindFolds"
+              :key="`lipat-${f.id}`"
+              type="button"
+              class="group absolute z-[1000000001] flex items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
+              :style="f.style"
+              :aria-expanded="!f.folded"
+              :aria-label="
+                f.folded
+                  ? `Buka cabang ${f.label}, ${f.kids} anak tersembunyi`
+                  : `Lipat cabang ${f.label}, ${f.kids} anak`
+              "
+              :data-mind-fold="f.id"
+              @pointerdown.stop
+              @dblclick.stop
+              @keydown.enter.stop
+              @keydown.space.stop
+              @click.stop="toggleFold(f.id)"
+            >
+              <!-- Lingkaran kecil terlihat; area sentuhnya seluruh tombol (44 px layar). -->
+              <span
+                class="flex h-1/2 min-w-1/2 items-center justify-center rounded-full border border-line bg-surface px-1 text-xs font-semibold text-ink group-hover:bg-canvas"
+              >
+                <template v-if="f.folded">+{{ f.kids }}</template>
+                <svg
+                  v-else
+                  aria-hidden="true"
+                  viewBox="0 0 16 16"
+                  class="size-3/4"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.75"
+                >
+                  <path d="M3 8h10" />
+                </svg>
+              </span>
+            </button>
             <WbDiagramHandles
               v-if="portHandles.length || selectedStops || tempLine"
               :zoom="view.zoom"
@@ -6422,6 +6695,33 @@ const toolBtn =
       @size="onShapeSize"
       @add-lane="shapeStyleId && addLaneTo(shapeStyleId)"
     />
+    <!-- Revisi 57c: hapus cabang mind map yang punya anak. -->
+    <BaseDialog :open="mindConfirm !== null" title="Hapus cabang?" @close="mindConfirm = null">
+      <div v-if="mindConfirm" class="flex flex-col gap-4 px-5 py-4">
+        <p>
+          {{ mindConfirm.label }} punya {{ mindConfirm.count }} cabang di bawahnya. Semuanya ikut terhapus dan
+          masuk Tempat sampah; Urungkan mengembalikannya.
+        </p>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" :class="btn" @click="mindConfirm = null">Batal</button>
+          <button
+            type="button"
+            :class="btn"
+            class="text-urgent"
+            data-testid="wb-mind-delete-confirm"
+            @click="
+              () => {
+                const c = byId.get(mindConfirm!.id)
+                mindConfirm = null
+                if (c) void deleteMind(c, true)
+              }
+            "
+          >
+            Hapus cabang
+          </button>
+        </div>
+      </div>
+    </BaseDialog>
     <!-- Revisi 56: hapus lane yang berisi kartu; kartunya tidak ikut terhapus. -->
     <BaseDialog :open="laneConfirm !== null" title="Hapus lane?" @close="laneConfirm = null">
       <div v-if="laneConfirm" class="flex flex-col gap-4 px-5 py-4">

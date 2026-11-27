@@ -40,6 +40,59 @@ export type ShapeContent = {
   rows?: ErdRow[]
   // Gambar bingkai (revisi 57b): cara isi dan posisi (persen, seperti object-position). Berkasnya di file kartu.
   image?: FrameImage
+  // Revisi 57c: cabang mind map dilipat, titik peristiwa garis waktu, dan tahap corong atau chevron.
+  folded?: boolean
+  events?: TimelineEvent[]
+  stages?: { label: string }[]
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Garis waktu, corong, dan chevron bertahap (revisi 57c). Bentuk lama tanpa events atau stages tetap digambar
+// seperti revisi 54f (empat titik tetap, satu teks).
+
+export type TimelineEvent = { id: string; label: string; date: string; at: number }
+export const MAX_EVENTS = 30
+export const MAX_STAGES = 10
+export const staged = (c: Pick<ShapeContent, 'shape' | 'stages'>) =>
+  (c.shape === 'funnel' || c.shape === 'chevron') && !!c.stages?.length
+export const timed = (c: Pick<ShapeContent, 'shape' | 'events'>) => c.shape === 'timeline' && !!c.events
+// Bentuk yang diedit lewat editor daftar atau tabel: setiap aksi satu langkah undo, juga selama mode edit.
+export const actionEdited = (s: string) =>
+  s === 'erd_table' || s === 'timeline' || s === 'funnel' || s === 'chevron'
+// Tinggi garis waktu bertitik peristiwa: judul di atas, label di atas garis, tanggal di bawahnya.
+export const TIMELINE_LINE = 0.58
+const CHEVRON_GAP = 6
+const chevronK = (cw: number, h: number) => Math.min(h / 2, cw / 3)
+// Kotak label per tahap di koordinat lokal kartu, sama di layar dan ekspor.
+export function stageBoxes(shape: string, w: number, h: number, n: number): Box[] {
+  if (n <= 0) return []
+  if (shape === 'chevron') {
+    const cw = (w - CHEVRON_GAP * (n - 1)) / n
+    const k = chevronK(cw, h)
+    return Array.from({ length: n }, (_, i) => {
+      const x0 = i * (cw + CHEVRON_GAP) + (i ? k : 0)
+      return { x: x0 + 2, y: 4, w: Math.max(10, cw - k - (i ? k : 0) - 4), h: Math.max(10, h - 8) }
+    })
+  }
+  const band = h / n
+  const edge = (y: number) => (y / h) * w * 0.34
+  return Array.from({ length: n }, (_, i) => {
+    const inset = edge((i + 1) * band) + 4
+    return { x: inset, y: i * band, w: Math.max(10, w - 2 * inset), h: band }
+  })
+}
+export const eventX = (w: number, at: number) => (w * Math.min(100, Math.max(0, at))) / 100
+// Peristiwa baru di tengah celah terlebar (atau di ujung kanan bila belum ada).
+export function newEventAt(events: TimelineEvent[]): number {
+  const xs = [0, ...events.map((e) => e.at).sort((a, b) => a - b), 100]
+  let best = 0
+  let at = 50
+  for (let i = 0; i + 1 < xs.length; i++)
+    if (xs[i + 1]! - xs[i]! > best) {
+      best = xs[i + 1]! - xs[i]!
+      at = (xs[i]! + xs[i + 1]!) / 2
+    }
+  return Math.round(at * 10) / 10
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -166,6 +219,19 @@ export function newShapeContent(shape: ShapeType, variant?: string): ShapeConten
     align: g.align ?? 'center',
     font_size: g.fontSize ?? 16,
     ...(shape === 'uml_class' ? { name: 'Kelas', attributes: '', methods: '' } : {}),
+    ...(shape === 'timeline'
+      ? {
+          events: [8, 36, 64, 92].map((at, i) => ({
+            id: newRowId([]),
+            label: `Peristiwa ${i + 1}`,
+            date: '',
+            at,
+          })),
+        }
+      : {}),
+    ...(shape === 'funnel' || shape === 'chevron'
+      ? { stages: [1, 2, 3].map((i) => ({ label: `Tahap ${i}` })) }
+      : {}),
     ...(shape === 'erd_table'
       ? {
           name: 'tabel',
@@ -355,8 +421,13 @@ export type Mark = {
 // Port sisi yang tidak di tengah sisi kotak port, mis. tangan aktor (sepertiga atas, bukan tengah tinggi).
 export type PortBox = Box & { side?: Partial<Record<'top' | 'right' | 'bottom' | 'left', Pt>> }
 type Geo = {
-  path: (w: number, h: number) => string
-  marks?: (w: number, h: number, variant: string, c?: Pick<ShapeContent, 'lanes'>) => Mark[]
+  path: (w: number, h: number, c?: Pick<ShapeContent, 'stages' | 'events'>) => string
+  marks?: (
+    w: number,
+    h: number,
+    variant: string,
+    c?: Pick<ShapeContent, 'lanes' | 'stages' | 'events'>,
+  ) => Mark[]
   inset?: Inset
   valign?: 'top' | 'center'
   // Garis terbuka (tanpa isian), mis. aktor dan anotasi.
@@ -1029,7 +1100,24 @@ const GEO = {
     inset: { top: '8px', bottom: '28%', left: '12px', right: '12px' },
   },
   chevron: {
-    path: (w, h) => {
+    path: (w, h, c) => {
+      const n = c?.stages?.length ?? 0
+      if (n > 0) {
+        // Deret chevron (revisi 57c): yang pertama berpangkal datar.
+        const cw = (w - CHEVRON_GAP * (n - 1)) / n
+        const k = chevronK(cw, h)
+        return Array.from({ length: n }, (_, i) => {
+          const x0 = i * (cw + CHEVRON_GAP)
+          return poly([
+            [x0, 0],
+            [x0 + cw - k, 0],
+            [x0 + cw, h / 2],
+            [x0 + cw - k, h],
+            [x0, h],
+            [x0 + (i ? k : 0), h / 2],
+          ])
+        }).join('')
+      }
       const k = Math.min(h / 2, w / 3)
       return poly([
         [0, 0],
@@ -1043,16 +1131,32 @@ const GEO = {
     inset: pct(10, 10, 22, 22),
   },
   funnel: {
-    path: (w, h) =>
-      poly([
-        [0, 0],
-        [w, 0],
-        [w * 0.62, h * 0.62],
-        [w * 0.62, h],
-        [w * 0.38, h],
-        [w * 0.38, h * 0.62],
-      ]),
-    marks: (w, h) => {
+    path: (w, h, c) =>
+      c?.stages?.length
+        ? poly([
+            [0, 0],
+            [w, 0],
+            [w * 0.66, h],
+            [w * 0.34, h],
+          ])
+        : poly([
+            [0, 0],
+            [w, 0],
+            [w * 0.62, h * 0.62],
+            [w * 0.62, h],
+            [w * 0.38, h],
+            [w * 0.38, h * 0.62],
+          ]),
+    marks: (w, h, _v, c) => {
+      const n = c?.stages?.length ?? 0
+      if (n > 0) {
+        // Corong bertahap (revisi 57c): pemisah di batas tiap tahap; tepi kiri di tinggi y: x = (y / h) x 0,34w.
+        const edge = (y: number) => (y / h) * w * 0.34
+        return Array.from({ length: n - 1 }, (_, i) => {
+          const y = ((i + 1) * h) / n
+          return { d: `M${f(edge(y))} ${f(y)}H${f(w - edge(y))}` }
+        })
+      }
       // Tepi kiri corong di tinggi y: x = (y / 0,62h) x 0,38w.
       const edge = (y: number) => (y / (h * 0.62)) * w * 0.38
       return [0.21, 0.42].map((k) => ({ d: `M${f(edge(h * k))} ${f(h * k)}H${f(w - edge(h * k))}` }))
@@ -1061,9 +1165,11 @@ const GEO = {
     inset: { top: '4px', bottom: 'auto', left: '14%', right: '14%' },
   },
   timeline: {
-    path: (w, h) => `M0 ${f(h * 0.7)}H${f(w)}`,
-    marks: (w, h) =>
-      [0.08, 0.36, 0.64, 0.92].map((k) => ({ d: circ(w * k, h * 0.7, 6), fill: 'line' as const })),
+    path: (w, h, c) => `M0 ${f(h * (c?.events ? TIMELINE_LINE : 0.7))}H${f(w)}`,
+    marks: (w, h, _v, c) =>
+      c?.events
+        ? c.events.map((e) => ({ d: circ(eventX(w, e.at), h * TIMELINE_LINE, 6), fill: 'line' as const }))
+        : [0.08, 0.36, 0.64, 0.92].map((k) => ({ d: circ(w * k, h * 0.7, 6), fill: 'line' as const })),
     open: true,
     fill: '',
     text: 'Garis waktu',
@@ -1158,9 +1264,10 @@ const GEO = {
 } satisfies Record<string, Geo>
 
 const geoOf = (s: string): Geo => (GEO as Record<string, Geo>)[s] ?? GEO.rect
-export const shapePath = (shape: string, w: number, h: number) => geoOf(shape).path(w, h)
+export const shapePath = (shape: string, w: number, h: number, c?: Pick<ShapeContent, 'stages' | 'events'>) =>
+  geoOf(shape).path(w, h, c)
 export const shapeMarks = (
-  c: Pick<ShapeContent, 'shape' | 'variant' | 'lanes'>,
+  c: Pick<ShapeContent, 'shape' | 'variant' | 'lanes' | 'stages' | 'events'>,
   w: number,
   h: number,
 ): Mark[] => geoOf(c.shape).marks?.(w, h, c.variant || shapeInfo(c.shape)?.variants?.[0]?.id || '', c) ?? []

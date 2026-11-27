@@ -96,3 +96,40 @@ func TestPengaturanGambarBingkai(t *testing.T) {
 		}
 	}
 }
+
+// Revisi 57c: peristiwa hanya di garis waktu, tahap hanya di corong dan chevron, lipat hanya di mind map; batas jumlah
+// dan nilai, dan teks ikut pencarian.
+func TestPeristiwaTahapLipat(t *testing.T) {
+	shape := func(s, extra string) json.RawMessage {
+		return json.RawMessage(`{"shape":"` + s + `","rotation":0,"fill":"","stroke":"tinta","stroke_width":2,"stroke_style":"solid","text":"Rilis","align":"center","font_size":16` + extra + `}`)
+	}
+	out, plain, err := CleanShape(shape("timeline", `,"events":[{"id":"e1","label":"Uji coba","date":"Q3 2026","at":33.33}]`))
+	if err != nil || len(out.Events) != 1 || out.Events[0].At != 33.3 || plain != "Rilis\nUji coba Q3 2026" {
+		t.Fatalf("garis waktu: %+v %q %v", out.Events, plain, err)
+	}
+	if out, plain, err := CleanShape(shape("chevron", `,"stages":[{"label":"Riset"},{"label":"Desain"}]`)); err != nil || len(out.Stages) != 2 || plain != "Rilis\nRiset\nDesain" {
+		t.Fatalf("chevron: %+v %q %v", out.Stages, plain, err)
+	}
+	if out, _, err := CleanShape(shape("mm_topic", `,"folded":true`)); err != nil || !out.Folded {
+		t.Fatalf("lipat: %v", err)
+	}
+	many := make([]string, MaxTimelineEvents+1)
+	for i := range many {
+		many[i] = fmt.Sprintf(`{"id":"e%d","label":"","date":"","at":10}`, i)
+	}
+	stages := strings.Repeat(`{"label":"t"},`, MaxStages) + `{"label":"t"}`
+	for _, bad := range [][2]string{
+		{"rect", `,"events":[{"id":"e1","label":"","date":"","at":1}]`},
+		{"timeline", `,"events":[` + strings.Join(many, ",") + `]`},
+		{"timeline", `,"events":[{"id":"e1","label":"","date":"","at":101}]`},
+		{"timeline", `,"events":[{"id":"e1","label":"","date":"","at":1},{"id":"e1","label":"","date":"","at":2}]`},
+		{"timeline", `,"events":[{"id":"e1","label":"","date":"` + strings.Repeat("d", 41) + `","at":1}]`},
+		{"rect", `,"stages":[{"label":"a"}]`},
+		{"funnel", `,"stages":[` + stages + `]`},
+		{"rect", `,"folded":true`},
+	} {
+		if _, _, err := CleanShape(shape(bad[0], bad[1])); err == nil {
+			t.Errorf("diterima: %s %.60s", bad[0], bad[1])
+		}
+	}
+}

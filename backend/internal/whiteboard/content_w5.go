@@ -108,6 +108,10 @@ type ShapeContent struct {
 	Rows []ShapeRow `json:"rows,omitempty"`
 	// Image: cara gambar bingkai ditampilkan (revisi 57b); berkasnya sendiri di wb_cards.file_id, bukan di sini.
 	Image *ShapeImage `json:"image,omitempty"`
+	// Revisi 57c: Folded cabang mind map dilipat; Events titik peristiwa garis waktu; Stages tahap corong dan chevron.
+	Folded bool         `json:"folded,omitempty"`
+	Events []ShapeEvent `json:"events,omitempty"`
+	Stages []ShapeStage `json:"stages,omitempty"`
 	// Pasangan dokumen berformat (revisi 49); teks di atas tetap teks polosnya.
 	Doc           *Node `json:"doc,omitempty"`
 	NameDoc       *Node `json:"name_doc,omitempty"`
@@ -167,6 +171,69 @@ func cleanImage(shape string, im *ShapeImage) (*ShapeImage, error) {
 		return nil, apperr.Invalid("Posisi gambar harus 0 sampai 100 persen.")
 	}
 	return &ShapeImage{Fit: im.Fit, X: math.Round(im.X*10) / 10, Y: math.Round(im.Y*10) / 10}, nil
+}
+
+// ShapeEvent: titik peristiwa garis waktu (revisi 57c). At posisi di sepanjang garis, 0 sampai 100 persen; Date teks
+// bebas (mis. "Q3 2026" atau "12 Des"), bukan tanggal yang diurai.
+type ShapeEvent struct {
+	ID    string  `json:"id"`
+	Label string  `json:"label"`
+	Date  string  `json:"date"`
+	At    float64 `json:"at"`
+}
+
+// ShapeStage: satu tahap corong atau chevron (revisi 57c).
+type ShapeStage struct {
+	Label string `json:"label"`
+}
+
+const (
+	MaxTimelineEvents = 30
+	MaxStages         = 10
+	maxStageLabel     = 100
+	maxEventDate      = 40
+)
+
+func cleanEvents(events []ShapeEvent) ([]ShapeEvent, error) {
+	if len(events) > MaxTimelineEvents {
+		return nil, apperr.Invalid(fmt.Sprintf("Garis waktu paling banyak %d peristiwa.", MaxTimelineEvents))
+	}
+	out := make([]ShapeEvent, len(events))
+	seen := map[string]bool{}
+	for i, e := range events {
+		if !ValidRowID(e.ID) || seen[e.ID] {
+			return nil, apperr.Invalid("Id peristiwa tidak sah atau ganda.")
+		}
+		seen[e.ID] = true
+		label, err := CleanText(e.Label, maxStageLabel, "Label peristiwa")
+		if err != nil {
+			return nil, err
+		}
+		date, err := CleanText(e.Date, maxEventDate, "Tanggal peristiwa")
+		if err != nil {
+			return nil, err
+		}
+		if !finite(e.At) || e.At < 0 || e.At > 100 {
+			return nil, apperr.Invalid("Posisi peristiwa harus 0 sampai 100 persen.")
+		}
+		out[i] = ShapeEvent{ID: e.ID, Label: label, Date: date, At: math.Round(e.At*10) / 10}
+	}
+	return out, nil
+}
+
+func cleanStages(stages []ShapeStage) ([]ShapeStage, error) {
+	if len(stages) > MaxStages {
+		return nil, apperr.Invalid(fmt.Sprintf("Tahap paling banyak %d.", MaxStages))
+	}
+	out := make([]ShapeStage, len(stages))
+	for i, st := range stages {
+		label, err := CleanText(st.Label, maxStageLabel, "Label tahap")
+		if err != nil {
+			return nil, err
+		}
+		out[i] = ShapeStage{Label: label}
+	}
+	return out, nil
 }
 
 // shapeOf: jenis bentuk dari isi kartu tersimpan (kosong bila bukan bentuk).
@@ -340,6 +407,21 @@ func CleanShape(raw json.RawMessage) (ShapeContent, string, error) {
 	if out.Image, err = cleanImage(in.Shape, in.Image); err != nil {
 		return in, "", err
 	}
+	if in.Folded && !strings.HasPrefix(in.Shape, "mm_") {
+		return in, "", apperr.Invalid("Lipat cabang hanya untuk bentuk mind map.")
+	}
+	if len(in.Events) > 0 && in.Shape != "timeline" {
+		return in, "", apperr.Invalid("Peristiwa hanya untuk garis waktu.")
+	}
+	if len(in.Stages) > 0 && in.Shape != "funnel" && in.Shape != "chevron" {
+		return in, "", apperr.Invalid("Tahap hanya untuk corong dan chevron.")
+	}
+	if out.Events, err = cleanEvents(in.Events); err != nil {
+		return in, "", err
+	}
+	if out.Stages, err = cleanStages(in.Stages); err != nil {
+		return in, "", err
+	}
 	out.Rows = nil
 	out.Name, out.Attributes, out.Methods = "", "", ""
 	out.NameDoc, out.AttributesDoc, out.MethodsDoc = nil, nil, nil
@@ -349,12 +431,21 @@ func CleanShape(raw json.RawMessage) (ShapeContent, string, error) {
 	if out.Lanes, err = cleanLanes(in.Shape, in.Lanes); err != nil {
 		return in, "", err
 	}
-	// Label lane ikut pencarian.
+	// Label lane, peristiwa, dan tahap ikut pencarian.
 	plain := out.Text
-	for _, l := range out.Lanes {
-		if l.Label != "" {
-			plain = strings.TrimSpace(plain + "\n" + l.Label)
+	add := func(v string) {
+		if v != "" {
+			plain = strings.TrimSpace(plain + "\n" + v)
 		}
+	}
+	for _, l := range out.Lanes {
+		add(l.Label)
+	}
+	for _, e := range out.Events {
+		add(strings.TrimSpace(e.Label + " " + e.Date))
+	}
+	for _, st := range out.Stages {
+		add(st.Label)
 	}
 	return out, plain, nil
 }

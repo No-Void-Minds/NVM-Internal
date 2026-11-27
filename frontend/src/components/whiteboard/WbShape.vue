@@ -4,6 +4,7 @@ import type { PMNode } from '../../utils/whiteboard'
 import WbRichField, { activateField } from './WbRichField.vue'
 import WbRichText from './WbRichText'
 import WbErdTable from './WbErdTable.vue'
+import WbItemsEditor from './WbItemsEditor.vue'
 import { inkColor } from './wbColors'
 import {
   openShape,
@@ -17,6 +18,13 @@ import {
   laneBandOf,
   laneOrient,
   defaultText,
+  eventX,
+  isMindmap,
+  stageBoxes,
+  staged,
+  timed,
+  TIMELINE_LINE,
+  type TimelineEvent,
   frameBox,
   frameImage,
   isFrame,
@@ -71,7 +79,12 @@ const sw = computed(() => props.content.stroke_width * strokeScale(props.content
 // Garis tepi digambar di dalam kotak: path dikecilkan setengah tebal garis supaya tidak terpotong tepi SVG.
 const inset = computed(() => sw.value / 2)
 const d = computed(() =>
-  shapePath(props.content.shape, Math.max(1, props.w - sw.value), Math.max(1, props.h - sw.value)),
+  shapePath(
+    props.content.shape,
+    Math.max(1, props.w - sw.value),
+    Math.max(1, props.h - sw.value),
+    props.content,
+  ),
 )
 const fill = computed(() =>
   openShape(props.content.shape)
@@ -90,7 +103,84 @@ const pathTransform = computed(() => {
 })
 const isClass = computed(() => props.content.shape === 'uml_class')
 const isTable = computed(() => props.content.shape === 'erd_table')
-
+// Revisi 57c: garis waktu, corong, dan chevron diedit lewat editor daftar; mind map satu baris (Enter selesai, lalu
+// Enter lagi menambah cabang sejajar).
+const listEdit = computed(() => ['timeline', 'funnel', 'chevron'].includes(props.content.shape))
+const isMind = computed(() => isMindmap(props.content.shape))
+const stages = computed(() =>
+  staged(props.content)
+    ? stageBoxes(props.content.shape, props.w, props.h, props.content.stages!.length)
+    : [],
+)
+const lineY = computed(() => props.h * TIMELINE_LINE)
+const evDraft = ref<{ id: string; at: number } | null>(null)
+const evAt = (e: TimelineEvent) => (evDraft.value?.id === e.id ? evDraft.value.at : e.at)
+const evStyle = (e: TimelineEvent, part: 'label' | 'date') => {
+  const x = Math.min(Math.max(eventX(props.w, evAt(e)), 0), props.w)
+  const w = 140
+  const left = Math.min(Math.max(x - w / 2, -20), props.w - w + 20)
+  return part === 'label'
+    ? { left: `${left}px`, width: `${w}px`, top: '24px', height: `${Math.max(16, lineY.value - 36)}px` }
+    : {
+        left: `${left}px`,
+        width: `${w}px`,
+        top: `${lineY.value + 12}px`,
+        height: `${Math.max(16, props.h - lineY.value - 12)}px`,
+      }
+}
+const dotsOn = computed(() => timed(props.content) && props.selected && props.canWrite && !props.editing)
+function dotStyle(e: TimelineEvent) {
+  const s = 44 / (props.zoom || 1)
+  return {
+    left: `${eventX(props.w, evAt(e)) - s / 2}px`,
+    top: `${lineY.value - s / 2}px`,
+    width: `${s}px`,
+    height: `${s}px`,
+  }
+}
+const pct1 = (v: number) => Math.round(Math.min(100, Math.max(0, v)) * 10) / 10
+function saveEvent(id: string, at: number) {
+  evDraft.value = null
+  const list = (props.content.events ?? [])
+    .map((e) => (e.id === id ? { ...e, at } : e))
+    .sort((a, b) => a.at - b.at)
+  if (JSON.stringify(list) !== JSON.stringify(props.content.events))
+    emit('save', { ...props.content, events: list })
+}
+function onDotDown(e: TimelineEvent, ev: PointerEvent) {
+  if (ev.button !== 0) return
+  const x0 = ev.clientX
+  const start = e.at
+  const z = props.zoom || 1
+  const move = (m: PointerEvent) => {
+    evDraft.value = { id: e.id, at: pct1(start + ((m.clientX - x0) / z / props.w) * 100) }
+  }
+  const up = () => {
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', up)
+    window.removeEventListener('pointercancel', up)
+    if (evDraft.value) saveEvent(e.id, evDraft.value.at)
+  }
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', up)
+  window.addEventListener('pointercancel', up)
+}
+function onDotKey(e: TimelineEvent, ev: KeyboardEvent) {
+  const d =
+    ev.key === 'ArrowLeft'
+      ? -1
+      : ev.key === 'ArrowRight'
+        ? 1
+        : ev.key === 'Home'
+          ? -100
+          : ev.key === 'End'
+            ? 100
+            : 0
+  if (!d) return
+  ev.preventDefault()
+  ev.stopPropagation()
+  saveEvent(e.id, pct1(e.at + d * (ev.shiftKey && Math.abs(d) === 1 ? 5 : 1)))
+}
 // Gambar bingkai (revisi 57b): di layar bingkai dengan object-fit dan object-position dari isi bentuk. Mode geser:
 // seret gambar atau panah (Shift 1 persen) mengubah posisi, satu langkah undo per seret atau per tombol; Enter atau
 // Escape selesai.
@@ -370,7 +460,7 @@ const draft = ref<ShapeContent>({ ...props.content })
 watch(
   () => props.editing,
   (on) => {
-    if (!on || isTable.value) return
+    if (!on || isTable.value || listEdit.value) return
     draft.value = { ...props.content }
     activateField(key(isClass.value ? 'name' : 'text'))
   },
@@ -552,15 +642,16 @@ const field = 'block w-full'
       @keydown="orient && !guards && canDivide ? onLabelKey('title', $event) : undefined"
     >
       <WbRichField
-        v-if="editing"
+        v-if="editing && !listEdit"
         :field-key="key('text')"
         :text="content.text"
         :doc="content.doc"
         label="Teks bentuk"
-        :single-line="false"
+        :single-line="isMind"
         class="max-h-full w-full overflow-auto leading-snug"
         @input="input('text', $event)"
         @commit="save('text', $event)"
+        @enter="isMind && emit('close')"
         @close="emit('close')"
       />
       <WbRichText
@@ -569,13 +660,72 @@ const field = 'block w-full'
         class="max-h-full w-full overflow-hidden leading-snug [overflow-wrap:anywhere]"
       />
       <p
-        v-else-if="content.text && !hideText"
+        v-else-if="content.text && !hideText && !stages.length"
         data-caret
         class="max-h-full w-full overflow-hidden leading-snug break-words whitespace-pre-wrap [overflow-wrap:anywhere]"
       >
         {{ content.text }}
       </p>
     </div>
+
+    <!-- Revisi 57c: label tahap corong dan chevron, label dan tanggal peristiwa garis waktu. -->
+    <p
+      v-for="(b, i) in stages"
+      :key="`tahap-${i}`"
+      class="absolute flex items-center justify-center overflow-hidden px-1 text-center text-sm leading-tight break-words text-ink"
+      :style="{ left: `${b.x}px`, top: `${b.y}px`, width: `${b.w}px`, height: `${b.h}px` }"
+      data-stage
+    >
+      {{ content.stages![i]!.label }}
+    </p>
+    <template v-if="timed(content)">
+      <template v-for="e in content.events" :key="e.id">
+        <p
+          class="absolute flex items-end justify-center overflow-hidden text-center text-sm leading-tight font-semibold break-words text-ink"
+          :style="evStyle(e, 'label')"
+          :data-event="e.id"
+        >
+          {{ e.label }}
+        </p>
+        <p
+          class="absolute flex items-start justify-center overflow-hidden text-center text-xs leading-tight text-ink-muted"
+          :style="evStyle(e, 'date')"
+          :data-event-date="e.id"
+        >
+          {{ e.date }}
+        </p>
+      </template>
+    </template>
+    <template v-if="dotsOn">
+      <button
+        v-for="e in content.events"
+        :key="`titik-${e.id}`"
+        type="button"
+        role="slider"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        :aria-valuenow="evAt(e)"
+        :aria-label="`Posisi ${e.label || 'peristiwa'}, panah kiri atau kanan untuk menggeser`"
+        class="absolute flex cursor-ew-resize items-center justify-center focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
+        :style="dotStyle(e)"
+        :data-event-dot="e.id"
+        @pointerdown.stop.prevent="onDotDown(e, $event)"
+        @dblclick.stop
+        @keydown="onDotKey(e, $event)"
+      >
+        <span class="size-1/3 rounded-full border-2 border-mark bg-surface" />
+      </button>
+    </template>
+    <WbItemsEditor
+      v-if="editing && listEdit"
+      :content="content"
+      :w="w"
+      :zoom="zoom"
+      @save="emit('save', $event)"
+      @live="emit('live', $event)"
+      @close="emit('close')"
+      @notice="emit('notice', $event)"
+    />
 
     <!-- Operator fragmen di tabnya (alt, opt, loop, par). -->
     <p

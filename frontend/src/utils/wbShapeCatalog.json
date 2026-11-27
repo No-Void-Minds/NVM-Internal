@@ -783,22 +783,22 @@
       "id": "chevron",
       "label": "Chevron",
       "group": "Lainnya",
-      "w": 180,
+      "w": 480,
       "h": 70
     },
     {
       "id": "funnel",
       "label": "Corong",
       "group": "Lainnya",
-      "w": 160,
-      "h": 140
+      "w": 240,
+      "h": 180
     },
     {
       "id": "timeline",
       "label": "Garis waktu",
       "group": "Lainnya",
-      "w": 420,
-      "h": 80
+      "w": 520,
+      "h": 130
     }
   ]
 }

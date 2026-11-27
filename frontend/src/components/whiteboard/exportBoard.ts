@@ -26,6 +26,11 @@ import {
   ERD_ROW,
   keyLabel,
   defaultText,
+  eventX,
+  stageBoxes,
+  staged,
+  timed,
+  TIMELINE_LINE,
   fitImage,
   frameBox,
   frameImage,
@@ -537,7 +542,7 @@ function drawShape(
   ctx.translate(-r.w / 2, -r.h / 2)
   const pw = Math.max(1, r.w - sw)
   const ph = Math.max(1, r.h - sw)
-  const path = new Path2D(shapePath(c.shape, pw, ph))
+  const path = new Path2D(shapePath(c.shape, pw, ph, c))
   ctx.save()
   ctx.translate(sw / 2, sw / 2)
   // Balik mendatar dan tegak (revisi 50): hanya path bentuknya, teks digambar sesudahnya tanpa dibalik.
@@ -673,7 +678,7 @@ function drawShape(
       if (name)
         drawLine(ctx, tok, name, nameX, y + (ERD_ROW - lineHeight(name)) / 2, r.w - nameX - typeW - 14, ink0)
     })
-  } else if (c.text && !(framed && c.text === defaultText(c.shape))) {
+  } else if (c.text && !(framed && c.text === defaultText(c.shape)) && !staged(c)) {
     // Area teks dari definisi bentuk (revisi 54), sama dengan layar: judul di atas untuk batas sistem, label di bawah
     // untuk event dan gateway.
     const t = textBox(c.shape, r.w, r.h)
@@ -696,6 +701,35 @@ function drawShape(
       y += lineHeight(l)
     }
     ctx.restore()
+  }
+  // Revisi 57c: label tahap corong dan chevron, label dan tanggal peristiwa garis waktu, sama dengan WbShape.vue.
+  if (staged(c))
+    stageBoxes(c.shape, r.w, r.h, c.stages!.length).forEach((b, i) => {
+      const ls = lay(c.stages![i]!.label, null, Math.max(10, b.w - 4)).slice(
+        0,
+        Math.max(1, Math.floor(b.h / 18)),
+      )
+      const total = ls.reduce((n, l) => n + lineHeight(l), 0)
+      let y = b.y + (b.h - total) / 2
+      for (const l of ls) {
+        drawLine(ctx, tok, l, b.x + 2, y, Math.max(10, b.w - 4), ink0, 'center')
+        y += lineHeight(l)
+      }
+    })
+  if (timed(c)) {
+    const ly = r.h * TIMELINE_LINE
+    for (const e of c.events!) {
+      const x = eventX(r.w, e.at)
+      const left = Math.min(Math.max(x - 70, -20), r.w - 120)
+      const label = wrapLine(ctx, tok, { text: e.label, size: 14, bold: true }, 140).slice(-2)
+      let y = ly - 12 - label.reduce((n, l) => n + lineHeight(l), 0)
+      for (const l of label) {
+        drawLine(ctx, tok, l, left, y, 140, ink0, 'center')
+        y += lineHeight(l)
+      }
+      const date = wrapLine(ctx, tok, { text: e.date, size: 12 }, 140)[0]
+      if (date && e.date) drawLine(ctx, tok, date, left, ly + 12, 140, tok('--color-ink-muted'), 'center')
+    }
   }
   // Label lane, sama dengan WbShape.vue: tegak di pita kedua pool, mendatar di pita kedua swimlane.
   const orient = laneOrient(c.shape)
