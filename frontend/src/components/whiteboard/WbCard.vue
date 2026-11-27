@@ -54,6 +54,9 @@ const props = defineProps<{
   rotation?: number | null
   // Peringkat tumpuk di antara kartu dan garis (revisi 53); tanpa itu z tersimpan dibulatkan.
   layer?: number
+  // Revisi 56: orang lain yang memegang kunci lunak kartu ini, dan permintaan edit nama lane dari menu.
+  lockedBy?: string | null
+  laneEdit?: { index: number | 'title'; nonce: number } | null
 }>()
 const emit = defineEmits<{
   grab: [e: PointerEvent]
@@ -69,6 +72,8 @@ const emit = defineEmits<{
   table: [op: TableOp]
   content: [content: Card['content']]
   comments: []
+  addLane: []
+  notice: [msg: string]
 }>()
 
 const root = ref<HTMLElement | null>(null)
@@ -334,6 +339,10 @@ function onPointerDown(e: PointerEvent) {
       :selected="selected"
       :can-write="canWrite"
       :zoom="zoom"
+      :locked-by="lockedBy"
+      :lane-edit="laneEdit"
+      @add-lane="emit('addLane')"
+      @notice="emit('notice', $event)"
       @save="emit('content', $event)"
       @live="emit('live', $event)"
       @close="emit('close')"

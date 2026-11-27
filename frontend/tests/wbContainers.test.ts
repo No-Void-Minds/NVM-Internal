@@ -336,3 +336,35 @@ test('lainnya (54f): kelompok baru, mind map, kotak centang, garis waktu, corong
   const [x1, , x2] = (d.match(/-?\d+(\.\d+)?/g) ?? []).map(Number)
   assert.ok(x1! > 0 && x2! < 160 && x1! < x2!, d)
 })
+
+test('lane di kanvas (56): lane di titik, hapus minimal satu, tukar urutan', async () => {
+  const c = await import('../src/utils/wbContainers.ts')
+  const lanes = [
+    { label: 'Penjual', size: 150 },
+    { label: 'Gudang', size: 150 },
+    { label: 'Kurir', size: 100 },
+  ]
+  // Pool 600 x 400: lane 0 tinggi 150, lane 1 150, lane 2 100; pita 32 px di kiri bukan lane.
+  assert.equal(c.laneIndexAt(lanes, 600, 400, 'rows', { x: 300, y: 10 }), 0)
+  assert.equal(c.laneIndexAt(lanes, 600, 400, 'rows', { x: 300, y: 160 }), 1)
+  assert.equal(c.laneIndexAt(lanes, 600, 400, 'rows', { x: 300, y: 390 }), 2)
+  assert.equal(c.laneIndexAt(lanes, 600, 400, 'rows', { x: 10, y: 160 }), null)
+  // Fragmen tanpa pita: x 10 sudah di dalam operand.
+  assert.equal(c.laneIndexAt(lanes, 600, 400, 'rows', { x: 10, y: 160 }, 0), 1)
+  assert.equal(c.laneIndexAt(lanes, 600, 400, 'cols', { x: 250, y: 200 }), 1)
+  assert.deepEqual(
+    c.removeLane(lanes, 1).map((l) => l.label),
+    ['Penjual', 'Kurir'],
+  )
+  const one = [{ label: 'Sendiri', size: 100 }]
+  assert.equal(c.removeLane(one, 0), one)
+  assert.deepEqual(
+    c.swapLanes(lanes, 0, 1).map((l) => [l.label, l.size]),
+    [
+      ['Gudang', 150],
+      ['Penjual', 150],
+      ['Kurir', 100],
+    ],
+  )
+  assert.equal(c.swapLanes(lanes, 2, 3), lanes)
+})

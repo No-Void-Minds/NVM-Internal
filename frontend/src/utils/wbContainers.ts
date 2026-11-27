@@ -100,3 +100,32 @@ export function addLane(lanes: Lane[], span: number): { lanes: Lane[]; grow: num
     grow: Math.round(avg * k),
   }
 }
+
+// Revisi 56: lane di titik lokal p (koordinat bentuk tanpa putar), untuk menu klik kanan pada lane.
+export function laneIndexAt(
+  lanes: Lane[],
+  w: number,
+  h: number,
+  orient: LaneOrient,
+  p: { x: number; y: number },
+  band = BAND,
+): number | null {
+  const i = laneBoxes(lanes, w, h, orient, band).findIndex(
+    (b) => p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h,
+  )
+  return i < 0 ? null : i
+}
+
+// Hapus lane i; pool, swimlane, dan fragmen minimal satu lane. Lane lain membagi ulang ruangnya (bobot).
+export function removeLane(lanes: Lane[], i: number): Lane[] {
+  if (lanes.length <= 1 || i < 0 || i >= lanes.length) return lanes
+  return lanes.filter((_, j) => j !== i)
+}
+
+// Tukar lane i dan j (bersebelahan); ukurannya ikut lane masing-masing.
+export function swapLanes(lanes: Lane[], i: number, j: number): Lane[] {
+  if (i < 0 || j < 0 || i >= lanes.length || j >= lanes.length) return lanes
+  const out = [...lanes]
+  ;[out[i], out[j]] = [out[j]!, out[i]!]
+  return out
+}

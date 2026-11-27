@@ -36,6 +36,7 @@ import {
   MESSAGE_DEFAULT_Y,
   isLifeline,
   isMindmap,
+  laneBandOf,
   portInset,
   portPoint,
   portsFor,
@@ -49,7 +50,15 @@ import {
   type ShapeContent,
   type PaletteEntry,
 } from '../utils/wbShapes'
-import { addLane, containerMembers, containersAt } from '../utils/wbContainers'
+import {
+  addLane,
+  containerMembers,
+  containersAt,
+  laneBoxes,
+  laneIndexAt,
+  removeLane,
+  swapLanes,
+} from '../utils/wbContainers'
 import { inkColor, penColors } from '../components/whiteboard/wbColors'
 import { caretHint, type CaretHint } from '../components/whiteboard/caret'
 import { ApiError, notifyUnauthorized } from '../api/client'
@@ -2475,6 +2484,45 @@ function selectionMenu(): MenuItem[] {
     })
   if (one?.kind === 'shape' && w)
     out.push({ id: 'shapestyle', label: 'Gaya bentuk', run: () => (shapeStyleId.value = one.id) })
+  // Revisi 56: aksi lane yang diklik kanan (ganti nama, urutan, hapus).
+  if (one && w && menuLane?.id === one.id) {
+    const sc = one.content as ShapeContent
+    const i = menuLane.index
+    const n = sc.lanes?.length ?? 0
+    const word = sc.shape === 'uml_fragment' ? 'operand' : 'lane'
+    const rows = laneOrient(sc.shape) === 'rows'
+    const children: MenuItem[] = [
+      {
+        id: 'laneRename',
+        label: `Ganti nama ${word}`,
+        run: () => (laneEdit.value = { id: one.id, index: i, nonce: Date.now() }),
+      },
+    ]
+    if (i > 0)
+      children.push({
+        id: 'laneUp',
+        label: rows ? `Naikkan ${word}` : `Geser ${word} ke kiri`,
+        run: () => moveLane(one.id, i, -1),
+      })
+    if (i < n - 1)
+      children.push({
+        id: 'laneDown',
+        label: rows ? `Turunkan ${word}` : `Geser ${word} ke kanan`,
+        run: () => moveLane(one.id, i, 1),
+      })
+    if (n > 1)
+      children.push({
+        id: 'laneRemove',
+        label: `Hapus ${word}`,
+        danger: true,
+        run: () => deleteLane(one.id, i),
+      })
+    out.push({
+      id: 'lane',
+      label: `${word === 'lane' ? 'Lane' : 'Operand'} ${i + 1}${sc.lanes?.[i]?.label ? `: ${sc.lanes[i]!.label}` : ''}`,
+      children,
+    })
+  }
   if (one?.kind === 'shape' && w && laneOrient((one.content as ShapeContent).shape))
     out.push({
       id: 'addLane',
@@ -2588,6 +2636,7 @@ function onContextMenu(e: MouseEvent) {
   if (id && byId.value.has(id)) {
     if (!selected.value.has(id)) select(unitIds(id))
     focusedId.value = id
+    menuLane = laneAtPoint(id, worldAt(e.clientX, e.clientY))
     openMenu(e.clientX, e.clientY, t.closest<HTMLElement>('[data-card]'), true)
   } else {
     menuAt = worldAt(e.clientX, e.clientY)
@@ -2596,6 +2645,7 @@ function onContextMenu(e: MouseEvent) {
 }
 
 function openMenuFromKeyboard() {
+  menuLane = null
   if (!selected.value.size && selectedConnector.value) {
     const r = canvas.value!.getBoundingClientRect()
     openMenu(r.left + r.width / 2, r.top + r.height / 2, canvas.value, true)
@@ -3560,6 +3610,89 @@ function addLaneTo(id: string) {
   })
   announce.value = `Lane ${lanes.length} ditambahkan.`
 }
+// Revisi 56: lane di kanvas. Lane di titik dunia (klik kanan), kotak lane di dunia, dan kartu yang seluruhnya ada di
+// dalam satu lane (anggota wadah yang jatuh di lane itu).
+let menuLane: { id: string; index: number } | null = null
+const laneEdit = ref<{ id: string; index: number | 'title'; nonce: number } | null>(null)
+const laneConfirm = ref<{ id: string; index: number; count: number; label: string } | null>(null)
+function laneAtPoint(id: string, p: Pt): { id: string; index: number } | null {
+  const c = shownById.value.get(id)
+  const sc = c?.kind === 'shape' ? (c.content as ShapeContent) : null
+  const orient = sc ? laneOrient(sc.shape) : null
+  if (!c || !sc || !orient || (rotations.value.get(id) ?? 0) !== 0) return null
+  const i = laneIndexAt(
+    sc.lanes ?? [],
+    c.w,
+    c.h,
+    orient,
+    { x: p.x - c.x, y: p.y - c.y },
+    laneBandOf(sc.shape),
+  )
+  return i === null ? null : { id, index: i }
+}
+function laneWorldBoxes(c: Card) {
+  const sc = c.content as ShapeContent
+  const orient = laneOrient(sc.shape)!
+  return laneBoxes(sc.lanes ?? [], c.w, c.h, orient, laneBandOf(sc.shape)).map((b) => ({
+    ...b,
+    x: c.x + b.x,
+    y: c.y + b.y,
+  }))
+}
+function cardsInLane(c: Card, box: Rect): Card[] {
+  return shownCards.value.filter((k) => {
+    if (k.id === c.id || k.column_id || k.z <= c.z) return false
+    const b = rotatedBounds(k, rotations.value.get(k.id) ?? 0)
+    return (
+      b.x >= box.x - 0.5 &&
+      b.y >= box.y - 0.5 &&
+      b.x + b.w <= box.x + box.w + 0.5 &&
+      b.y + b.h <= box.y + box.h + 0.5
+    )
+  })
+}
+// Hapus lane: bila berisi kartu, tanya dulu; kartunya tidak ikut terhapus dan tetap di posisinya.
+function deleteLane(id: string, i: number, confirmed = false) {
+  const c = byId.value.get(id)
+  const sc = c?.content as ShapeContent | undefined
+  if (!c || !sc?.lanes || sc.lanes.length <= 1 || !canWrite.value) return
+  const inside = cardsInLane(c, laneWorldBoxes(c)[i]!)
+  if (inside.length && !confirmed) {
+    laneConfirm.value = { id, index: i, count: inside.length, label: sc.lanes[i]?.label || `${i + 1}` }
+    return
+  }
+  recordContent(id, { ...sc, lanes: removeLane(sc.lanes, i) })
+  announce.value = 'Lane dihapus.'
+}
+// Naikkan atau turunkan lane: kartu di kedua lane ikut pindah bersama lane-nya; isi dan geseran satu langkah undo.
+function moveLane(id: string, i: number, dir: -1 | 1) {
+  const c = byId.value.get(id)
+  const sc = c?.content as ShapeContent | undefined
+  const j = i + dir
+  if (!c || !sc?.lanes || j < 0 || j >= sc.lanes.length || !canWrite.value) return
+  const rows = laneOrient(sc.shape) === 'rows'
+  const boxes = laneWorldBoxes(c)
+  const [a, b] = dir > 0 ? [i, j] : [j, i]
+  const first = boxes[a]!
+  const second = boxes[b]!
+  const lenA = rows ? first.h : first.w
+  const lenB = rows ? second.h : second.w
+  const shift = (k: Card, d: number) => ({ id: k.id, after: rows ? { y: k.y + d } : { x: k.x + d } })
+  const inA = cardsInLane(c, first)
+  const inB = cardsInLane(c, second)
+  const locked = [...inA, ...inB].filter((k) => k.locked).length
+  if (locked) {
+    lockedToast(locked)
+    return
+  }
+  asOneStep(() => {
+    const moves = [...inA.map((k) => shift(k, lenB)), ...inB.map((k) => shift(k, -lenA))]
+    if (moves.length) applyLayout(moves)
+    recordContent(id, { ...sc, lanes: swapLanes(sc.lanes!, i, j) })
+  })
+  announce.value = dir < 0 ? 'Lane dinaikkan.' : 'Lane diturunkan.'
+}
+
 function onShapeSize(sz: { w: number; h: number }) {
   const id = shapeStyleId.value
   if (id) applyLayout([{ id, after: sz }])
@@ -4679,6 +4812,19 @@ function onCanvasDblClick(e: MouseEvent) {
   const id = el?.closest<HTMLElement>('[data-card]')?.dataset.card
   const card = id ? byId.value.get(id) : undefined
   if (!card || editingId.value === card.id) return
+  // Revisi 56: dobel klik label lane, syarat operand, atau pita nama pool mengganti namanya di tempat, bukan
+  // membuka editor bentuk.
+  // Pembatas lane yang muncul saat bentuk terpilih bisa menutupi label (syarat operand fragmen tepat di bawahnya), jadi
+  // semua elemen di titik itu ditelusuri; seret tetap mengenai pembatas.
+  const under = document
+    .elementsFromPoint(e.clientX, e.clientY)
+    .find((x) => x.closest(`[data-card="${card.id}"]`) && x.closest('[data-lane-index], [data-lane-title]'))
+  const lane = under?.closest<HTMLElement>('[data-lane-index]')?.dataset.laneIndex
+  const title = under?.closest('[data-lane-title]')
+  if (canWrite.value && (lane !== undefined || title)) {
+    laneEdit.value = { id: card.id, index: lane !== undefined ? Number(lane) : 'title', nonce: Date.now() }
+    return
+  }
   if (card.kind === 'board') openBoard(card)
   else if (!enterGroup(card)) startEdit(card.id, caretHint(e.clientX, e.clientY, el))
 }
@@ -5471,6 +5617,10 @@ const toolBtn =
                 :ref="(inst) => setCardRef(c.id, inst)"
                 :card="c"
                 :layer="layers.get(c.id)"
+                :locked-by="
+                  remoteLocks[c.id] && remoteLocks[c.id]!.id !== myId ? remoteLocks[c.id]!.name : null
+                "
+                :lane-edit="laneEdit?.id === c.id ? laneEdit : null"
                 :selected="selected.has(c.id)"
                 :editing="editingId === c.id"
                 :can-write="canWrite"
@@ -5498,6 +5648,8 @@ const toolBtn =
                 @table="onTable(c.id, $event)"
                 @content="onCardContent(c.id, $event)"
                 @comments="commentsFor = c.id"
+                @add-lane="addLaneTo(c.id)"
+                @notice="showToast($event)"
               />
             </template>
             <WbDiagramHandles
@@ -6057,6 +6209,27 @@ const toolBtn =
       @size="onShapeSize"
       @add-lane="shapeStyleId && addLaneTo(shapeStyleId)"
     />
+    <!-- Revisi 56: hapus lane yang berisi kartu; kartunya tidak ikut terhapus. -->
+    <BaseDialog :open="laneConfirm !== null" title="Hapus lane?" @close="laneConfirm = null">
+      <div v-if="laneConfirm" class="flex flex-col gap-4 px-5 py-4">
+        <p>
+          Lane {{ laneConfirm.label }} berisi {{ laneConfirm.count }} kartu. Kartunya tidak ikut terhapus,
+          hanya keluar dari lane dan tetap di posisinya.
+        </p>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" :class="btn" @click="laneConfirm = null">Batal</button>
+          <button
+            type="button"
+            :class="btn"
+            class="text-urgent"
+            data-testid="wb-lane-delete-confirm"
+            @click="(deleteLane(laneConfirm.id, laneConfirm.index, true), (laneConfirm = null))"
+          >
+            Hapus lane
+          </button>
+        </div>
+      </div>
+    </BaseDialog>
     <WbTemplateDialog
       :open="templateOpen"
       :current="bid"

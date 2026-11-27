@@ -1921,6 +1921,24 @@ Audit operasi garis (sebelum revisi 55):
 - Jalur siku baru: setiap ruas punya beberapa bentuk L (langsung, atau lewat potongan port untuk ruas pertama dan terakhir), dan pencarian beam (8 jalur) memilih yang tidak berbalik arah, keluar searah port, tiba di port tujuan dari luar, tidak memotong jalurnya sendiri, tidak menembus kotak ujung, lalu yang terpendek. Hasil pada data acak yang sama dengan titik belok di luar kotak ujung: 0 silang saat aktor diam, 33 sesudah aktor digeser (semuanya susunan yang tidak bisa dibuat siku tanpa silang, mis. dua titik berselisih beberapa px di kedua sisi ruas tegak); tekukan bolak-balik 0. Titik belok yang jatuh di tengah ruas lurus tidak lagi menjadi titik sudut; pegangannya tetap di posisi titik itu.
 - Garis yang kedua ujungnya ikut terseret: garis beranchor tidak ditulis ulang (pemetaan elastis sudah menggesernya dan undo geser kartu mengembalikannya). Garis lama tanpa anchor diberi anchor dari posisi ujung sebelum geser, tanpa langkah undo karena tampilannya tidak berubah.
 
+## Sprint 12o: Lane langsung di kanvas (revisi 56)
+
+**Tujuan:** pengguna bisa mengganti nama, menambah, menghapus, dan mengurutkan lane tanpa mencari Gaya bentuk atau menu Aksi.
+
+- [x] S12o-01 Ganti nama lane, syarat operand fragmen, dan nama pool atau swimlane di tempat: dobel klik label (atau fokus lalu Enter atau F2), Enter atau klik di luar menyimpan, Escape membatalkan.
+- [x] S12o-02 Tombol tambah lane 44 px di tengah tepi bawah pool dan fragmen (tepi kanan swimlane) saat bentuk terpilih; lane baru langsung masuk mode edit nama.
+- [x] S12o-03 Klik kanan pada lane: submenu "Lane N" berisi ganti nama, naikkan atau turunkan (swimlane: geser ke kiri atau kanan), dan hapus lane (konfirmasi bila lane berisi kartu).
+- [x] S12o-04 Test: unit test di `tests/wbContainers.test.ts` dan `tests/wbLineUndo.test.ts`, E2E `scripts/e2e/uji-r56.mjs` (1280 px); pengaman uji-r54b, uji-r54c, uji-r54d, uji-r55, wb5.
+
+**Keputusan:**
+- Ganti nama memakai isian satu baris di atas label, bukan editor teks berformat: nama lane dan pool berupa teks polos (format nama pool yang lama dibuang saat namanya diganti di tempat; lewat dobel klik area pool, editor berformat tetap ada). Simpan lewat isi bentuk, jadi satu langkah undo, tersiar realtime, dan ditolak dengan pesan "X sedang mengedit kartu ini" bila orang lain memegang kunci lunak kartu itu. Kunci posisi tidak menghalangi ganti nama, sama dengan isi kartu terkunci lainnya.
+- Dobel klik ditangani kanvas (pointer capture mengalihkan dblclick ke kanvas), dan semua elemen di titik itu ditelusuri: pembatas lane yang muncul saat bentuk terpilih bisa menutupi label syarat operand di bawahnya, jadi dobel klik tetap mengganti nama sedangkan seret tetap menggeser pembatas.
+- Tambah lane dari tombol sama dengan menu Aksi: lane baru seukuran rata-rata, bentuk memanjang, satu langkah undo; ganti nama sesudahnya langkah sendiri.
+- Naikkan atau turunkan lane menukar dua lane bersebelahan beserta ukurannya, dan kartu yang seluruhnya ada di dalam kedua lane itu ikut pindah bersama lane-nya (satu langkah undo, kartu terkunci di salah satunya membatalkan dengan pesan kunci).
+- Hapus lane berisi kartu meminta konfirmasi; kartunya tidak dihapus dan tidak dipindah, lane lain membagi ulang ruang lane yang dihapus. Pool, swimlane, dan fragmen minimal satu lane (aksi hapus tidak ditawarkan bila tinggal satu).
+- Riwayat, perbaikan yang ketemu: langkah isi di dalam langkah gabungan (tambah lane) tidak ikut diteruskan versinya, jadi tambah lane lalu ganti nama hanya bisa dibatalkan setengah (tinggi pool kembali, lane tetap). `chainContentVersion` sekarang mencari ke dalam langkah gabungan.
+- Tombol tambah lane menahan Enter dan Spasi supaya tidak ditangkap pintasan kanvas (Enter membuka editor kartu terfokus).
+
 ## Sprint 12: Persiapan deploy dan migrasi data
 
 **Tujuan:** semua yang dibutuhkan untuk go-live sudah tertulis, tetapi belum dijalankan di VM.
@@ -2130,10 +2148,11 @@ Masih terbuka: uji restart Windows di PC tim (S14-18), salinan backup ke luar VM
 | 53 | 2026-11-26 | Whiteboard: garis ikut urutan tumpuk (otomatis di atas kartu ujung, urutan manual lewat menu), bentuk Batas sistem dan Use case, preset include dan extend, jalur Bebas, garis elastis saat kartu ujung digeser | Sprint 12l |
 | 54 | 2026-11-26 | Whiteboard: pustaka bentuk lengkap per kelompok (BPMN, wadah, activity dan state, sequence, ERD dan class, lainnya), bentuk sebagai data, palet dengan cari, lipat kelompok, Terakhir dipakai, dan pratinjau | Sprint 12m |
 | 55 | 2026-11-26 | Whiteboard (bug): setiap perubahan garis satu langkah undo dan redo, jalur siku dengan titik belok tidak memotong dirinya, garis tidak bergeser dua kali saat kedua ujung diseret | Sprint 12n |
+| 56 | 2026-11-27 | Whiteboard: lane langsung di kanvas (ganti nama di tempat, tombol tambah lane, klik kanan untuk urutan dan hapus) untuk pool, swimlane, dan operand fragmen | Sprint 12o |
 | 33b | 2026-11-20 | Poles tampilan kartu Aktivitas: tombol rantai pindah ke celah antar isian dan jadi ikon kecil tanpa bingkai, tombol mati tidak dirender, jam tersambung menyatu dengan jam kepalanya, status simpan punya baris tetap, Tambah berkas di sel tabel tanpa bingkai | Sprint 12c |
 | 5 | 2026-11-16 | NVM-Internal publik di `https://novoidminds.xyz`, bukan LAN-only. NVM Launcher (`https://dash.novoidminds.xyz`) dan Remotion Studio (`https://studio.novoidminds.xyz`) di PC tim dijaga Caddy forward_auth ke NVM-Internal, jadi hanya akun NVM-Internal yang sudah login yang bisa masuk | Sprint 12 (kode) dan 14 (pemasangan) |
 
-SRS v1.0 belum memuat kelima puluh lima revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
+SRS v1.0 belum memuat kelima puluh enam revisi (revisi 5 di S14-17). SRS diperbarui sebelum UAT supaya checklist AC sesuai aplikasi.
 
 ## Menunggu jawaban Manajer
 

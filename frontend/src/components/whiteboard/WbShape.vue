@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, useId, watch } from 'vue'
+import { computed, nextTick, ref, useId, watch } from 'vue'
 import type { PMNode } from '../../utils/whiteboard'
 import WbRichField, { activateField } from './WbRichField.vue'
 import WbRichText from './WbRichText'
@@ -32,8 +32,18 @@ const props = defineProps<{
   selected?: boolean
   canWrite?: boolean
   zoom?: number
+  // Revisi 56: nama orang lain yang sedang mengedit kartu ini (kunci lunak), dan permintaan edit nama lane dari
+  // menu klik kanan halaman (nonce membedakan dua permintaan untuk lane yang sama).
+  lockedBy?: string | null
+  laneEdit?: { index: number | 'title'; nonce: number } | null
 }>()
-const emit = defineEmits<{ save: [c: ShapeContent]; live: [c: ShapeContent]; close: [] }>()
+const emit = defineEmits<{
+  save: [c: ShapeContent]
+  live: [c: ShapeContent]
+  close: []
+  addLane: []
+  notice: [msg: string]
+}>()
 
 const fillVar: Record<string, string> = {
   putih: 'var(--color-surface)',
@@ -111,6 +121,115 @@ function dividerStyle(i: number) {
     : { top: `${band.value}px`, bottom: '0px', left: `${b.x - t / 2}px`, width: `${t}px` }
 }
 const canDivide = computed(() => !!orient.value && props.selected && props.canWrite && !props.editing)
+
+// Revisi 56: ganti nama lane, syarat operand, dan nama pool atau swimlane langsung di kanvas. Dobel klik (atau fokus
+// lalu Enter) membuka isian di tempat; Enter atau klik di luar menyimpan (satu langkah undo lewat simpan isi bentuk),
+// Escape membatalkan. Ditolak bila orang lain sedang mengedit kartu ini.
+const nameEdit = ref<number | 'title' | null>(null)
+const nameDraft = ref('')
+const nameInput = ref<HTMLInputElement | null>(null)
+const laneWord = computed(() => (guards.value ? 'operand' : 'lane'))
+function startName(which: number | 'title') {
+  if (!props.canWrite || !orient.value) return
+  if (props.lockedBy) {
+    emit('notice', `${props.lockedBy} sedang mengedit kartu ini. Coba lagi sesudah selesai.`)
+    return
+  }
+  nameEdit.value = which
+  nameDraft.value = which === 'title' ? props.content.text : (props.content.lanes?.[which]?.label ?? '')
+  void nextTick(() => {
+    nameInput.value?.focus()
+    nameInput.value?.select()
+  })
+}
+function commitName() {
+  const which = nameEdit.value
+  if (which === null) return
+  nameEdit.value = null
+  const v = nameDraft.value.replace(/\s+/g, ' ').trim()
+  if (which === 'title') {
+    if (v !== props.content.text) emit('save', { ...props.content, text: v, doc: null })
+    return
+  }
+  const lanes = props.content.lanes ?? []
+  if (!lanes[which] || lanes[which]!.label === v) return
+  emit('save', { ...props.content, lanes: lanes.map((l, j) => (j === which ? { ...l, label: v } : l)) })
+}
+function cancelName() {
+  nameEdit.value = null
+}
+function onNameKey(e: KeyboardEvent) {
+  e.stopPropagation()
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    commitName()
+  } else if (e.key === 'Escape') {
+    e.preventDefault()
+    cancelName()
+  }
+}
+function onLabelKey(which: number | 'title', e: KeyboardEvent) {
+  if (e.key !== 'Enter' && e.key !== 'F2') return
+  e.preventDefault()
+  e.stopPropagation()
+  startName(which)
+}
+function nameInputStyle() {
+  const which = nameEdit.value
+  if (which === 'title')
+    return orient.value === 'rows'
+      ? {
+          left: '0px',
+          top: `${props.h / 2 - 18}px`,
+          width: `${Math.min(220, Math.max(140, props.w - BAND))}px`,
+        }
+      : { left: '4px', top: `${BAND / 2 - 18}px`, width: `${Math.max(120, props.w - 8)}px` }
+  const b = which === null ? null : lanes.value[which]
+  if (!b) return {}
+  if (guards.value)
+    return {
+      left: '8px',
+      top: `${b.y + (which ? 2 : FRAGMENT_TAB.h + 2)}px`,
+      width: `${Math.max(140, b.w - 16)}px`,
+    }
+  return orient.value === 'rows'
+    ? {
+        left: `${band.value}px`,
+        top: `${b.y + b.h / 2 - 18}px`,
+        width: `${Math.min(220, Math.max(140, b.w))}px`,
+      }
+    : { left: `${b.x + 4}px`, top: `${band.value}px`, width: `${Math.max(120, b.w - 8)}px` }
+}
+// Lane baru dari tombol tambah langsung masuk mode edit nama.
+let pendingLane: number | null = null
+function onAddLane() {
+  pendingLane = props.content.lanes?.length ?? 0
+  emit('addLane')
+}
+watch(
+  () => props.content.lanes?.length ?? 0,
+  (n) => {
+    if (pendingLane !== null && n > pendingLane) {
+      const i = pendingLane
+      pendingLane = null
+      startName(i)
+    }
+  },
+)
+watch(
+  () => props.laneEdit,
+  (r) => {
+    if (r) startName(r.index)
+  },
+)
+// Tombol tambah 44 px di layar pada zoom berapa pun, di tengah tepi bawah (pool, fragmen) atau kanan (swimlane).
+function addStyle() {
+  const s = 44 / (props.zoom || 1)
+  const gap = 6 / (props.zoom || 1)
+  return orient.value === 'cols'
+    ? { left: `${props.w + gap}px`, top: `${props.h / 2 - s / 2}px`, width: `${s}px`, height: `${s}px` }
+    : { left: `${props.w / 2 - s / 2}px`, top: `${props.h + gap}px`, width: `${s}px`, height: `${s}px` }
+}
 function commitLanes(next: Lane[]) {
   laneDraft.value = null
   if (JSON.stringify(next) !== JSON.stringify(props.content.lanes))
@@ -312,6 +431,11 @@ const field = 'block w-full'
         underline ? 'underline' : '',
       ]"
       :style="textStyle"
+      :role="orient && !guards && canDivide ? 'button' : undefined"
+      :tabindex="orient && !guards && canDivide ? 0 : undefined"
+      :aria-label="orient && !guards && canDivide ? `Ganti nama ${content.text || 'bentuk'}` : undefined"
+      :data-lane-title="orient && !guards ? '' : undefined"
+      @keydown="orient && !guards && canDivide ? onLabelKey('title', $event) : undefined"
     >
       <WbRichField
         v-if="editing"
@@ -348,10 +472,15 @@ const field = 'block w-full'
     >
       {{ content.variant || 'alt' }}
     </p>
-    <!-- Label lane (revisi 54b) atau syarat operand fragmen: diubah lewat Gaya bentuk; di sini hanya tampil. -->
+    <!-- Label lane (revisi 54b) atau syarat operand fragmen: dobel klik atau Enter untuk mengganti nama (revisi 56);
+         juga lewat Gaya bentuk. -->
     <p
       v-for="(b, i) in lanes"
       :key="`lane-${i}`"
+      :role="canDivide ? 'button' : undefined"
+      :tabindex="canDivide ? 0 : undefined"
+      :aria-label="canDivide ? `Ganti nama ${laneWord} ${i + 1}${b.label ? `, ${b.label}` : ''}` : undefined"
+      :data-lane-index="i"
       class="absolute overflow-hidden text-sm leading-tight break-words text-ink"
       :class="
         guards
@@ -360,6 +489,7 @@ const field = 'block w-full'
       "
       :style="laneLabelStyle(b, i)"
       data-lane
+      @keydown="canDivide && onLabelKey(i, $event)"
     >
       {{ guards ? (b.label ? `[${b.label}]` : '') : b.label }}
     </p>
@@ -378,6 +508,45 @@ const field = 'block w-full'
         @pointerdown.stop.prevent="onDividerDown(i - 1, $event)"
         @keydown="onDividerKey(i - 1, $event)"
       />
+      <button
+        type="button"
+        class="wb-lane-add absolute flex items-center justify-center rounded-full border border-line bg-surface text-ink shadow-menu hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
+        :style="addStyle()"
+        :aria-label="`Tambah ${laneWord}`"
+        :title="`Tambah ${laneWord}`"
+        data-lane-add
+        @pointerdown.stop
+        @keydown.enter.stop
+        @keydown.space.stop
+        @dblclick.stop
+        @click.stop="onAddLane"
+      >
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 16 16"
+          class="size-1/2"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.75"
+        >
+          <path d="M8 3v10M3 8h10" />
+        </svg>
+      </button>
     </template>
+    <input
+      v-if="nameEdit !== null"
+      ref="nameInput"
+      v-model="nameDraft"
+      type="text"
+      maxlength="200"
+      class="absolute z-10 h-9 rounded-card border border-mark bg-surface px-2 text-sm text-ink"
+      :style="nameInputStyle()"
+      :aria-label="nameEdit === 'title' ? 'Nama' : `Nama ${laneWord} ${(nameEdit as number) + 1}`"
+      data-lane-input
+      @pointerdown.stop
+      @dblclick.stop
+      @keydown="onNameKey"
+      @blur="commitName"
+    />
   </div>
 </template>

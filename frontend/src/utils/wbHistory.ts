@@ -199,11 +199,18 @@ export function linePatch(
 // ada suntingan orang lain di antaranya). Tanpa ini dua perubahan isi berturut-turut pada satu kartu hanya bisa
 // dibatalkan sekali: versi kartu naik karena undo sendiri, dan langkah yang lebih lama dianggap diubah orang lain.
 export function chainContentVersion(stack: Step[], id: string, old: number, now: number) {
-  for (let i = stack.length - 1; i >= 0; i--) {
-    const s = stack[i]!
-    if (s.kind === 'content' && s.id === id) {
-      if (s.version === old - 1) s.version = now
-      return
+  // Langkah gabungan (mis. Tambah lane: ukuran dan isi) dicari ke dalam juga, dari langkah terakhirnya (revisi 56).
+  const last = (list: Step[]): Extract<Step, { kind: 'content' }> | null => {
+    for (let i = list.length - 1; i >= 0; i--) {
+      const s = list[i]!
+      if (s.kind === 'content' && s.id === id) return s
+      if (s.kind === 'batch') {
+        const inner = last(s.steps)
+        if (inner) return inner
+      }
     }
+    return null
   }
+  const s = last(stack)
+  if (s && s.version === old - 1) s.version = now
 }

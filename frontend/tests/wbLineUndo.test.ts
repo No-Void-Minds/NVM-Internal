@@ -143,3 +143,11 @@ test('dua perubahan isi berturut-turut pada satu kartu bisa dibatalkan dua kali 
   assert.equal((s0 as { version: number }).version, 3)
   void s2
 })
+
+test('rantai versi isi juga masuk ke langkah gabungan (revisi 56)', () => {
+  // Tambah lane: batch ukuran dan isi (versi 5); ganti nama lane baru: isi versi 6; undo ganti nama: kartu versi 7.
+  const inner: Step = { kind: 'content', id: 'pool', before: 'a', after: 'b', version: 5 }
+  const batch: Step = { kind: 'batch', steps: [{ kind: 'layout', cards: [] }, inner] }
+  chainContentVersion([batch], 'pool', 6, 7)
+  assert.equal((inner as { version: number }).version, 7)
+})
