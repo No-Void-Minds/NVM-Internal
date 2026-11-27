@@ -8,7 +8,14 @@ import WbRichField, { activateField } from './WbRichField.vue'
 import { fileUrl, type ChecklistOp, type TableOp } from '../../api/whiteboard'
 import { formatBytes } from '../../utils/attachment'
 import type { CaretHint } from './caret'
-import { handleSign, shapeHandles, type Handle, type ShapeContent } from '../../utils/wbShapes'
+import {
+  handleSign,
+  laneBandOf,
+  laneOrient,
+  shapeHandles,
+  type Handle,
+  type ShapeContent,
+} from '../../utils/wbShapes'
 import { styleClasses, styleOpacity } from '../../utils/wbStyle'
 import { cropBox } from '../../utils/wbCrop'
 import { AVATAR_PX, type PersonContent } from '../../utils/wbPerson'
@@ -147,14 +154,23 @@ const crop = computed(() =>
 
 // Pegangan bentuk: gambar 10 px dan area sentuh 44 px di layar pada zoom berapa pun.
 const handleBox = computed(() => 44 / props.zoom)
+// Sisi berpita nama (kiri pool, atas swimlane): pegangan tengah sisi itu dipindah ke tiga perempat panjang sisi, supaya
+// tidak menutup tengah pita, tempat orang dobel klik untuk mengganti nama (revisi 56). Tidak digeser ke luar tepi
+// karena di sana ada pegangan port (48 px di luar tepi) yang area sentuhnya akan bertumpuk. Area sentuh tetap 44 px.
+const bandHandle = computed<Handle | null>(() => {
+  if (!isShape.value || laneBandOf(shape.value.shape) <= 0) return null
+  const o = laneOrient(shape.value.shape)
+  return o === 'rows' ? 'w' : o === 'cols' ? 'n' : null
+})
 function handleStyle(h: Handle) {
   const [sx, sy] = handleSign(h)
   const s = handleBox.value
+  const along = h === bandHandle.value ? 75 : 50
   return {
     width: `${s}px`,
     height: `${s}px`,
-    left: `calc(${((sx + 1) / 2) * 100}% - ${s / 2}px)`,
-    top: `calc(${((sy + 1) / 2) * 100}% - ${s / 2}px)`,
+    left: `calc(${h === 'n' ? along : ((sx + 1) / 2) * 100}% - ${s / 2}px)`,
+    top: `calc(${h === 'w' ? along : ((sy + 1) / 2) * 100}% - ${s / 2}px)`,
     cursor:
       h === 'n' || h === 's'
         ? 'ns-resize'

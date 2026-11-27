@@ -1938,6 +1938,7 @@ Audit operasi garis (sebelum revisi 55):
 - Hapus lane berisi kartu meminta konfirmasi; kartunya tidak dihapus dan tidak dipindah, lane lain membagi ulang ruang lane yang dihapus. Pool, swimlane, dan fragmen minimal satu lane (aksi hapus tidak ditawarkan bila tinggal satu).
 - Riwayat, perbaikan yang ketemu: langkah isi di dalam langkah gabungan (tambah lane) tidak ikut diteruskan versinya, jadi tambah lane lalu ganti nama hanya bisa dibatalkan setengah (tinggi pool kembali, lane tetap). `chainContentVersion` sekarang mencari ke dalam langkah gabungan.
 - Tombol tambah lane menahan Enter dan Spasi supaya tidak ditangkap pintasan kanvas (Enter membuka editor kartu terfokus).
+- Perbaikan sesudah revisi 56: pegangan ubah ukuran tengah sisi berpita nama (kiri pool, atas swimlane) menutupi tengah pita nama, tempat orang paling sering dobel klik. Pegangan itu dipindah ke tiga perempat panjang sisi, tetap di tepi dan tetap 44 px area sentuh; tidak digeser ke luar tepi karena area sentuhnya akan bertumpuk dengan pegangan port (48 px di luar tepi). Fungsinya tidak berubah (tetap mengubah sisi itu). Fragmen tidak berpita, jadi tidak diubah.
 
 ## Sprint 12: Persiapan deploy dan migrasi data
 

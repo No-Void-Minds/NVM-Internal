@@ -99,9 +99,12 @@ try {
   expect((await lanesOf(pool.id)) === "Pembeli|Gudang utama", "keyboard Enter", await lanesOf(pool.id));
 
   // 3. Nama pool: dobel klik pita nama, klik di luar menyimpan.
-  // Bagian atas pita: titik tengahnya tertutup pegangan ubah ukuran kiri saat pool terpilih.
+  // Tepat di tengah pita nama saat pool terpilih: pegangan ubah ukuran kiri tidak lagi menutupnya.
+  await selectCard(pool.id);
   const tb = await ps.locator(`[data-card="${pool.id}"] [data-lane-title]`).boundingBox();
-  await ps.mouse.dblclick(tb.x + tb.width / 2, tb.y + tb.height * 0.3);
+  const mid = await ps.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest("[data-handle]")?.getAttribute("data-handle") ?? null, [tb.x + tb.width / 2, tb.y + tb.height / 2]);
+  expect(mid === null, "tengah pita pool", `tertutup pegangan ${mid}`);
+  await ps.mouse.dblclick(tb.x + tb.width / 2, tb.y + tb.height / 2);
   await input.waitFor({ timeout: 5000 });
   await input.fill("Pesanan daring");
   const cv = await ps.locator(".wb-canvas").boundingBox();
@@ -203,6 +206,16 @@ try {
   const sb = await ps.locator(`[data-card="${swim.id}"]`).boundingBox();
   const sa = await ps.locator(`[data-card="${swim.id}"] [data-lane-add]`).boundingBox();
   expect(sa && sa.x >= sb.x + sb.width - 1, "swimlane tombol tambah", `tombol ${JSON.stringify(sa)} kartu ${JSON.stringify(sb)}`);
+  // Tengah pita judul swimlane saat terpilih: tidak tertutup pegangan atas, dobel klik membuka edit nama.
+  const st = await ps.locator(`[data-card="${swim.id}"] [data-lane-title]`).boundingBox();
+  const smid = await ps.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest("[data-handle]")?.getAttribute("data-handle") ?? null, [st.x + st.width / 2, st.y + st.height / 2]);
+  expect(smid === null, "tengah pita swimlane", `tertutup pegangan ${smid}`);
+  await ps.mouse.dblclick(st.x + st.width / 2, st.y + st.height / 2);
+  await input.waitFor({ timeout: 5000 });
+  await input.fill("Alur pesanan");
+  await input.press("Enter");
+  await saved(ps);
+  expect((await cards()).get(swim.id).content.text === "Alur pesanan", "nama swimlane", (await cards()).get(swim.id).content.text);
 
   // 9. Fragmen: syarat operand dengan dobel klik.
   await label(frag.id, 1).dblclick();
