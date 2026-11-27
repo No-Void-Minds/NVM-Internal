@@ -5789,25 +5789,33 @@ async function checkWbPerforma() {
 
     // Revisi 53: seret kartu yang punya garis 2 detik. Garis lain tidak berubah di DOM (memakai objek garis lama) dan
     // p95 frame tetap di bawah 20 ms di build produksi.
-    const dragged = plain.find((c) => full.connectors.some((n) => n.from === c.id || n.to === c.id));
-    const attached = new Set(full.connectors.filter((n) => n.from === dragged.id || n.to === dragged.id).map((n) => n.id));
-    const db = await ps.locator(`[data-card="${dragged.id}"]`).boundingBox();
-    // Garis lain bisa melintas di atas kartu ini (revisi 53, garis di atas kartu yang z-nya lebih rendah dari ujungnya);
-    // tekan di titik kartu yang kartunya sendiri paling atas supaya yang terjadi seret kartu, bukan pilih garis.
+    // Garis lain bisa melintas di atas kartu (revisi 53), dan kartu pertama bisa di luar layar: dipilih kartu ber-garis
+    // yang terlihat dan punya titik tekan yang kartunya sendiri paling atas, supaya yang terjadi seret kartu.
+    const linked = plain.filter((c) => full.connectors.some((n) => n.from === c.id || n.to === c.id)).map((c) => c.id);
     const grip = await ps.evaluate(
-      ([id, b]) => {
-        for (const fy of [0.5, 0.3, 0.7, 0.15, 0.85])
-          for (const fx of [0.5, 0.25, 0.75, 0.1, 0.9]) {
-            const x = b.x + b.width * fx;
-            const y = b.y + b.height * fy;
-            const el = document.elementFromPoint(x, y);
-            if (el?.closest("[data-card]")?.getAttribute("data-card") === id && !el.closest("[data-connector]")) return { x, y };
-          }
+      ([ids]) => {
+        // Kartu pertama yang terlihat di layar dan punya titik tekan yang kartunya sendiri paling atas.
+        for (const id of ids) {
+          const el0 = document.querySelector(`[data-card="${id}"]`);
+          if (!el0) continue;
+          const b = el0.getBoundingClientRect();
+          if (b.left < 0 || b.top < 60 || b.right > innerWidth || b.bottom > innerHeight) continue;
+          for (const fy of [0.5, 0.3, 0.7, 0.15, 0.85])
+            for (const fx of [0.5, 0.25, 0.75, 0.1, 0.9]) {
+              const x = b.left + b.width * fx;
+              const y = b.top + b.height * fy;
+              const el = document.elementFromPoint(x, y);
+              if (el?.closest("[data-card]")?.getAttribute("data-card") === id && !el.closest("[data-connector], [data-handle]")) return { id, x, y };
+            }
+        }
         return null;
       },
-      [dragged.id, db],
+      [linked],
     );
-    expect(!!grip, "seret garis", "tidak ada titik kartu yang tidak tertutup garis");
+    expect(!!grip, "seret garis", "tidak ada kartu ber-garis yang terlihat dan tidak tertutup garis");
+    const dragged = plain.find((c) => c.id === (grip?.id ?? linked[0]));
+    const attached = new Set(full.connectors.filter((n) => n.from === dragged.id || n.to === dragged.id).map((n) => n.id));
+    const db = await ps.locator(`[data-card="${dragged.id}"]`).boundingBox();
     const gx = grip?.x ?? db.x + db.width / 2;
     const gy = grip?.y ?? db.y + db.height / 2;
     await ps.evaluate(() => {
