@@ -292,6 +292,8 @@ type Geo = {
   laneBand?: number
   // Label lane sebagai syarat operand fragmen ([kondisi] di kiri atas), bukan label pita pool.
   guards?: boolean
+  // Teks bergaris bawah (atribut kunci ERD).
+  underline?: boolean
   fill?: string
   text?: string
   align?: 'left' | 'center' | 'right'
@@ -700,6 +702,31 @@ const GEO = {
           ]
         : [{ label: 'kondisi', size: 240 }],
   },
+  // ERD (revisi 54e)
+  erd_entity: { path: (w, h) => basePath('rect', w, h), text: 'Entitas' },
+  erd_weak_entity: {
+    path: (w, h) => basePath('rect', w, h),
+    marks: (w, h) => [
+      {
+        d: poly([
+          [5, 5],
+          [w - 5, 5],
+          [w - 5, h - 5],
+          [5, h - 5],
+        ]),
+      },
+    ],
+    text: 'Entitas lemah',
+    inset: { top: '10px', bottom: '10px', left: '12px', right: '12px' },
+  },
+  erd_attribute: { path: (w, h) => basePath('ellipse', w, h), text: 'atribut', inset: pct(16, 16, 14, 14) },
+  erd_key_attribute: {
+    path: (w, h) => basePath('ellipse', w, h),
+    text: 'id',
+    underline: true,
+    inset: pct(16, 16, 14, 14),
+  },
+  erd_relationship: { path: (w, h) => basePath('diamond', w, h), text: 'relasi', inset: pct(28, 28, 24, 24) },
   uml_swimlane: {
     path: (w, h) => basePath('rect', w, h),
     marks: (w, h, _v, c) => laneMarks(w, h, 'cols', c?.lanes),
@@ -806,6 +833,10 @@ export const portInset = (s: string | undefined, w: number, h: number): PortBox 
 export const shapeHandles = (s: string): Handle[] => geoOf(s).handles ?? HANDLES
 export const laneBandOf = (s: string) => geoOf(s).laneBand ?? BAND
 export const guardLanes = (s: string) => !!geoOf(s).guards
+export const underlineText = (s: string) => !!geoOf(s).underline
+// Stereotip kelas UML per varian (revisi 54e); kelas abstrak ditandai nama miring.
+export const classStereotype = (v: string | undefined) =>
+  v === 'interface' ? '\u00abinterface\u00bb' : v === 'enum' ? '\u00abenumeration\u00bb' : ''
 // Ujung pesan sequence: lifeline, lifeline aktor, dan activation bar.
 export const isLifeline = (s: string | undefined) =>
   s === 'uml_lifeline' || s === 'uml_lifeline_actor' || s === 'uml_activation'
@@ -1178,7 +1209,19 @@ export function pointAlong(pts: Pt[], t: number): Pt {
 }
 
 // Ujung garis: path di titik tip dengan arah datang dari `from`. filled false berarti hanya garis tepi (isi surface).
-export type EndKind = 'none' | 'arrow' | 'open_arrow' | 'triangle' | 'diamond' | 'diamond_open' | 'circle'
+export type EndKind =
+  | 'none'
+  | 'arrow'
+  | 'open_arrow'
+  | 'triangle'
+  | 'diamond'
+  | 'diamond_open'
+  | 'circle'
+  | 'cf_one'
+  | 'cf_many'
+  | 'cf_zero_one'
+  | 'cf_one_many'
+  | 'cf_zero_many'
 export const END_KINDS: { id: EndKind; label: string }[] = [
   { id: 'none', label: 'Tanpa ujung' },
   { id: 'arrow', label: 'Panah' },
@@ -1187,6 +1230,11 @@ export const END_KINDS: { id: EndKind; label: string }[] = [
   { id: 'diamond', label: 'Belah ketupat' },
   { id: 'diamond_open', label: 'Belah ketupat kosong' },
   { id: 'circle', label: 'Lingkaran' },
+  { id: 'cf_one', label: "Crow's foot: satu" },
+  { id: 'cf_many', label: "Crow's foot: banyak" },
+  { id: 'cf_zero_one', label: "Crow's foot: nol atau satu" },
+  { id: 'cf_one_many', label: "Crow's foot: satu atau banyak" },
+  { id: 'cf_zero_many', label: "Crow's foot: nol atau banyak" },
 ]
 export function endMarker(
   kind: EndKind,
@@ -1215,6 +1263,27 @@ export function endMarker(
         d: `M${P(tip)}L${P(at(9, 5))}L${P(at(18, 0))}L${P(at(9, -5))}Z`,
         fill: kind === 'diamond' ? 'line' : 'surface',
       }
+    // Crow's foot (revisi 54e): kaki tiga cabang di tepi entitas, garis tegak untuk "satu", lingkaran untuk "nol".
+    // Cabang dan garis berupa sub-path dua titik, jadi isian surface hanya mengisi lingkaran.
+    case 'cf_one':
+    case 'cf_many':
+    case 'cf_zero_one':
+    case 'cf_one_many':
+    case 'cf_zero_many': {
+      const many = kind === 'cf_many' || kind === 'cf_one_many' || kind === 'cf_zero_many'
+      const one = kind === 'cf_one' || kind === 'cf_zero_one' || kind === 'cf_one_many'
+      const zero = kind === 'cf_zero_one' || kind === 'cf_zero_many'
+      const seg = (p: Pt, q: Pt) => `M${P(p)}L${P(q)}`
+      let d = ''
+      if (many) d += seg(at(14, 0), at(0, 8)) + seg(at(14, 0), at(0, 0)) + seg(at(14, 0), at(0, -8))
+      if (one) d += seg(at(many ? 18 : 10, 7), at(many ? 18 : 10, -7))
+      if (zero) {
+        const c = at(many ? 26 : 20, 0)
+        d += `M${P({ x: c.x + 5, y: c.y })}A5 5 0 1 0 ${P({ x: c.x - 5, y: c.y })}A5 5 0 1 0 ${P({ x: c.x + 5, y: c.y })}Z`
+      }
+      if (kind === 'cf_one') d += seg(at(16, 7), at(16, -7))
+      return { d, fill: zero ? 'surface' : 'none' }
+    }
     case 'circle': {
       const c = at(5, 0)
       return {
@@ -1591,6 +1660,31 @@ export const LINE_PRESETS: LinePreset[] = [
     end: 'arrow',
     text: '\u00abdestroy\u00bb',
     destroy: true,
+  },
+  {
+    id: 'erd_one_many',
+    label: 'Satu ke banyak',
+    group: 'ERD',
+    line: 'solid',
+    start: 'cf_one',
+    end: 'cf_many',
+  },
+  { id: 'erd_one_one', label: 'Satu ke satu', group: 'ERD', line: 'solid', start: 'cf_one', end: 'cf_one' },
+  {
+    id: 'erd_many_many',
+    label: 'Banyak ke banyak',
+    group: 'ERD',
+    line: 'solid',
+    start: 'cf_many',
+    end: 'cf_many',
+  },
+  {
+    id: 'erd_zero_many',
+    label: 'Satu ke nol atau banyak',
+    group: 'ERD',
+    line: 'solid',
+    start: 'cf_one',
+    end: 'cf_zero_many',
   },
   { id: 'sequence_flow', label: 'Sequence flow', group: 'BPMN', line: 'solid', start: 'none', end: 'arrow' },
   {

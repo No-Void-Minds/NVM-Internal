@@ -701,8 +701,10 @@ type Connector struct {
 const maxConnectorPoints = 50
 
 var (
+	// cf_*: ujung crow's foot ERD (revisi 54e): satu, banyak, nol atau satu, satu atau banyak, nol atau banyak.
 	connectorEnds = map[string]bool{"none": true, "arrow": true, "open_arrow": true, "triangle": true, "diamond": true,
-		"diamond_open": true, "circle": true}
+		"diamond_open": true, "circle": true, "cf_one": true, "cf_many": true, "cf_zero_one": true, "cf_one_many": true,
+		"cf_zero_many": true}
 	connectorLine = map[string]bool{"solid": true, "dashed": true, "dotted": true}
 	// bebas (revisi 53): ruas lurus antar titik belok dengan sudut apa pun.
 	// message (revisi 54d): pesan sequence, mendatar di antara garis tengah dua lifeline (digambar klien); satu-satunya

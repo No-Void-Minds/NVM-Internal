@@ -77,7 +77,18 @@ export type PreviewInfo = {
 }
 // Model garis sudah memuat kebutuhan diagram W5: ujung bebas, port, jalur, titik belok, tujuh jenis ujung, tiga label.
 export type ConnectorEndKind =
-  'none' | 'arrow' | 'open_arrow' | 'triangle' | 'diamond' | 'diamond_open' | 'circle'
+  | 'none'
+  | 'arrow'
+  | 'open_arrow'
+  | 'triangle'
+  | 'diamond'
+  | 'diamond_open'
+  | 'circle'
+  | 'cf_one'
+  | 'cf_many'
+  | 'cf_zero_one'
+  | 'cf_one_many'
+  | 'cf_zero_many'
 export type ConnectorStyle = {
   start: ConnectorEndKind
   end: ConnectorEndKind

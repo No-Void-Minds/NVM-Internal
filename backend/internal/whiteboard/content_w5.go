@@ -40,6 +40,9 @@ var (
 		"uml_choice": true, "uml_state_composite": true,
 		// Sequence diagram (revisi 54d)
 		"uml_lifeline": true, "uml_lifeline_actor": true, "uml_activation": true, "uml_fragment": true,
+		// ERD (revisi 54e)
+		"erd_entity": true, "erd_weak_entity": true, "erd_attribute": true, "erd_key_attribute": true,
+		"erd_relationship": true,
 		// Panah blok
 		"arrow_right": true, "arrow_left": true, "arrow_up": true, "arrow_down": true, "arrow_both": true,
 	}
@@ -54,6 +57,8 @@ var (
 		"uml_lifeline":       {"none", "destroyed"},
 		"uml_lifeline_actor": {"none", "destroyed"},
 		"uml_fragment":       {"alt", "opt", "loop", "par"},
+		// Kelas UML (revisi 54e): kelas lama tanpa varian tetap kelas biasa.
+		"uml_class": {"class", "abstract", "interface", "enum"},
 	}
 	// laneShapes: bentuk yang punya lane (revisi 54b); bentuk lain tidak boleh membawa lanes.
 	laneShapes = map[string]bool{"bpmn_pool": true, "uml_swimlane": true, "uml_fragment": true}

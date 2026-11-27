@@ -292,3 +292,26 @@ test('aktor dan lifeline aktor: port kiri dan kanan di ujung tangan, juga sesuda
     y: 24.5,
   })
 })
+
+test("ERD dan class (54e): crow's foot, preset, varian kelas, atribut kunci, entitas lemah", async () => {
+  const w = await import('../src/utils/wbShapes.ts')
+  const tip = { x: 100, y: 0 }
+  const from = { x: 0, y: 0 }
+  for (const k of ['cf_one', 'cf_many', 'cf_zero_one', 'cf_one_many', 'cf_zero_many'] as const) {
+    const m = w.endMarker(k, tip, from)!
+    assert.ok(m.d.startsWith('M') && !m.d.includes('NaN'), k)
+    // Hanya varian "nol" yang punya lingkaran berisi warna permukaan; garis cabang tidak terisi.
+    assert.equal(m.fill, k.startsWith('cf_zero') ? 'surface' : 'none', k)
+    assert.ok(w.END_KINDS.some((e) => e.id === k))
+  }
+  // Banyak: tiga cabang menyentuh tepi entitas (titik ujung).
+  assert.equal((w.endMarker('cf_many', tip, from)!.d.match(/L100 /g) ?? []).length, 3)
+  const p = w.LINE_PRESETS.find((x) => x.id === 'erd_one_many')!
+  assert.deepEqual([p.start, p.end], ['cf_one', 'cf_many'])
+  assert.equal(w.classStereotype('interface'), '«interface»')
+  assert.equal(w.classStereotype('enum'), '«enumeration»')
+  assert.equal(w.classStereotype('abstract'), '')
+  assert.equal(w.newShapeContent('uml_class').variant, 'class')
+  assert.ok(w.underlineText('erd_key_attribute') && !w.underlineText('erd_attribute'))
+  assert.equal(shapeMarks({ shape: 'erd_weak_entity' }, 160, 70).length, 1)
+})

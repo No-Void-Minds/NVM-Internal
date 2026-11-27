@@ -10,7 +10,9 @@ import {
   shapeMarks,
   shapePath,
   FRAGMENT_TAB,
+  classStereotype,
   guardLanes,
+  underlineText,
   laneBandOf,
   laneOrient,
   shapeValign,
@@ -66,6 +68,11 @@ const pathTransform = computed(() => {
   return `translate(${inset.value} ${inset.value})${flip}`
 })
 const isClass = computed(() => props.content.shape === 'uml_class')
+// Varian kelas (revisi 54e): stereotip di atas nama, nama miring untuk kelas abstrak, enum tanpa bagian metode.
+const stereo = computed(() => classStereotype(props.content.variant))
+const abstract = computed(() => props.content.variant === 'abstract')
+const isEnum = computed(() => props.content.variant === 'enum')
+const underline = computed(() => underlineText(props.content.shape))
 
 // Area teks dan tanda di dalam bentuk dari definisi bentuk (utils/wbShapes.ts), sama dengan ekspor.
 const textInset = computed(() => shapeInset(props.content.shape))
@@ -221,6 +228,7 @@ const field = 'block w-full'
       class="absolute inset-0 flex flex-col overflow-hidden text-ink"
       :style="{ fontSize: `${content.font_size}px` }"
     >
+      <p v-if="stereo" class="px-2 pt-1 text-center text-sm leading-tight" data-stereotype>{{ stereo }}</p>
       <template v-if="editing">
         <WbRichField
           :field-key="key('name')"
@@ -228,7 +236,7 @@ const field = 'block w-full'
           :doc="content.name_doc"
           label="Nama kelas"
           placeholder="Kelas"
-          :class="field"
+          :class="[field, abstract ? 'italic' : '']"
           class="px-2 py-1 text-center font-bold"
           @input="input('name', $event)"
           @commit="save('name', $event)"
@@ -239,7 +247,7 @@ const field = 'block w-full'
           :field-key="key('attributes')"
           :text="content.attributes ?? ''"
           :doc="content.attributes_doc"
-          label="Atribut kelas, satu per baris"
+          :label="isEnum ? 'Nilai enum, satu per baris' : 'Atribut kelas, satu per baris'"
           :single-line="false"
           :class="field"
           :style="divider"
@@ -249,6 +257,7 @@ const field = 'block w-full'
           @close="emit('close')"
         />
         <WbRichField
+          v-if="!isEnum"
           :field-key="key('methods')"
           :text="content.methods ?? ''"
           :doc="content.methods_doc"
@@ -263,15 +272,30 @@ const field = 'block w-full'
         />
       </template>
       <template v-else>
-        <WbRichText v-if="content.name_doc" :doc="content.name_doc" class="px-2 py-1 text-center font-bold" />
-        <p v-else class="px-2 py-1 text-center font-bold break-words" data-caret>
+        <WbRichText
+          v-if="content.name_doc"
+          :doc="content.name_doc"
+          class="px-2 py-1 text-center font-bold"
+          :class="abstract ? 'italic' : ''"
+        />
+        <p
+          v-else
+          class="px-2 py-1 text-center font-bold break-words"
+          :class="abstract ? 'italic' : ''"
+          data-caret
+          data-class-name
+        >
           {{ content.name || 'Kelas' }}
         </p>
         <div class="min-h-6 flex-1 px-2 py-1 font-mono break-words whitespace-pre-wrap" :style="divider">
           <WbRichText v-if="content.attributes_doc" :doc="content.attributes_doc" />
           <template v-else>{{ content.attributes }}</template>
         </div>
-        <div class="min-h-6 flex-1 px-2 py-1 font-mono break-words whitespace-pre-wrap" :style="divider">
+        <div
+          v-if="!isEnum"
+          class="min-h-6 flex-1 px-2 py-1 font-mono break-words whitespace-pre-wrap"
+          :style="divider"
+        >
           <WbRichText v-if="content.methods_doc" :doc="content.methods_doc" />
           <template v-else>{{ content.methods }}</template>
         </div>
@@ -285,6 +309,7 @@ const field = 'block w-full'
         top ? 'items-start font-semibold' : 'items-center',
         orient && !guards ? 'justify-center px-1 font-semibold' : '',
         pool ? 'wb-vertical' : '',
+        underline ? 'underline' : '',
       ]"
       :style="textStyle"
     >

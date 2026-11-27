@@ -1,5 +1,5 @@
 {
-  "groups": ["Dasar", "Flowchart", "UML", "Activity dan state", "Sequence", "BPMN", "Panah blok"],
+  "groups": ["Dasar", "Flowchart", "UML", "Activity dan state", "Sequence", "ERD", "BPMN", "Panah blok"],
   "shapes": [
     {
       "id": "rect",
@@ -97,7 +97,25 @@
       "label": "Kelas",
       "group": "UML",
       "w": 220,
-      "h": 180
+      "h": 180,
+      "variants": [
+        {
+          "id": "class",
+          "label": "Kelas"
+        },
+        {
+          "id": "abstract",
+          "label": "Kelas abstrak"
+        },
+        {
+          "id": "interface",
+          "label": "Interface"
+        },
+        {
+          "id": "enum",
+          "label": "Enum"
+        }
+      ]
     },
     {
       "id": "uml_actor",
@@ -290,6 +308,41 @@
           "label": "Fragmen par"
         }
       ]
+    },
+    {
+      "id": "erd_entity",
+      "label": "Entitas",
+      "group": "ERD",
+      "w": 160,
+      "h": 70
+    },
+    {
+      "id": "erd_weak_entity",
+      "label": "Entitas lemah",
+      "group": "ERD",
+      "w": 160,
+      "h": 70
+    },
+    {
+      "id": "erd_attribute",
+      "label": "Atribut",
+      "group": "ERD",
+      "w": 130,
+      "h": 60
+    },
+    {
+      "id": "erd_key_attribute",
+      "label": "Atribut kunci",
+      "group": "ERD",
+      "w": 130,
+      "h": 60
+    },
+    {
+      "id": "erd_relationship",
+      "label": "Relasi",
+      "group": "ERD",
+      "w": 140,
+      "h": 90
     },
     {
       "id": "bpmn_pool",

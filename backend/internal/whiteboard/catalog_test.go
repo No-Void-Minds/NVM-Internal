@@ -109,3 +109,27 @@ func TestKatalogBentuk(t *testing.T) {
 		}
 	}
 }
+
+// Revisi 54e: ujung crow's foot diterima daftar putih gaya garis, varian kelas UML divalidasi, kelas lama tanpa varian
+// tetap sah.
+func TestCrowsFootDanVarianKelas(t *testing.T) {
+	for _, k := range []string{"cf_one", "cf_many", "cf_zero_one", "cf_one_many", "cf_zero_many"} {
+		if _, err := cleanStyle(ConnectorStyle{Start: k, End: k}); err != nil {
+			t.Errorf("ujung %s ditolak: %v", k, err)
+		}
+	}
+	if _, err := cleanStyle(ConnectorStyle{End: "cf_lima"}); err == nil {
+		t.Error("ujung tak dikenal diterima")
+	}
+	class := func(v string) json.RawMessage {
+		return json.RawMessage(`{"shape":"uml_class","variant":"` + v + `","rotation":0,"fill":"putih","stroke":"tinta","stroke_width":2,"stroke_style":"solid","text":"","align":"center","font_size":16,"name":"Pembayaran","attributes":"KARTU\nTUNAI","methods":""}`)
+	}
+	for _, v := range []string{"", "class", "abstract", "interface", "enum"} {
+		if _, _, err := CleanShape(class(v)); err != nil {
+			t.Errorf("kelas %q ditolak: %v", v, err)
+		}
+	}
+	if _, _, err := CleanShape(class("trait")); err == nil {
+		t.Error("varian kelas tak dikenal diterima")
+	}
+}

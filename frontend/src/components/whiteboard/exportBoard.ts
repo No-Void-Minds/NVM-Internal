@@ -16,7 +16,9 @@ import {
   solidShape,
   strokeScale,
   FRAGMENT_TAB,
+  classStereotype,
   guardLanes,
+  underlineText,
   laneOrient,
   textBox,
   type ShapeContent,
@@ -559,14 +561,21 @@ function drawShape(ctx: CanvasRenderingContext2D, tok: Tok, c: ShapeContent, r: 
     fieldLines(text, doc, { size: fs, bold }).flatMap((l) => wrapLine(ctx, tok, l, maxW))
   if (c.shape === 'uml_class') {
     let y = 6
-    for (const l of lay(c.name || 'Kelas', c.name_doc, r.w - 16, true)) {
+    // Varian kelas (revisi 54e), sama dengan WbShape.vue: stereotip, nama miring untuk abstrak, enum dua bagian.
+    const stereo = classStereotype(c.variant)
+    if (stereo)
+      for (const l of lay(stereo, null, r.w - 16)) {
+        drawLine(ctx, tok, l, 8, y, r.w - 16, ink0, 'center')
+        y += lineHeight(l)
+      }
+    for (const l0 of lay(c.name || 'Kelas', c.name_doc, r.w - 16, true)) {
+      const l = c.variant === 'abstract' ? { ...l0, runs: l0.runs.map((x) => ({ ...x, italic: true })) } : l0
       drawLine(ctx, tok, l, 8, y, r.w - 16, ink0, 'center')
       y += lineHeight(l)
     }
-    for (const [part, doc] of [
-      [c.attributes ?? '', c.attributes_doc],
-      [c.methods ?? '', c.methods_doc],
-    ] as const) {
+    const parts: [string, (typeof c)['attributes_doc']][] = [[c.attributes ?? '', c.attributes_doc]]
+    if (c.variant !== 'enum') parts.push([c.methods ?? '', c.methods_doc])
+    for (const [part, doc] of parts) {
       y += 4
       ctx.strokeStyle = ink(tok, c.stroke)
       ctx.lineWidth = sw
@@ -596,7 +605,10 @@ function drawShape(ctx: CanvasRenderingContext2D, tok: Tok, c: ShapeContent, r: 
     const lines = lay(c.text, c.doc, Math.max(20, tw - 8), t.valign === 'top' || !!t.vertical)
     const total = lines.reduce((n, l) => n + lineHeight(l), 0)
     let y = t.valign === 'top' || t.y >= r.h ? 0 : (th - total) / 2
-    for (const l of lines) {
+    // Atribut kunci ERD (revisi 54e): teksnya bergaris bawah.
+    const under = underlineText(c.shape)
+    for (const l0 of lines) {
+      const l = under ? { ...l0, runs: l0.runs.map((x) => ({ ...x, underline: true })) } : l0
       drawLine(ctx, tok, l, 4, y, Math.max(20, tw - 8), ink0, t.vertical ? 'center' : c.align)
       y += lineHeight(l)
     }
