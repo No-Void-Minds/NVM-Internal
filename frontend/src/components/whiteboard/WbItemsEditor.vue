@@ -39,9 +39,12 @@ watch(
   (c) => {
     if (!dirty) draft.value = clone(c)
     if (pending !== null) {
+      // Target fokus dipegang sampai barisnya benar-benar ada (isi kartu bisa berubah dua kali: lokal lalu jawaban
+      // server), supaya ketikan sesudah Enter tidak jatuh ke luar editor.
       const i = pending
-      pending = null
-      focusRow(i)
+      void nextTick(() => {
+        if (focusRow(i)) pending = null
+      })
     }
   },
 )
@@ -55,12 +58,12 @@ function fitScreen() {
     end > size - 8 ? Math.max(8 - start, size - 8 - end) : start < 8 ? 8 - start : 0
   shift.value = { x: room(b.left, b.right, window.innerWidth), y: room(b.top, b.bottom, window.innerHeight) }
 }
-const focusRow = (i: number, field = 'label') =>
-  void nextTick(() => {
-    const el = root.value?.querySelector<HTMLInputElement>(`[data-item="${i}"] [data-field="${field}"]`)
-    el?.focus()
-    el?.select()
-  })
+function focusRow(i: number, field = 'label'): boolean {
+  const el = root.value?.querySelector<HTMLInputElement>(`[data-item="${i}"] [data-field="${field}"]`)
+  el?.focus()
+  el?.select()
+  return !!el
+}
 void nextTick(() => {
   fitScreen()
   focusRow(0)
@@ -151,14 +154,14 @@ function onKey(e: KeyboardEvent) {
     e.preventDefault()
     if (i < 0) {
       if (dirty) commit()
-      focusRow(0)
+      void nextTick(() => focusRow(0))
     } else if (i === rows.value - 1) {
       // Ketikan yang belum tersimpan satu langkah undo sendiri, terpisah dari tambah baris.
       if (dirty) commit()
       addRow(i + 1)
     } else {
       if (dirty) commit()
-      focusRow(i + 1)
+      void nextTick(() => focusRow(i + 1))
     }
   } else if (!events.value && e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && i >= 0) {
     e.preventDefault()

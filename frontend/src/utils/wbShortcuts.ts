@@ -37,6 +37,8 @@ export const SHORTCUTS = {
   flipH: { shift: true, code: 'KeyH' },
   flipV: { shift: true, code: 'KeyV' },
   connect: { alt: true, shift: true, code: 'KeyK' },
+  // Revisi 57d1: tambah bentuk tersambung (ditangani penangan Ctrl lama di kanvas).
+  quickAdd: { ctrl: true, code: 'Enter' },
   newBoard: { alt: true, shift: true, code: 'KeyB' },
   moveBoard: { alt: true, shift: true, code: 'KeyM' },
   comments: { ctrl: true, alt: true, code: 'KeyM' },

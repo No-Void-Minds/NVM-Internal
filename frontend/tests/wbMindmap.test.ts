@@ -126,3 +126,95 @@ test('tahap corong dan chevron, peristiwa garis waktu, bentuk lama tidak berubah
   assert.equal(newShapeContent('funnel').stages?.length, 3)
   assert.equal(shapeMarks({ shape: 'timeline' }, 400, 80).length, 4)
 })
+
+test('garis tidak wajar: lingkaran, dua induk, dua topik pusat; induk konsisten dan selalu berhenti', () => {
+  const links = (pairs: [string, string][]) => pairs.map(([from, to]) => ({ from, to }))
+  // Lingkaran C ke A ke B ke C: tiap simpul sekali, penutup lingkaran tidak dipakai.
+  let nodes = [node('c', 0, 0, { central: true }), node('a', 300, -50), node('b', 300, 50)]
+  let tree = mindTree(
+    nodes,
+    links([
+      ['c', 'a'],
+      ['a', 'b'],
+      ['b', 'c'],
+    ]),
+  )
+  assert.equal(tree.parent.get('a'), 'c')
+  assert.equal(tree.parent.get('b'), 'c')
+  assert.deepEqual(descendants(tree, 'c').sort(), ['a', 'b'])
+  // Urutan garis tidak berpengaruh.
+  const again = mindTree(
+    nodes,
+    links([
+      ['b', 'c'],
+      ['a', 'b'],
+      ['c', 'a'],
+    ]),
+  )
+  assert.deepEqual(Object.fromEntries(again.parent), Object.fromEntries(tree.parent))
+  nodes = [node('c', 0, 0, { central: true }), node('p1', 300, -100), node('p2', 300, 100), node('x', 600, 0)]
+  for (const order of [
+    links([
+      ['c', 'p1'],
+      ['c', 'p2'],
+      ['p2', 'x'],
+      ['p1', 'x'],
+    ]),
+    links([
+      ['p2', 'x'],
+      ['p1', 'x'],
+      ['c', 'p2'],
+      ['c', 'p1'],
+    ]),
+  ])
+    assert.equal(mindTree(nodes, order).parent.get('x'), 'p1')
+  // Jarak lebih pendek menang dari letak: x tersambung langsung ke c dan lewat p1.
+  assert.equal(
+    mindTree(
+      nodes,
+      links([
+        ['c', 'p1'],
+        ['p1', 'x'],
+        ['c', 'x'],
+      ]),
+    ).parent.get('x'),
+    'c',
+  )
+  // Dua topik pusat tersambung langsung: keduanya tetap akar; cabang di antara keduanya ikut yang lebih dekat, lalu
+  // yang lebih atas.
+  nodes = [
+    node('c1', 0, 0, { central: true }),
+    node('c2', 0, 400, { central: true }),
+    node('m', 300, 200),
+    node('n', 300, 500),
+  ]
+  tree = mindTree(
+    nodes,
+    links([
+      ['c1', 'c2'],
+      ['c1', 'm'],
+      ['c2', 'm'],
+      ['c2', 'n'],
+      ['n', 'm'],
+    ]),
+  )
+  assert.equal(tree.parent.get('c1'), null)
+  assert.equal(tree.parent.get('c2'), null)
+  assert.equal(tree.parent.get('m'), 'c1')
+  assert.equal(tree.parent.get('n'), 'c2')
+  // Lingkaran tanpa topik pusat: akar di simpul paling atas; tata letak dan lipat berhenti.
+  nodes = [node('a', 0, 100), node('b', 300, 0), node('d', 300, 200)]
+  tree = mindTree(
+    nodes,
+    links([
+      ['a', 'b'],
+      ['b', 'd'],
+      ['d', 'a'],
+    ]),
+  )
+  assert.equal(tree.parent.get('b'), null)
+  assert.deepEqual([...tree.parent.values()].filter((v) => v === null).length, 1)
+  const folded = nodes.map((n) => (n.id === 'b' ? { ...n, folded: true } : n))
+  assert.deepEqual([...hiddenByFold(folded, tree)].sort(), ['a', 'd'])
+  assert.ok(layoutMind(nodes, tree, 'b').size === 2)
+})

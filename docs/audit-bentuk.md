@@ -57,11 +57,11 @@ Prioritas: **Tinggi** berarti bentuk itu tidak bisa dipakai untuk tujuannya tanp
 | Tambah bentuk tersambung | Dari bentuk terpilih, satu klik atau pintasan menambah bentuk berikutnya yang langsung tersambung garis (flowchart, BPMN, activity) | Palet lalu tarik garis | Tiga sampai lima langkah per langkah alur | Tombol di sisi bentuk terpilih (dan Ctrl+Enter) membuat bentuk sejenis 60 px di sisi itu dan garis ke sana, satu langkah undo | Sedang |
 | Teks melebihi bentuk | Teks tidak hilang diam-diam | Teks terpotong di tepi area teks | Isi terpotong tanpa tanda | Tanda terpotong (gradasi atau ikon titik tiga) dan perintah "Pas ke teks" yang menambah tinggi bentuk | Rendah |
 
-## Usulan 57d (menunggu persetujuan)
+## Usulan 57d (disetujui 2026-11-27, dikerjakan 57d1 sampai 57d5)
 
 Butir prioritas sedang dari tabel di atas, urut dari yang paling sering dipakai tim:
 
-1. Tambah bentuk tersambung dari bentuk terpilih (lintas bentuk).
+1. Tambah bentuk tersambung dari bentuk terpilih (lintas bentuk). Selesai di 57d1.
 2. Kotak centang wireframe bisa dicentang langsung.
 3. Tinggi kelas UML mengikuti isi.
 4. Paket UML dan Zona arsitektur sebagai wadah.

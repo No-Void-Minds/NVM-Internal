@@ -1,9 +1,19 @@
 // Mind map (revisi 57c): pohon dari garis antar bentuk mind map, cabang yang tersembunyi karena induknya dilipat, dan
 // tata letak otomatis kiri dan kanan topik pusat. Bagian murni tanpa Vue supaya bisa diuji dengan node --test.
 //
-// Struktur tidak disimpan terpisah: induk dan anak diturunkan dari garis yang kedua ujungnya bentuk mind map, mulai
-// dari topik pusat (BFS, jadi arah garis tidak penting). Komponen tanpa topik pusat berakar di simpul yang tidak
-// pernah menjadi ujung akhir garis. Jadi salin tempel, undo, realtime, dan template tidak butuh data tambahan.
+// Struktur tidak disimpan terpisah: induk dan anak diturunkan dari garis yang kedua ujungnya bentuk mind map, jadi salin
+// tempel, undo, realtime, dan template tidak butuh data tambahan. Aturan untuk garis yang tidak membentuk pohon
+// (lingkaran, cabang dengan dua induk, cabang yang tersambung ke dua topik pusat):
+// 1. Semua topik pusat menjadi akar sekaligus dan tidak pernah menjadi anak, juga bila tersambung ke topik pusat lain.
+// 2. Pohon dibangun BFS per tingkat dari semua akar bersamaan, arah garis tidak penting. Setiap simpul masuk pohon
+//    sekali (simpul yang sudah dikunjungi dilewati), jadi lingkaran tidak berulang tanpa akhir.
+// 3. Induk sebuah simpul adalah tetangga yang dicapai lebih dulu: jarak garis terpendek ke topik pusat; bila sama,
+//    tetangga yang lebih atas di layar (y, lalu x, lalu id). Cabang yang tersambung ke dua topik pusat ikut topik
+//    pusat yang lebih dekat, lalu yang lebih atas.
+// 4. Komponen tanpa topik pusat berakar di simpul yang tidak pernah menjadi ujung akhir garis (yang paling atas dulu);
+//    bila semua simpulnya ujung akhir (lingkaran murni), di simpul yang paling atas.
+// Garis yang tidak dipakai pohon (penutup lingkaran, induk kedua) tetap digambar, tetapi tidak dipakai tata letak dan
+// lipat.
 
 export type MindNode = {
   id: string
@@ -26,39 +36,53 @@ export const GAP_Y = 16
 
 export function mindTree(nodes: MindNode[], links: MindLink[]): MindTree {
   const byId = new Map(nodes.map((n) => [n.id, n]))
-  const adj = new Map<string, string[]>(nodes.map((n) => [n.id, []]))
+  // Urutan tetap: atas ke bawah, lalu kiri ke kanan, lalu id; tidak bergantung urutan garis dari server.
+  const order = (a: string, b: string) => {
+    const p = byId.get(a)!
+    const q = byId.get(b)!
+    return p.y - q.y || p.x - q.x || (a < b ? -1 : a > b ? 1 : 0)
+  }
+  const adj = new Map<string, Set<string>>(nodes.map((n) => [n.id, new Set()]))
   const isTo = new Set<string>()
   for (const l of links) {
     if (!byId.has(l.from) || !byId.has(l.to) || l.from === l.to) continue
-    adj.get(l.from)!.push(l.to)
-    adj.get(l.to)!.push(l.from)
+    adj.get(l.from)!.add(l.to)
+    adj.get(l.to)!.add(l.from)
     isTo.add(l.to)
   }
   const parent = new Map<string, string | null>()
   const children = new Map<string, string[]>(nodes.map((n) => [n.id, []]))
   const root = new Map<string, string>()
-  const walk = (start: string) => {
-    if (parent.has(start)) return
-    parent.set(start, null)
-    root.set(start, start)
-    const queue = [start]
-    while (queue.length) {
-      const id = queue.shift()!
-      for (const next of adj.get(id)!) {
-        if (parent.has(next)) continue
-        parent.set(next, id)
-        root.set(next, start)
-        children.get(id)!.push(next)
-        queue.push(next)
-      }
+  // BFS per tingkat dari beberapa akar sekaligus; tiap tingkat diurutkan supaya seri jarak diputus oleh letak.
+  const grow = (starts: string[]) => {
+    let level = starts.filter((id) => !parent.has(id)).sort(order)
+    for (const id of level) {
+      parent.set(id, null)
+      root.set(id, id)
+    }
+    while (level.length) {
+      const next: string[] = []
+      for (const id of level)
+        for (const nb of [...adj.get(id)!].sort(order)) {
+          if (parent.has(nb) || byId.get(nb)!.central) continue
+          parent.set(nb, id)
+          root.set(nb, root.get(id)!)
+          children.get(id)!.push(nb)
+          next.push(nb)
+        }
+      level = next.sort(order)
     }
   }
-  for (const n of nodes) if (n.central) walk(n.id)
-  for (const n of nodes) if (!isTo.has(n.id)) walk(n.id)
-  for (const n of nodes) walk(n.id)
+  grow(nodes.filter((n) => n.central).map((n) => n.id))
+  const rest = () =>
+    nodes
+      .map((n) => n.id)
+      .filter((id) => !parent.has(id))
+      .sort(order)
+  for (const id of rest()) if (!isTo.has(id)) grow([id])
+  for (let left = rest(); left.length; left = rest()) grow([left[0]!])
   // Anak diurutkan dari atas ke bawah, jadi tata letak mempertahankan urutan yang terlihat.
-  for (const list of children.values())
-    list.sort((a, b) => byId.get(a)!.y - byId.get(b)!.y || byId.get(a)!.x - byId.get(b)!.x)
+  for (const list of children.values()) list.sort(order)
   return { parent, children, root }
 }
 

@@ -77,6 +77,7 @@ import {
   sideOf,
   type MindNode,
 } from '../utils/wbMindmap'
+import { DIR_PORTS, placeNext, type Dir } from '../utils/wbQuickAdd'
 import { inkColor, penColors } from '../components/whiteboard/wbColors'
 import { caretHint, type CaretHint } from '../components/whiteboard/caret'
 import { ApiError, notifyUnauthorized } from '../api/client'
@@ -2629,6 +2630,13 @@ function selectionMenu(): MenuItem[] {
       label: 'Tambah pesan ke diri sendiri',
       run: () => void addSelfMessage(one.id),
     })
+  if (one && quickSource.value?.id === one.id)
+    out.push({
+      id: 'quickAdd',
+      label: 'Tambah bentuk tersambung',
+      key: keyLabel('quickAdd'),
+      run: () => void addConnected(quickDir(one.id)),
+    })
   if (isMindCard(one) && one && w) {
     if (mindKidsOf(one.id))
       out.push({
@@ -3995,6 +4003,117 @@ const selectedStops = computed(() =>
 )
 
 // Port kartu terpilih untuk menarik garis baru: hanya satu kartu, bisa ditulis, tidak sedang diedit atau mode pena.
+// Tambah bentuk tersambung (revisi 57d1): empat tombol 44 px di sisi bentuk terpilih (100 px layar dari tepi, di luar
+// pegangan port 48 px dan area sentuhnya; atas 150 px karena pegangan putar) dan Ctrl+Enter. Bentuk baru memakai jenis, varian, dan gaya bentuk asal,
+// diletakkan tanpa menimpa kartu lain (utils/wbQuickAdd.ts), dan disambung garis; bentuk dan garis satu langkah undo.
+// Tidak untuk wadah (pool, swimlane, fragmen, batas sistem, bingkai), mind map (Tab), dan sequence (pesan).
+const QUICK_OFFSET = 100
+const DIR_LABEL: Record<Dir, string> = { right: 'kanan', down: 'bawah', left: 'kiri', up: 'atas' }
+const quickSource = computed(() => {
+  if (!canWrite.value || penOn.value || editingId.value || selected.value.size !== 1) return null
+  const c = shownById.value.get([...selected.value][0]!)
+  if (!c || c.kind !== 'shape' || c.column_id || mind.value.hidden.has(c.id)) return null
+  const sh = (c.content as ShapeContent).shape
+  return isContainer(sh) || isMindmap(sh) || isLifeline(sh) ? null : c
+})
+const quickAdds = computed(() => {
+  const c = quickSource.value
+  if (!c || connectDraft.value) return []
+  const s = 44 / view.value.zoom
+  const off = QUICK_OFFSET / view.value.zoom
+  const at: Record<Dir, Pt> = {
+    right: { x: c.x + c.w + off, y: c.y + c.h / 2 },
+    down: { x: c.x + c.w / 2, y: c.y + c.h + off },
+    left: { x: c.x - off, y: c.y + c.h / 2 },
+    // Pegangan putar ada 100 px di atas bentuk, jadi tombol atas 150 px, di luar area sentuhnya.
+    up: { x: c.x + c.w / 2, y: c.y - (QUICK_OFFSET + 50) / view.value.zoom },
+  }
+  // Tombol yang menimpa kartu lain tidak ditampilkan, supaya tidak menghalangi klik ke kartu itu; arah itu tetap bisa
+  // lewat Ctrl+Enter atau menu, dan letak bentuk barunya menghindari kartu.
+  const others = rendered.value.filter((k) => k.id !== c.id && k.kind !== 'drawing')
+  return (Object.keys(at) as Dir[]).flatMap((dir) => {
+    const box = { x: at[dir].x - s / 2, y: at[dir].y - s / 2, w: s, h: s }
+    if (others.some((k) => intersects(box, k))) return []
+    return [
+      {
+        dir,
+        label: DIR_LABEL[dir],
+        style: { left: `${box.x}px`, top: `${box.y}px`, width: `${s}px`, height: `${s}px` },
+      },
+    ]
+  })
+})
+// Arah Ctrl+Enter: searah garis keluar terakhir bentuk itu (alur yang sedang dibuat), atau ke kanan.
+function quickDir(id: string): Dir {
+  const out = liveConnectors.value.filter((c) => c.from === id && c.to)
+  const port = out.at(-1)?.geometry.from.port
+  return port === 'bottom' ? 'down' : port === 'left' ? 'left' : port === 'top' ? 'up' : 'right'
+}
+async function addConnected(dir: Dir) {
+  const src = quickSource.value
+  if (!src) return
+  const sc = src.content as ShapeContent
+  const content: ShapeContent = {
+    ...newShapeContent(sc.shape, sc.variant),
+    fill: sc.fill,
+    stroke: sc.stroke,
+    stroke_width: sc.stroke_width,
+    stroke_style: sc.stroke_style,
+    font_size: sc.font_size,
+    align: sc.align,
+  }
+  // Kartu lain sebagai penghalang, kecuali wadah yang memuat bentuk asal (bentuk baru boleh ikut di dalamnya).
+  const inside = (o: Rect) =>
+    o.x <= src.x && o.y <= src.y && o.x + o.w >= src.x + src.w && o.y + o.h >= src.y + src.h
+  const obstacles = shownCards.value.filter(
+    (c) =>
+      c.id !== src.id &&
+      !mind.value.hidden.has(c.id) &&
+      !(c.kind === 'shape' && isContainer((c.content as ShapeContent).shape) && inside(c)),
+  )
+  const r = placeNext(src, dir, { w: src.w, h: src.h }, obstacles)
+  let made: string | null = null
+  await asOneStepAsync(async () => {
+    const res = await saving(() =>
+      createCard(bid.value, {
+        id: newId(),
+        kind: 'shape',
+        ...r,
+        color: src.color ?? '',
+        content,
+        ...(src.style ? { style: src.style } : {}),
+      }),
+    ).catch(() => undefined)
+    if (!res) return
+    upsert([res.card])
+    record({ kind: 'create', ids: [res.card.id] })
+    made = res.card.id
+    const erd = sc.shape === 'erd_table'
+    const line = await saving(() =>
+      createConnector(bid.value, {
+        from: src.id,
+        to: res.card.id,
+        style: erd
+          ? { ...erdEnds(src.id, undefined, res.card.id, undefined), line: 'solid', color: '' }
+          : { start: 'none', end: 'arrow', line: 'solid', color: '' },
+        geometry: {
+          from: { port: DIR_PORTS[dir].from },
+          to: { port: DIR_PORTS[dir].to },
+          route: 'orthogonal',
+          points: [],
+        },
+      }),
+    ).catch(() => undefined)
+    if (line) {
+      upsertConnectors([line.connector])
+      record({ kind: 'connectors', ids: [line.connector.id], batches: [] })
+    }
+  })
+  if (!made) return
+  select([made])
+  void focusCard(made)
+  announce.value = `Bentuk baru ditambahkan di ${DIR_LABEL[dir]} dan disambung garis.`
+}
 const connectDraft = ref<{ card: string; port: Port; at: Pt; row?: string } | null>(null)
 const PORT_OFFSET = 48
 const portHandles = computed(() => {
@@ -4366,6 +4485,14 @@ const mindFolds = computed(() => {
     ]
   })
 })
+// Petunjuk pintasan saat satu bentuk mind map terpilih dan bisa ditulis (revisi 57d).
+const mindHint = computed(
+  () =>
+    canWrite.value &&
+    !editingId.value &&
+    selected.value.size === 1 &&
+    isMindCard(byId.value.get([...selected.value][0]!)),
+)
 const isMindCard = (c: Card | undefined) =>
   c?.kind === 'shape' && isMindmap((c.content as ShapeContent).shape)
 function relayoutMind(anyId: string) {
@@ -5473,6 +5600,10 @@ function onKeydown(e: KeyboardEvent) {
     } else if (k === 'd' && canWrite.value) {
       e.preventDefault()
       duplicateSelection()
+    } else if (e.key === 'Enter' && canWrite.value && quickSource.value) {
+      // Revisi 57d1: tambah bentuk tersambung searah alur.
+      e.preventDefault()
+      void addConnected(quickDir(quickSource.value.id))
     } else if (k === '0') {
       e.preventDefault()
       fit()
@@ -6079,6 +6210,7 @@ const toolBtn =
                 :caret="editHint?.id === c.id ? editHint : null"
                 :readonly-by="readonlyFor?.id === c.id ? readonlyFor.name : null"
                 :panning="imagePan === c.id"
+                :aria-describedby="mindHint && selected.has(c.id) ? 'wb-mind-hint' : undefined"
                 @focus="focusedId = c.id"
                 @grab="onCardGrab(c, $event)"
                 @resize="(e: PointerEvent, h?: Handle) => onResizeStart(c, e, h)"
@@ -6135,6 +6267,44 @@ const toolBtn =
                   stroke-width="1.75"
                 >
                   <path d="M3 8h10" />
+                </svg>
+              </span>
+            </button>
+            <!-- Tambah bentuk tersambung (revisi 57d1), di atas garis seperti tombol lipat. -->
+            <button
+              v-for="q in quickAdds"
+              :key="`tambah-${q.dir}`"
+              type="button"
+              class="group absolute z-[1000000001] flex items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mark"
+              :style="q.style"
+              :aria-label="`Tambah bentuk tersambung di ${q.label}`"
+              :title="`Tambah bentuk tersambung di ${q.label} (${keyLabel('quickAdd')})`"
+              :data-quick-add="q.dir"
+              @pointerdown.stop
+              @dblclick.stop
+              @keydown.enter.stop
+              @keydown.space.stop
+              @click.stop="addConnected(q.dir)"
+            >
+              <span
+                class="flex size-2/3 items-center justify-center rounded-full border border-line bg-surface text-ink shadow-menu group-hover:bg-canvas"
+              >
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 16 16"
+                  class="size-1/2"
+                  :class="{
+                    'rotate-90': q.dir === 'down',
+                    'rotate-180': q.dir === 'left',
+                    '-rotate-90': q.dir === 'up',
+                  }"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.75"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" />
                 </svg>
               </span>
             </button>
@@ -6301,6 +6471,18 @@ const toolBtn =
             <button type="button" :class="barBtn" class="text-urgent" @click="removeSelected">
               Hapus {{ selected.size }} kartu
             </button>
+            <!-- Revisi 57d: petunjuk pintasan mind map; juga dibaca pembaca layar lewat aria-describedby kartunya. Di
+                 layar sempit hanya untuk pembaca layar (bar pilihan sudah dua baris, pintasan keyboard jarang). -->
+            <template v-if="mindHint">
+              <span aria-hidden="true" class="mx-0.5 hidden h-6 w-px bg-line md:block" />
+              <p
+                id="wb-mind-hint"
+                class="sr-only px-2 text-sm text-ink-muted md:not-sr-only"
+                data-testid="wb-mind-hint"
+              >
+                Tab: anak, Enter: sejajar, F2: ubah teks
+              </p>
+            </template>
           </div>
           <div id="wb-format-slot" class="pointer-events-auto max-w-full empty:hidden" />
         </div>

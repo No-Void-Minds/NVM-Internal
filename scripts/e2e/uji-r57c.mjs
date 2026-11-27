@@ -251,6 +251,10 @@ try {
   await ed.locator('[data-item="2"] [data-field="label"]').click();
   await ps.keyboard.press("Enter");
   await settle(ps);
+  const focused = await ps
+    .waitForFunction(() => document.activeElement?.closest("[data-item]")?.getAttribute("data-item") === "3", null, { timeout: 3000 })
+    .then(() => true, () => false);
+  expect(focused, "fokus tahap baru", "fokus tidak pindah ke tahap baru sesudah Enter");
   await ps.keyboard.type("Setia");
   await ps.keyboard.press("Alt+ArrowUp");
   await settle(ps);
