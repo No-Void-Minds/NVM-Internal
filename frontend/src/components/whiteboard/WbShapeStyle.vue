@@ -116,6 +116,16 @@ const lbl = 'text-sm font-semibold'
           :disabled="!canWrite"
           @update:model-value="set('variant', $event)"
         />
+        <!-- Revisi 54f: enum menyembunyikan bagian metode; isinya tidak dibuang. -->
+        <p
+          v-if="content.shape === 'uml_class' && content.variant === 'enum' && (content.methods ?? '').trim()"
+          class="col-span-2 text-sm text-ink-muted"
+          role="status"
+          data-testid="wb-enum-note"
+        >
+          Bagian metode disembunyikan untuk enum. Isinya tetap tersimpan dan muncul lagi kalau varian diganti
+          kembali.
+        </p>
       </template>
       <div>
         <label :for="`${uid}-fill`" :class="lbl">Isian</label>

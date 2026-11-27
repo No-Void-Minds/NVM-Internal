@@ -1,5 +1,18 @@
 {
-  "groups": ["Dasar", "Flowchart", "UML", "Activity dan state", "Sequence", "ERD", "BPMN", "Panah blok"],
+  "groups": [
+    "Dasar",
+    "Flowchart",
+    "UML",
+    "Activity dan state",
+    "Sequence",
+    "ERD",
+    "BPMN",
+    "Arsitektur",
+    "Wireframe",
+    "Mind map",
+    "Panah blok",
+    "Lainnya"
+  ],
   "shapes": [
     {
       "id": "rect",
@@ -90,6 +103,55 @@
       "label": "Dokumen",
       "group": "Flowchart",
       "w": 180,
+      "h": 100
+    },
+    {
+      "id": "fc_manual_input",
+      "label": "Input manual",
+      "group": "Flowchart",
+      "w": 180,
+      "h": 80
+    },
+    {
+      "id": "fc_predefined",
+      "label": "Proses terdefinisi",
+      "group": "Flowchart",
+      "w": 180,
+      "h": 80
+    },
+    {
+      "id": "fc_offpage",
+      "label": "Konektor halaman lain",
+      "group": "Flowchart",
+      "w": 80,
+      "h": 80
+    },
+    {
+      "id": "fc_delay",
+      "label": "Delay",
+      "group": "Flowchart",
+      "w": 160,
+      "h": 80
+    },
+    {
+      "id": "fc_preparation",
+      "label": "Persiapan",
+      "group": "Flowchart",
+      "w": 180,
+      "h": 80
+    },
+    {
+      "id": "fc_merge",
+      "label": "Merge",
+      "group": "Flowchart",
+      "w": 120,
+      "h": 90
+    },
+    {
+      "id": "fc_sort",
+      "label": "Sort",
+      "group": "Flowchart",
+      "w": 120,
       "h": 100
     },
     {
@@ -566,6 +628,170 @@
       "group": "Panah blok",
       "w": 200,
       "h": 100
+    },
+    {
+      "id": "arch_server",
+      "label": "Server",
+      "group": "Arsitektur",
+      "w": 70,
+      "h": 90
+    },
+    {
+      "id": "arch_database",
+      "label": "Database",
+      "group": "Arsitektur",
+      "w": 70,
+      "h": 80
+    },
+    {
+      "id": "arch_cloud",
+      "label": "Cloud",
+      "group": "Arsitektur",
+      "w": 150,
+      "h": 100
+    },
+    {
+      "id": "arch_user",
+      "label": "Pengguna",
+      "group": "Arsitektur",
+      "w": 70,
+      "h": 80
+    },
+    {
+      "id": "arch_laptop",
+      "label": "Laptop",
+      "group": "Arsitektur",
+      "w": 100,
+      "h": 70
+    },
+    {
+      "id": "arch_phone",
+      "label": "Ponsel",
+      "group": "Arsitektur",
+      "w": 50,
+      "h": 90
+    },
+    {
+      "id": "arch_firewall",
+      "label": "Firewall",
+      "group": "Arsitektur",
+      "w": 90,
+      "h": 70
+    },
+    {
+      "id": "arch_component",
+      "label": "Komponen",
+      "group": "Arsitektur",
+      "w": 170,
+      "h": 80
+    },
+    {
+      "id": "arch_node",
+      "label": "Node 3D",
+      "group": "Arsitektur",
+      "w": 160,
+      "h": 110
+    },
+    {
+      "id": "wf_browser",
+      "label": "Jendela browser",
+      "group": "Wireframe",
+      "w": 360,
+      "h": 240
+    },
+    {
+      "id": "wf_phone",
+      "label": "Bingkai ponsel",
+      "group": "Wireframe",
+      "w": 180,
+      "h": 340
+    },
+    {
+      "id": "wf_button",
+      "label": "Tombol",
+      "group": "Wireframe",
+      "w": 120,
+      "h": 44
+    },
+    {
+      "id": "wf_input",
+      "label": "Isian",
+      "group": "Wireframe",
+      "w": 220,
+      "h": 44
+    },
+    {
+      "id": "wf_checkbox",
+      "label": "Kotak centang",
+      "group": "Wireframe",
+      "w": 180,
+      "h": 40,
+      "variants": [
+        {
+          "id": "unchecked",
+          "label": "Kotak centang"
+        },
+        {
+          "id": "checked",
+          "label": "Kotak centang tercentang"
+        }
+      ]
+    },
+    {
+      "id": "wf_dropdown",
+      "label": "Dropdown",
+      "group": "Wireframe",
+      "w": 200,
+      "h": 44
+    },
+    {
+      "id": "wf_image",
+      "label": "Placeholder gambar",
+      "group": "Wireframe",
+      "w": 160,
+      "h": 120
+    },
+    {
+      "id": "mm_central",
+      "label": "Topik pusat",
+      "group": "Mind map",
+      "w": 200,
+      "h": 90
+    },
+    {
+      "id": "mm_topic",
+      "label": "Cabang",
+      "group": "Mind map",
+      "w": 160,
+      "h": 60
+    },
+    {
+      "id": "callout",
+      "label": "Callout",
+      "group": "Lainnya",
+      "w": 200,
+      "h": 120
+    },
+    {
+      "id": "chevron",
+      "label": "Chevron",
+      "group": "Lainnya",
+      "w": 180,
+      "h": 70
+    },
+    {
+      "id": "funnel",
+      "label": "Corong",
+      "group": "Lainnya",
+      "w": 160,
+      "h": 140
+    },
+    {
+      "id": "timeline",
+      "label": "Garis waktu",
+      "group": "Lainnya",
+      "w": 420,
+      "h": 80
     }
   ]
 }

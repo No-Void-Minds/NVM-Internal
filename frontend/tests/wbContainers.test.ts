@@ -315,3 +315,24 @@ test("ERD dan class (54e): crow's foot, preset, varian kelas, atribut kunci, ent
   assert.ok(w.underlineText('erd_key_attribute') && !w.underlineText('erd_attribute'))
   assert.equal(shapeMarks({ shape: 'erd_weak_entity' }, 160, 70).length, 1)
 })
+
+test('lainnya (54f): kelompok baru, mind map, kotak centang, garis waktu, corong', async () => {
+  const w = await import('../src/utils/wbShapes.ts')
+  const count = (g: string) => w.SHAPES.filter((s) => s.group === g).length
+  assert.equal(count('Arsitektur'), 9)
+  assert.equal(count('Wireframe'), 7)
+  assert.equal(count('Mind map'), 2)
+  assert.equal(count('Lainnya'), 4)
+  assert.ok(w.SHAPES.filter((s) => s.id.startsWith('fc_')).length === 7)
+  assert.ok(w.isMindmap('mm_central') && !w.isMindmap('rect') && !w.isMindmap(undefined))
+  assert.equal(w.newShapeContent('mm_central').font_size, 20)
+  assert.equal(w.newShapeContent('mm_central').fill, 'kuning')
+  assert.equal(shapeMarks({ shape: 'wf_checkbox', variant: 'unchecked' }, 180, 40).length, 0)
+  assert.equal(shapeMarks({ shape: 'wf_checkbox', variant: 'checked' }, 180, 40).length, 1)
+  assert.ok(w.openShape('timeline'))
+  assert.equal(shapeMarks({ shape: 'timeline' }, 420, 80).length, 4)
+  // Garis bantu corong berada di dalam tepinya.
+  const d = shapeMarks({ shape: 'funnel' }, 160, 140)[0]!.d
+  const [x1, , x2] = (d.match(/-?\d+(\.\d+)?/g) ?? []).map(Number)
+  assert.ok(x1! > 0 && x2! < 160 && x1! < x2!, d)
+})

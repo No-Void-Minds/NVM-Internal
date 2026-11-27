@@ -35,6 +35,7 @@ import {
   LINE_PRESETS,
   MESSAGE_DEFAULT_Y,
   isLifeline,
+  isMindmap,
   portInset,
   portPoint,
   portsFor,
@@ -3754,13 +3755,22 @@ async function finishConnect(at: Pt) {
   // Lifeline ke lifeline: pesan sequence mendatar di tinggi titik lepas (revisi 54d).
   const message =
     !!target && isLifeline(shapeKinds.value.get(d.card)) && isLifeline(shapeKinds.value.get(target.id))
-  const route = message ? 'message' : from.kind === 'shape' || toShape ? 'orthogonal' : 'straight'
+  // Mind map (revisi 54f): melengkung tanpa panah bila salah satu ujungnya bentuk mind map.
+  const mind =
+    isMindmap(shapeKinds.value.get(d.card)) || (!!target && isMindmap(shapeKinds.value.get(target.id)))
+  const route = message
+    ? 'message'
+    : mind
+      ? 'curved'
+      : from.kind === 'shape' || toShape
+        ? 'orthogonal'
+        : 'straight'
   try {
     const res = await saving(() =>
       createConnector(bid.value, {
         from: d.card,
         to: target?.id ?? '',
-        style: { start: 'none', end: 'arrow', line: 'solid', color: '' },
+        style: { start: 'none', end: mind ? 'none' : 'arrow', line: 'solid', color: '' },
         geometry: {
           from: { port: d.port },
           to: target ? { port: target.port } : { port: '', x: Math.round(at.x), y: Math.round(at.y) },
@@ -3962,26 +3972,35 @@ async function connectPair(from: string, to: string): Promise<string | null> {
     // Bentuk dan kartu orang (bagan organisasi) memakai garis siku dengan panah; lifeline memakai pesan sequence.
     const shape = [from, to].some((id) => ['shape', 'person'].includes(byId.value.get(id)?.kind ?? ''))
     const message = isLifeline(shapeKinds.value.get(from)) && isLifeline(shapeKinds.value.get(to))
+    const mind = isMindmap(shapeKinds.value.get(from)) || isMindmap(shapeKinds.value.get(to))
     const res = await saving(() =>
       createConnector(bid.value, {
         from,
         to,
-        ...(message
+        ...(mind && !message
           ? {
-              style: { start: 'none', end: 'arrow', line: 'solid', color: '' },
-              geometry: {
-                from: { port: 'auto' },
-                to: { port: 'auto' },
-                route: 'message',
-                points: [[0, MESSAGE_DEFAULT_Y]],
-              },
+              style: { start: 'none', end: 'none', line: 'solid', color: '' },
+              geometry: { from: { port: 'auto' }, to: { port: 'auto' }, route: 'curved', points: [] },
             }
-          : shape
+          : {}),
+        ...(mind && !message
+          ? {}
+          : message
             ? {
                 style: { start: 'none', end: 'arrow', line: 'solid', color: '' },
-                geometry: { from: { port: 'auto' }, to: { port: 'auto' }, route: 'orthogonal', points: [] },
+                geometry: {
+                  from: { port: 'auto' },
+                  to: { port: 'auto' },
+                  route: 'message',
+                  points: [[0, MESSAGE_DEFAULT_Y]],
+                },
               }
-            : {}),
+            : shape
+              ? {
+                  style: { start: 'none', end: 'arrow', line: 'solid', color: '' },
+                  geometry: { from: { port: 'auto' }, to: { port: 'auto' }, route: 'orthogonal', points: [] },
+                }
+              : {}),
       }),
     )
     if (!res) return null

@@ -80,7 +80,9 @@ try {
     expect((await previewText(dlg)).startsWith("Gateway inklusif"), where("pratinjau hover"), await previewText(dlg));
     await box.fill("waktu");
     const tm = await dlg.getByRole("option").allTextContents();
-    expect(tm.length === 2 && tm.every((t) => /waktu/.test(t)), where("cari varian"), tm.join(", "));
+    // Sejak 54f "Garis waktu" juga cocok; yang diuji di sini kedua varian event waktu ikut ditemukan.
+    const ev = tm.filter((t) => /Event .* waktu/.test(t));
+    expect(ev.length === 2 && tm.every((t) => /waktu/.test(t)), where("cari varian"), tm.join(", "));
 
     // Lipat kelompok BPMN: opsinya hilang dan panah melompatinya.
     await box.fill("");

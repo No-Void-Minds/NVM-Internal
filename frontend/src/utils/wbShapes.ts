@@ -90,7 +90,7 @@ export function newShapeContent(shape: ShapeType, variant?: string): ShapeConten
     stroke_style: 'solid',
     text: g.text ?? '',
     align: g.align ?? 'center',
-    font_size: 16,
+    font_size: g.fontSize ?? 16,
     ...(shape === 'uml_class' ? { name: 'Kelas', attributes: '', methods: '' } : {}),
     ...(g.lanes
       ? {
@@ -294,6 +294,8 @@ type Geo = {
   guards?: boolean
   // Teks bergaris bawah (atribut kunci ERD).
   underline?: boolean
+  // Ukuran huruf awal bila bukan 16 (topik pusat mind map).
+  fontSize?: number
   fill?: string
   text?: string
   align?: 'left' | 'center' | 'right'
@@ -727,6 +729,254 @@ const GEO = {
     inset: pct(16, 16, 14, 14),
   },
   erd_relationship: { path: (w, h) => basePath('diamond', w, h), text: 'relasi', inset: pct(28, 28, 24, 24) },
+  // Flowchart lanjutan (revisi 54f)
+  fc_manual_input: {
+    path: (w, h) =>
+      poly([
+        [0, h * 0.3],
+        [w, 0],
+        [w, h],
+        [0, h],
+      ]),
+    inset: { top: '34%', bottom: '8px', left: '10px', right: '10px' },
+  },
+  fc_predefined: {
+    path: (w, h) => basePath('rect', w, h),
+    marks: (w, h) => [{ d: `M12 0V${f(h)}M${f(w - 12)} 0V${f(h)}` }],
+    inset: { top: '8px', bottom: '8px', left: '18px', right: '18px' },
+  },
+  fc_offpage: {
+    path: (w, h) =>
+      poly([
+        [0, 0],
+        [w, 0],
+        [w, h * 0.65],
+        [w / 2, h],
+        [0, h * 0.65],
+      ]),
+    inset: pct(8, 38, 10, 10),
+  },
+  fc_delay: {
+    path: (w, h) => {
+      const r = Math.min(h / 2, w / 2)
+      return `M0 0H${f(w - r)}A${f(r)} ${f(h / 2)} 0 0 1 ${f(w - r)} ${f(h)}H0Z`
+    },
+    inset: { top: '8px', bottom: '8px', left: '10px', right: '20%' },
+  },
+  fc_preparation: base('hexagon'),
+  fc_merge: {
+    path: (w, h) =>
+      poly([
+        [0, 0],
+        [w, 0],
+        [w / 2, h],
+      ]),
+    inset: pct(8, 45, 24, 24),
+  },
+  fc_sort: {
+    path: (w, h) => basePath('diamond', w, h),
+    marks: (w, h) => [{ d: `M0 ${f(h / 2)}H${f(w)}` }],
+    inset: pct(22, 22, 26, 26),
+  },
+  // Arsitektur (revisi 54f): ikon garis sederhana, label di bawah seperti event BPMN.
+  arch_server: {
+    path: (w, h) => roundRect(0, 0, w, h, 4),
+    marks: (w, h) => [
+      { d: `M0 ${f(h / 3)}H${f(w)}M0 ${f((2 * h) / 3)}H${f(w)}` },
+      ...[1, 3, 5].map((k) => ({ d: circ(w - 10, (h * k) / 6, 2.5), fill: 'line' as const })),
+    ],
+    inset: BELOW,
+  },
+  arch_database: base('database', { inset: BELOW }),
+  arch_cloud: {
+    path: (w, h) =>
+      `M${f(w * 0.25)} ${f(h * 0.85)}C${f(w * 0.05)} ${f(h * 0.85)} 0 ${f(h * 0.55)} ${f(w * 0.2)} ${f(h * 0.5)}` +
+      `C${f(w * 0.15)} ${f(h * 0.2)} ${f(w * 0.45)} ${f(h * 0.08)} ${f(w * 0.55)} ${f(h * 0.3)}` +
+      `C${f(w * 0.65)} ${f(h * 0.05)} ${f(w * 0.97)} ${f(h * 0.2)} ${f(w * 0.85)} ${f(h * 0.45)}` +
+      `C${f(w)} ${f(h * 0.5)} ${f(w)} ${f(h * 0.85)} ${f(w * 0.8)} ${f(h * 0.85)}Z`,
+    inset: pct(36, 18, 20, 18),
+  },
+  arch_user: {
+    path: (w, h) =>
+      circ(w / 2, h * 0.25, Math.min(w, h) * 0.22) +
+      `M${f(w * 0.1)} ${f(h)}Q${f(w * 0.1)} ${f(h * 0.52)} ${f(w / 2)} ${f(h * 0.52)}Q${f(w * 0.9)} ${f(h * 0.52)} ${f(w * 0.9)} ${f(h)}Z`,
+    inset: BELOW,
+  },
+  arch_laptop: {
+    path: (w, h) =>
+      roundRect(w * 0.12, 0, w * 0.76, h * 0.72, 4) +
+      poly([
+        [0, h * 0.8],
+        [w, h * 0.8],
+        [w * 0.92, h],
+        [w * 0.08, h],
+      ]),
+    inset: BELOW,
+  },
+  arch_phone: {
+    path: (w, h) => roundRect(0, 0, w, h, 8),
+    marks: (w, h) => [
+      {
+        d: poly([
+          [5, 12],
+          [w - 5, 12],
+          [w - 5, h - 16],
+          [5, h - 16],
+        ]),
+      },
+      { d: circ(w / 2, h - 8, 2.5), fill: 'line' },
+    ],
+    inset: BELOW,
+  },
+  arch_firewall: {
+    path: (w, h) => basePath('rect', w, h),
+    marks: (w, h) => {
+      const r = h / 3
+      return [
+        {
+          d:
+            `M0 ${f(r)}H${f(w)}M0 ${f(2 * r)}H${f(w)}` +
+            `M${f(w / 2)} 0V${f(r)}M${f(w / 4)} ${f(r)}V${f(2 * r)}M${f((3 * w) / 4)} ${f(r)}V${f(2 * r)}M${f(w / 2)} ${f(2 * r)}V${f(h)}`,
+        },
+      ]
+    },
+    inset: BELOW,
+  },
+  arch_component: {
+    path: (w, h) => basePath('rect', w, h),
+    marks: (_w, h) =>
+      [0.25, 0.55].map((k) => ({
+        d: poly([
+          [-8, h * k],
+          [8, h * k],
+          [8, h * k + 12],
+          [-8, h * k + 12],
+        ]),
+        fill: 'surface' as const,
+      })),
+    inset: { top: '8px', bottom: '8px', left: '18px', right: '10px' },
+  },
+  arch_node: {
+    path: (w, h) => {
+      const d = Math.min(14, w / 5, h / 5)
+      return `M0 ${f(d)}L${f(d)} 0H${f(w)}V${f(h - d)}L${f(w - d)} ${f(h)}H0Z`
+    },
+    marks: (w, h) => {
+      const d = Math.min(14, w / 5, h / 5)
+      return [{ d: `M0 ${f(d)}H${f(w - d)}V${f(h)}M${f(w - d)} ${f(d)}L${f(w)} 0` }]
+    },
+    inset: { top: '20px', bottom: '8px', left: '10px', right: '20px' },
+  },
+  // Wireframe (revisi 54f)
+  wf_browser: {
+    path: (w, h) => roundRect(0, 0, w, h, 6),
+    marks: (w) => [
+      { d: `M0 28H${f(w)}` },
+      ...[12, 24, 36].map((x) => ({ d: circ(x, 14, 3) })),
+      { d: roundRect(50, 7, Math.max(10, w - 62), 14, 7) },
+    ],
+    text: 'Halaman',
+    valign: 'top',
+    inset: { top: '36px', bottom: 'auto', left: '12px', right: '12px' },
+  },
+  wf_phone: {
+    path: (w, h) => roundRect(0, 0, w, h, 24),
+    marks: (w, h) => [
+      { d: `M${f(w / 2 - 18)} 14H${f(w / 2 + 18)}M${f(w / 2 - 24)} ${f(h - 12)}H${f(w / 2 + 24)}` },
+    ],
+    text: 'Layar',
+    valign: 'top',
+    inset: { top: '30px', bottom: 'auto', left: '14px', right: '14px' },
+  },
+  wf_button: { path: (w, h) => roundRect(0, 0, w, h, 8), text: 'Tombol' },
+  wf_input: {
+    path: (w, h) => roundRect(0, 0, w, h, 4),
+    text: 'Isian',
+    align: 'left',
+    inset: { top: '6px', bottom: '6px', left: '12px', right: '12px' },
+  },
+  wf_checkbox: {
+    path: (_w, h) => roundRect(0, (h - 20) / 2, 20, 20, 3),
+    marks: (_w, h, v) =>
+      v === 'checked' ? [{ d: `M4 ${f(h / 2)}L9 ${f(h / 2 + 5)}L16 ${f(h / 2 - 5)}`, width: 1.5 }] : [],
+    text: 'Pilihan',
+    align: 'left',
+    inset: { top: '4px', bottom: '4px', left: '30px', right: '4px' },
+  },
+  wf_dropdown: {
+    path: (w, h) => roundRect(0, 0, w, h, 4),
+    marks: (w, h) => [
+      {
+        d: `M${f(w - 36)} 8V${f(h - 8)}M${f(w - 24)} ${f(h / 2 - 3)}L${f(w - 18)} ${f(h / 2 + 3)}L${f(w - 12)} ${f(h / 2 - 3)}`,
+      },
+    ],
+    text: 'Pilih',
+    align: 'left',
+    inset: { top: '6px', bottom: '6px', left: '12px', right: '42px' },
+  },
+  wf_image: {
+    path: (w, h) => basePath('rect', w, h),
+    marks: (w, h) => [{ d: `M0 0L${f(w)} ${f(h)}M${f(w)} 0L0 ${f(h)}` }],
+  },
+  // Mind map (revisi 54f): garis antar bentuk mind map otomatis melengkung tanpa panah (WhiteboardPage).
+  mm_central: {
+    path: (w, h) => roundRect(0, 0, w, h, h / 2),
+    fill: 'kuning',
+    text: 'Topik utama',
+    fontSize: 20,
+  },
+  mm_topic: { path: (w, h) => roundRect(0, 0, w, h, 12), text: 'Cabang' },
+  // Lainnya (revisi 54f)
+  callout: {
+    path: (w, h) => {
+      const b = h * 0.75
+      const r = Math.min(10, w / 4, b / 4)
+      return `M${f(r)} 0H${f(w - r)}Q${f(w)} 0 ${f(w)} ${f(r)}V${f(b - r)}Q${f(w)} ${f(b)} ${f(w - r)} ${f(b)}H${f(w * 0.35)}L${f(w * 0.16)} ${f(h)}L${f(w * 0.22)} ${f(b)}H${f(r)}Q0 ${f(b)} 0 ${f(b - r)}V${f(r)}Q0 0 ${f(r)} 0Z`
+    },
+    inset: { top: '8px', bottom: '28%', left: '12px', right: '12px' },
+  },
+  chevron: {
+    path: (w, h) => {
+      const k = Math.min(h / 2, w / 3)
+      return poly([
+        [0, 0],
+        [w - k, 0],
+        [w, h / 2],
+        [w - k, h],
+        [0, h],
+        [k, h / 2],
+      ])
+    },
+    inset: pct(10, 10, 22, 22),
+  },
+  funnel: {
+    path: (w, h) =>
+      poly([
+        [0, 0],
+        [w, 0],
+        [w * 0.62, h * 0.62],
+        [w * 0.62, h],
+        [w * 0.38, h],
+        [w * 0.38, h * 0.62],
+      ]),
+    marks: (w, h) => {
+      // Tepi kiri corong di tinggi y: x = (y / 0,62h) x 0,38w.
+      const edge = (y: number) => (y / (h * 0.62)) * w * 0.38
+      return [0.21, 0.42].map((k) => ({ d: `M${f(edge(h * k))} ${f(h * k)}H${f(w - edge(h * k))}` }))
+    },
+    valign: 'top',
+    inset: { top: '4px', bottom: 'auto', left: '14%', right: '14%' },
+  },
+  timeline: {
+    path: (w, h) => `M0 ${f(h * 0.7)}H${f(w)}`,
+    marks: (w, h) =>
+      [0.08, 0.36, 0.64, 0.92].map((k) => ({ d: circ(w * k, h * 0.7, 6), fill: 'line' as const })),
+    open: true,
+    fill: '',
+    text: 'Garis waktu',
+    valign: 'top',
+    inset: { top: '0px', bottom: 'auto', left: '0px', right: '0px' },
+  },
   uml_swimlane: {
     path: (w, h) => basePath('rect', w, h),
     marks: (w, h, _v, c) => laneMarks(w, h, 'cols', c?.lanes),
@@ -834,6 +1084,8 @@ export const shapeHandles = (s: string): Handle[] => geoOf(s).handles ?? HANDLES
 export const laneBandOf = (s: string) => geoOf(s).laneBand ?? BAND
 export const guardLanes = (s: string) => !!geoOf(s).guards
 export const underlineText = (s: string) => !!geoOf(s).underline
+// Bentuk mind map (revisi 54f): garis di antaranya otomatis melengkung tanpa panah.
+export const isMindmap = (s: string | undefined) => !!s && s.startsWith('mm_')
 // Stereotip kelas UML per varian (revisi 54e); kelas abstrak ditandai nama miring.
 export const classStereotype = (v: string | undefined) =>
   v === 'interface' ? '\u00abinterface\u00bb' : v === 'enum' ? '\u00abenumeration\u00bb' : ''

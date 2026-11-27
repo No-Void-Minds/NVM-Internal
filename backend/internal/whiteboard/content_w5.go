@@ -43,6 +43,15 @@ var (
 		// ERD (revisi 54e)
 		"erd_entity": true, "erd_weak_entity": true, "erd_attribute": true, "erd_key_attribute": true,
 		"erd_relationship": true,
+		// Lainnya (revisi 54f): flowchart lanjutan, arsitektur, wireframe, mind map, dan bentuk presentasi
+		"fc_manual_input": true, "fc_predefined": true, "fc_offpage": true, "fc_delay": true, "fc_preparation": true,
+		"fc_merge": true, "fc_sort": true,
+		"arch_server": true, "arch_database": true, "arch_cloud": true, "arch_user": true, "arch_laptop": true,
+		"arch_phone": true, "arch_firewall": true, "arch_component": true, "arch_node": true,
+		"wf_browser": true, "wf_phone": true, "wf_button": true, "wf_input": true, "wf_checkbox": true,
+		"wf_dropdown": true, "wf_image": true,
+		"mm_central": true, "mm_topic": true,
+		"callout": true, "chevron": true, "funnel": true, "timeline": true,
 		// Panah blok
 		"arrow_right": true, "arrow_left": true, "arrow_up": true, "arrow_down": true, "arrow_both": true,
 	}
@@ -58,7 +67,8 @@ var (
 		"uml_lifeline_actor": {"none", "destroyed"},
 		"uml_fragment":       {"alt", "opt", "loop", "par"},
 		// Kelas UML (revisi 54e): kelas lama tanpa varian tetap kelas biasa.
-		"uml_class": {"class", "abstract", "interface", "enum"},
+		"uml_class":   {"class", "abstract", "interface", "enum"},
+		"wf_checkbox": {"unchecked", "checked"},
 	}
 	// laneShapes: bentuk yang punya lane (revisi 54b); bentuk lain tidak boleh membawa lanes.
 	laneShapes = map[string]bool{"bpmn_pool": true, "uml_swimlane": true, "uml_fragment": true}
