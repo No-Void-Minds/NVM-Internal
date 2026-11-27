@@ -25,6 +25,11 @@ import {
   ERD_HEAD,
   ERD_ROW,
   keyLabel,
+  defaultText,
+  fitImage,
+  frameBox,
+  frameImage,
+  isFrame,
 } from '../../utils/wbShapes'
 import { BAND, laneBoxes } from '../../utils/wbContainers'
 import { stackOrder } from '../../utils/wbStack'
@@ -255,7 +260,7 @@ export async function renderBoard(cards: Card[], connectors: Connector[]): Promi
   )
   const images = await Promise.all(
     laid.map((l) =>
-      l.card.kind === 'image' && l.card.file?.thumb
+      (l.card.kind === 'image' || l.card.kind === 'shape') && l.card.file?.thumb
         ? loadImage(fileUrl(l.card.file.id, true))
         : l.card.kind === 'person' && l.card.person?.avatar_url
           ? loadImage(l.card.person.avatar_url)
@@ -345,7 +350,7 @@ export async function renderBoard(cards: Card[], connectors: Connector[]): Promi
     }
     if (card.kind === 'shape') {
       if (look.shadow) setShadow(ctx)
-      drawShape(ctx, tok, card.content as ShapeContent, rect)
+      drawShape(ctx, tok, card.content as ShapeContent, rect, card.file ? images[i]! : null)
       return
     }
     ctx.beginPath()
@@ -516,7 +521,15 @@ const shapeFill: Record<string, string> = { putih: '--color-surface', ...cardBg 
 
 // Bentuk diputar terhadap pusatnya, digambar dari path yang sama dengan layar, lalu teksnya dipecah per baris di
 // tengah bentuk. Kelas UML: nama tebal, garis pemisah, atribut, garis pemisah, metode.
-function drawShape(ctx: CanvasRenderingContext2D, tok: Tok, c: ShapeContent, r: Box) {
+function drawShape(
+  ctx: CanvasRenderingContext2D,
+  tok: Tok,
+  c: ShapeContent,
+  r: Box,
+  // Gambar bingkai (revisi 57b), sudah dimuat.
+  img: HTMLImageElement | null = null,
+) {
+  const framed = !!img && isFrame(c.shape)
   const sw = c.stroke_width * strokeScale(c.shape)
   ctx.save()
   ctx.translate(r.x + r.w / 2, r.y + r.h / 2)
@@ -547,7 +560,7 @@ function drawShape(ctx: CanvasRenderingContext2D, tok: Tok, c: ShapeContent, r: 
   ctx.stroke(path)
   ctx.setLineDash([])
   // Tanda di dalam bentuk (ikon BPMN), sama dengan WbShape.vue.
-  for (const m of shapeMarks(c, pw, ph)) {
+  for (const m of framed && c.shape === 'wf_image' ? [] : shapeMarks(c, pw, ph)) {
     const mp = new Path2D(m.d)
     const paint = (v: 'line' | 'surface' | 'none' | undefined) =>
       v === 'line' ? ink(tok, c.stroke) : v === 'surface' ? tok('--color-surface') : null
@@ -566,6 +579,17 @@ function drawShape(ctx: CanvasRenderingContext2D, tok: Tok, c: ShapeContent, r: 
     }
   }
   ctx.restore()
+  // Gambar bingkai di layar bingkainya, dengan cara isi dan posisi yang sama dengan object-fit di layar.
+  if (framed && img) {
+    const box = frameBox(c.shape, r.w, r.h, sw)
+    const at = fitImage(box, img.naturalWidth || 1, img.naturalHeight || 1, frameImage(c))
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(box.x, box.y, box.w, box.h)
+    ctx.clip()
+    ctx.drawImage(img, at.x, at.y, at.w, at.h)
+    ctx.restore()
+  }
   const fs = c.font_size
   const ink0 = tok('--color-ink')
   const lay = (text: string, doc: Parameters<typeof fieldLines>[1], maxW: number, bold?: boolean) =>
@@ -649,7 +673,7 @@ function drawShape(ctx: CanvasRenderingContext2D, tok: Tok, c: ShapeContent, r: 
       if (name)
         drawLine(ctx, tok, name, nameX, y + (ERD_ROW - lineHeight(name)) / 2, r.w - nameX - typeW - 14, ink0)
     })
-  } else if (c.text) {
+  } else if (c.text && !(framed && c.text === defaultText(c.shape))) {
     // Area teks dari definisi bentuk (revisi 54), sama dengan layar: judul di atas untuk batas sistem, label di bawah
     // untuk event dan gateway.
     const t = textBox(c.shape, r.w, r.h)

@@ -64,6 +64,8 @@ const props = defineProps<{
   // Revisi 56: orang lain yang memegang kunci lunak kartu ini, dan permintaan edit nama lane dari menu.
   lockedBy?: string | null
   laneEdit?: { index: number | 'title'; nonce: number } | null
+  // Revisi 57b: mode geser posisi gambar bingkai.
+  panning?: boolean
 }>()
 const emit = defineEmits<{
   grab: [e: PointerEvent]
@@ -82,6 +84,7 @@ const emit = defineEmits<{
   addLane: []
   notice: [msg: string]
   rowPort: [row: string, side: 'left' | 'right', e: PointerEvent]
+  panDone: []
 }>()
 
 const root = ref<HTMLElement | null>(null)
@@ -360,6 +363,9 @@ function onPointerDown(e: PointerEvent) {
       :lane-edit="laneEdit"
       @add-lane="emit('addLane')"
       @row-port="(r, s, e) => emit('rowPort', r, s, e)"
+      :image="card.file ? fileUrl(card.file.id, card.file.thumb) : null"
+      :panning="panning"
+      @pan-done="emit('panDone')"
       @notice="emit('notice', $event)"
       @save="emit('content', $event)"
       @live="emit('live', $event)"

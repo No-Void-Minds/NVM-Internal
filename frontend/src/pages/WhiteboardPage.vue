@@ -41,6 +41,9 @@ import {
   portPoint,
   portsFor,
   erdHeight,
+  frameBox,
+  frameImage,
+  isFrame,
   resizeBox,
   rotatePoint,
   routeConnector,
@@ -2184,6 +2187,60 @@ function onReplacePicked(e: Event) {
   if (f && replaceTarget) void replaceCardFile(replaceTarget, f)
 }
 
+// Gambar bingkai (revisi 57b). Isi dan ganti memakai jalur Ganti berkas (undo lewat file_id); lepas juga langkah
+// file_id, jadi undo setelah berkasnya dibersihkan job harian ditolak server dan dilewati dengan pesan (applyStep).
+const imagePan = ref<string | null>(null)
+watch(selected, (s) => {
+  if (imagePan.value && !s.has(imagePan.value)) imagePan.value = null
+})
+function setFrameFit(id: string, fit: 'cover' | 'contain') {
+  const c = byId.value.get(id)
+  if (!c) return
+  recordContent(id, {
+    ...(c.content as ShapeContent),
+    image: { ...frameImage(c.content as ShapeContent), fit },
+  })
+  announce.value = fit === 'cover' ? 'Gambar mengisi penuh bingkai.' : 'Gambar dimuat utuh di bingkai.'
+}
+function detachFrameImage(id: string) {
+  const c = byId.value.get(id)
+  if (!c?.file || !canWrite.value) return
+  record({ kind: 'layout', cards: [{ id, before: { file_id: c.file.id }, after: { file_id: '' } }] })
+  patchLocal(id, { file: undefined })
+  void sendGeometry([{ id, file_id: '' }])
+  announce.value = 'Gambar dilepas dari bingkai.'
+}
+// Kartu gambar diseret ke bingkai kosong: bingkai memakai gambarnya dan kartu gambar dihapus (ke Tempat sampah),
+// satu langkah undo. Bingkai yang sudah bergambar tidak diganti diam-diam; kartu gambar menjadi isi wadah biasa.
+function frameAt(at: Pt, except: string): Card | null {
+  const hit = shownCards.value
+    .filter((c) => {
+      if (c.id === except || c.kind !== 'shape' || c.file) return false
+      const sc = c.content as ShapeContent
+      if (!isFrame(sc.shape) || (sc.rotation || 0) !== 0) return false
+      const b = frameBox(sc.shape, c.w, c.h, sc.stroke_width)
+      return at.x >= c.x + b.x && at.x <= c.x + b.x + b.w && at.y >= c.y + b.y && at.y <= c.y + b.y + b.h
+    })
+    .sort((p, q) => (layers.value.get(q.id) ?? 0) - (layers.value.get(p.id) ?? 0))
+  return hit[0] ?? null
+}
+async function fillFrameFromCard(frame: string, image: Card) {
+  if (!image.file) return
+  const file = image.file
+  await asOneStepAsync(async () => {
+    record({ kind: 'layout', cards: [{ id: frame, before: { file_id: '' }, after: { file_id: file.id } }] })
+    patchLocal(frame, { file })
+    await sendGeometry([{ id: frame, file_id: file.id }])
+    const res = await deleteIds([image.id]).catch(() => undefined)
+    if (res) {
+      removeLocal([image.id])
+      record({ kind: 'delete', ids: [image.id], batch: res.batch })
+    }
+  })
+  select([frame])
+  showToast('Gambar dimasukkan ke bingkai. Urungkan untuk mengembalikan kartu gambarnya.')
+}
+
 // Ganti berkas: posisi, ukuran, gaya, keterangan, grup, kunci, dan garis tetap. Undo memakai berkas lama lewat patch
 // file_id (berkas lama tidak dihapus server; job harian membersihkannya setelah tidak dipakai kartu mana pun).
 async function replaceCardFile(id: string, file: File) {
@@ -2195,6 +2252,10 @@ async function replaceCardFile(id: string, file: File) {
     return
   }
   const image = file.type.startsWith('image/')
+  if (c.kind === 'shape' && !image) {
+    showToast('Bingkai hanya bisa diisi gambar (JPEG, PNG, WebP, atau GIF).')
+    return
+  }
   if (c.kind === 'image' && !image) {
     showToast('Kartu gambar hanya bisa diganti dengan gambar (JPEG, PNG, WebP, atau GIF).')
     return
@@ -2556,6 +2617,22 @@ function selectionMenu(): MenuItem[] {
       label: 'Tambah pesan ke diri sendiri',
       run: () => void addSelfMessage(one.id),
     })
+  if (one?.kind === 'shape' && isFrame((one.content as ShapeContent).shape) && w) {
+    if (!one.file) out.push(mi('replaceFile', 'Isi gambar...'))
+    else {
+      const fit = frameImage(one.content as ShapeContent).fit
+      out.push(
+        mi('replaceFile', 'Ganti gambar...'),
+        {
+          id: 'frameFit',
+          label: fit === 'cover' ? 'Muat gambar utuh' : 'Isi penuh bingkai',
+          run: () => setFrameFit(one.id, fit === 'cover' ? 'contain' : 'cover'),
+        },
+        { id: 'framePan', label: 'Geser posisi gambar', run: () => (imagePan.value = one.id) },
+        { id: 'frameDetach', label: 'Lepas gambar', run: () => detachFrameImage(one.id) },
+      )
+    }
+  }
   if (one?.kind === 'image' && one.file) {
     if (w)
       out.push(
@@ -2743,6 +2820,20 @@ async function applyStep(step: Step, dir: 'undo' | 'redo'): Promise<number | 'ke
     case 'layout': {
       const r = layoutPatches(step, byId.value, dir)
       skipped = r.skipped
+      // Gambar yang sudah dibersihkan job harian (dilepas lebih dari sehari yang lalu): server menolak dengan 400.
+      // Langkahnya dilewati dengan pesan, bukan gagal diam-diam (revisi 57b).
+      if (r.patches.some((p) => 'file_id' in p && p.file_id)) {
+        try {
+          const res = await saving(() => patchCards(bid.value, r.patches))
+          if (res) upsert(res.cards)
+        } catch (e) {
+          if (e instanceof ApiError && e.status === 400) {
+            saveError.value = ''
+            showToast('Gambar sudah tidak tersedia (berkasnya sudah dibersihkan). Langkah ini dilewati.')
+          }
+        }
+        break
+      }
       for (const p of r.patches) {
         const { id, ...rest } = p
         patchLocal(id, {
@@ -3020,7 +3111,9 @@ function onPaste(e: ClipboardEvent) {
   const files = pastedFiles(e.clipboardData, new Date())
   // Satu kartu gambar atau berkas terpilih: tempelan mengganti berkasnya (revisi 50), bukan kartu baru.
   const only = selected.value.size === 1 ? byId.value.get([...selected.value][0]!) : undefined
-  if (files.length === 1 && canWrite.value && (only?.kind === 'image' || only?.kind === 'file')) {
+  // Bingkai terpilih (revisi 57b): tempelan gambar mengisi bingkainya.
+  const frame = only?.kind === 'shape' && isFrame((only.content as ShapeContent).shape)
+  if (files.length === 1 && canWrite.value && (only?.kind === 'image' || only?.kind === 'file' || frame)) {
     e.preventDefault()
     replaceCardFile(only.id, files[0]!)
     return
@@ -4794,7 +4887,14 @@ function onUp(e: PointerEvent) {
     const wasCarried = carried.value
     carried.value = new Set()
     if (g.cancelled || (dx === 0 && dy === 0)) return
-    if (dropOn(g.ids, toWorld(view.value, local(e).x, local(e).y), dx, dy)) return
+    const dropAt = toWorld(view.value, local(e).x, local(e).y)
+    const lone = g.ids.length === 1 ? byId.value.get(g.ids[0]!) : undefined
+    const frame = lone?.kind === 'image' && lone.file && canWrite.value ? frameAt(dropAt, lone.id) : null
+    if (frame && lone) {
+      void fillFrameFromCard(frame.id, lone)
+      return
+    }
+    if (dropOn(g.ids, dropAt, dx, dy)) return
     const changes: { id: string; after: Geo }[] = g.ids.flatMap((id) => {
       const c = shownById.value.get(id)
       return c
@@ -5761,6 +5861,8 @@ const toolBtn =
                 @add-lane="addLaneTo(c.id)"
                 @notice="showToast($event)"
                 @row-port="(r: string, s: 'left' | 'right', e: PointerEvent) => onRowPort(c.id, r, s, e)"
+                :panning="imagePan === c.id"
+                @pan-done="imagePan = null"
               />
             </template>
             <WbDiagramHandles

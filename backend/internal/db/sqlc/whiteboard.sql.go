@@ -2171,13 +2171,13 @@ SET x = coalesce($1, x),
     style = coalesce($12, style),
     locked = coalesce($13, locked),
     group_ids = CASE WHEN $14::bool THEN $15::uuid[] ELSE group_ids END,
-    file_id = coalesce($16, file_id),
-    plain = coalesce($17, plain),
+    file_id = CASE WHEN $16::bool THEN NULL ELSE coalesce($17, file_id) END,
+    plain = coalesce($18, plain),
     content_version = content_version + CASE WHEN $11::jsonb IS NULL THEN 0 ELSE 1 END,
     version = version + 1,
-    seq = $18,
-    updated_by = $19
-WHERE id = $20 AND board_id = $21 AND deleted_at IS NULL
+    seq = $19,
+    updated_by = $20
+WHERE id = $21 AND board_id = $22 AND deleted_at IS NULL
 `
 
 type PatchWbCardParams struct {
@@ -2196,6 +2196,7 @@ type PatchWbCardParams struct {
 	Locked      pgtype.Bool
 	SetGroups   bool
 	GroupIds    []pgtype.UUID
+	ClearFile   bool
 	FileID      pgtype.UUID
 	Plain       pgtype.Text
 	Seq         int64
@@ -2223,6 +2224,7 @@ func (q *Queries) PatchWbCard(ctx context.Context, arg PatchWbCardParams) error 
 		arg.Locked,
 		arg.SetGroups,
 		arg.GroupIds,
+		arg.ClearFile,
 		arg.FileID,
 		arg.Plain,
 		arg.Seq,

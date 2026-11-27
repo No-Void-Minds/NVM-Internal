@@ -16,6 +16,11 @@ import {
   underlineText,
   laneBandOf,
   laneOrient,
+  defaultText,
+  frameBox,
+  frameImage,
+  isFrame,
+  type FrameImage,
   shapeValign,
   solidShape,
   strokeScale,
@@ -37,6 +42,9 @@ const props = defineProps<{
   // menu klik kanan halaman (nonce membedakan dua permintaan untuk lane yang sama).
   lockedBy?: string | null
   laneEdit?: { index: number | 'title'; nonce: number } | null
+  // Revisi 57b: alamat gambar bingkai, dan mode geser posisi gambar.
+  image?: string | null
+  panning?: boolean
 }>()
 const emit = defineEmits<{
   save: [c: ShapeContent]
@@ -45,6 +53,7 @@ const emit = defineEmits<{
   addLane: []
   notice: [msg: string]
   rowPort: [row: string, side: 'left' | 'right', e: PointerEvent]
+  panDone: []
 }>()
 
 const fillVar: Record<string, string> = {
@@ -81,6 +90,71 @@ const pathTransform = computed(() => {
 })
 const isClass = computed(() => props.content.shape === 'uml_class')
 const isTable = computed(() => props.content.shape === 'erd_table')
+
+// Gambar bingkai (revisi 57b): di layar bingkai dengan object-fit dan object-position dari isi bentuk. Mode geser:
+// seret gambar atau panah (Shift 1 persen) mengubah posisi, satu langkah undo per seret atau per tombol; Enter atau
+// Escape selesai.
+const framed = computed(() => !!props.image && isFrame(props.content.shape))
+const imageDraft = ref<FrameImage | null>(null)
+const im = computed(() => imageDraft.value ?? frameImage(props.content))
+const frameStyle = computed(() => {
+  const b = frameBox(props.content.shape, props.w, props.h, sw.value)
+  return { left: `${b.x}px`, top: `${b.y}px`, width: `${b.w}px`, height: `${b.h}px` }
+})
+const hideText = computed(() => framed.value && props.content.text === defaultText(props.content.shape))
+const panEl = ref<HTMLElement | null>(null)
+watch(
+  () => props.panning,
+  (on) => {
+    if (on) void nextTick(() => panEl.value?.focus())
+  },
+)
+const clampPct = (v: number) => Math.round(Math.min(100, Math.max(0, v)) * 10) / 10
+function saveImage(next: FrameImage) {
+  imageDraft.value = null
+  const cur = frameImage(props.content)
+  if (next.x !== cur.x || next.y !== cur.y || next.fit !== cur.fit)
+    emit('save', { ...props.content, image: next })
+}
+function onPanDown(e: PointerEvent) {
+  if (e.button !== 0) return
+  const b = frameBox(props.content.shape, props.w, props.h, sw.value)
+  const z = props.zoom || 1
+  const start = { ...im.value }
+  const x0 = e.clientX
+  const y0 = e.clientY
+  const move = (ev: PointerEvent) => {
+    // Seret ke kanan memperlihatkan bagian kiri gambar, jadi posisi berkurang.
+    imageDraft.value = {
+      ...start,
+      x: clampPct(start.x - ((ev.clientX - x0) / z / b.w) * 100),
+      y: clampPct(start.y - ((ev.clientY - y0) / z / b.h) * 100),
+    }
+  }
+  const up = () => {
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', up)
+    window.removeEventListener('pointercancel', up)
+    if (imageDraft.value) saveImage(imageDraft.value)
+  }
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', up)
+  window.addEventListener('pointercancel', up)
+}
+function onPanKey(e: KeyboardEvent) {
+  e.stopPropagation()
+  if (e.key === 'Escape' || e.key === 'Enter') {
+    e.preventDefault()
+    emit('panDone')
+    return
+  }
+  const step = e.shiftKey ? 1 : 5
+  const d = { ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] }[e.key]
+  if (!d) return
+  e.preventDefault()
+  const cur = im.value
+  saveImage({ ...cur, x: clampPct(cur.x + d[0]!), y: clampPct(cur.y + d[1]!) })
+}
 // Varian kelas (revisi 54e): stereotip di atas nama, nama miring untuk kelas abstrak, enum tanpa bagian metode.
 const stereo = computed(() => classStereotype(props.content.variant))
 const abstract = computed(() => props.content.variant === 'abstract')
@@ -331,7 +405,7 @@ const field = 'block w-full'
         :style="{ stroke }"
       />
       <path
-        v-for="(m, i) in marks"
+        v-for="(m, i) in framed && content.shape === 'wf_image' ? [] : marks"
         :key="i"
         :d="m.d"
         :transform="pathTransform"
@@ -343,6 +417,29 @@ const field = 'block w-full'
         data-mark
       />
     </svg>
+
+    <!-- Gambar bingkai (revisi 57b). -->
+    <div v-if="framed" class="absolute overflow-hidden" :style="frameStyle" data-frame-image>
+      <img
+        :src="image!"
+        alt="Gambar di bingkai"
+        draggable="false"
+        class="size-full max-w-none"
+        :style="{ objectFit: im.fit, objectPosition: `${im.x}% ${im.y}%` }"
+      />
+      <div
+        v-if="panning"
+        ref="panEl"
+        tabindex="0"
+        class="absolute inset-0 cursor-move shadow-[inset_0_0_0_2px_var(--color-mark),inset_0_0_0_4px_var(--color-surface)] outline-none"
+        :aria-label="`Posisi gambar ${Math.round(im.x)} persen dari kiri, ${Math.round(im.y)} persen dari atas. Seret atau tekan panah untuk menggeser, Enter atau Escape selesai.`"
+        data-frame-pan
+        @pointerdown.stop.prevent="onPanDown"
+        @dblclick.stop
+        @keydown="onPanKey"
+        @blur="emit('panDone')"
+      />
+    </div>
 
     <!-- Kelas UML: tiga bagian bergaris pemisah. -->
     <div
@@ -472,7 +569,7 @@ const field = 'block w-full'
         class="max-h-full w-full overflow-hidden leading-snug [overflow-wrap:anywhere]"
       />
       <p
-        v-else-if="content.text"
+        v-else-if="content.text && !hideText"
         data-caret
         class="max-h-full w-full overflow-hidden leading-snug break-words whitespace-pre-wrap [overflow-wrap:anywhere]"
       >

@@ -344,11 +344,33 @@ func (s *Service) ReplaceFile(ctx context.Context, actor Actor, boardText, cardT
 		if err != nil {
 			return notFound(err)
 		}
-		if err := replaceKindMatches(cur.Kind, u.kind); err != nil {
+		frame := cur.Kind == KindShape
+		if frame {
+			// Bingkai (revisi 57b): hanya gambar, dan isi bentuknya (teks, gaya, cara isi gambar) tidak berubah.
+			if !FrameShapes[shapeOf(cur.Content)] {
+				return apperr.Invalid("Hanya bingkai ponsel, jendela browser, dan placeholder gambar yang bisa diisi gambar.")
+			}
+			if u.kind != KindImage {
+				return apperr.Invalid("Bingkai hanya bisa diisi gambar (JPEG, PNG, WebP, atau GIF).")
+			}
+		} else if err := replaceKindMatches(cur.Kind, u.kind); err != nil {
 			return err
 		}
 		if err := u.insert(ctx, q, fileID, boardID, actor); err != nil {
 			return err
+		}
+		if frame {
+			if err := q.PatchWbCard(ctx, sqlc.PatchWbCardParams{FileID: fileID, Seq: seq, ActorID: actor.ID, ID: cardID, BoardID: boardID}); err != nil {
+				return err
+			}
+			if out, err = getCard(ctx, q, cardID); err != nil {
+				return err
+			}
+			old = idString(cur.FileID)
+			if err := record(ctx, q, boardID, actor.ID, "file_replaced", cardID, map[string]any{"kind": cur.Kind, "excerpt": excerpt(u.name)}); err != nil {
+				return err
+			}
+			return s.commitUpload(u, fileID)
 		}
 		var caption CaptionContent
 		_ = json.Unmarshal(cur.Content, &caption)
@@ -390,7 +412,17 @@ func replaceKindMatches(cardKind, fileKind string) error {
 }
 
 // replaceFilePatch: patch file_id (undo dan redo ganti gambar) memakai berkas yang sudah ada dengan jenis yang sama.
-func replaceFilePatch(ctx context.Context, q *sqlc.Queries, cardKind, fileText string, params *sqlc.PatchWbCardParams) error {
+// Bingkai (revisi 57b) diisi berkas gambar, dan "" melepas gambarnya.
+func replaceFilePatch(ctx context.Context, q *sqlc.Queries, cardKind, shape, fileText string, params *sqlc.PatchWbCardParams) error {
+	if cardKind == KindShape {
+		if !FrameShapes[shape] {
+			return apperr.Invalid("Hanya bingkai ponsel, jendela browser, dan placeholder gambar yang bisa diisi gambar.")
+		}
+		if fileText == "" {
+			params.ClearFile = true
+			return nil
+		}
+	}
 	fileID, err := ParseID(fileText)
 	if err != nil {
 		return apperr.Invalid("Id berkas tidak sah.")
@@ -399,7 +431,11 @@ func replaceFilePatch(ctx context.Context, q *sqlc.Queries, cardKind, fileText s
 	if err != nil {
 		return apperr.Invalid("Berkas itu sudah tidak ada. Unggah ulang berkasnya.")
 	}
-	if err := replaceKindMatches(cardKind, f.Kind); err != nil {
+	if cardKind == KindShape {
+		if f.Kind != KindImage {
+			return apperr.Invalid("Bingkai hanya bisa diisi gambar (JPEG, PNG, WebP, atau GIF).")
+		}
+	} else if err := replaceKindMatches(cardKind, f.Kind); err != nil {
 		return err
 	}
 	params.FileID = fileID

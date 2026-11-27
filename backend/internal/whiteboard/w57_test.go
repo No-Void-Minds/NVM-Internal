@@ -75,3 +75,24 @@ func TestUjungGarisKeBaris(t *testing.T) {
 		}
 	}
 }
+
+// Revisi 57b: cara isi dan posisi gambar hanya untuk bingkai, dengan nilai yang sah.
+func TestPengaturanGambarBingkai(t *testing.T) {
+	shape := func(s, image string) json.RawMessage {
+		return json.RawMessage(`{"shape":"` + s + `","rotation":0,"fill":"putih","stroke":"tinta","stroke_width":2,"stroke_style":"solid","text":"","align":"center","font_size":16,"image":` + image + `}`)
+	}
+	out, _, err := CleanShape(shape("wf_browser", `{"fit":"contain","x":12.34,"y":100}`))
+	if err != nil || out.Image == nil || out.Image.Fit != "contain" || out.Image.X != 12.3 {
+		t.Fatalf("pengaturan sah ditolak atau berubah: %+v %v", out.Image, err)
+	}
+	for _, bad := range [][2]string{
+		{"rect", `{"fit":"cover","x":50,"y":50}`},
+		{"wf_phone", `{"fit":"fill","x":50,"y":50}`},
+		{"wf_image", `{"fit":"cover","x":-1,"y":50}`},
+		{"wf_image", `{"fit":"cover","x":50,"y":101}`},
+	} {
+		if _, _, err := CleanShape(shape(bad[0], bad[1])); err == nil {
+			t.Errorf("diterima: %v", bad)
+		}
+	}
+}

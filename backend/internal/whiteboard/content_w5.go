@@ -3,6 +3,7 @@ package whiteboard
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -105,6 +106,8 @@ type ShapeContent struct {
 	Lanes []ShapeLane `json:"lanes,omitempty"`
 	// Rows: kolom tabel ERD (revisi 57a); nama tabel di Name.
 	Rows []ShapeRow `json:"rows,omitempty"`
+	// Image: cara gambar bingkai ditampilkan (revisi 57b); berkasnya sendiri di wb_cards.file_id, bukan di sini.
+	Image *ShapeImage `json:"image,omitempty"`
 	// Pasangan dokumen berformat (revisi 49); teks di atas tetap teks polosnya.
 	Doc           *Node `json:"doc,omitempty"`
 	NameDoc       *Node `json:"name_doc,omitempty"`
@@ -138,6 +141,42 @@ const (
 	maxColumnName = 100
 	maxColumnType = 60
 )
+
+// FrameShapes: bentuk yang bisa diisi gambar (revisi 57b).
+var FrameShapes = map[string]bool{"wf_phone": true, "wf_browser": true, "wf_image": true}
+
+// ShapeImage: cover mengisi penuh bingkai (terpotong), contain memuat utuh; X dan Y posisi gambar 0 sampai 100 persen
+// (seperti object-position), untuk menggeser bagian yang terlihat.
+type ShapeImage struct {
+	Fit string  `json:"fit"`
+	X   float64 `json:"x"`
+	Y   float64 `json:"y"`
+}
+
+func cleanImage(shape string, im *ShapeImage) (*ShapeImage, error) {
+	if im == nil {
+		return nil, nil
+	}
+	if !FrameShapes[shape] {
+		return nil, apperr.Invalid("Pengaturan gambar hanya untuk bingkai ponsel, jendela browser, dan placeholder gambar.")
+	}
+	if im.Fit != "cover" && im.Fit != "contain" {
+		return nil, apperr.Invalid("Cara isi gambar harus penuh atau muat utuh.")
+	}
+	if !finite(im.X) || !finite(im.Y) || im.X < 0 || im.X > 100 || im.Y < 0 || im.Y > 100 {
+		return nil, apperr.Invalid("Posisi gambar harus 0 sampai 100 persen.")
+	}
+	return &ShapeImage{Fit: im.Fit, X: math.Round(im.X*10) / 10, Y: math.Round(im.Y*10) / 10}, nil
+}
+
+// shapeOf: jenis bentuk dari isi kartu tersimpan (kosong bila bukan bentuk).
+func shapeOf(content []byte) string {
+	var c struct {
+		Shape string `json:"shape"`
+	}
+	_ = json.Unmarshal(content, &c)
+	return c.Shape
+}
 
 // tableKeys: urutan kunci tetap (PK, FK, UK), jadi isi yang sama selalu tersimpan sama.
 var tableKeys = []string{"pk", "fk", "uk"}
@@ -297,6 +336,9 @@ func CleanShape(raw json.RawMessage) (ShapeContent, string, error) {
 	}
 	if len(in.Rows) > 0 {
 		return in, "", apperr.Invalid("Kolom hanya untuk bentuk tabel.")
+	}
+	if out.Image, err = cleanImage(in.Shape, in.Image); err != nil {
+		return in, "", err
 	}
 	out.Rows = nil
 	out.Name, out.Attributes, out.Methods = "", "", ""

@@ -97,7 +97,8 @@ const fields = ['x', 'y', 'w', 'h', 'z', 'color', 'style', 'locked', 'group_ids'
 type Field = (typeof fields)[number]
 
 function valueOf(card: Card, f: Field): unknown {
-  if (f === 'file_id') return card.file?.id
+  // Bingkai tanpa gambar (revisi 57b) bernilai '', sama dengan langkah Lepas gambar.
+  if (f === 'file_id') return card.file?.id ?? ''
   if (f === 'style') return card.style ?? {}
   if (f === 'locked') return card.locked ?? false
   if (f === 'group_ids') return card.group_ids ?? []

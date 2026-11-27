@@ -38,7 +38,35 @@ export type ShapeContent = {
   lanes?: Lane[]
   // Kolom tabel ERD (revisi 57a); nama tabel di name.
   rows?: ErdRow[]
+  // Gambar bingkai (revisi 57b): cara isi dan posisi (persen, seperti object-position). Berkasnya di file kartu.
+  image?: FrameImage
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Gambar di bingkai (revisi 57b): bingkai ponsel, jendela browser, dan placeholder gambar.
+
+export type FrameImage = { fit: 'cover' | 'contain'; x: number; y: number }
+export const FRAME_SHAPES = new Set(['wf_phone', 'wf_browser', 'wf_image'])
+export const isFrame = (s: string | undefined) => !!s && FRAME_SHAPES.has(s)
+export const frameImage = (c: Pick<ShapeContent, 'image'>): FrameImage =>
+  c.image ?? { fit: 'cover', x: 50, y: 50 }
+// Layar bingkai di koordinat lokal kartu: di dalam bezel ponsel, di bawah bilah alamat browser, atau seluruh
+// placeholder; sw tebal garis tepi supaya gambar tidak menutupi garisnya.
+export function frameBox(shape: string, w: number, h: number, sw: number): Box {
+  if (shape === 'wf_phone') return { x: 8, y: 28, w: Math.max(1, w - 16), h: Math.max(1, h - 52) }
+  if (shape === 'wf_browser')
+    return { x: sw, y: 28 + sw / 2, w: Math.max(1, w - 2 * sw), h: Math.max(1, h - 28 - sw * 1.5) }
+  return { x: sw, y: sw, w: Math.max(1, w - 2 * sw), h: Math.max(1, h - 2 * sw) }
+}
+// Kotak gambar berukuran iw x ih di dalam box, sama dengan object-fit dan object-position di layar (untuk ekspor).
+export function fitImage(box: Box, iw: number, ih: number, im: FrameImage): Box {
+  const s = im.fit === 'cover' ? Math.max(box.w / iw, box.h / ih) : Math.min(box.w / iw, box.h / ih)
+  const w = iw * s
+  const h = ih * s
+  return { x: box.x + (box.w - w) * (im.x / 100), y: box.y + (box.h - h) * (im.y / 100), w, h }
+}
+// Teks bawaan bentuk (mis. "Layar"), disembunyikan di bingkai yang sudah bergambar selama belum diganti.
+export const defaultText = (s: string) => geoOf(s).text ?? ''
 
 // ---------------------------------------------------------------------------------------------------------------
 // Tabel ERD (revisi 57a): kepala berisi nama tabel, lalu satu baris per kolom. Tinggi tabel mengikuti jumlah baris
@@ -931,6 +959,7 @@ const GEO = {
   },
   // Wireframe (revisi 54f)
   wf_browser: {
+    container: true,
     path: (w, h) => roundRect(0, 0, w, h, 6),
     marks: (w) => [
       { d: `M0 28H${f(w)}` },
@@ -941,7 +970,9 @@ const GEO = {
     valign: 'top',
     inset: { top: '36px', bottom: 'auto', left: '12px', right: '12px' },
   },
+  // Bingkai ponsel dan jendela browser (revisi 57b) wadah untuk bentuk wireframe di dalamnya.
   wf_phone: {
+    container: true,
     path: (w, h) => roundRect(0, 0, w, h, 24),
     marks: (w, h) => [
       { d: `M${f(w / 2 - 18)} 14H${f(w / 2 + 18)}M${f(w / 2 - 24)} ${f(h - 12)}H${f(w / 2 + 24)}` },

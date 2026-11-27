@@ -545,6 +545,16 @@ func (s *Service) CreateCard(ctx context.Context, actor Actor, boardText string,
 			return Card{}, apperr.Invalid("Kartu gambar dan berkas dibuat lewat unggahan.")
 		}
 	}
+	// Bingkai bergambar (revisi 57b) hasil salin tempel, undo hapus, atau template memakai gambar yang sama.
+	frame := in.Kind == KindShape && in.FileID != ""
+	if frame {
+		if !FrameShapes[shapeOf(content)] {
+			return Card{}, apperr.Invalid("Hanya bingkai ponsel, jendela browser, dan placeholder gambar yang bisa diisi gambar.")
+		}
+		if fileID, err = ParseID(in.FileID); err != nil {
+			return Card{}, apperr.Invalid("Id berkas tidak sah.")
+		}
+	}
 	var out Card
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := sqlc.New(tx)
@@ -565,10 +575,10 @@ func (s *Service) CreateCard(ctx context.Context, actor Actor, boardText string,
 		if fileID.Valid {
 			// Salin tempel memakai berkas yang sama; jenis kartu harus cocok dengan jenis berkasnya.
 			f, err := q.GetWbFile(ctx, fileID)
-			if err != nil || f.Kind != in.Kind {
+			if err != nil || (f.Kind != in.Kind && !(frame && f.Kind == KindImage)) {
 				return apperr.Invalid("Berkas kartu ini tidak ditemukan. Unggah ulang berkasnya.")
 			}
-			if plain == "" {
+			if plain == "" && !frame {
 				plain = f.OriginalName
 			}
 		}
@@ -622,7 +632,8 @@ type CardPatch struct {
 	ColumnID *string  `json:"column_id"`
 	ColOrder *float64 `json:"col_order"`
 	// Revisi 50. Style menggantikan seluruh gaya; GroupIDs menggantikan seluruh jalur grup ([] keluar dari semua grup);
-	// FileID mengganti berkas kartu gambar atau berkas (undo ganti gambar).
+	// FileID mengganti berkas kartu gambar atau berkas (undo ganti gambar), atau mengisi gambar bingkai (revisi 57b;
+	// "" melepas gambar bingkai).
 	Style    json.RawMessage `json:"style"`
 	Locked   *bool           `json:"locked"`
 	GroupIDs *[]string       `json:"group_ids"`
@@ -756,7 +767,7 @@ func (s *Service) PatchCards(ctx context.Context, actor Actor, boardText string,
 				params.GroupIds = []pgtype.UUID{}
 			}
 			if p.FileID != nil {
-				if err := replaceFilePatch(ctx, q, cur.Kind, *p.FileID, &params); err != nil {
+				if err := replaceFilePatch(ctx, q, cur.Kind, shapeOf(cur.Content), *p.FileID, &params); err != nil {
 					return err
 				}
 			}
